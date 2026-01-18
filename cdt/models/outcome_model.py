@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from .cnn_extractor import CNNFeatureExtractor
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor
+from ..config import normalize_feature_extractor_type
 
 
 logger = logging.getLogger(__name__)
@@ -128,9 +129,10 @@ class OutcomeOnlyModel(nn.Module):
         super().__init__()
 
         self._device = torch.device(device)
-        self.feature_extractor_type = feature_extractor_type
+        # Normalize feature extractor type (e.g., "modernbert" -> "bert")
+        self.feature_extractor_type = normalize_feature_extractor_type(feature_extractor_type)
 
-        # Store config for checkpointing
+        # Store config for checkpointing (store original type for reproducibility)
         self.config = {
             'feature_extractor_type': feature_extractor_type,
             'embedding_dim': embedding_dim,
@@ -162,8 +164,8 @@ class OutcomeOnlyModel(nn.Module):
             'representation_dim': representation_dim
         }
 
-        # Initialize feature extractor based on type
-        if feature_extractor_type == "bert":
+        # Initialize feature extractor based on normalized type
+        if self.feature_extractor_type == "bert":
             self.feature_extractor = BertFeatureExtractor(
                 model_name=bert_model_name,
                 projection_dim=bert_projection_dim,
@@ -175,7 +177,7 @@ class OutcomeOnlyModel(nn.Module):
             if bert_gradient_checkpointing:
                 self.feature_extractor.gradient_checkpointing_enable()
             logger.info(f"Outcome model using BERT feature extractor: {bert_model_name}")
-        elif feature_extractor_type == "gru":
+        elif self.feature_extractor_type == "gru":
             self.feature_extractor = GRUFeatureExtractor(
                 embedding_dim=gru_embedding_dim,
                 hidden_dim=gru_hidden_dim,

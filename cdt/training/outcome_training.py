@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig, OutcomeModelConfig
+from ..config import AppliedInferenceConfig, OutcomeModelConfig, normalize_feature_extractor_type
 from ..models.outcome_model import OutcomeOnlyModel, create_outcome_model_from_config
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup, get_memory_info
@@ -211,7 +211,10 @@ def _train_outcome_model(
         Tuple of (trained OutcomeOnlyModel, training_history)
     """
     # Get feature extractor type (default to "cnn" for backward compatibility)
-    feature_extractor_type = getattr(arch_config, 'feature_extractor_type', 'cnn')
+    # Normalize type (e.g., "modernbert" -> "bert")
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'cnn')
+    )
 
     # Create outcome model
     model = create_outcome_model_from_config(

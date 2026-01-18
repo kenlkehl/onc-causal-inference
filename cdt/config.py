@@ -8,6 +8,39 @@ import json
 import hashlib
 
 
+def normalize_feature_extractor_type(feature_type: str) -> str:
+    """
+    Normalize feature extractor type to one of: "cnn", "bert", or "gru".
+
+    This handles variants like "modernbert" which should be treated as "bert".
+
+    Args:
+        feature_type: The raw feature extractor type string
+
+    Returns:
+        Normalized type: "cnn", "bert", or "gru"
+    """
+    if feature_type is None:
+        return "cnn"
+
+    feature_type_lower = feature_type.lower()
+
+    # Check for GRU variants
+    if feature_type_lower == "gru":
+        return "gru"
+
+    # Check for BERT variants (bert, modernbert, clinicalbert, etc.)
+    if "bert" in feature_type_lower:
+        return "bert"
+
+    # Check for CNN
+    if feature_type_lower == "cnn":
+        return "cnn"
+
+    # Default to CNN for backward compatibility
+    return "cnn"
+
+
 @dataclass
 class ModelArchitectureConfig:
     """Configuration for model architecture."""

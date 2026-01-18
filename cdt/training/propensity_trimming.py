@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig, PropensityTrimmingConfig
+from ..config import AppliedInferenceConfig, PropensityTrimmingConfig, normalize_feature_extractor_type
 from ..models.propensity_model import PropensityOnlyModel, create_propensity_model_from_config
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup, get_memory_info
@@ -211,7 +211,10 @@ def _train_propensity_model(
         Tuple of (trained PropensityOnlyModel, training_history)
     """
     # Get feature extractor type (default to "cnn" for backward compatibility)
-    feature_extractor_type = getattr(arch_config, 'feature_extractor_type', 'cnn')
+    # Normalize type (e.g., "modernbert" -> "bert")
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'cnn')
+    )
 
     # Create propensity model
     model = create_propensity_model_from_config(

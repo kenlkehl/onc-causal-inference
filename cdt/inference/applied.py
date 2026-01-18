@@ -15,7 +15,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig
+from ..config import AppliedInferenceConfig, normalize_feature_extractor_type
 from ..models.causal_cnn import CausalCNNText
 from ..data import (
     ClinicalTextDataset,
@@ -340,7 +340,10 @@ def _train_single_model(
     arch_config = config.architecture
 
     # Get feature extractor type (default to "cnn" for backward compatibility)
-    feature_extractor_type = getattr(arch_config, 'feature_extractor_type', 'cnn')
+    # Normalize type (e.g., "modernbert" -> "bert")
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'cnn')
+    )
 
     # Determine max_length and embedding_dim based on extractor type
     if feature_extractor_type == "gru":

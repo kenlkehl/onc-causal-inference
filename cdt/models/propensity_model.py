@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from .cnn_extractor import CNNFeatureExtractor
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor
+from ..config import normalize_feature_extractor_type
 
 
 logger = logging.getLogger(__name__)
@@ -136,7 +137,8 @@ class PropensityOnlyModel(nn.Module):
         super().__init__()
 
         self._device = torch.device(device)
-        self.feature_extractor_type = feature_extractor_type
+        # Normalize feature extractor type (e.g., "modernbert" -> "bert")
+        self.feature_extractor_type = normalize_feature_extractor_type(feature_extractor_type)
 
         # Store config for checkpointing
         self.config = {
@@ -170,8 +172,8 @@ class PropensityOnlyModel(nn.Module):
             'representation_dim': representation_dim
         }
 
-        # Initialize feature extractor based on type
-        if feature_extractor_type == "bert":
+        # Initialize feature extractor based on normalized type
+        if self.feature_extractor_type == "bert":
             self.feature_extractor = BertFeatureExtractor(
                 model_name=bert_model_name,
                 projection_dim=bert_projection_dim,
@@ -183,7 +185,7 @@ class PropensityOnlyModel(nn.Module):
             if bert_gradient_checkpointing:
                 self.feature_extractor.gradient_checkpointing_enable()
             logger.info(f"Propensity model using BERT feature extractor: {bert_model_name}")
-        elif feature_extractor_type == "gru":
+        elif self.feature_extractor_type == "gru":
             self.feature_extractor = GRUFeatureExtractor(
                 embedding_dim=gru_embedding_dim,
                 hidden_dim=gru_hidden_dim,
@@ -226,7 +228,7 @@ class PropensityOnlyModel(nn.Module):
         self.to(self._device)
 
         logger.info(f"PropensityOnlyModel initialized:")
-        logger.info(f"  Feature extractor: {feature_extractor_type}")
+        logger.info(f"  Feature extractor: {self.feature_extractor_type}")
         logger.info(f"  Feature extractor output: {input_dim}")
         logger.info(f"  Representation dim: {representation_dim}")
         logger.info(f"  Device: {self._device}")

@@ -19,7 +19,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig
+from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig, normalize_feature_extractor_type
 from ..models.causal_cnn import CausalCNNText
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup, get_memory_info, set_seed
@@ -335,7 +335,10 @@ def _train_cnn_model(
     """Train a model with CNN or BERT feature extractor."""
 
     # Get feature extractor type (default to "cnn" for backward compatibility)
-    feature_extractor_type = getattr(arch_config, 'feature_extractor_type', 'cnn')
+    # Normalize type (e.g., "modernbert" -> "bert")
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'cnn')
+    )
 
     model = CausalCNNText(
         feature_extractor_type=feature_extractor_type,
