@@ -1,72 +1,47 @@
-# Causal DragonNet Text (CDT)
+# Propensity Score Matching for Clinical Text (PSM-CT)
 
-A framework for clinical causal inference using electronic health record (EHR) text as the primary input. CDT estimates treatment effects from unstructured clinical narratives by learning confounder representations directly from text.
+A framework for causal inference from clinical text using propensity score matching with deep learning text encoders. PSM-CT estimates treatment effects from unstructured clinical narratives by learning propensity scores from text and performing traditional statistical analysis.
 
 ## Clinical Research Objective
 
 Observational studies using EHR data are essential for comparative effectiveness research when randomized trials are infeasible or unethical. However, standard approaches rely on structured covariates (diagnoses, labs, demographics) which may fail to capture critical confounders documented only in clinical notes—such as functional status, symptom severity, patient preferences, or nuanced disease characteristics.
 
-CDT addresses this gap by:
-- **Extracting confounders from clinical text** using sentence embeddings and learnable confounder representations
-- **Estimating treatment effects** using a DragonNet architecture that jointly models propensity scores and potential outcomes
-- **Validating methods via plasmode simulation** to assess sensitivity to unmeasured confounding and model misspecification
+PSM-CT addresses this gap by:
+- **Learning propensity scores from clinical text** using deep learning encoders (CNN, Transformer, or GRU with attention)
+- **Performing traditional propensity score matching** with well-established statistical methods
+- **Providing comprehensive statistical analysis** including ATE/ATT estimation, balance diagnostics, and sensitivity analysis
 
-This enables researchers to leverage the rich information in clinical narratives for causal inference while providing tools to evaluate the robustness of their estimates.
+This enables researchers to leverage the rich information in clinical narratives for causal inference while maintaining the interpretability and statistical rigor of traditional propensity score methods.
 
 ## How It Works
 
 ### Architecture Overview
 
-CDT processes clinical text through three stages:
+PSM-CT processes clinical text through two main stages:
 
-1. **Text Embedding**: Clinical notes are chunked and embedded using a sentence transformer (default: `all-MiniLM-L6-v2`)
+1. **Propensity Score Estimation**: Train a deep learning model to predict treatment assignment
+   - Text is chunked and embedded using a sentence transformer (default: `all-MiniLM-L6-v2`)
+   - Optional confounder feature extraction learns interpretable confounding patterns
+   - Encoder architecture options: CNN, Transformer (BERT-style), or GRU with attention
+   - Optional joint outcome prediction encourages learning of true confounders
 
-2. **Confounder Extraction**: A feature extractor learns to identify confounder-relevant patterns from embeddings using:
-   - Learnable latent confounders (data-driven patterns)
-   - Optional explicit confounders (user-specified clinical queries like "What is the patient's performance status?")
+2. **Traditional Propensity Score Analysis**:
+   - Propensity score matching (nearest neighbor, optimal, caliper-based)
+   - Balance diagnostics (standardized mean differences)
+   - Treatment effect estimation (ATT from matched pairs, ATE via IPW or stratification)
+   - Sensitivity analysis (Rosenbaum bounds)
 
-3. **Causal Inference**: A DragonNet model takes the extracted confounders and jointly predicts:
-   - Treatment propensity P(T=1|X)
-   - Potential outcomes E[Y|T=0,X] and E[Y|T=1,X]
-   - Individual treatment effects (ITE) as the difference in potential outcomes
+### Model Architecture Options
 
-### Workflow Modes
+| Encoder | Description | Best For |
+|---------|-------------|----------|
+| `gru` | Bidirectional GRU with attention | Variable-length texts, default choice |
+| `transformer` | BERT-style transformer encoder | Long documents, complex patterns |
+| `cnn` | Multi-kernel 1D CNN | Fast training, shorter texts |
 
-#### Applied Inference
+### Joint Outcome Prediction
 
-For estimating treatment effects on real clinical data:
-
-```
-Clinical Text → Embeddings → Confounder Features → DragonNet → Treatment Effect Estimates
-```
-
-The system supports:
-- **K-fold cross-validation**: Out-of-sample predictions across all data
-- **Fixed train/val/test splits**: When data comes pre-split
-
-#### Plasmode Simulation
-
-Plasmode simulation generates synthetic outcomes while preserving the real covariate (text) distribution. This enables:
-
-- **Method validation**: Test if your model can recover known treatment effects
-- **Sensitivity analysis**: Assess robustness across different outcome-generating processes
-
-The plasmode workflow:
-1. Train a "generator" model on real data to learn confounder representations
-2. Generate synthetic outcomes with known true treatment effects using the learned confounders
-3. Train an "evaluator" model on the synthetic data
-4. Compare estimated effects to ground truth
-
-Available generation modes:
-- `phi_linear`: Linear relationship between confounders and outcomes
-- `deep_nonlinear`: Deep neural network outcome model
-- `uplift_nonlinear`: Linear baseline with nonlinear treatment effect heterogeneity
-
-#### Multi-Treatment Pretraining
-
-When labeled data for your target treatment comparison is limited, you can pretrain on a larger dataset with multiple treatments. This learns general confounder representations that transfer to the binary treatment setting.
-
-Pretraining → Applied Inference (with pretrained weights) → [Optional: Plasmode Validation]
+Optionally, the propensity model can jointly predict outcomes during training. This encourages the model to learn features that are true confounders (predictive of both treatment and outcome) rather than just treatment predictors. This is controlled by the `joint_outcome_prediction` and `outcome_weight` parameters.
 
 ## Installation
 
@@ -82,30 +57,16 @@ git clone https://github.com/kenlkehl/causal-dragonnet-text.git
 cd causal-dragonnet-text
 ```
 
-### Install uv (Recommended Package Manager)
-
-[uv](https://github.com/astral-sh/uv) is a fast Python package manager. Install it via:
+### Install with uv (Recommended)
 
 ```bash
-# On macOS/Linux
+# Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Or with pip
-pip install uv
-```
-
-### Create Environment and Install
-
-```bash
-# Create a virtual environment
+# Create environment and install
 uv venv --python 3.10
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install CDT in editable mode
+source .venv/bin/activate
 uv pip install -e .
-
-# For development (includes testing/linting tools)
-uv pip install -e ".[dev]"
 ```
 
 ### Alternative: Standard pip Installation
@@ -118,193 +79,207 @@ pip install -e .
 
 ## Dataset Requirements
 
-CDT expects datasets in Parquet or CSV format with specific columns depending on your workflow.
-
-### Binary Causal Inference (Applied Inference)
-
-Required columns:
+PSM-CT expects datasets in Parquet or CSV format with these columns:
 
 | Column | Description | Type |
 |--------|-------------|------|
 | `clinical_text` | The clinical narrative text | string |
 | `treatment_indicator` | Binary treatment assignment (0 or 1) | int/float |
 | `outcome_indicator` | Binary outcome (0 or 1) | int/float |
-| `split` | Data split: "train", "val", "test" | string |
+| `split` (optional) | Data split: "train", "val", "test" | string |
 
-The `split` column is required for fixed-split mode but optional for cross-validation mode (where all data is used and split automatically).
+The `split` column is only needed for fixed-split mode. For cross-validation, all data is used and split automatically.
 
-Example:
-```
-| clinical_text                          | treatment_indicator | outcome_indicator | split |
-|----------------------------------------|---------------------|-------------------|-------|
-| "58yo male with stage IV NSCLC..."     | 1                   | 0                 | train |
-| "Patient presents with dyspnea..."     | 0                   | 1                 | train |
-| "History of smoking, 40 pack-years..." | 1                   | 1                 | test  |
-```
+## Quick Start
 
-### Multi-Treatment Pretraining
-
-For pretraining on multi-treatment data, use these columns:
-
-| Column | Description | Type |
-|--------|-------------|------|
-| `clinical_text` | The clinical narrative text | string |
-| `treatment` | Treatment category (can be string or integer) | any |
-| `outcome_indicator` | Binary outcome (0 or 1) | int/float |
-
-The `treatment` column can have any number of unique values representing different treatments.
-
-## Running Experiments
-
-### Basic Usage
+### 1. Create Configuration
 
 ```bash
-# Generate a default configuration file
-cdt init --output my_config.json
-
-# Edit my_config.json to set your dataset paths and parameters
-
-# Run the experiment
-cdt run --config my_config.json
+psm init --output config.json
 ```
 
-### Configuration Structure
-
-A configuration file controls all aspects of the experiment:
+### 2. Edit Configuration
 
 ```json
 {
   "output_dir": "./results",
-  "seed": 42,
-  "device": "cuda:0",
-  "num_workers": 1,
-  "cache_dir": "./cache",
+  "dataset_path": "./my_data.parquet",
+  "cv_folds": 5,
 
-  "pretraining": {
-    "enabled": false,
-    "dataset_path": "./pretrain_data.parquet",
-    "treatment_column": "treatment"
+  "model": {
+    "encoder_type": "gru",
+    "hidden_dim": 256,
+    "joint_outcome_prediction": true,
+    "outcome_weight": 0.3
   },
 
-  "applied_inference": {
-    "dataset_path": "./analysis_data.parquet",
-    "text_column": "clinical_text",
-    "outcome_column": "outcome_indicator",
-    "treatment_column": "treatment_indicator",
-    "split_column": "split",
-    "cv_folds": 5,
-    "use_pretrained_weights": true,
-
-    "architecture": {
-      "num_latent_confounders": 20,
-      "features_per_confounder": 4
-    },
-
-    "training": {
-      "epochs": 50,
-      "batch_size": 8,
-      "learning_rate": 0.0001
-    }
+  "training": {
+    "epochs": 50,
+    "batch_size": 8,
+    "learning_rate": 0.0001
   },
 
-  "plasmode_experiments": {
-    "enabled": false,
-    "num_repeats": 3,
-    "plasmode_scenarios": [
-      {"generation_mode": "phi_linear", "target_ate_logit": 0.5}
-    ]
+  "matching": {
+    "method": "nearest",
+    "caliper": 0.2,
+    "caliper_scale": "std"
   }
 }
 ```
 
-### Key Configuration Options
-
-**Applied Inference:**
-- `cv_folds`: Set to >1 for cross-validation, or 0/1 for fixed train/val/test splits
-- `use_pretrained_weights`: Whether to initialize from pretraining (requires pretraining to be run first)
-- `num_latent_confounders`: Number of learnable confounder patterns
-- `explicit_confounder_texts`: Optional list of clinical questions to guide confounder extraction
-
-**Plasmode:**
-- `generation_mode`: How synthetic outcomes are generated
-- `target_ate_logit`: The true average treatment effect (on logit scale) to simulate
-- `num_repeats`: Number of simulation replicates per scenario
-
-### CLI Options
+### 3. Run Analysis
 
 ```bash
-cdt run --config config.json \
-    --device cuda:1 \           # Override GPU device
-    --workers 4 \               # Parallel workers for CV folds
-    --output-dir ./my_results \ # Override output directory
-    --skip-pretraining \        # Skip pretraining phase
-    --skip-plasmode \           # Skip plasmode experiments
+psm run --config config.json
+```
+
+## Configuration Reference
+
+### Model Configuration (`model`)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `encoder_type` | `"gru"` | Encoder architecture: `"cnn"`, `"transformer"`, `"gru"` |
+| `hidden_dim` | `256` | Hidden dimension for encoder and heads |
+| `dropout` | `0.1` | Dropout rate |
+| `num_latent_confounders` | `20` | Number of learnable confounder patterns |
+| `joint_outcome_prediction` | `false` | Whether to jointly predict outcomes |
+| `outcome_weight` | `0.5` | Weight for outcome loss (0-1) |
+| `use_confounder_features` | `true` | Use confounder feature extraction |
+
+### Training Configuration (`training`)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `learning_rate` | `1e-4` | Learning rate |
+| `epochs` | `50` | Maximum training epochs |
+| `batch_size` | `8` | Batch size |
+| `early_stopping_patience` | `10` | Epochs without improvement before stopping |
+
+### Matching Configuration (`matching`)
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `method` | `"nearest"` | Matching method: `"nearest"`, `"optimal"`, `"caliper"` |
+| `caliper` | `0.2` | Maximum allowed distance for a match |
+| `caliper_scale` | `"std"` | Scale for caliper: `"propensity"`, `"logit"`, `"std"` |
+| `ratio` | `1` | Matching ratio (1:k matching) |
+| `replacement` | `false` | Whether to match with replacement |
+
+## CLI Options
+
+```bash
+psm run --config config.json \
+    --device cuda:0 \           # Override GPU device
+    --cv-folds 10 \             # Override CV folds
+    --encoder transformer \     # Override encoder type
+    --joint-outcome \           # Enable joint outcome prediction
+    --matching-method optimal \ # Override matching method
+    --caliper 0.1 \             # Override caliper value
     --verbose                   # Enable debug logging
 ```
 
 ## Output Files
 
-After running, results are saved to the output directory:
+Results are saved to the output directory:
 
 ```
 output_dir/
-├── config.json                    # Copy of experiment configuration
-├── summary.json                   # High-level results summary
-├── applied_inference/
-│   ├── predictions.parquet        # Per-sample treatment effect estimates
-│   └── training_log.csv           # Training metrics per epoch
-└── plasmode_experiments/          # (if enabled)
-    ├── results.csv                # Aggregated plasmode metrics
-    └── simulated_datasets/        # (if save_datasets=true)
+├── summary.json              # High-level results summary
+├── predictions.parquet       # Per-sample propensity scores
+├── matched_pairs.csv         # Matched treatment-control pairs
+├── balance_statistics.csv    # Covariate balance before/after matching
+├── sensitivity_analysis.csv  # Rosenbaum bounds
+└── training_history.csv      # Training metrics per epoch
 ```
 
-The `predictions.parquet` file contains:
-- `y0_pred`: Predicted outcome probability under control
-- `y1_pred`: Predicted outcome probability under treatment
-- `ite_pred`: Individual treatment effect (y1_pred - y0_pred)
-- `propensity_pred`: Predicted probability of receiving treatment
-- `cv_fold`: Which cross-validation fold (if using CV)
+### Key Results
 
-## Example Workflows
+The `summary.json` file contains:
+- **Crude difference**: Unadjusted difference in outcome rates
+- **IPW ATE**: Inverse probability weighted average treatment effect
+- **Stratified ATE**: Propensity score stratification estimate
+- **Matched ATT**: Average treatment effect on the treated from matched pairs
+- **Overlap coefficient**: Measure of propensity score overlap between groups
 
-### Simple Binary Treatment Analysis
+## Python API
 
-```bash
-# 1. Create config
-cdt init -o simple_config.json
+```python
+import pandas as pd
+from cdt import (
+    PropensityModel,
+    PropensityMatcher,
+    estimate_att_matched,
+    estimate_ate_ipw,
+    summarize_analysis
+)
 
-# 2. Edit simple_config.json:
-#    - Set applied_inference.dataset_path to your data
-#    - Set cv_folds: 5 for cross-validation
-#    - Disable pretraining and plasmode
+# Load data
+data = pd.read_parquet("clinical_data.parquet")
 
-# 3. Run
-cdt run --config simple_config.json
+# Train propensity model
+model = PropensityModel(
+    encoder_type="gru",
+    joint_outcome_prediction=True
+)
+# ... training code ...
+
+# Get propensity scores
+propensity_scores = model.predict(embeddings)['propensity']
+
+# Perform matching
+matcher = PropensityMatcher(method="nearest", caliper=0.2)
+match_result = matcher.match(propensity_scores, treatment)
+
+# Estimate treatment effects
+att = estimate_att_matched(outcomes, treatment, match_result)
+ate = estimate_ate_ipw(outcomes, treatment, propensity_scores)
+
+print(f"ATT: {att.estimate:.3f} [{att.ci_lower:.3f}, {att.ci_upper:.3f}]")
+print(f"ATE: {ate.estimate:.3f} [{ate.ci_lower:.3f}, {ate.ci_upper:.3f}]")
 ```
 
-### Full Pipeline with Pretraining and Validation
+## Statistical Methods
+
+### Treatment Effect Estimators
+
+1. **ATT from Matched Pairs**: Difference in means between treated and matched controls
+2. **IPW (Inverse Probability Weighting)**: Horvitz-Thompson-style estimator
+3. **Stratification**: Weighted average of within-stratum effects
+
+### Matching Methods
+
+1. **Nearest Neighbor**: Greedy matching to closest control
+2. **Optimal**: Hungarian algorithm minimizing total distance
+3. **Caliper**: Nearest neighbor with maximum distance constraint
+
+### Inference
+
+- Bootstrap confidence intervals (default: 1000 iterations)
+- Paired t-test for continuous outcomes
+- McNemar's test for binary outcomes
+- Rosenbaum sensitivity analysis for unmeasured confounding
+
+## Legacy DragonNet Mode
+
+The original DragonNet/UpliftNet approach is still available but deprecated:
 
 ```bash
-# 1. Create config with all features enabled
-cdt init -o full_config.json
+# Create legacy config
+psm init --legacy --output legacy_config.json
 
-# 2. Edit full_config.json:
-#    - Enable pretraining, set dataset_path
-#    - Configure applied_inference
-#    - Enable plasmode_experiments with multiple scenarios
-
-# 3. Run complete pipeline
-cdt run --config full_config.json --workers 4
+# Run legacy mode
+psm legacy-run --config legacy_config.json
 ```
 
 ## Citation
 
-If you use CDT in your research, please cite:
+If you use PSM-CT in your research, please cite:
 
 ```bibtex
-@software{cdt2024,
+@software{psmct2024,
   author = {Kehl, Ken},
-  title = {Causal DragonNet Text: Clinical Causal Inference from EHR Text},
+  title = {Propensity Score Matching for Clinical Text},
   year = {2024},
   url = {https://github.com/kenlkehl/causal-dragonnet-text}
 }
