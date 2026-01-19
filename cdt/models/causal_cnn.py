@@ -78,7 +78,9 @@ class CausalCNNText(nn.Module):
         dragonnet_hidden_outcome_dim: int = 64,
         dragonnet_dropout: float = 0.2,
         device: str = "cuda:0",
-        model_type: str = "dragonnet"  # "dragonnet" or "uplift"
+        model_type: str = "dragonnet",  # "dragonnet" or "uplift"
+        # Auxiliary features (for hybrid text + categorical models)
+        auxiliary_dim: int = 0  # Dimension of auxiliary categorical features (0 = no auxiliary)
     ):
         """
         Initialize causal inference model with CNN, BERT, or GRU feature extractor.
@@ -112,6 +114,7 @@ class CausalCNNText(nn.Module):
             dragonnet_dropout: Dropout rate for DragonNet layers
             device: Device string
             model_type: Architecture type ("dragonnet" or "uplift")
+            auxiliary_dim: Dimension of auxiliary categorical features (0 = disabled)
         """
         super().__init__()
 
@@ -148,8 +151,12 @@ class CausalCNNText(nn.Module):
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
-            'model_type': model_type
+            'model_type': model_type,
+            'auxiliary_dim': auxiliary_dim
         }
+
+        # Store auxiliary dimension
+        self.auxiliary_dim = auxiliary_dim
 
         # Initialize feature extractor based on normalized type
         if self.feature_extractor_type == "bert":
@@ -197,8 +204,23 @@ class CausalCNNText(nn.Module):
             )
             logger.info("Using CNN feature extractor")
 
+        # Auxiliary feature projection (if enabled)
+        if auxiliary_dim > 0:
+            self.auxiliary_projection = nn.Sequential(
+                nn.Linear(auxiliary_dim, dragonnet_representation_dim // 2),
+                nn.LayerNorm(dragonnet_representation_dim // 2),
+                nn.ReLU(),
+                nn.Dropout(dragonnet_dropout)
+            )
+            logger.info(f"Auxiliary features enabled: {auxiliary_dim} -> {dragonnet_representation_dim // 2}")
+        else:
+            self.auxiliary_projection = None
+
         # Binary treatment Causal Inference Net
+        # Input dim = text features + auxiliary features (if any)
         input_dim = self.feature_extractor.output_dim
+        if auxiliary_dim > 0:
+            input_dim += dragonnet_representation_dim // 2
 
         if model_type == "uplift":
             self.net = UpliftNet(
@@ -230,13 +252,15 @@ class CausalCNNText(nn.Module):
 
     def forward(
         self,
-        texts: List[str]
+        texts: List[str],
+        auxiliary_features: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the complete model.
 
         Args:
             texts: List of text strings
+            auxiliary_features: Optional tensor of auxiliary features (batch, auxiliary_dim)
 
         Returns:
             y0_logit: (batch, 1) - outcome prediction under control
@@ -246,6 +270,11 @@ class CausalCNNText(nn.Module):
         """
         # Extract features from texts using CNN
         features = self.feature_extractor(texts)
+
+        # Concatenate auxiliary features if provided
+        if self.auxiliary_projection is not None and auxiliary_features is not None:
+            aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+            features = torch.cat([features, aux_projected], dim=1)
 
         if self.model_type == "uplift":
             # UpliftNet returns: y0_logit, tau_logit, t_logit, final_common_layer
@@ -269,7 +298,8 @@ class CausalCNNText(nn.Module):
         Perform single training step.
 
         Args:
-            batch: Dictionary with 'texts', 'treatment', 'outcome' keys
+            batch: Dictionary with 'texts', 'treatment', 'outcome' keys.
+                   Optional 'auxiliary_features' for hybrid models.
             alpha_propensity: Weight for propensity loss
             beta_targreg: Weight for targeted regularization
             label_smoothing: Label smoothing factor (0 = no smoothing)
@@ -280,6 +310,7 @@ class CausalCNNText(nn.Module):
         texts = batch['texts']
         treatments = batch['treatment']  # (batch,)
         outcomes = batch['outcome']  # (batch,)
+        auxiliary_features = batch.get('auxiliary_features', None)
 
         # Apply label smoothing if enabled
         if label_smoothing > 0:
@@ -290,7 +321,7 @@ class CausalCNNText(nn.Module):
             outcomes_smooth = outcomes
 
         # Forward pass
-        y0_logit, y1_logit, t_logit, phi = self.forward(texts)
+        y0_logit, y1_logit, t_logit, phi = self.forward(texts, auxiliary_features)
 
         # Propensity loss
         propensity_loss = F.binary_cross_entropy_with_logits(
@@ -342,19 +373,26 @@ class CausalCNNText(nn.Module):
 
     def predict(
         self,
-        texts: List[str]
+        texts: List[str],
+        auxiliary_features: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
         """
         Make predictions for inference.
 
         Args:
             texts: List of text strings
+            auxiliary_features: Optional tensor of auxiliary features (batch, auxiliary_dim)
 
         Returns:
             Dictionary with prediction outputs
         """
         with torch.no_grad():
             features = self.feature_extractor(texts)
+
+            # Concatenate auxiliary features if provided
+            if self.auxiliary_projection is not None and auxiliary_features is not None:
+                aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+                features = torch.cat([features, aux_projected], dim=1)
 
             if self.model_type == "uplift":
                 y0_logit, tau_logit, t_logit, final_common_layer = self.net(features)
