@@ -1,4 +1,4 @@
-"""Setup configuration for Propensity Score Matching package."""
+"""Setup configuration for CDT package."""
 
 from setuptools import setup, find_packages
 from pathlib import Path
@@ -8,11 +8,11 @@ readme_file = Path(__file__).parent / "README.md"
 long_description = readme_file.read_text() if readme_file.exists() else ""
 
 setup(
-    name="psm-clinical-text",
+    name="cdt-causal",
     version="0.2.0",
     author="Ken Kehl",
     author_email="kenneth_kehl@dfci.harvard.edu",
-    description="Propensity score matching for causal inference from clinical text",
+    description="Causal inference from clinical text using DragonNet with PSM validation",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/kenlkehl/causal-dragonnet-text",
@@ -50,8 +50,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "psm=cdt.cli:main",  # New propensity matching CLI
-            "cdt=cdt.cli:main",  # Legacy alias for backward compatibility
+            "cdt=cdt.cli:main",
         ],
     },
 )

@@ -1,46 +1,36 @@
 # cdt/models/__init__.py
-"""Model components for propensity score matching and causal inference."""
+"""Model components for causal inference from clinical text."""
 
-# New propensity matching model
-from .propensity_model import (
-    PropensityModel,
-    CNNEncoder,
-    TransformerEncoder,
-    GRUAttentionEncoder,
-    PropensityHead,
-    OutcomeHead
-)
+# Main model
+from .causal_dragonnet import CausalDragonnetText
 
-# Shared components
-from .components import ConfounderAggregator
-from .feature_extractor import FeatureExtractor
-
-# Legacy DragonNet components (deprecated)
+# DragonNet architecture components
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
+from .feature_extractor import FeatureExtractor
+from .components import ConfounderAggregator
+
+# Outcome heads for oracle/plasmode mode
 from .outcome_heads import OutcomeHeadsOnly, UpliftHeadsOnly
-from .causal_dragonnet import CausalDragonnetText
+
+# Multi-treatment pretraining
 from .multitreatment import MultiTreatmentDragonNetInternal, MultiTreatmentDragonnetText
 
 __all__ = [
-    # New propensity matching
-    'PropensityModel',
-    'CNNEncoder',
-    'TransformerEncoder',
-    'GRUAttentionEncoder',
-    'PropensityHead',
-    'OutcomeHead',
+    # Main model
+    'CausalDragonnetText',
 
-    # Shared components
-    'ConfounderAggregator',
-    'FeatureExtractor',
-
-    # Legacy (deprecated)
+    # Core components
     'DragonNet',
     'UpliftNet',
+    'FeatureExtractor',
+    'ConfounderAggregator',
+
+    # Oracle mode
     'OutcomeHeadsOnly',
     'UpliftHeadsOnly',
-    'CausalDragonnetText',
+
+    # Multi-treatment
     'MultiTreatmentDragonNetInternal',
     'MultiTreatmentDragonnetText',
 ]

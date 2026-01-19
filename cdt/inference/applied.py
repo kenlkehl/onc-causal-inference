@@ -20,6 +20,7 @@ from ..utils import (
     cuda_cleanup, get_memory_info, load_pretrained_with_dimension_matching,
     compute_latent_drift, log_latent_drift, compute_confounder_feature_stats, log_confounder_stats
 )
+from ..analysis import run_psm_analysis
 
 
 logger = logging.getLogger(__name__)
@@ -106,7 +107,7 @@ def _run_cv_inference(
     
     # Combine predictions and save
     results_df = pd.concat(all_predictions).sort_index()
-    _save_and_summarize(results_df, output_path)
+    _save_and_summarize(results_df, output_path, config)
 
     # Save training logs
     log_path = output_path.parent / "training_log.csv"
@@ -206,8 +207,8 @@ def _run_fixed_split_inference(
     results_df['y1_pred'] = preds['y1_logit']
     results_df['ite_pred'] = preds['ite_logit']
     results_df['propensity_pred'] = preds['propensity_logit']
-    
-    _save_and_summarize(results_df, output_path)
+
+    _save_and_summarize(results_df, output_path, config)
 
 
 def _train_single_model(
@@ -579,17 +580,67 @@ def _generate_predictions(
     }
 
 
-def _save_and_summarize(results_df: pd.DataFrame, output_path: Path) -> None:
-    """Save results and print summary."""
+def _save_and_summarize(
+    results_df: pd.DataFrame,
+    output_path: Path,
+    config: Optional[AppliedInferenceConfig] = None
+) -> Dict[str, Any]:
+    """Save results and print summary. Optionally run PSM analysis."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     results_df.to_parquet(output_path, index=False)
-    
+
     logger.info(f"Predictions saved to: {output_path}")
-    logger.info("\nPrediction Summary:")
+    logger.info("\n" + "="*60)
+    logger.info("DRAGONNET PREDICTION SUMMARY")
+    logger.info("="*60)
     logger.info(f"  Samples: {len(results_df)}")
     logger.info(f"  Mean ITE: {results_df['ite_pred'].mean():.4f}")
     logger.info(f"  Std ITE: {results_df['ite_pred'].std():.4f}")
-    logger.info(f"  Mean propensity: {results_df['propensity_pred'].mean():.4f}")
+    logger.info(f"  Mean propensity: {torch.sigmoid(torch.tensor(results_df['propensity_pred'].mean())).item():.4f}")
+
+    results = {'dragonnet_predictions': results_df}
+
+    # Run PSM analysis if enabled
+    if config is not None and config.matching_analysis.enabled:
+        logger.info("\n" + "="*60)
+        logger.info("RUNNING PSM ANALYSIS ON DRAGONNET PROPENSITY SCORES")
+        logger.info("="*60)
+
+        # Prepare dataframe for PSM analysis
+        # Convert propensity from logit to probability scale
+        psm_df = results_df.copy()
+        psm_df['propensity_pred'] = torch.sigmoid(torch.tensor(psm_df['propensity_pred'].values)).numpy()
+
+        # Ensure we have the required columns
+        psm_df['treatment'] = psm_df[config.treatment_column]
+        psm_df['outcome'] = psm_df[config.outcome_column]
+
+        psm_results = run_psm_analysis(
+            predictions_df=psm_df,
+            config=config.matching_analysis,
+            output_dir=output_path.parent / "psm_analysis",
+            propensity_column='propensity_pred',
+            treatment_column='treatment',
+            outcome_column='outcome'
+        )
+
+        results['psm_analysis'] = psm_results
+
+        # Print comparison summary
+        logger.info("\n" + "="*60)
+        logger.info("DRAGONNET vs PSM COMPARISON")
+        logger.info("="*60)
+
+        dragonnet_ate = results_df['ite_pred'].mean()
+        psm_ate = psm_results['ate_ipw'].estimate
+        psm_att = psm_results['att_matched'].estimate
+
+        logger.info(f"  DragonNet ATE (mean ITE): {dragonnet_ate:.4f}")
+        logger.info(f"  PSM IPW ATE:              {psm_ate:.4f} [{psm_results['ate_ipw'].ci_lower:.4f}, {psm_results['ate_ipw'].ci_upper:.4f}]")
+        logger.info(f"  PSM Matched ATT:          {psm_att:.4f} [{psm_results['att_matched'].ci_lower:.4f}, {psm_results['att_matched'].ci_upper:.4f}]")
+        logger.info(f"  Difference (ATE):         {abs(dragonnet_ate - psm_ate):.4f}")
+
+    return results
 
 
 def _initialize_latents_kmeans(

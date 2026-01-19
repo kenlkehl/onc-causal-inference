@@ -1,35 +1,36 @@
 """
-Propensity Score Matching for Clinical Text (PSM-CT)
+Causal DragonNet Text (CDT)
 
-A package for causal inference from clinical text using propensity score matching
-with deep learning text encoders (CNN, Transformer, GRU with attention).
+A package for causal inference from clinical text using DragonNet models.
 
-Main components:
-- PropensityModel: Text encoder with propensity score prediction
-- PropensityMatcher: Traditional propensity score matching algorithms
-- Statistical analysis: ATE/ATT estimation, balance diagnostics, sensitivity analysis
+Key Features:
+- DragonNet/UpliftNet for Individual Treatment Effect (ITE) estimation
+- Traditional PSM analysis using DragonNet's propensity scores for validation
+- Balance diagnostics and sensitivity analysis
+- Plasmode simulation for method validation
 """
 
 __version__ = "0.2.0"
 
-# New propensity matching configuration (recommended)
+# Main configuration
 from .config import (
-    PropensityExperimentConfig,
-    PropensityModelConfig,
-    PropensityTrainingConfig,
-    MatchingConfig,
-    create_propensity_config
+    ExperimentConfig,
+    AppliedInferenceConfig,
+    PretrainingConfig,
+    PlasmodeExperimentConfig,
+    MatchingAnalysisConfig,
+    create_default_config
 )
 
-# New propensity matching models
+# Models
 from .models import (
-    PropensityModel,
-    CNNEncoder,
-    TransformerEncoder,
-    GRUAttentionEncoder
+    CausalDragonnetText,
+    DragonNet,
+    UpliftNet,
+    FeatureExtractor
 )
 
-# Matching algorithms
+# Matching algorithms (for PSM analysis)
 from .matching import (
     PropensityMatcher,
     MatchResult,
@@ -43,58 +44,42 @@ from .analysis import (
     estimate_att_matched,
     estimate_ate_ipw,
     estimate_ate_stratified,
-    summarize_analysis
+    run_psm_analysis,
+    compare_estimates
 )
 
-# Training pipeline
-from .training import (
-    train_propensity_model,
-    run_propensity_matching_pipeline
-)
-
-# Legacy imports for backward compatibility (deprecated)
-from .config import (
-    ExperimentConfig,
-    AppliedInferenceConfig,
-    PretrainingConfig,
-    PlasmodeExperimentConfig,
-    create_default_config
-)
-
+# Experiment runner
 from .experiments import ExperimentRunner
 
 __all__ = [
-    # New propensity matching (recommended)
-    'PropensityExperimentConfig',
-    'PropensityModelConfig',
-    'PropensityTrainingConfig',
-    'MatchingConfig',
-    'create_propensity_config',
+    # Config
+    'ExperimentConfig',
+    'AppliedInferenceConfig',
+    'PretrainingConfig',
+    'PlasmodeExperimentConfig',
+    'MatchingAnalysisConfig',
+    'create_default_config',
 
-    'PropensityModel',
-    'CNNEncoder',
-    'TransformerEncoder',
-    'GRUAttentionEncoder',
+    # Models
+    'CausalDragonnetText',
+    'DragonNet',
+    'UpliftNet',
+    'FeatureExtractor',
 
+    # Matching
     'PropensityMatcher',
     'MatchResult',
     'compute_balance_statistics',
     'assess_overlap',
 
+    # Analysis
     'TreatmentEffectEstimate',
     'estimate_att_matched',
     'estimate_ate_ipw',
     'estimate_ate_stratified',
-    'summarize_analysis',
+    'run_psm_analysis',
+    'compare_estimates',
 
-    'train_propensity_model',
-    'run_propensity_matching_pipeline',
-
-    # Legacy (deprecated)
-    'ExperimentConfig',
-    'AppliedInferenceConfig',
-    'PretrainingConfig',
-    'PlasmodeExperimentConfig',
+    # Runner
     'ExperimentRunner',
-    'create_default_config',
 ]

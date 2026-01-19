@@ -12,6 +12,11 @@ from .statistical_analysis import (
     summarize_analysis
 )
 
+from .psm_analysis import (
+    run_psm_analysis,
+    compare_estimates
+)
+
 __all__ = [
     'TreatmentEffectEstimate',
     'estimate_att_matched',
@@ -20,5 +25,7 @@ __all__ = [
     'mcnemars_test',
     'paired_t_test',
     'sensitivity_analysis_rosenbaum',
-    'summarize_analysis'
+    'summarize_analysis',
+    'run_psm_analysis',
+    'compare_estimates'
 ]
