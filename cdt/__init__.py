@@ -12,6 +12,7 @@ from .config import (
     PlasmodeExperimentConfig,
     ModelArchitectureConfig,
     TrainingConfig,
+    MatchingAnalysisConfig,
     create_default_config
 )
 
@@ -23,6 +24,7 @@ __all__ = [
     'PlasmodeExperimentConfig',
     'ModelArchitectureConfig',
     'TrainingConfig',
+    'MatchingAnalysisConfig',
     'ExperimentRunner',
     'create_default_config',
 ]

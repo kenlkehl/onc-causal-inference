@@ -31,6 +31,13 @@ cdt/                          # Main package
 │   ├── plasmode.py           # Plasmode simulation experiments
 │   ├── propensity_trimming.py# Propensity-based dataset trimming
 │   └── outcome_training.py   # Standalone outcome model training
+├── matching/                 # Propensity score matching
+│   ├── propensity_matcher.py # PropensityMatcher, MatchResult, balance utilities
+│   └── __init__.py           # Exports matching classes and functions
+├── analysis/                 # Statistical analysis for causal inference
+│   ├── statistical_analysis.py # ATT/ATE estimation, McNemar's test, Rosenbaum bounds
+│   ├── psm_analysis.py       # run_psm_analysis() - main PSM workflow
+│   └── __init__.py           # Exports analysis functions
 └── utils/                    # Utilities (io, system, etc.)
 
 synthetic_data/               # LLM-based synthetic data generation
@@ -109,6 +116,7 @@ Main config classes:
 - `ModelArchitectureConfig`: Feature extractor type, CNN/BERT/GRU params, DragonNet dims
 - `TrainingConfig`: Learning rate, epochs, batch size, loss weights
 - `PropensityTrimmingConfig`: Pre-trimming by propensity scores
+- `MatchingAnalysisConfig`: Post-hoc PSM analysis using DragonNet's propensity scores
 - `PlasmodeConfig`: Plasmode simulation parameters
 
 Key architecture settings:
@@ -159,6 +167,63 @@ Generates synthetic outcomes with known ground truth for method validation:
 3. Train "evaluator" on synthetic data
 4. Compare estimated vs. true treatment effects
 
+### 3. Propensity Score Matching Analysis
+Post-hoc traditional PSM analysis using DragonNet's learned propensity scores:
+- ATT estimation from matched pairs with bootstrap CIs
+- ATE via IPW (inverse probability weighting)
+- ATE via stratification (propensity subclassification)
+- Balance diagnostics (SMD before/after matching)
+- Rosenbaum sensitivity analysis for hidden bias
+
+## Matching Module (`cdt/matching/`)
+
+**PropensityMatcher** - Main matching class:
+```python
+from cdt.matching import PropensityMatcher, assess_overlap
+
+matcher = PropensityMatcher(
+    method='nearest',      # 'nearest', 'optimal', or 'caliper'
+    caliper=0.2,           # Max distance for valid match
+    caliper_scale='std',   # 'propensity', 'logit', or 'std'
+    ratio=1,               # 1:k matching
+    replacement=False
+)
+
+match_result = matcher.match(propensity_scores, treatment)
+# match_result.matched_pairs: (n_matches, 2) array of indices
+# match_result.distances: distance for each pair
+```
+
+**Helper functions**:
+- `compute_balance_statistics(covariates, treatment, match_result)` - SMD before/after
+- `assess_overlap(propensity_scores, treatment)` - Overlap coefficient, common support
+
+## Analysis Module (`cdt/analysis/`)
+
+**Treatment effect estimation**:
+```python
+from cdt.analysis import (
+    estimate_att_matched,    # ATT from matched pairs
+    estimate_ate_ipw,        # ATE via inverse probability weighting
+    estimate_ate_stratified, # ATE via propensity stratification
+    run_psm_analysis         # Full PSM analysis workflow
+)
+
+# Run full PSM analysis
+from cdt.config import MatchingAnalysisConfig
+results = run_psm_analysis(
+    predictions_df,          # Must have propensity_pred, treatment, outcome columns
+    config=MatchingAnalysisConfig(),
+    output_dir=Path('./psm_results')
+)
+# Returns: match_result, overlap, balance_stats, att_matched, ate_ipw, etc.
+```
+
+**Statistical tests**:
+- `mcnemars_test(outcomes, match_result)` - For binary outcomes
+- `paired_t_test(outcomes, match_result)` - For continuous outcomes
+- `sensitivity_analysis_rosenbaum(outcomes, match_result)` - Rosenbaum bounds
+
 ## Synthetic Data Generation (`synthetic_data/`)
 
 LLM-based pipeline for generating synthetic clinical datasets:
@@ -176,6 +241,9 @@ Supports both OpenAI API and local vLLM batch inference.
 - **Config**: `cdt/config.py`
 - **CLI**: `cdt/cli.py`
 - **Dataset**: `cdt/data/dataset.py`
+- **PSM Analysis**: `cdt/analysis/psm_analysis.py` (run_psm_analysis)
+- **Matching**: `cdt/matching/propensity_matcher.py` (PropensityMatcher, MatchResult)
+- **Statistical Tests**: `cdt/analysis/statistical_analysis.py` (ATT, ATE, McNemar's, Rosenbaum)
 
 ## Common Patterns
 
@@ -228,7 +296,12 @@ output_dir/
 ├── config.json                 # Experiment configuration
 ├── applied_inference/
 │   ├── predictions.parquet     # Per-sample predictions
-│   └── training_log.csv        # Training metrics
+│   ├── training_log.csv        # Training metrics
+│   └── psm_analysis/           # If matching_analysis.enabled=true
+│       ├── matched_pairs.csv   # Matched treated-control pairs
+│       ├── balance_statistics.csv # SMD before/after matching
+│       ├── sensitivity_analysis.csv # Rosenbaum bounds
+│       └── psm_summary.json    # Treatment effect estimates
 └── plasmode_experiments/       # If enabled
     └── results.csv             # Plasmode results
 ```
@@ -240,3 +313,5 @@ output_dir/
 3. **Filter initialization**: Semantic filters improve interpretability; k-means captures data patterns
 4. **Propensity trimming**: Optional preprocessing to enforce positivity assumption
 5. **All predictions are on probability scale**: ITE = P(Y=1|T=1,X) - P(Y=1|T=0,X)
+6. **PSM analysis**: Post-hoc analysis using `cdt.analysis.run_psm_analysis()` - validates DragonNet estimates with traditional methods
+7. **Matching module**: `cdt.matching.PropensityMatcher` supports nearest neighbor, optimal (Hungarian), and caliper matching

@@ -8,6 +8,41 @@ import json
 import hashlib
 
 
+# =============================================================================
+# MATCHING ANALYSIS CONFIGURATION (used as post-hoc analysis with DragonNet)
+# =============================================================================
+
+@dataclass
+class MatchingAnalysisConfig:
+    """Configuration for propensity score matching analysis (post-hoc)."""
+
+    # Whether to run PSM analysis using DragonNet's propensity scores
+    enabled: bool = True
+
+    # Matching method: 'nearest', 'optimal', 'caliper'
+    method: str = "nearest"
+
+    # Caliper (maximum allowed distance for a match)
+    # None = no caliper
+    caliper: Optional[float] = 0.2
+
+    # Scale for caliper: 'propensity', 'logit', 'std'
+    # 'std' means caliper is in standard deviations of logit propensity
+    caliper_scale: str = "std"
+
+    # Matching ratio (1:k matching)
+    ratio: int = 1
+
+    # Whether to match with replacement
+    replacement: bool = False
+
+    # Number of bootstrap iterations for confidence intervals
+    n_bootstrap: int = 1000
+
+    # Confidence level for intervals
+    ci_level: float = 0.95
+
+
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to one of: "cnn", "bert", or "gru".
@@ -194,6 +229,9 @@ class AppliedInferenceConfig:
     use_pretrained_weights: bool = False  # Not used for CNN, kept for API compatibility
     skip: bool = False  # Skip applied inference, go straight to plasmode
 
+    # PSM analysis configuration (uses DragonNet's propensity scores)
+    matching_analysis: MatchingAnalysisConfig = field(default_factory=MatchingAnalysisConfig)
+
 
 @dataclass
 class PlasmodeExperimentConfig:
@@ -251,6 +289,7 @@ class ExperimentConfig:
                else TrainingConfig(**v) if k == 'training'
                else PropensityTrimmingConfig(**v) if k == 'propensity_trimming'
                else OutcomeModelConfig(**v) if k == 'outcome_model'
+               else MatchingAnalysisConfig(**v) if k == 'matching_analysis'
                else v
                for k, v in data.get('applied_inference', {}).items()}
         )
@@ -297,6 +336,12 @@ class ExperimentConfig:
 
         if self.plasmode_experiments.enabled and not self.plasmode_experiments.plasmode_scenarios:
             raise ValueError("plasmode_experiments.plasmode_scenarios cannot be empty when enabled=True")
+
+        # Validate matching config
+        if self.applied_inference.matching_analysis.enabled:
+            valid_methods = {'nearest', 'optimal', 'caliper'}
+            if self.applied_inference.matching_analysis.method not in valid_methods:
+                raise ValueError(f"matching_analysis.method must be one of {valid_methods}")
 
 
 def create_default_config(output_path: str) -> None:

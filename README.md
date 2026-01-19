@@ -79,6 +79,23 @@ The plasmode workflow:
 3. Train an "evaluator" model on the synthetic data
 4. Compare estimated effects to ground truth
 
+### Propensity Score Matching Analysis
+
+CDT includes a traditional propensity score matching (PSM) module that can be run as a post-hoc analysis using DragonNet's learned propensity scores. This provides:
+
+- **Treatment effect estimation via multiple methods**:
+  - **ATT (Average Treatment Effect on Treated)**: From matched pairs
+  - **ATE via IPW**: Inverse probability weighting
+  - **ATE via Stratification**: Propensity score subclassification
+
+- **Balance diagnostics**: Standardized mean differences before/after matching
+
+- **Statistical inference**: Bootstrap confidence intervals, McNemar's test (binary outcomes), paired t-tests (continuous outcomes)
+
+- **Sensitivity analysis**: Rosenbaum bounds to assess robustness to unmeasured confounding
+
+This allows comparison of DragonNet's ITE estimates with traditional PSM estimates, providing validation and enabling traditional statistical inference.
+
 ## Installation
 
 ### Prerequisites
@@ -209,6 +226,17 @@ A configuration file controls all aspects of the experiment:
       "learning_rate": 0.0001,
       "alpha_propensity": 1.0,
       "beta_targreg": 0.1
+    },
+
+    "matching_analysis": {
+      "enabled": true,
+      "method": "nearest",
+      "caliper": 0.2,
+      "caliper_scale": "std",
+      "ratio": 1,
+      "replacement": false,
+      "n_bootstrap": 1000,
+      "ci_level": 0.95
     }
   },
 
@@ -255,6 +283,16 @@ A configuration file controls all aspects of the experiment:
 - `target_ate_prob`: True average treatment effect on probability scale (e.g., 0.10 = 10% increase)
 - `ite_heterogeneity_scale`: Scale of individual treatment effect heterogeneity
 
+**Matching Analysis (PSM):**
+- `enabled`: Whether to run PSM analysis using DragonNet's propensity scores (default: true)
+- `method`: Matching algorithm - "nearest" (greedy), "optimal" (Hungarian), or "caliper" (default: "nearest")
+- `caliper`: Maximum allowed distance for a match (default: 0.2)
+- `caliper_scale`: Scale for caliper - "propensity", "logit", or "std" (standard deviations of logit propensity)
+- `ratio`: Matching ratio (1:k matching, default: 1)
+- `replacement`: Whether to match with replacement (default: false)
+- `n_bootstrap`: Number of bootstrap iterations for confidence intervals (default: 1000)
+- `ci_level`: Confidence level for intervals (default: 0.95)
+
 ### CLI Options
 
 ```bash
@@ -276,7 +314,12 @@ output_dir/
 ├── config.json                    # Copy of experiment configuration
 ├── applied_inference/
 │   ├── predictions.parquet        # Per-sample treatment effect estimates
-│   └── training_log.csv           # Training metrics per epoch
+│   ├── training_log.csv           # Training metrics per epoch
+│   └── psm_analysis/              # (if matching_analysis.enabled=true)
+│       ├── matched_pairs.csv      # Matched treated-control pairs with distances
+│       ├── balance_statistics.csv # SMD before/after matching
+│       ├── sensitivity_analysis.csv # Rosenbaum bounds for hidden bias
+│       └── psm_summary.json       # Treatment effect estimates and comparison
 └── plasmode_experiments/          # (if enabled)
     ├── results.csv                # Aggregated plasmode metrics
     └── simulated_datasets/        # (if save_datasets=true)
