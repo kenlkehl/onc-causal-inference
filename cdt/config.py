@@ -149,6 +149,14 @@ class ModelArchitectureConfig:
     confounder_top_k: int = 5  # K for top-k attention method
     confounder_dropout: float = 0.1  # Dropout rate
 
+    # Hierarchical confounder extractor (token-level attention)
+    # When enabled, uses per-sentence BERT encoding + token-level cross-attention
+    # This preserves fine-grained token signal that sentence embeddings may lose
+    confounder_hierarchical: bool = False  # Enable hierarchical token-level attention
+    confounder_token_encoder: str = "distilbert-base-uncased"  # Token encoder for hierarchical mode
+    confounder_freeze_token_encoder: bool = True  # Whether to freeze token encoder
+    confounder_max_sentence_tokens: int = 128  # Max tokens per sentence in hierarchical mode
+
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128
     dragonnet_hidden_outcome_dim: int = 64

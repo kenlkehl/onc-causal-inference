@@ -25,7 +25,7 @@ class MLPDragonNet(nn.Module):
     Takes one-hot encoded categorical features as input and produces
     treatment effect estimates using the DragonNet architecture.
 
-    This is simpler than CausalCNNText - no text processing, just
+    This is simpler than CausalText - no text processing, just
     a direct MLP on tabular features.
     """
 

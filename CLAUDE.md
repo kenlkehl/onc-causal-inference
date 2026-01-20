@@ -19,10 +19,11 @@ cdt/                          # Main package
 ├── inference/
 │   └── applied.py            # Run applied causal inference (CV or fixed split)
 ├── models/
-│   ├── causal_cnn.py         # CausalCNNText - main model combining extractor + DragonNet
+│   ├── causal_text.py        # CausalText - main model combining extractor + DragonNet
 │   ├── cnn_extractor.py      # CNNFeatureExtractor - 1D CNN with semantic filter init
 │   ├── bert_extractor.py     # BertFeatureExtractor - HuggingFace transformer CLS token
 │   ├── gru_extractor.py      # GRUFeatureExtractor - BiGRU with attention pooling
+│   ├── confounder_extractor.py # ConfounderExtractor, HierarchicalConfounderExtractor
 │   ├── dragonnet.py          # DragonNet head (propensity + potential outcomes)
 │   ├── uplift.py             # UpliftNet head (alternative parametrization)
 │   ├── rlearner.py           # RLearnerNet head (direct tau optimization)
@@ -58,7 +59,7 @@ examples/                     # Example config files
 
 ## Architecture
 
-### Core Model: CausalCNNText (`cdt/models/causal_cnn.py`)
+### Core Model: CausalText (`cdt/models/causal_text.py`)
 
 The main model combines:
 1. **Feature Extractor** (one of four types):
@@ -122,7 +123,7 @@ Reference: Nie & Wager (2021). Quasi-oracle estimation of heterogeneous treatmen
 
 Perceiver-style feature extractor designed for extracting confounder signals from long clinical text. Uses sentence-level processing with sparse cross-attention.
 
-**Architecture:**
+**Standard Architecture (sentence-level):**
 ```
 Long Clinical Text
         ↓
@@ -141,12 +142,31 @@ K Latent Representations (K × d)
 MLP Projection → Causal Head (DragonNet/RLearner)
 ```
 
+**Hierarchical Architecture (token-level):**
+With `confounder_hierarchical=True`, preserves fine-grained token signal:
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Encode EACH sentence with BERT → S × (L_s tokens × 768)
+        ↓
+Mean-pool each sentence → Sentence Embeddings (S × 768)
+        ↓
+Sentence-Level Sparse Attention (entmax) → Sentence Weights (K × S)
+        ↓
+Token-Level Cross-Attention (within each sentence, gated by sentence weights)
+        ↓
+K Confounder Representations → Causal Head
+```
+
 **Key features:**
 - **Sparse attention** via entmax (forces exact zeros on irrelevant sentences)
 - **Iterative refinement**: Multiple cross-attention passes for progressive focusing
 - **Explicit confounder initialization**: Optional concept phrases (e.g., "metastatic sites")
 - **Self-attention between latents**: Allows confounders to share information
 - **Attention visualization**: `interpret_attention()` method shows top-attended sentences
+- **Hierarchical mode**: Preserves token-level distinctions (e.g., "ECOG PS 0" vs "ECOG PS 2")
 
 **Key configuration:**
 ```python
@@ -156,12 +176,19 @@ confounder_num_iterations: int = 2     # Refinement passes
 confounder_sparse_attention: bool = True
 confounder_sparse_alpha: float = 1.5   # 1.5=entmax15, 2.0=sparsemax
 confounder_sparse_method: str = "entmax"  # "entmax", "topk", "softmax"
+
+# Hierarchical mode (token-level attention)
+confounder_hierarchical: bool = False   # Enable token-level attention
+confounder_token_encoder: str = "distilbert-base-uncased"  # BERT for token encoding
+confounder_freeze_token_encoder: bool = True
+confounder_max_sentence_tokens: int = 128
 ```
 
 **Why this helps for long documents:**
 - Sentence-level attention reduces search space from 2048 tokens to ~50-100 sentences
 - Sparse attention forces each latent to focus on few relevant sentences
 - Iterative refinement allows progressive "zooming in" on confounder mentions
+- Hierarchical mode preserves fine-grained signal that sentence embeddings may lose
 - Works with standard causal loss - no concept labels needed
 
 ### Sparse Attention Utilities (`cdt/models/sparse_attention.py`)
@@ -317,9 +344,9 @@ Supports both OpenAI API and local vLLM batch inference.
 
 ## Key Files for Development
 
-- **Main model**: `cdt/models/causal_cnn.py` (CausalCNNText)
+- **Main model**: `cdt/models/causal_text.py` (CausalText)
 - **Causal heads**: `cdt/models/dragonnet.py`, `cdt/models/uplift.py`, `cdt/models/rlearner.py`
-- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py`
+- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor)
 - **Sparse attention**: `cdt/models/sparse_attention.py` (entmax, top-k, SparseCrossAttention)
 - **Training loop**: `cdt/inference/applied.py` (_train_single_model, _train_epoch)
 - **Plasmode**: `cdt/training/plasmode.py` (plasmode simulation experiments)
@@ -334,9 +361,9 @@ Supports both OpenAI API and local vLLM batch inference.
 
 ### Training a model manually
 ```python
-from cdt.models.causal_cnn import CausalCNNText
+from cdt.models import CausalText
 
-model = CausalCNNText(
+model = CausalText(
     feature_extractor_type="cnn",
     embedding_dim=128,
     kernel_sizes=[3, 4, 5, 7],
@@ -362,10 +389,10 @@ for batch in dataloader:
 
 ### Training with R-Learner
 ```python
-from cdt.models.causal_cnn import CausalCNNText
+from cdt.models import CausalText
 
 # Create model with R-Learner architecture
-model = CausalCNNText(
+model = CausalText(
     feature_extractor_type="cnn",
     model_type="rlearner",  # Use R-Learner instead of DragonNet
     embedding_dim=128,
@@ -392,10 +419,10 @@ print(f"R-loss: {losses['r_loss']}")
 
 ### Training with ConfounderExtractor
 ```python
-from cdt.models.causal_cnn import CausalCNNText
+from cdt.models import CausalText
 
 # Create model with ConfounderExtractor for long documents
-model = CausalCNNText(
+model = CausalText(
     feature_extractor_type="confounder",
     model_type="rlearner",
     # Confounder extractor settings
@@ -431,6 +458,36 @@ for doc_idx, doc_interp in enumerate(interpretations):
     print(f"Document {doc_idx}:")
     for conf_name, attended in doc_interp.items():
         print(f"  {conf_name}: {[a['sentence'][:50] for a in attended]}")
+```
+
+### Training with Hierarchical ConfounderExtractor
+```python
+from cdt.models import CausalText
+
+# Hierarchical mode preserves token-level signal (e.g., "PS 0" vs "PS 2")
+model = CausalText(
+    feature_extractor_type="confounder",
+    model_type="rlearner",
+    # Enable hierarchical mode
+    confounder_hierarchical=True,
+    confounder_token_encoder="distilbert-base-uncased",  # or "emilyalsentzer/Bio_ClinicalBERT"
+    confounder_freeze_token_encoder=True,
+    confounder_max_sentence_tokens=128,
+    # Other settings
+    confounder_num_latents=4,
+    confounder_explicit_texts=["metastatic disease", "performance status"],
+    confounder_value_dim=128,
+    confounder_sparse_attention=True,
+    confounder_sparse_alpha=1.5,
+    device="cuda:0"
+)
+
+# Training is the same
+model.fit_tokenizer(train_texts)  # No-op
+for batch in dataloader:
+    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
+    losses['loss'].backward()
+    optimizer.step()
 ```
 
 ### Getting predictions
@@ -478,3 +535,4 @@ output_dir/
 7. **Matching module**: `cdt.matching.PropensityMatcher` supports nearest neighbor, optimal (Hungarian), and caliper matching
 8. **R-Learner vs DragonNet**: R-Learner provides stronger gradient signal for tau(X) by detaching nuisance functions; use when treatment effect heterogeneity is the primary focus
 9. **Confounder extractor**: Use for long documents (2048+ tokens) where confounders are mentioned in specific sentences. Sparse attention (entmax) forces focus on relevant sentences. Use `interpret_attention()` to visualize what each latent confounder attends to.
+10. **Hierarchical confounder mode**: Enable with `confounder_hierarchical=True` when fine-grained token distinctions matter (e.g., "ECOG PS 0" vs "ECOG PS 2"). Uses sentence-level sparse attention to focus on relevant sentences, then token-level attention to preserve specific values.

@@ -4,6 +4,8 @@
   "device": "cuda:0",
   "num_workers": 4,
 
+  "_comment_overview": "ConfounderExtractor uses Perceiver-style cross-attention. By default, it operates at SENTENCE level. With confounder_hierarchical=true, it uses HIERARCHICAL attention: sentence-level sparse attention to focus on relevant sentences, then token-level attention within those sentences to preserve fine-grained signal.",
+
   "applied_inference": {
     "dataset_path": "./data/clinical_notes.parquet",
     "text_column": "clinical_text",
@@ -16,24 +18,53 @@
       "model_type": "rlearner",
       "feature_extractor_type": "confounder",
 
+      "_comment_latents": "Latent confounders: learnable query vectors that learn to attend to relevant sentences",
       "confounder_num_latents": 4,
+
+      "_comment_explicit": "Explicit confounders: concept phrases encoded as additional query vectors. These provide inductive bias for known confounders.",
       "confounder_explicit_texts": [
         "metastatic disease",
         "performance status",
         "prior treatment history",
         "comorbidities"
       ],
+
+      "_comment_dimensions": "value_dim is the dimension of each confounder representation AND the final output dimension",
       "confounder_value_dim": 128,
+
+      "_comment_hierarchical": "HIERARCHICAL MODE: When true, uses per-sentence BERT encoding + token-level cross-attention. This preserves fine-grained token signal (e.g., 'PS is 0' vs 'PS is 2') that sentence embeddings may lose.",
+      "confounder_hierarchical": true,
+      "confounder_token_encoder": "distilbert-base-uncased",
+      "_comment_token_encoder": "HuggingFace model for token encoding in hierarchical mode. Options: distilbert-base-uncased (fast), emilyalsentzer/Bio_ClinicalBERT (clinical domain)",
+      "confounder_freeze_token_encoder": true,
+      "confounder_max_sentence_tokens": 128,
+      "_comment_max_sentence_tokens": "Maximum tokens per sentence. Sentences longer than this are truncated.",
+
+      "_comment_sentence_encoder": "(For non-hierarchical mode only) SentenceTransformer model for encoding sentences.",
       "confounder_sentence_model": "all-MiniLM-L6-v2",
       "confounder_freeze_encoder": true,
+
+      "_comment_sentence_processing": "max_sentences limits how many sentences to process per document. Sentences beyond this are dropped.",
       "confounder_max_sentences": 100,
+
+      "_comment_attention": "Cross-attention from latent confounders to sentence/token embeddings",
       "confounder_num_heads": 4,
+
+      "_comment_iterations": "(For non-hierarchical mode only) Number of iterative refinement passes (Perceiver-IO style).",
       "confounder_num_iterations": 2,
+
+      "_comment_self_attention": "(For non-hierarchical mode only) Whether latent confounders attend to each other between passes.",
       "confounder_use_self_attention": true,
+
+      "_comment_sparse": "Sparse attention forces each confounder to focus on few sentences instead of spreading attention everywhere.",
       "confounder_sparse_attention": true,
       "confounder_sparse_method": "entmax",
+      "_comment_sparse_methods": "Options: 'entmax' (soft sparsity, recommended), 'topk' (hard top-k selection), 'softmax' (no sparsity)",
       "confounder_sparse_alpha": 1.5,
+      "_comment_alpha": "For entmax: 1.0=softmax (dense), 1.5=entmax15 (moderate sparsity), 2.0=sparsemax (aggressive sparsity)",
       "confounder_top_k": 5,
+      "_comment_topk": "Only used when sparse_method='topk'. Number of sentences each confounder can attend to.",
+
       "confounder_dropout": 0.1,
 
       "dragonnet_representation_dim": 128,
@@ -78,9 +109,23 @@
       "model_type": "rlearner",
       "feature_extractor_type": "confounder",
       "confounder_num_latents": 4,
+      "confounder_explicit_texts": ["metastatic disease", "performance status"],
       "confounder_value_dim": 128,
+      "confounder_hierarchical": true,
+      "confounder_token_encoder": "distilbert-base-uncased",
+      "confounder_freeze_token_encoder": true,
+      "confounder_max_sentence_tokens": 128,
+      "confounder_sentence_model": "all-MiniLM-L6-v2",
+      "confounder_freeze_encoder": true,
+      "confounder_max_sentences": 100,
+      "confounder_num_heads": 4,
       "confounder_num_iterations": 2,
+      "confounder_use_self_attention": true,
       "confounder_sparse_attention": true,
+      "confounder_sparse_method": "entmax",
+      "confounder_sparse_alpha": 1.5,
+      "confounder_top_k": 5,
+      "confounder_dropout": 0.1,
       "dragonnet_representation_dim": 128,
       "dragonnet_hidden_outcome_dim": 64
     },
@@ -96,9 +141,23 @@
       "model_type": "rlearner",
       "feature_extractor_type": "confounder",
       "confounder_num_latents": 4,
+      "confounder_explicit_texts": ["metastatic disease", "performance status"],
       "confounder_value_dim": 128,
+      "confounder_hierarchical": true,
+      "confounder_token_encoder": "distilbert-base-uncased",
+      "confounder_freeze_token_encoder": true,
+      "confounder_max_sentence_tokens": 128,
+      "confounder_sentence_model": "all-MiniLM-L6-v2",
+      "confounder_freeze_encoder": true,
+      "confounder_max_sentences": 100,
+      "confounder_num_heads": 4,
       "confounder_num_iterations": 2,
+      "confounder_use_self_attention": true,
       "confounder_sparse_attention": true,
+      "confounder_sparse_method": "entmax",
+      "confounder_sparse_alpha": 1.5,
+      "confounder_top_k": 5,
+      "confounder_dropout": 0.1,
       "dragonnet_representation_dim": 128,
       "dragonnet_hidden_outcome_dim": 64
     },

@@ -20,7 +20,7 @@ from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
 from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig, normalize_feature_extractor_type
-from ..models.causal_cnn import CausalCNNText
+from ..models.causal_text import CausalText
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup, get_memory_info, set_seed
 
@@ -331,7 +331,7 @@ def _train_cnn_model(
     arch_config,
     train_config,
     device: torch.device
-) -> Tuple[CausalCNNText, List[Dict[str, Any]]]:
+) -> Tuple[CausalText, List[Dict[str, Any]]]:
     """Train a model with CNN or BERT feature extractor."""
 
     # Get feature extractor type (default to "cnn" for backward compatibility)
@@ -340,7 +340,7 @@ def _train_cnn_model(
         getattr(arch_config, 'feature_extractor_type', 'cnn')
     )
 
-    model = CausalCNNText(
+    model = CausalText(
         feature_extractor_type=feature_extractor_type,
         # CNN args
         embedding_dim=arch_config.cnn_embedding_dim,
@@ -492,7 +492,7 @@ def _train_cnn_model(
 
 def _generate_plasmode_data(
     df: pd.DataFrame,
-    generator: CausalCNNText,
+    generator: CausalText,
     scenario: PlasmodeConfig,
     applied_config: AppliedInferenceConfig,
     device: torch.device
@@ -571,7 +571,7 @@ def _generate_plasmode_data(
 
 
 def _predict_cnn_model(
-    model: CausalCNNText,
+    model: CausalText,
     df: pd.DataFrame,
     applied_config: AppliedInferenceConfig,
     device: torch.device

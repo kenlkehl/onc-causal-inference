@@ -64,7 +64,7 @@ class PropensityOnlyModel(nn.Module):
     """
     Propensity-score-only model for dataset trimming.
 
-    Uses same architecture as CausalCNNText/DragonNet:
+    Uses same architecture as CausalText/DragonNet:
     - Feature extractor (CNN or BERT)
     - 6-layer representation network
     - Single propensity head

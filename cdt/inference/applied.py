@@ -16,7 +16,7 @@ from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
 from ..config import AppliedInferenceConfig, normalize_feature_extractor_type
-from ..models.causal_cnn import CausalCNNText
+from ..models.causal_text import CausalText
 from ..data import (
     ClinicalTextDataset,
     collate_batch,
@@ -335,7 +335,7 @@ def _train_single_model(
     val_df: pd.DataFrame,
     config: AppliedInferenceConfig,
     device: torch.device
-) -> Tuple[CausalCNNText, List[Dict[str, Any]]]:
+) -> Tuple[CausalText, List[Dict[str, Any]]]:
     """Train a single model instance (CNN or BERT feature extractor)."""
     arch_config = config.architecture
 
@@ -358,7 +358,7 @@ def _train_single_model(
         max_vocab_size = getattr(arch_config, 'cnn_max_vocab_size', 50000)
 
     # Create model with appropriate feature extractor
-    model = CausalCNNText(
+    model = CausalText(
         feature_extractor_type=feature_extractor_type,
         # CNN/GRU shared args
         embedding_dim=embedding_dim,
@@ -527,7 +527,7 @@ def _train_single_model(
 
 
 def _predict_dataset(
-    model: CausalCNNText,
+    model: CausalText,
     df: pd.DataFrame,
     config: AppliedInferenceConfig,
     device: torch.device
@@ -556,7 +556,7 @@ def _predict_dataset(
 
 
 def _train_epoch(
-    model: CausalCNNText,
+    model: CausalText,
     loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     scheduler,
@@ -616,7 +616,7 @@ def _train_epoch(
 
 
 def _eval_epoch(
-    model: CausalCNNText,
+    model: CausalText,
     loader: DataLoader,
     device: torch.device,
     config
@@ -691,7 +691,7 @@ def _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_
 
 
 def _generate_predictions(
-    model: CausalCNNText,
+    model: CausalText,
     loader: DataLoader,
     device: torch.device
 ) -> dict:
@@ -748,7 +748,7 @@ def _save_and_summarize(results_df: pd.DataFrame, output_path: Path) -> None:
 
 
 def _save_filter_interpretations(
-    model: CausalCNNText,
+    model: CausalText,
     train_texts: List[str],
     output_dir: Path,
     top_k: int = 10
@@ -760,7 +760,7 @@ def _save_filter_interpretations(
     Only applicable for CNN feature extractors.
 
     Args:
-        model: Trained CausalCNNText model
+        model: Trained CausalText model
         train_texts: Training texts to analyze activations on
         output_dir: Directory to save interpretation files
         top_k: Number of top n-grams per filter

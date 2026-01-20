@@ -56,7 +56,7 @@ class OutcomeOnlyModel(nn.Module):
     """
     Outcome-only model for assessing prognostic signal.
 
-    Uses same architecture as CausalCNNText/DragonNet:
+    Uses same architecture as CausalText/DragonNet:
     - Feature extractor (CNN or BERT)
     - 2-layer representation network
     - Single outcome head
