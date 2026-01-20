@@ -1,10 +1,16 @@
 #!/usr/bin/env python
-"""Concept-aware CNN filter experiment for synthetic clinical text.
+"""Concept-aware CNN filter experiment using R-Learner for synthetic clinical text.
 
 This script runs 8 experimental conditions to evaluate different strategies
-for ITE estimation on synthetic clinical text:
+for ITE estimation on synthetic clinical text, using R-Learner architecture
+instead of DragonNet for direct treatment effect optimization.
 
-End-to-End CNN Approaches:
+R-Learner Key Difference:
+- Uses three heads: propensity e(X), marginal outcome m(X), treatment effect tau(X)
+- Nuisance functions (e, m) are detached in R-loss, providing stronger gradient
+  signal for learning treatment effect modifiers from text
+
+End-to-End CNN Approaches (R-Learner):
 1. Oracle: patient_prompt with k-means filters (upper bound)
 2. Baseline: clinical_text with random filters only
 3. K-means: clinical_text with k-means filters
@@ -12,14 +18,16 @@ End-to-End CNN Approaches:
 5. Concept + K-means: clinical_text with both semantic and k-means filters
 
 Two-Stage LLM Extraction Approaches:
-6. LLM-Extract-Only: Train on extracted categorical features only
-7. LLM-Extract-Combined: Text features + extracted features (hybrid)
-8. LLM-Extract-as-Text: Convert extraction to structured text like patient_prompt
+6. LLM-Extract-Only: Train on extracted categorical features only (MLP DragonNet)
+7. LLM-Extract-Combined: Text features + extracted features (hybrid, R-Learner)
+8. LLM-Extract-as-Text: Convert extraction to structured text like patient_prompt (R-Learner)
+
+Note: Condition 6 still uses MLPDragonNet since there's no MLP R-Learner equivalent.
 
 Usage:
-    python scripts/run_concept_aware_experiment.py \
+    python oracle_experiment_scripts/run_concept_aware_experiment_rlearner.py \
         --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
-        --output-dir results/concept_aware_experiment \
+        --output-dir results/concept_aware_experiment_rlearner \
         --device cuda:0 \
         --epochs 50
 """
@@ -286,7 +294,7 @@ def compute_metrics(
     return metrics
 
 
-def train_cnn_model(
+def train_rlearner_model(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     config: ExperimentConfig,
@@ -294,9 +302,10 @@ def train_cnn_model(
     epochs: int,
     batch_size: int,
     learning_rate: float,
+    gamma_rlearner: float = 1.0,
     encoder: Optional[CategoricalEncoder] = None
 ) -> Tuple[CausalCNNText, List[Dict]]:
-    """Train a CNN-based model for one fold."""
+    """Train an R-Learner CNN model for one fold."""
     text_column = config.text_column
 
     # Prepare auxiliary features if needed
@@ -320,9 +329,10 @@ def train_cnn_model(
     num_kmeans = config.num_kmeans_filters if config.use_kmeans else 0
     num_random = config.num_random_filters if config.use_random_only else 0
 
-    # Create model
+    # Create model with R-Learner architecture
     model = CausalCNNText(
         feature_extractor_type="cnn",
+        model_type="rlearner",  # Use R-Learner instead of DragonNet
         embedding_dim=128,
         kernel_sizes=[3, 4, 5, 7],
         explicit_filter_concepts=explicit_concepts,
@@ -391,34 +401,51 @@ def train_cnn_model(
         # Train
         model.train()
         train_loss = 0.0
+        train_r_loss = 0.0
         for batch in train_loader:
             batch['treatment'] = batch['treatment'].to(device)
             batch['outcome'] = batch['outcome'].to(device)
 
             optimizer.zero_grad()
-            losses = model.train_step(batch, alpha_propensity=1.0, beta_targreg=0.1)
+            # Use gamma_rlearner for R-Learner loss weight
+            losses = model.train_step(
+                batch,
+                alpha_propensity=1.0,
+                gamma_rlearner=gamma_rlearner
+            )
             losses['loss'].backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
             train_loss += losses['loss'].item()
+            train_r_loss += losses['r_loss'].item()
 
         # Validate
         model.eval()
         val_loss = 0.0
+        val_r_loss = 0.0
         with torch.no_grad():
             for batch in val_loader:
                 batch['treatment'] = batch['treatment'].to(device)
                 batch['outcome'] = batch['outcome'].to(device)
-                losses = model.train_step(batch, alpha_propensity=1.0, beta_targreg=0.1)
+                losses = model.train_step(
+                    batch,
+                    alpha_propensity=1.0,
+                    gamma_rlearner=gamma_rlearner
+                )
                 val_loss += losses['loss'].item()
+                val_r_loss += losses['r_loss'].item()
 
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
+        train_r_loss /= len(train_loader)
+        val_r_loss /= len(val_loader)
 
         history.append({
             'epoch': epoch + 1,
             'train_loss': train_loss,
-            'val_loss': val_loss
+            'val_loss': val_loss,
+            'train_r_loss': train_r_loss,
+            'val_r_loss': val_r_loss
         })
 
         if val_loss < best_val_loss:
@@ -440,7 +467,10 @@ def train_mlp_model(
     batch_size: int,
     learning_rate: float
 ) -> Tuple[MLPDragonNet, List[Dict]]:
-    """Train MLP model for condition 6 (LLM-extract-only)."""
+    """Train MLP model for condition 6 (LLM-extract-only).
+
+    Note: This still uses DragonNet since there's no MLP R-Learner equivalent.
+    """
     # Encode categorical features
     train_features = encoder.transform(
         train_df['llm_extracted_metastatic_sites'].tolist(),
@@ -451,7 +481,7 @@ def train_mlp_model(
         device=device
     )
 
-    # Create model
+    # Create model (still DragonNet for MLP)
     model = MLPDragonNet(
         input_dim=encoder.num_categories,
         hidden_dims=[32, 32],
@@ -539,7 +569,7 @@ def train_mlp_model(
     return model, history
 
 
-def predict_cnn(
+def predict_rlearner(
     model: CausalCNNText,
     df: pd.DataFrame,
     text_column: str,
@@ -548,13 +578,14 @@ def predict_cnn(
     encoder: Optional[CategoricalEncoder] = None,
     use_auxiliary: bool = False
 ) -> Dict[str, np.ndarray]:
-    """Generate predictions from CNN model."""
+    """Generate predictions from R-Learner CNN model."""
     model.eval()
 
     texts = df[text_column].tolist()
     all_y0 = []
     all_y1 = []
     all_prop = []
+    all_tau = []
 
     # Prepare auxiliary features if needed
     aux_features = None
@@ -575,11 +606,13 @@ def predict_cnn(
             all_y0.append(preds['y0_prob'].cpu().numpy())
             all_y1.append(preds['y1_prob'].cpu().numpy())
             all_prop.append(preds['propensity'].cpu().numpy())
+            all_tau.append(preds['tau_pred'].cpu().numpy())
 
     return {
         'y0_prob': np.concatenate(all_y0),
         'y1_prob': np.concatenate(all_y1),
         'propensity': np.concatenate(all_prop),
+        'tau_pred': np.concatenate(all_tau),
         'ite_prob': np.concatenate(all_y1) - np.concatenate(all_y0)
     }
 
@@ -627,11 +660,12 @@ def run_condition(
     epochs: int,
     batch_size: int,
     learning_rate: float,
+    gamma_rlearner: float = 1.0,
     encoder: Optional[CategoricalEncoder] = None
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Run cross-validation for one experimental condition."""
     logger.info(f"\n{'='*60}")
-    logger.info(f"Running condition: {config.name}")
+    logger.info(f"Running condition: {config.name} (R-Learner)")
     logger.info(f"{'='*60}")
 
     # Reset index
@@ -648,20 +682,22 @@ def run_condition(
         test_df = df.iloc[test_idx]
 
         if config.llm_extraction_only:
-            # Condition 6: MLP on categorical features only
+            # Condition 6: MLP on categorical features only (still uses DragonNet)
+            logger.info(f"    Note: Condition 6 uses MLP DragonNet (no MLP R-Learner)")
             model, _ = train_mlp_model(
                 train_df, test_df, encoder, device,
                 epochs, batch_size, learning_rate
             )
             preds = predict_mlp(model, test_df, encoder, device, batch_size)
         else:
-            # CNN-based conditions
-            model, _ = train_cnn_model(
+            # R-Learner CNN-based conditions
+            model, _ = train_rlearner_model(
                 train_df, test_df, config, device,
                 epochs, batch_size, learning_rate,
+                gamma_rlearner=gamma_rlearner,
                 encoder=encoder if config.llm_combined else None
             )
-            preds = predict_cnn(
+            preds = predict_rlearner(
                 model, test_df, config.text_column, device, batch_size,
                 encoder=encoder if config.llm_combined else None,
                 use_auxiliary=config.llm_combined
@@ -673,6 +709,8 @@ def run_condition(
         fold_preds['pred_y1_prob'] = preds['y1_prob']
         fold_preds['pred_ite_prob'] = preds['ite_prob']
         fold_preds['pred_propensity'] = preds['propensity']
+        if 'tau_pred' in preds:
+            fold_preds['pred_tau'] = preds['tau_pred']
         fold_preds['cv_fold'] = fold + 1
 
         all_predictions.append(fold_preds)
@@ -698,7 +736,7 @@ def run_condition(
         true_y1=results_df['true_y1_prob'].values
     )
 
-    logger.info(f"  Results for {config.name}:")
+    logger.info(f"  Results for {config.name} (R-Learner):")
     logger.info(f"    ITE MSE: {metrics['ite_mse']:.4f}")
     logger.info(f"    ITE MAE: {metrics['ite_mae']:.4f}")
     logger.info(f"    ITE Correlation: {metrics['ite_corr']:.4f}")
@@ -722,7 +760,9 @@ def create_llm_structured_text(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run concept-aware CNN experiment")
+    parser = argparse.ArgumentParser(
+        description="Run concept-aware CNN experiment with R-Learner"
+    )
     parser.add_argument(
         "--dataset", "-d",
         type=str,
@@ -732,7 +772,7 @@ def main():
     parser.add_argument(
         "--output-dir", "-o",
         type=str,
-        default="results/concept_aware_experiment",
+        default="results/concept_aware_experiment_rlearner",
         help="Output directory for results"
     )
     parser.add_argument(
@@ -758,6 +798,12 @@ def main():
         type=float,
         default=1e-4,
         help="Learning rate"
+    )
+    parser.add_argument(
+        "--gamma-rlearner",
+        type=float,
+        default=1.0,
+        help="Weight for R-learner loss"
     )
     parser.add_argument(
         "--n-folds",
@@ -786,6 +832,7 @@ def main():
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
+    logger.info(f"Using R-Learner architecture with gamma_rlearner={args.gamma_rlearner}")
 
     # Load dataset
     df = pd.read_parquet(args.dataset)
@@ -836,6 +883,7 @@ def main():
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
+                gamma_rlearner=args.gamma_rlearner,
                 encoder=encoder
             )
 
@@ -860,16 +908,18 @@ def main():
 
     # Print summary table
     logger.info("\n" + "=" * 80)
-    logger.info("EXPERIMENT RESULTS SUMMARY")
+    logger.info("EXPERIMENT RESULTS SUMMARY (R-Learner)")
     logger.info("=" * 80)
     logger.info("\n" + metrics_df.to_string())
 
     # Save config
     config_info = {
         'dataset': args.dataset,
+        'model_type': 'rlearner',
         'epochs': args.epochs,
         'batch_size': args.batch_size,
         'learning_rate': args.learning_rate,
+        'gamma_rlearner': args.gamma_rlearner,
         'n_folds': args.n_folds,
         'device': str(device),
         'conditions_run': [c.name for c in conditions]

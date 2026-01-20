@@ -45,7 +45,7 @@ class MatchingAnalysisConfig:
 
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
-    Normalize feature extractor type to one of: "cnn", "bert", or "gru".
+    Normalize feature extractor type to one of: "cnn", "bert", "gru", or "confounder".
 
     This handles variants like "modernbert" which should be treated as "bert".
 
@@ -53,12 +53,16 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
         feature_type: The raw feature extractor type string
 
     Returns:
-        Normalized type: "cnn", "bert", or "gru"
+        Normalized type: "cnn", "bert", "gru", or "confounder"
     """
     if feature_type is None:
         return "cnn"
 
     feature_type_lower = feature_type.lower()
+
+    # Check for confounder extractor
+    if feature_type_lower in ("confounder", "perceiver", "sentence_perceiver"):
+        return "confounder"
 
     # Check for GRU variants
     if feature_type_lower == "gru":
@@ -79,7 +83,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 @dataclass
 class ModelArchitectureConfig:
     """Configuration for model architecture."""
-    model_type: str = "dragonnet"  # "dragonnet" or "uplift"
+    model_type: str = "dragonnet"  # "dragonnet", "uplift", or "rlearner"
 
     # Feature extractor type: "cnn", "bert", or "gru"
     feature_extractor_type: str = "cnn"
@@ -128,6 +132,23 @@ class ModelArchitectureConfig:
     gru_init_embeddings_from: Optional[str] = None  # e.g., "emilyalsentzer/Bio_ClinicalBERT"
     gru_freeze_embeddings: bool = False  # Whether to freeze initialized embeddings
 
+    # Confounder extractor architecture (used when feature_extractor_type="confounder")
+    # Perceiver-style cross-attention with sparse attention for long document understanding
+    confounder_num_latents: int = 4  # Number of learnable latent confounder vectors
+    confounder_explicit_texts: Optional[List[str]] = None  # Explicit confounder phrases (e.g., ["metastatic sites", "performance status"])
+    confounder_value_dim: int = 128  # Dimension per confounder (and output dimension)
+    confounder_sentence_model: str = "all-MiniLM-L6-v2"  # Sentence transformer model for chunk encoding
+    confounder_freeze_encoder: bool = True  # Whether to freeze sentence encoder
+    confounder_max_sentences: int = 100  # Maximum sentences per document
+    confounder_num_heads: int = 4  # Number of attention heads
+    confounder_num_iterations: int = 2  # Number of iterative refinement passes
+    confounder_use_self_attention: bool = True  # Whether latents attend to each other
+    confounder_sparse_attention: bool = True  # Use sparse attention (entmax/top-k)
+    confounder_sparse_method: str = "entmax"  # Sparsity method: "entmax", "topk", "softmax"
+    confounder_sparse_alpha: float = 1.5  # Alpha for entmax (1.5=entmax15, 2.0=sparsemax)
+    confounder_top_k: int = 5  # K for top-k attention method
+    confounder_dropout: float = 0.1  # Dropout rate
+
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128
     dragonnet_hidden_outcome_dim: int = 64
@@ -157,6 +178,7 @@ class TrainingConfig:
     batch_size: int = 8
     alpha_propensity: float = 1.0
     beta_targreg: float = 0.1
+    gamma_rlearner: float = 1.0  # Weight for R-learner loss (when model_type="rlearner")
     # Regularization options
     weight_decay: float = 0.01  # L2 regularization (AdamW decoupled weight decay)
     gradient_clip_norm: float = 1.0  # Max gradient norm (0 to disable)

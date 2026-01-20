@@ -574,6 +574,7 @@ def _train_epoch(
     # Get regularization options from config
     label_smoothing = getattr(config, 'label_smoothing', 0.0)
     gradient_clip_norm = getattr(config, 'gradient_clip_norm', 0.0)
+    gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
 
     for batch in tqdm(loader, desc="Training", leave=False):
         # Move tensors to device
@@ -587,6 +588,7 @@ def _train_epoch(
             batch,
             alpha_propensity=config.alpha_propensity,
             beta_targreg=config.beta_targreg,
+            gamma_rlearner=gamma_rlearner,
             label_smoothing=label_smoothing
         )
 
@@ -627,6 +629,8 @@ def _eval_epoch(
     all_y1 = []
     all_prop = []
 
+    gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
+
     with torch.no_grad():
         for batch in tqdm(loader, desc="Validation", leave=False):
             batch['outcome'] = batch['outcome'].to(device)
@@ -635,7 +639,8 @@ def _eval_epoch(
             losses = model.train_step(
                 batch,
                 alpha_propensity=config.alpha_propensity,
-                beta_targreg=config.beta_targreg
+                beta_targreg=config.beta_targreg,
+                gamma_rlearner=gamma_rlearner
             )
 
             epoch_loss += losses['loss'].item()

@@ -1,27 +1,34 @@
 #!/usr/bin/env python
-"""Concept-aware CNN filter experiment for synthetic clinical text.
+"""BERT-based R-Learner experiment for synthetic clinical text.
 
-This script runs 8 experimental conditions to evaluate different strategies
-for ITE estimation on synthetic clinical text:
+This script runs experimental conditions using ModernBERT as the feature extractor
+instead of CNN, testing whether transformer-based representations improve ITE
+estimation from clinical text.
 
-End-to-End CNN Approaches:
-1. Oracle: patient_prompt with k-means filters (upper bound)
-2. Baseline: clinical_text with random filters only
-3. K-means: clinical_text with k-means filters
-4. Concept-Aware: clinical_text with semantic concept filters
-5. Concept + K-means: clinical_text with both semantic and k-means filters
+Key differences from CNN version:
+- Uses ModernBERT encoder with CLS token extraction
+- Supports long sequences (up to 8192 tokens)
+- Fine-tunes the transformer (with gradient checkpointing for memory efficiency)
+- Lower learning rate appropriate for transformer fine-tuning
 
-Two-Stage LLM Extraction Approaches:
-6. LLM-Extract-Only: Train on extracted categorical features only
-7. LLM-Extract-Combined: Text features + extracted features (hybrid)
-8. LLM-Extract-as-Text: Convert extraction to structured text like patient_prompt
+Conditions tested:
+1. Oracle: patient_prompt (explicit confounder)
+2. Baseline: clinical_text with frozen encoder (lower bound)
+3. Fine-tuned: clinical_text with fine-tuning
+4. LLM-extract-only: Extracted categorical features (MLP)
+5. LLM-extract-combined: Text + extracted features (hybrid)
+6. LLM-extract-as-text: Structured text from extraction
 
 Usage:
-    python oracle_experiment_scripts/run_concept_aware_experiment.py \
-        --dataset ../pcori_experiments/explicit_confounder_experiments_1-19-26/dataset_with_extraction.parquet \
-        --output-dir rlearner_results/concept_aware_experiment \
-        --device cuda:0 \
-        --epochs 50
+    # Single GPU:
+    python oracle_experiment_scripts/run_concept_aware_experiment_rlearner_bert.py \
+        --dataset path/to/dataset.parquet \
+        --output-dir results/bert_rlearner \
+        --device cuda:0
+
+    # Parallel across two GPUs (run two processes):
+    python run_concept_aware_experiment_rlearner_bert.py --device cuda:0 --conditions 1_oracle 2_baseline_frozen 3_fine_tuned &
+    python run_concept_aware_experiment_rlearner_bert.py --device cuda:1 --conditions 4_llm_extract_only 5_llm_extract_combined 6_llm_extract_as_text &
 """
 
 import argparse
@@ -55,38 +62,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-# Semantic concepts for metastatic site count
-METASTATIC_SITE_CONCEPTS = {
-    "3": [  # 3-gram concepts
-        "single metastatic site",
-        "one metastatic lesion",
-        "solitary bone metastasis",
-        "isolated liver metastasis",
-        "oligometastatic disease noted",
-        "limited metastatic burden",
-        "multiple metastatic sites",
-        "widespread metastatic disease",
-        "extensive bone involvement",
-        "diffuse hepatic metastases",
-    ],
-    "4": [  # 4-gram concepts
-        "metastatic to the bone",
-        "metastatic to the liver",
-        "metastases involving the bone",
-        "metastases involving the liver",
-        "metastatic disease in bone",
-        "metastatic lesions in liver",
-        "osseous metastatic disease noted",
-        "hepatic metastatic disease noted",
-    ],
-    "5": [  # 5-gram concepts
-        "metastatic disease involving bone and",
-        "metastatic lesions noted in the",
-        "widespread metastatic disease with involvement",
-        "multiple sites of metastatic disease",
-        "extensive metastatic burden with lesions",
-    ],
-}
+# Default ModernBERT clinical model path
+DEFAULT_BERT_MODEL = "/ksg/kehl_mm_data/mmai/active_serial/oncobert/modernbert-clinical/final"
 
 
 @dataclass
@@ -94,75 +71,48 @@ class ExperimentConfig:
     """Configuration for an experimental condition."""
     name: str
     text_column: str
-    use_kmeans: bool = True
-    use_semantic_concepts: bool = False
-    use_random_only: bool = False
+    freeze_encoder: bool = False
     use_llm_extraction: bool = False
     llm_extraction_only: bool = False
     llm_combined: bool = False
     llm_as_text: bool = False
-    num_kmeans_filters: int = 64
-    num_random_filters: int = 0
 
 
-# Define all 8 experimental conditions
+# Define experimental conditions for BERT
 EXPERIMENT_CONDITIONS = [
     ExperimentConfig(
         name="1_oracle",
         text_column="patient_prompt",
-        use_kmeans=True,
-        use_semantic_concepts=False,
-        num_kmeans_filters=64
+        freeze_encoder=False
     ),
     ExperimentConfig(
-        name="2_baseline_random",
+        name="2_baseline_frozen",
         text_column="clinical_text",
-        use_kmeans=False,
-        use_random_only=True,
-        num_random_filters=64
+        freeze_encoder=True  # Frozen encoder = baseline for BERT
     ),
     ExperimentConfig(
-        name="3_kmeans_only",
+        name="3_fine_tuned",
         text_column="clinical_text",
-        use_kmeans=True,
-        use_semantic_concepts=False,
-        num_kmeans_filters=64
+        freeze_encoder=False  # Fine-tuned = main BERT condition
     ),
     ExperimentConfig(
-        name="4_concept_aware",
-        text_column="clinical_text",
-        use_kmeans=False,
-        use_semantic_concepts=True,
-        num_random_filters=32  # Some random to fill out
-    ),
-    ExperimentConfig(
-        name="5_concept_plus_kmeans",
-        text_column="clinical_text",
-        use_kmeans=True,
-        use_semantic_concepts=True,
-        num_kmeans_filters=32
-    ),
-    ExperimentConfig(
-        name="6_llm_extract_only",
-        text_column="clinical_text",  # Not used, but required
+        name="4_llm_extract_only",
+        text_column="clinical_text",  # Not used
         use_llm_extraction=True,
         llm_extraction_only=True
     ),
     ExperimentConfig(
-        name="7_llm_extract_combined",
+        name="5_llm_extract_combined",
         text_column="clinical_text",
-        use_kmeans=True,
+        freeze_encoder=False,
         use_llm_extraction=True,
-        llm_combined=True,
-        num_kmeans_filters=64
+        llm_combined=True
     ),
     ExperimentConfig(
-        name="8_llm_extract_as_text",
-        text_column="llm_structured_text",  # Will be created
-        use_kmeans=True,
-        use_semantic_concepts=False,
-        llm_as_text=True,
-        num_kmeans_filters=64
+        name="6_llm_extract_as_text",
+        text_column="llm_structured_text",
+        freeze_encoder=False,
+        llm_as_text=True
     ),
 ]
 
@@ -197,7 +147,7 @@ class TextDataset(Dataset):
 
 
 class CategoricalDataset(Dataset):
-    """Dataset for categorical features only (condition 6)."""
+    """Dataset for categorical features only."""
 
     def __init__(
         self,
@@ -286,7 +236,7 @@ def compute_metrics(
     return metrics
 
 
-def train_cnn_model(
+def train_bert_rlearner_model(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     config: ExperimentConfig,
@@ -294,9 +244,13 @@ def train_cnn_model(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    encoder: Optional[CategoricalEncoder] = None
+    gamma_rlearner: float = 1.0,
+    bert_model_name: str = DEFAULT_BERT_MODEL,
+    bert_max_length: int = 8192,
+    encoder: Optional[CategoricalEncoder] = None,
+    gradient_accumulation_steps: int = 1
 ) -> Tuple[CausalCNNText, List[Dict]]:
-    """Train a CNN-based model for one fold."""
+    """Train a BERT-based R-Learner model for one fold."""
     text_column = config.text_column
 
     # Prepare auxiliary features if needed
@@ -315,22 +269,18 @@ def train_cnn_model(
             device=device
         )
 
-    # Configure filter initialization
-    explicit_concepts = METASTATIC_SITE_CONCEPTS if config.use_semantic_concepts else None
-    num_kmeans = config.num_kmeans_filters if config.use_kmeans else 0
-    num_random = config.num_random_filters if config.use_random_only else 0
-
-    # Create model
+    # Create model with BERT feature extractor and R-Learner architecture
     model = CausalCNNText(
-        feature_extractor_type="cnn",
-        embedding_dim=128,
-        kernel_sizes=[3, 4, 5, 7],
-        explicit_filter_concepts=explicit_concepts,
-        num_kmeans_filters=num_kmeans,
-        num_random_filters=num_random,
-        projection_dim=128,
-        cnn_dropout=0.1,
-        max_length=2048,
+        feature_extractor_type="bert",
+        model_type="rlearner",
+        # BERT-specific parameters
+        bert_model_name=bert_model_name,
+        bert_max_length=bert_max_length,
+        bert_projection_dim=128,
+        bert_dropout=0.1,
+        bert_freeze_encoder=config.freeze_encoder,
+        bert_gradient_checkpointing=True,  # Enable for memory efficiency with long sequences
+        # DragonNet/R-Learner head parameters
         dragonnet_representation_dim=128,
         dragonnet_hidden_outcome_dim=64,
         dragonnet_dropout=0.2,
@@ -338,21 +288,10 @@ def train_cnn_model(
         auxiliary_dim=auxiliary_dim
     )
 
-    # Fit tokenizer
-    train_texts = train_df[text_column].tolist()
-    model.fit_tokenizer(train_texts)
-
-    # Initialize embeddings from BERT
-    model.feature_extractor.init_embeddings_from_bert(
-        "emilyalsentzer/Bio_ClinicalBERT",
-        freeze=False
-    )
-
-    # Initialize filters
-    if config.use_semantic_concepts or config.use_kmeans:
-        model.feature_extractor.init_filters(train_texts, freeze=False)
+    # BERT uses pretrained tokenizer, no fit_tokenizer() needed
 
     # Create datasets
+    train_texts = train_df[text_column].tolist()
     train_dataset = TextDataset(
         texts=train_texts,
         treatments=train_df['treatment_indicator'].values,
@@ -381,52 +320,103 @@ def train_cnn_model(
         collate_fn=collate_text_batch
     )
 
-    # Training
-    optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
+    # Training with AdamW and appropriate LR for transformers
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=learning_rate,
+        weight_decay=0.01,
+        betas=(0.9, 0.999)
+    )
+
+    # Linear warmup then decay
+    num_training_steps = len(train_loader) * epochs // gradient_accumulation_steps
+    num_warmup_steps = num_training_steps // 10
+
+    def lr_lambda(current_step):
+        if current_step < num_warmup_steps:
+            return float(current_step) / float(max(1, num_warmup_steps))
+        return max(
+            0.0,
+            float(num_training_steps - current_step) / float(max(1, num_training_steps - num_warmup_steps))
+        )
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     best_val_loss = float('inf')
     best_state = None
     history = []
+    global_step = 0
 
     for epoch in range(epochs):
         # Train
         model.train()
         train_loss = 0.0
-        for batch in train_loader:
+        train_r_loss = 0.0
+        optimizer.zero_grad()
+
+        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}")):
             batch['treatment'] = batch['treatment'].to(device)
             batch['outcome'] = batch['outcome'].to(device)
 
-            optimizer.zero_grad()
-            losses = model.train_step(batch, alpha_propensity=1.0, beta_targreg=0.1)
-            losses['loss'].backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
+            losses = model.train_step(
+                batch,
+                alpha_propensity=1.0,
+                gamma_rlearner=gamma_rlearner
+            )
+
+            # Scale loss for gradient accumulation
+            loss = losses['loss'] / gradient_accumulation_steps
+            loss.backward()
+
             train_loss += losses['loss'].item()
+            train_r_loss += losses['r_loss'].item()
+
+            if (batch_idx + 1) % gradient_accumulation_steps == 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+                scheduler.step()
+                optimizer.zero_grad()
+                global_step += 1
 
         # Validate
         model.eval()
         val_loss = 0.0
+        val_r_loss = 0.0
         with torch.no_grad():
             for batch in val_loader:
                 batch['treatment'] = batch['treatment'].to(device)
                 batch['outcome'] = batch['outcome'].to(device)
-                losses = model.train_step(batch, alpha_propensity=1.0, beta_targreg=0.1)
+                losses = model.train_step(
+                    batch,
+                    alpha_propensity=1.0,
+                    gamma_rlearner=gamma_rlearner
+                )
                 val_loss += losses['loss'].item()
+                val_r_loss += losses['r_loss'].item()
 
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
+        train_r_loss /= len(train_loader)
+        val_r_loss /= len(val_loader)
 
         history.append({
             'epoch': epoch + 1,
             'train_loss': train_loss,
-            'val_loss': val_loss
+            'val_loss': val_loss,
+            'train_r_loss': train_r_loss,
+            'val_r_loss': val_r_loss,
+            'lr': scheduler.get_last_lr()[0]
         })
+
+        logger.info(f"  Epoch {epoch+1}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}, r_loss={val_r_loss:.4f}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            best_state = model.state_dict().copy()
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
     if best_state:
         model.load_state_dict(best_state)
+        model.to(device)
 
     return model, history
 
@@ -440,7 +430,7 @@ def train_mlp_model(
     batch_size: int,
     learning_rate: float
 ) -> Tuple[MLPDragonNet, List[Dict]]:
-    """Train MLP model for condition 6 (LLM-extract-only)."""
+    """Train MLP model for LLM-extract-only condition."""
     # Encode categorical features
     train_features = encoder.transform(
         train_df['llm_extracted_metastatic_sites'].tolist(),
@@ -451,7 +441,6 @@ def train_mlp_model(
         device=device
     )
 
-    # Create model
     model = MLPDragonNet(
         input_dim=encoder.num_categories,
         hidden_dims=[32, 32],
@@ -461,7 +450,6 @@ def train_mlp_model(
         device=str(device)
     )
 
-    # Create datasets
     train_dataset = CategoricalDataset(
         features=train_features,
         treatments=train_df['treatment_indicator'].values,
@@ -488,14 +476,12 @@ def train_mlp_model(
         collate_fn=collate_categorical_batch
     )
 
-    # Training
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
     best_val_loss = float('inf')
     best_state = None
     history = []
 
     for epoch in range(epochs):
-        # Train
         model.train()
         train_loss = 0.0
         for batch in train_loader:
@@ -509,7 +495,6 @@ def train_mlp_model(
             optimizer.step()
             train_loss += losses['loss'].item()
 
-        # Validate
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
@@ -539,7 +524,7 @@ def train_mlp_model(
     return model, history
 
 
-def predict_cnn(
+def predict_bert_rlearner(
     model: CausalCNNText,
     df: pd.DataFrame,
     text_column: str,
@@ -548,15 +533,15 @@ def predict_cnn(
     encoder: Optional[CategoricalEncoder] = None,
     use_auxiliary: bool = False
 ) -> Dict[str, np.ndarray]:
-    """Generate predictions from CNN model."""
+    """Generate predictions from BERT R-Learner model."""
     model.eval()
 
     texts = df[text_column].tolist()
     all_y0 = []
     all_y1 = []
     all_prop = []
+    all_tau = []
 
-    # Prepare auxiliary features if needed
     aux_features = None
     if use_auxiliary and encoder is not None:
         aux_features = encoder.transform(
@@ -575,11 +560,13 @@ def predict_cnn(
             all_y0.append(preds['y0_prob'].cpu().numpy())
             all_y1.append(preds['y1_prob'].cpu().numpy())
             all_prop.append(preds['propensity'].cpu().numpy())
+            all_tau.append(preds['tau_pred'].cpu().numpy())
 
     return {
         'y0_prob': np.concatenate(all_y0),
         'y1_prob': np.concatenate(all_y1),
         'propensity': np.concatenate(all_prop),
+        'tau_pred': np.concatenate(all_tau),
         'ite_prob': np.concatenate(all_y1) - np.concatenate(all_y0)
     }
 
@@ -627,16 +614,18 @@ def run_condition(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    encoder: Optional[CategoricalEncoder] = None
+    gamma_rlearner: float = 1.0,
+    bert_model_name: str = DEFAULT_BERT_MODEL,
+    bert_max_length: int = 8192,
+    encoder: Optional[CategoricalEncoder] = None,
+    gradient_accumulation_steps: int = 1
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Run cross-validation for one experimental condition."""
     logger.info(f"\n{'='*60}")
-    logger.info(f"Running condition: {config.name}")
+    logger.info(f"Running condition: {config.name} (BERT R-Learner)")
     logger.info(f"{'='*60}")
 
-    # Reset index
     df = df.reset_index(drop=True)
-
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
 
     all_predictions = []
@@ -648,20 +637,24 @@ def run_condition(
         test_df = df.iloc[test_idx]
 
         if config.llm_extraction_only:
-            # Condition 6: MLP on categorical features only
+            # MLP on categorical features only
             model, _ = train_mlp_model(
                 train_df, test_df, encoder, device,
-                epochs, batch_size, learning_rate
+                epochs, batch_size * 4, learning_rate * 10  # MLP can use larger batch/LR
             )
-            preds = predict_mlp(model, test_df, encoder, device, batch_size)
+            preds = predict_mlp(model, test_df, encoder, device, batch_size * 4)
         else:
-            # CNN-based conditions
-            model, _ = train_cnn_model(
+            # BERT-based R-Learner
+            model, _ = train_bert_rlearner_model(
                 train_df, test_df, config, device,
                 epochs, batch_size, learning_rate,
-                encoder=encoder if config.llm_combined else None
+                gamma_rlearner=gamma_rlearner,
+                bert_model_name=bert_model_name,
+                bert_max_length=bert_max_length,
+                encoder=encoder if config.llm_combined else None,
+                gradient_accumulation_steps=gradient_accumulation_steps
             )
-            preds = predict_cnn(
+            preds = predict_bert_rlearner(
                 model, test_df, config.text_column, device, batch_size,
                 encoder=encoder if config.llm_combined else None,
                 use_auxiliary=config.llm_combined
@@ -673,6 +666,8 @@ def run_condition(
         fold_preds['pred_y1_prob'] = preds['y1_prob']
         fold_preds['pred_ite_prob'] = preds['ite_prob']
         fold_preds['pred_propensity'] = preds['propensity']
+        if 'tau_pred' in preds:
+            fold_preds['pred_tau'] = preds['tau_pred']
         fold_preds['cv_fold'] = fold + 1
 
         all_predictions.append(fold_preds)
@@ -698,7 +693,7 @@ def run_condition(
         true_y1=results_df['true_y1_prob'].values
     )
 
-    logger.info(f"  Results for {config.name}:")
+    logger.info(f"  Results for {config.name} (BERT R-Learner):")
     logger.info(f"    ITE MSE: {metrics['ite_mse']:.4f}")
     logger.info(f"    ITE MAE: {metrics['ite_mae']:.4f}")
     logger.info(f"    ITE Correlation: {metrics['ite_corr']:.4f}")
@@ -709,7 +704,7 @@ def run_condition(
 
 
 def create_llm_structured_text(df: pd.DataFrame) -> pd.DataFrame:
-    """Create structured text from LLM-extracted values (condition 8)."""
+    """Create structured text from LLM-extracted values."""
     df = df.copy()
 
     def make_structured(extracted_value):
@@ -722,42 +717,68 @@ def create_llm_structured_text(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run concept-aware CNN experiment")
+    parser = argparse.ArgumentParser(
+        description="Run BERT-based R-Learner experiment for clinical text ITE estimation"
+    )
     parser.add_argument(
         "--dataset", "-d",
         type=str,
         required=True,
-        help="Path to dataset parquet file (with LLM extractions for conditions 6-8)"
+        help="Path to dataset parquet file"
     )
     parser.add_argument(
         "--output-dir", "-o",
         type=str,
-        default="results/concept_aware_experiment",
+        default="results/bert_rlearner_experiment",
         help="Output directory for results"
     )
     parser.add_argument(
         "--device",
         type=str,
         default="cuda:0",
-        help="Device to use (cuda:0, cpu, etc.)"
+        help="Device to use (cuda:0, cuda:1, cpu, etc.)"
+    )
+    parser.add_argument(
+        "--bert-model",
+        type=str,
+        default=DEFAULT_BERT_MODEL,
+        help="Path to BERT/ModernBERT model"
+    )
+    parser.add_argument(
+        "--bert-max-length",
+        type=int,
+        default=8192,
+        help="Maximum sequence length for BERT"
     )
     parser.add_argument(
         "--epochs",
         type=int,
-        default=50,
-        help="Number of training epochs"
+        default=10,
+        help="Number of training epochs (less needed for transformers)"
     )
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=16,
-        help="Batch size"
+        default=4,
+        help="Batch size (smaller for large models)"
+    )
+    parser.add_argument(
+        "--gradient-accumulation-steps",
+        type=int,
+        default=4,
+        help="Gradient accumulation steps (effective batch = batch_size * this)"
     )
     parser.add_argument(
         "--learning-rate",
         type=float,
-        default=1e-4,
-        help="Learning rate"
+        default=2e-5,
+        help="Learning rate (lower for transformer fine-tuning)"
+    )
+    parser.add_argument(
+        "--gamma-rlearner",
+        type=float,
+        default=1.0,
+        help="Weight for R-learner loss"
     )
     parser.add_argument(
         "--n-folds",
@@ -770,12 +791,7 @@ def main():
         type=str,
         nargs="+",
         default=None,
-        help="Specific conditions to run (e.g., 1_oracle 4_concept_aware)"
-    )
-    parser.add_argument(
-        "--skip-llm-conditions",
-        action="store_true",
-        help="Skip conditions 6-8 that require LLM extractions"
+        help="Specific conditions to run (e.g., 1_oracle 3_fine_tuned)"
     )
 
     args = parser.parse_args()
@@ -786,6 +802,8 @@ def main():
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
+    logger.info(f"BERT model: {args.bert_model}")
+    logger.info(f"Max sequence length: {args.bert_max_length}")
 
     # Load dataset
     df = pd.read_parquet(args.dataset)
@@ -801,11 +819,11 @@ def main():
     # Check for LLM extraction column
     has_llm_extraction = 'llm_extracted_metastatic_sites' in df.columns
 
-    # Create structured text for condition 8
+    # Create structured text for condition 6
     if has_llm_extraction:
         df = create_llm_structured_text(df)
 
-    # Setup categorical encoder for LLM conditions
+    # Setup categorical encoder
     encoder = None
     if has_llm_extraction:
         encoder = CategoricalEncoder(categories=["1", "2", "3", "4_or_more"])
@@ -815,14 +833,12 @@ def main():
     conditions = EXPERIMENT_CONDITIONS
     if args.conditions:
         conditions = [c for c in conditions if c.name in args.conditions]
-        logger.info(f"Running {len(conditions)} selected conditions")
+        logger.info(f"Running {len(conditions)} selected conditions: {[c.name for c in conditions]}")
 
-    # Skip LLM conditions if requested or extraction not available
-    if args.skip_llm_conditions or not has_llm_extraction:
-        conditions = [c for c in conditions if not c.use_llm_extraction]
-        if not has_llm_extraction:
-            logger.warning("LLM extraction column not found. Skipping conditions 6-8.")
-            logger.warning("Run scripts/extract_confounders_llm.py first to enable these conditions.")
+    # Skip LLM conditions if extraction not available
+    if not has_llm_extraction:
+        conditions = [c for c in conditions if not c.use_llm_extraction and not c.llm_as_text]
+        logger.warning("LLM extraction column not found. Skipping LLM-based conditions.")
 
     # Run all conditions
     all_metrics = {}
@@ -836,7 +852,11 @@ def main():
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
-                encoder=encoder
+                gamma_rlearner=args.gamma_rlearner,
+                bert_model_name=args.bert_model,
+                bert_max_length=args.bert_max_length,
+                encoder=encoder,
+                gradient_accumulation_steps=args.gradient_accumulation_steps
             )
 
             all_metrics[config.name] = metrics
@@ -854,22 +874,29 @@ def main():
             continue
 
     # Save combined metrics
-    metrics_df = pd.DataFrame(all_metrics).T
-    metrics_df.index.name = 'condition'
-    metrics_df.to_csv(output_dir / "metrics_summary.csv")
+    if all_metrics:
+        metrics_df = pd.DataFrame(all_metrics).T
+        metrics_df.index.name = 'condition'
+        metrics_df.to_csv(output_dir / "metrics_summary.csv")
 
-    # Print summary table
-    logger.info("\n" + "=" * 80)
-    logger.info("EXPERIMENT RESULTS SUMMARY")
-    logger.info("=" * 80)
-    logger.info("\n" + metrics_df.to_string())
+        # Print summary table
+        logger.info("\n" + "=" * 80)
+        logger.info("EXPERIMENT RESULTS SUMMARY (BERT R-Learner)")
+        logger.info("=" * 80)
+        logger.info("\n" + metrics_df.to_string())
 
     # Save config
     config_info = {
         'dataset': args.dataset,
+        'model_type': 'bert_rlearner',
+        'bert_model': args.bert_model,
+        'bert_max_length': args.bert_max_length,
         'epochs': args.epochs,
         'batch_size': args.batch_size,
+        'gradient_accumulation_steps': args.gradient_accumulation_steps,
+        'effective_batch_size': args.batch_size * args.gradient_accumulation_steps,
         'learning_rate': args.learning_rate,
+        'gamma_rlearner': args.gamma_rlearner,
         'n_folds': args.n_folds,
         'device': str(device),
         'conditions_run': [c.name for c in conditions]

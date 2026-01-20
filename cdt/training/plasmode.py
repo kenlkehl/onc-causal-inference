@@ -433,6 +433,9 @@ def _train_cnn_model(
     best_val_loss = float('inf')
     best_model_state = None
 
+    # Get gamma_rlearner from config (default 1.0 for backward compatibility)
+    gamma_rlearner = getattr(train_config, 'gamma_rlearner', 1.0)
+
     for epoch in range(train_config.epochs):
         model.train()
         epoch_loss = 0.0
@@ -445,7 +448,8 @@ def _train_cnn_model(
             losses = model.train_step(
                 batch,
                 alpha_propensity=train_config.alpha_propensity,
-                beta_targreg=train_config.beta_targreg
+                beta_targreg=train_config.beta_targreg,
+                gamma_rlearner=gamma_rlearner
             )
             losses['loss'].backward()
             optimizer.step()
@@ -463,7 +467,8 @@ def _train_cnn_model(
                 losses = model.train_step(
                     batch,
                     alpha_propensity=train_config.alpha_propensity,
-                    beta_targreg=train_config.beta_targreg
+                    beta_targreg=train_config.beta_targreg,
+                    gamma_rlearner=gamma_rlearner
                 )
                 val_loss += losses['loss'].item()
 

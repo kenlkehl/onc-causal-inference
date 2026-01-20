@@ -25,6 +25,7 @@ cdt/                          # Main package
 │   ├── gru_extractor.py      # GRUFeatureExtractor - BiGRU with attention pooling
 │   ├── dragonnet.py          # DragonNet head (propensity + potential outcomes)
 │   ├── uplift.py             # UpliftNet head (alternative parametrization)
+│   ├── rlearner.py           # RLearnerNet head (direct tau optimization)
 │   ├── outcome_heads.py      # Outcome prediction heads
 │   └── propensity_model.py   # Standalone propensity model
 ├── training/
@@ -50,7 +51,9 @@ synthetic_data/               # LLM-based synthetic data generation
 examples/                     # Example config files
 ├── semantic_cnn_config.json  # CNN with explicit clinical concepts
 ├── bert_config.json          # BERT feature extractor config
-└── modernbert_config.json    # ModernBERT config
+├── modernbert_config.json    # ModernBERT config
+├── rlearner_config.json      # R-Learner with direct tau optimization
+└── confounder_config.json    # Confounder extractor with sparse cross-attention
 ```
 
 ## Architecture
@@ -58,14 +61,16 @@ examples/                     # Example config files
 ### Core Model: CausalCNNText (`cdt/models/causal_cnn.py`)
 
 The main model combines:
-1. **Feature Extractor** (one of three types):
+1. **Feature Extractor** (one of four types):
    - `cnn`: 1D CNN with word-level tokenization (default, fastest)
    - `bert`: HuggingFace transformer (Bio_ClinicalBERT, ModernBERT, etc.)
    - `gru`: Bidirectional GRU with attention (O(N) for long sequences)
+   - `confounder`: Perceiver-style cross-attention with sparse attention for long documents
 
-2. **Causal Inference Head** (one of two types):
+2. **Causal Inference Head** (one of three types):
    - `dragonnet`: Classic DragonNet (propensity + Y0/Y1 potential outcomes)
    - `uplift`: UpliftNet (base outcome + treatment effect parametrization)
+   - `rlearner`: R-Learner (direct tau optimization with detached nuisance functions)
 
 ### CNN Feature Extractor (`cdt/models/cnn_extractor.py`)
 
@@ -89,6 +94,82 @@ Loss function components:
 - Outcome loss (factual only)
 - Propensity loss (binary cross-entropy)
 - Targeted regularization (R-loss)
+
+### RLearnerNet (`cdt/models/rlearner.py`)
+
+R-Learner architecture for direct treatment effect optimization. Uses three heads:
+- `e(X)`: Propensity head - P(T=1|X)
+- `m(X)`: Marginal outcome head - E[Y|X]
+- `tau(X)`: Treatment effect head - E[Y(1)-Y(0)|X] (unbounded, can be negative)
+
+**Key advantage**: The nuisance functions (e, m) are **detached** in the R-loss, so gradients flow directly through tau(X). This provides stronger gradient signal for learning treatment effect modifiers from text.
+
+Loss function:
+```
+L = L_outcome(m) + alpha * L_propensity(e) + gamma * L_rlearner(tau)
+
+L_rlearner = E[((Y - m(X)) - tau(X) * (T - e(X)))^2]  # e, m detached
+```
+
+Outputs (predict method):
+- `tau_pred`: Direct treatment effect tau(X)
+- `m_prob`: Marginal outcome probability E[Y|X]
+- `y0_prob`, `y1_prob`: Derived for backward compatibility
+
+Reference: Nie & Wager (2021). Quasi-oracle estimation of heterogeneous treatment effects. Biometrika.
+
+### ConfounderExtractor (`cdt/models/confounder_extractor.py`)
+
+Perceiver-style feature extractor designed for extracting confounder signals from long clinical text. Uses sentence-level processing with sparse cross-attention.
+
+**Architecture:**
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Sentence Encoder (SentenceTransformer, e.g., all-MiniLM-L6-v2)
+        ↓
+Sentence Embeddings (S × d)
+        ↓
+Latent Queries (K learnable confounder vectors)
+        ↓
+Sparse Cross-Attention (entmax/top-k) with Iterative Refinement
+        ↓
+K Latent Representations (K × d)
+        ↓
+MLP Projection → Causal Head (DragonNet/RLearner)
+```
+
+**Key features:**
+- **Sparse attention** via entmax (forces exact zeros on irrelevant sentences)
+- **Iterative refinement**: Multiple cross-attention passes for progressive focusing
+- **Explicit confounder initialization**: Optional concept phrases (e.g., "metastatic sites")
+- **Self-attention between latents**: Allows confounders to share information
+- **Attention visualization**: `interpret_attention()` method shows top-attended sentences
+
+**Key configuration:**
+```python
+confounder_num_latents: int = 4        # Learnable latent vectors
+confounder_explicit_texts: List[str]   # Explicit concept phrases
+confounder_num_iterations: int = 2     # Refinement passes
+confounder_sparse_attention: bool = True
+confounder_sparse_alpha: float = 1.5   # 1.5=entmax15, 2.0=sparsemax
+confounder_sparse_method: str = "entmax"  # "entmax", "topk", "softmax"
+```
+
+**Why this helps for long documents:**
+- Sentence-level attention reduces search space from 2048 tokens to ~50-100 sentences
+- Sparse attention forces each latent to focus on few relevant sentences
+- Iterative refinement allows progressive "zooming in" on confounder mentions
+- Works with standard causal loss - no concept labels needed
+
+### Sparse Attention Utilities (`cdt/models/sparse_attention.py`)
+
+Provides sparse attention mechanisms that produce exact zeros for irrelevant positions:
+- `sparse_softmax()`: Unified interface for entmax/sparsemax with fallback implementations
+- `top_k_attention()`: Hard top-k selection with straight-through gradients
+- `SparseCrossAttention`: Multi-head cross-attention with configurable sparsity
 
 ## Key Commands
 
@@ -114,7 +195,7 @@ Main config classes:
 - `ExperimentConfig`: Top-level config
 - `AppliedInferenceConfig`: Dataset paths, column names, CV folds
 - `ModelArchitectureConfig`: Feature extractor type, CNN/BERT/GRU params, DragonNet dims
-- `TrainingConfig`: Learning rate, epochs, batch size, loss weights
+- `TrainingConfig`: Learning rate, epochs, batch size, loss weights (alpha_propensity, beta_targreg, gamma_rlearner)
 - `PropensityTrimmingConfig`: Pre-trimming by propensity scores
 - `MatchingAnalysisConfig`: Post-hoc PSM analysis using DragonNet's propensity scores
 - `PlasmodeConfig`: Plasmode simulation parameters
@@ -237,7 +318,11 @@ Supports both OpenAI API and local vLLM batch inference.
 ## Key Files for Development
 
 - **Main model**: `cdt/models/causal_cnn.py` (CausalCNNText)
+- **Causal heads**: `cdt/models/dragonnet.py`, `cdt/models/uplift.py`, `cdt/models/rlearner.py`
+- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py`
+- **Sparse attention**: `cdt/models/sparse_attention.py` (entmax, top-k, SparseCrossAttention)
 - **Training loop**: `cdt/inference/applied.py` (_train_single_model, _train_epoch)
+- **Plasmode**: `cdt/training/plasmode.py` (plasmode simulation experiments)
 - **Config**: `cdt/config.py`
 - **CLI**: `cdt/cli.py`
 - **Dataset**: `cdt/data/dataset.py`
@@ -275,6 +360,79 @@ for batch in dataloader:
     optimizer.step()
 ```
 
+### Training with R-Learner
+```python
+from cdt.models.causal_cnn import CausalCNNText
+
+# Create model with R-Learner architecture
+model = CausalCNNText(
+    feature_extractor_type="cnn",
+    model_type="rlearner",  # Use R-Learner instead of DragonNet
+    embedding_dim=128,
+    kernel_sizes=[3, 4, 5, 7],
+    num_kmeans_filters=64,
+    device="cuda:0"
+)
+
+model.fit_tokenizer(train_texts)
+
+# Training loop with gamma_rlearner
+for batch in dataloader:
+    losses = model.train_step(
+        batch,
+        alpha_propensity=1.0,
+        gamma_rlearner=1.0  # Weight for R-learner loss
+    )
+    losses['loss'].backward()
+    optimizer.step()
+
+# R-learner returns additional loss component
+print(f"R-loss: {losses['r_loss']}")
+```
+
+### Training with ConfounderExtractor
+```python
+from cdt.models.causal_cnn import CausalCNNText
+
+# Create model with ConfounderExtractor for long documents
+model = CausalCNNText(
+    feature_extractor_type="confounder",
+    model_type="rlearner",
+    # Confounder extractor settings
+    confounder_num_latents=4,
+    confounder_explicit_texts=[
+        "metastatic disease",
+        "performance status",
+        "prior treatment"
+    ],
+    confounder_value_dim=128,
+    confounder_num_iterations=2,
+    confounder_sparse_attention=True,
+    confounder_sparse_alpha=1.5,  # entmax15
+    device="cuda:0"
+)
+
+# No fit_tokenizer needed - uses pretrained sentence encoder
+model.fit_tokenizer(train_texts)  # No-op for confounder extractor
+
+# Training loop
+for batch in dataloader:
+    losses = model.train_step(
+        batch,
+        alpha_propensity=1.0,
+        gamma_rlearner=1.0
+    )
+    losses['loss'].backward()
+    optimizer.step()
+
+# Interpret attention weights (which sentences each confounder attends to)
+interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
+for doc_idx, doc_interp in enumerate(interpretations):
+    print(f"Document {doc_idx}:")
+    for conf_name, attended in doc_interp.items():
+        print(f"  {conf_name}: {[a['sentence'][:50] for a in attended]}")
+```
+
 ### Getting predictions
 ```python
 preds = model.predict(texts)
@@ -287,7 +445,10 @@ ite = preds['y1_prob'] - preds['y0_prob']
 ## Dependencies
 
 Core: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow
-Optional: openai (for synthetic data generation)
+Optional:
+- openai (for synthetic data generation)
+- sentence-transformers (for ConfounderExtractor)
+- entmax (for sparse attention; fallback implementations provided if not installed)
 
 ## Output Files
 
@@ -308,10 +469,12 @@ output_dir/
 
 ## Notes for Development
 
-1. **Feature extractor type**: CNN is fastest, BERT is most expressive, GRU is efficient for long sequences
-2. **Tokenizer fitting**: CNN/GRU require `fit_tokenizer()` before use; BERT uses pretrained tokenizer
+1. **Feature extractor type**: CNN is fastest, BERT is most expressive, GRU is efficient for long sequences, Confounder is best for extracting specific signals from long documents
+2. **Tokenizer fitting**: CNN/GRU require `fit_tokenizer()` before use; BERT/Confounder use pretrained tokenizers
 3. **Filter initialization**: Semantic filters improve interpretability; k-means captures data patterns
 4. **Propensity trimming**: Optional preprocessing to enforce positivity assumption
 5. **All predictions are on probability scale**: ITE = P(Y=1|T=1,X) - P(Y=1|T=0,X)
 6. **PSM analysis**: Post-hoc analysis using `cdt.analysis.run_psm_analysis()` - validates DragonNet estimates with traditional methods
 7. **Matching module**: `cdt.matching.PropensityMatcher` supports nearest neighbor, optimal (Hungarian), and caliper matching
+8. **R-Learner vs DragonNet**: R-Learner provides stronger gradient signal for tau(X) by detaching nuisance functions; use when treatment effect heterogeneity is the primary focus
+9. **Confounder extractor**: Use for long documents (2048+ tokens) where confounders are mentioned in specific sentences. Sparse attention (entmax) forces focus on relevant sentences. Use `interpret_attention()` to visualize what each latent confounder attends to.
