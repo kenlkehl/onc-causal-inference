@@ -860,6 +860,8 @@ class HierarchicalConfounderExtractor(nn.Module):
         top_k: int = 5,
         # Regularization
         dropout: float = 0.1,
+        # Model type for task-specific aggregation
+        model_type: str = "dragonnet",
         # Device
         device: Optional[torch.device] = None
     ):
@@ -880,6 +882,9 @@ class HierarchicalConfounderExtractor(nn.Module):
             sparse_method: Sparsity method ("entmax", "topk", "softmax")
             top_k: K for top-k attention method
             dropout: Dropout rate
+            model_type: Architecture type ("dragonnet", "uplift", or "rlearner") for
+                       task-specific aggregation. DragonNet uses propensity/Y0/Y1 queries,
+                       R-Learner uses propensity/outcome/tau queries.
             device: Device to place model on
         """
         super().__init__()
@@ -894,6 +899,7 @@ class HierarchicalConfounderExtractor(nn.Module):
         self.sparse_alpha = sparse_alpha
         self.sparse_method = sparse_method
         self.top_k = top_k
+        self.model_type = model_type
 
         # Token encoder (BERT-based)
         self.token_encoder = TokenEncoder(
@@ -970,8 +976,32 @@ class HierarchicalConfounderExtractor(nn.Module):
         self._W_k = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False).to(self._device)
         self._W_v = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False).to(self._device)
 
+        # Task-specific aggregation queries (3 queries for 3-way aggregation)
+        # These allow different weighting of confounders for each task head
+        self._propensity_query = nn.Parameter(
+            torch.randn(self._encoder_dim, device=self._device) * 0.02
+        )
+        if self.model_type == "rlearner":
+            # R-Learner: propensity, marginal outcome m(X), treatment effect τ(X)
+            self._outcome_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+            self._tau_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+        else:
+            # DragonNet/UpliftNet: propensity, Y0 (outcome under control), Y1 (outcome under treatment)
+            self._y0_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+            self._y1_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+
         # Output projection
-        output_input_dim = self._encoder_dim * self.total_confounders
+        # Task-specific aggregation produces 3*D instead of K*D
+        # (propensity + y0/y1 for DragonNet, or propensity + outcome + tau for R-Learner)
+        output_input_dim = self._encoder_dim * 3
         self._output_projection = nn.Sequential(
             nn.Linear(output_input_dim, output_input_dim),
             nn.LayerNorm(output_input_dim),
@@ -1131,6 +1161,61 @@ class HierarchicalConfounderExtractor(nn.Module):
 
         return attended.squeeze(0)
 
+    def _aggregate_confounders(
+        self,
+        confounders: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Aggregate K confounder representations using 3 task-specific queries.
+
+        For DragonNet/UpliftNet: propensity, Y0 (control outcome), Y1 (treatment outcome)
+        For R-Learner: propensity, m(X) (marginal outcome), τ(X) (treatment effect)
+
+        This 3-way aggregation allows:
+        - DragonNet: Different confounders for Y0 vs Y1 (treatment effect modifiers)
+        - R-Learner: Distinguish prognostic factors (m) from effect modifiers (τ)
+
+        Args:
+            confounders: (K, D) confounder representations for one document
+
+        Returns:
+            aggregated: (3*D,) concatenated task-specific representations
+            prop_weights: (K,) propensity task confounder weights
+            weight2: (K,) y0 weights (DragonNet) or outcome weights (R-Learner)
+            weight3: (K,) y1 weights (DragonNet) or tau weights (R-Learner)
+        """
+        # Propensity task aggregation (same for both model types)
+        prop_scores = torch.matmul(confounders, self._propensity_query)  # (K,)
+        prop_weights = F.softmax(prop_scores, dim=0)  # (K,)
+        prop_repr = torch.matmul(prop_weights, confounders)  # (D,)
+
+        if self.model_type == "rlearner":
+            # Outcome aggregation: m(X)
+            out_scores = torch.matmul(confounders, self._outcome_query)  # (K,)
+            out_weights = F.softmax(out_scores, dim=0)  # (K,)
+            out_repr = torch.matmul(out_weights, confounders)  # (D,)
+
+            # Tau aggregation: τ(X) - treatment effect modifiers
+            tau_scores = torch.matmul(confounders, self._tau_query)  # (K,)
+            tau_weights = F.softmax(tau_scores, dim=0)  # (K,)
+            tau_repr = torch.matmul(tau_weights, confounders)  # (D,)
+
+            aggregated = torch.cat([prop_repr, out_repr, tau_repr], dim=0)  # (3*D,)
+            return aggregated, prop_weights, out_weights, tau_weights
+        else:
+            # Y0 aggregation: outcome under control
+            y0_scores = torch.matmul(confounders, self._y0_query)  # (K,)
+            y0_weights = F.softmax(y0_scores, dim=0)  # (K,)
+            y0_repr = torch.matmul(y0_weights, confounders)  # (D,)
+
+            # Y1 aggregation: outcome under treatment
+            y1_scores = torch.matmul(confounders, self._y1_query)  # (K,)
+            y1_weights = F.softmax(y1_scores, dim=0)  # (K,)
+            y1_repr = torch.matmul(y1_weights, confounders)  # (D,)
+
+            aggregated = torch.cat([prop_repr, y0_repr, y1_repr], dim=0)  # (3*D,)
+            return aggregated, prop_weights, y0_weights, y1_weights
+
     def forward(
         self,
         texts: List[str],
@@ -1187,12 +1272,6 @@ class HierarchicalConfounderExtractor(nn.Module):
                 all_confounders, sentence_embeddings
             )  # (K, S)
 
-            if return_attention:
-                all_attention_weights.append({
-                    'sentence_weights': sentence_weights.detach().cpu(),
-                    'sentences': sentences
-                })
-
             # 5. Token-level cross-attention per sentence, gated by sentence weights
             confounder_reprs = []
             for k in range(self.total_confounders):
@@ -1215,14 +1294,30 @@ class HierarchicalConfounderExtractor(nn.Module):
 
             # Stack confounders: (K, D)
             doc_confounders = torch.stack(confounder_reprs)
-            batch_results.append(doc_confounders)
 
-        # Stack batch: (B, K, D)
-        batch_confounders = torch.stack(batch_results)
+            # 6. Task-specific aggregation: (K, D) -> (3*D,)
+            aggregated, prop_weights, weight2, weight3 = self._aggregate_confounders(doc_confounders)
+            batch_results.append(aggregated)
 
-        # Flatten and project: (B, K*D) -> (B, value_dim)
-        flat_confounders = batch_confounders.reshape(batch_size, -1)
-        features = self._output_projection(flat_confounders)
+            if return_attention:
+                attn_info = {
+                    'sentence_weights': sentence_weights.detach().cpu(),
+                    'sentences': sentences,
+                    'propensity_confounder_weights': prop_weights.detach().cpu()
+                }
+                if self.model_type == "rlearner":
+                    attn_info['outcome_confounder_weights'] = weight2.detach().cpu()
+                    attn_info['tau_confounder_weights'] = weight3.detach().cpu()
+                else:
+                    attn_info['y0_confounder_weights'] = weight2.detach().cpu()
+                    attn_info['y1_confounder_weights'] = weight3.detach().cpu()
+                all_attention_weights.append(attn_info)
+
+        # Stack batch: (B, 3*D)
+        batch_aggregated = torch.stack(batch_results)
+
+        # Project to output: (B, 3*D) -> (B, value_dim)
+        features = self._output_projection(batch_aggregated)
 
         if return_attention:
             return features, all_attention_weights
@@ -1310,6 +1405,19 @@ class HierarchicalConfounderExtractor(nn.Module):
             self._W_v = self._W_v.to(device)
         if self._output_projection is not None:
             self._output_projection = self._output_projection.to(device)
+        # Move task-specific aggregation query parameters
+        if hasattr(self, '_propensity_query') and self._propensity_query is not None:
+            self._propensity_query.data = self._propensity_query.data.to(device)
+        # R-Learner queries
+        if hasattr(self, '_outcome_query') and self._outcome_query is not None:
+            self._outcome_query.data = self._outcome_query.data.to(device)
+        if hasattr(self, '_tau_query') and self._tau_query is not None:
+            self._tau_query.data = self._tau_query.data.to(device)
+        # DragonNet queries
+        if hasattr(self, '_y0_query') and self._y0_query is not None:
+            self._y0_query.data = self._y0_query.data.to(device)
+        if hasattr(self, '_y1_query') and self._y1_query is not None:
+            self._y1_query.data = self._y1_query.data.to(device)
         return super().to(device)
 
     def get_state(self) -> Dict[str, Any]:
@@ -1320,7 +1428,8 @@ class HierarchicalConfounderExtractor(nn.Module):
             'value_dim': self.value_dim,
             'max_sentences': self.max_sentences,
             'output_dim': self._output_dim,
-            'hierarchical': True
+            'hierarchical': True,
+            'model_type': self.model_type
         }
 
     # Compatibility with CausalText interface
@@ -1379,6 +1488,8 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
         value_dim: int = 128,
         # Regularization
         dropout: float = 0.1,
+        # Model type for task-specific aggregation
+        model_type: str = "dragonnet",
         # Device
         device: Optional[torch.device] = None
     ):
@@ -1403,6 +1514,9 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
             max_sentences: Maximum sentences to process per document
             value_dim: Output dimension per confounder
             dropout: Dropout rate
+            model_type: Architecture type ("dragonnet", "uplift", or "rlearner") for
+                       task-specific aggregation. DragonNet uses propensity/Y0/Y1 queries,
+                       R-Learner uses propensity/outcome/tau queries.
             device: Device to place model on
         """
         super().__init__()
@@ -1418,6 +1532,7 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
         self.sparse_method = sparse_method
         self.top_k = top_k
         self.gru_bidirectional = gru_bidirectional
+        self.model_type = model_type
 
         # Import WordTokenizer from cnn_extractor
         from .cnn_extractor import WordTokenizer
@@ -1452,6 +1567,28 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
             torch.randn(num_latent_confounders, self._encoder_dim, device=self._device) * 0.02
         )
 
+        # Task-specific aggregation queries (3 queries for 3-way aggregation)
+        # These allow different weighting of confounders for each task head
+        self._propensity_query = nn.Parameter(
+            torch.randn(self._encoder_dim, device=self._device) * 0.02
+        )
+        if model_type == "rlearner":
+            # R-Learner: propensity, marginal outcome m(X), treatment effect τ(X)
+            self._outcome_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+            self._tau_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+        else:
+            # DragonNet/UpliftNet: propensity, Y0 (outcome under control), Y1 (outcome under treatment)
+            self._y0_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+            self._y1_query = nn.Parameter(
+                torch.randn(self._encoder_dim, device=self._device) * 0.02
+            )
+
         # Token-level cross-attention projections
         self._W_q = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False)
         self._W_k = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False)
@@ -1461,7 +1598,9 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
         # Output projection
-        output_input_dim = self._encoder_dim * num_latent_confounders
+        # Task-specific aggregation produces 3*D instead of K*D
+        # (propensity + y0/y1 for DragonNet, or propensity + outcome + tau for R-Learner)
+        output_input_dim = self._encoder_dim * 3
         self._output_projection = nn.Sequential(
             nn.Linear(output_input_dim, output_input_dim),
             nn.LayerNorm(output_input_dim),
@@ -1771,6 +1910,61 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
 
         return attended.squeeze(0)
 
+    def _aggregate_confounders(
+        self,
+        confounders: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Aggregate K confounder representations using 3 task-specific queries.
+
+        For DragonNet/UpliftNet: propensity, Y0 (control outcome), Y1 (treatment outcome)
+        For R-Learner: propensity, m(X) (marginal outcome), τ(X) (treatment effect)
+
+        This 3-way aggregation allows:
+        - DragonNet: Different confounders for Y0 vs Y1 (treatment effect modifiers)
+        - R-Learner: Distinguish prognostic factors (m) from effect modifiers (τ)
+
+        Args:
+            confounders: (K, D) confounder representations for one document
+
+        Returns:
+            aggregated: (3*D,) concatenated task-specific representations
+            prop_weights: (K,) propensity task confounder weights
+            weight2: (K,) y0 weights (DragonNet) or outcome weights (R-Learner)
+            weight3: (K,) y1 weights (DragonNet) or tau weights (R-Learner)
+        """
+        # Propensity task aggregation (same for both model types)
+        prop_scores = torch.matmul(confounders, self._propensity_query)  # (K,)
+        prop_weights = F.softmax(prop_scores, dim=0)  # (K,)
+        prop_repr = torch.matmul(prop_weights, confounders)  # (D,)
+
+        if self.model_type == "rlearner":
+            # Outcome aggregation: m(X)
+            out_scores = torch.matmul(confounders, self._outcome_query)  # (K,)
+            out_weights = F.softmax(out_scores, dim=0)  # (K,)
+            out_repr = torch.matmul(out_weights, confounders)  # (D,)
+
+            # Tau aggregation: τ(X) - treatment effect modifiers
+            tau_scores = torch.matmul(confounders, self._tau_query)  # (K,)
+            tau_weights = F.softmax(tau_scores, dim=0)  # (K,)
+            tau_repr = torch.matmul(tau_weights, confounders)  # (D,)
+
+            aggregated = torch.cat([prop_repr, out_repr, tau_repr], dim=0)  # (3*D,)
+            return aggregated, prop_weights, out_weights, tau_weights
+        else:
+            # Y0 aggregation: outcome under control
+            y0_scores = torch.matmul(confounders, self._y0_query)  # (K,)
+            y0_weights = F.softmax(y0_scores, dim=0)  # (K,)
+            y0_repr = torch.matmul(y0_weights, confounders)  # (D,)
+
+            # Y1 aggregation: outcome under treatment
+            y1_scores = torch.matmul(confounders, self._y1_query)  # (K,)
+            y1_weights = F.softmax(y1_scores, dim=0)  # (K,)
+            y1_repr = torch.matmul(y1_weights, confounders)  # (D,)
+
+            aggregated = torch.cat([prop_repr, y0_repr, y1_repr], dim=0)  # (3*D,)
+            return aggregated, prop_weights, y0_weights, y1_weights
+
     def forward(
         self,
         texts: List[str],
@@ -1815,12 +2009,6 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
                 all_confounders, sentence_embeddings
             )  # (K, S)
 
-            if return_attention:
-                all_attention_weights.append({
-                    'sentence_weights': sentence_weights.detach().cpu(),
-                    'sentences': sentences
-                })
-
             # 5. Token-level cross-attention per sentence, gated by sentence weights
             confounder_reprs = []
             for k in range(self.total_confounders):
@@ -1843,14 +2031,30 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
 
             # Stack confounders: (K, D)
             doc_confounders = torch.stack(confounder_reprs)
-            batch_results.append(doc_confounders)
 
-        # Stack batch: (B, K, D)
-        batch_confounders = torch.stack(batch_results)
+            # 6. Task-specific aggregation: (K, D) -> (3*D,)
+            aggregated, prop_weights, weight2, weight3 = self._aggregate_confounders(doc_confounders)
+            batch_results.append(aggregated)
 
-        # Flatten and project: (B, K*D) -> (B, value_dim)
-        flat_confounders = batch_confounders.reshape(batch_size, -1)
-        features = self._output_projection(flat_confounders)
+            if return_attention:
+                attn_info = {
+                    'sentence_weights': sentence_weights.detach().cpu(),
+                    'sentences': sentences,
+                    'propensity_confounder_weights': prop_weights.detach().cpu()
+                }
+                if self.model_type == "rlearner":
+                    attn_info['outcome_confounder_weights'] = weight2.detach().cpu()
+                    attn_info['tau_confounder_weights'] = weight3.detach().cpu()
+                else:
+                    attn_info['y0_confounder_weights'] = weight2.detach().cpu()
+                    attn_info['y1_confounder_weights'] = weight3.detach().cpu()
+                all_attention_weights.append(attn_info)
+
+        # Stack batch: (B, 3*D)
+        batch_aggregated = torch.stack(batch_results)
+
+        # Project to output: (B, 3*D) -> (B, value_dim)
+        features = self._output_projection(batch_aggregated)
 
         if return_attention:
             return features, all_attention_weights
@@ -1940,6 +2144,19 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
         self._W_k = self._W_k.to(device)
         self._W_v = self._W_v.to(device)
         self._output_projection = self._output_projection.to(device)
+        # Move task-specific aggregation query parameters
+        if hasattr(self, '_propensity_query'):
+            self._propensity_query.data = self._propensity_query.data.to(device)
+        # R-Learner queries
+        if hasattr(self, '_outcome_query') and self._outcome_query is not None:
+            self._outcome_query.data = self._outcome_query.data.to(device)
+        if hasattr(self, '_tau_query') and self._tau_query is not None:
+            self._tau_query.data = self._tau_query.data.to(device)
+        # DragonNet queries
+        if hasattr(self, '_y0_query') and self._y0_query is not None:
+            self._y0_query.data = self._y0_query.data.to(device)
+        if hasattr(self, '_y1_query') and self._y1_query is not None:
+            self._y1_query.data = self._y1_query.data.to(device)
         return super().to(device)
 
     def get_state(self) -> Dict[str, Any]:
@@ -1950,6 +2167,7 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
             'max_sentences': self.max_sentences,
             'output_dim': self._output_dim,
             'gru_hierarchical': True,
+            'model_type': self.model_type,
             'vocab_size': self.tokenizer.vocab_size if self._initialized else 0
         }
 

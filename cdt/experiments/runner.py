@@ -124,7 +124,9 @@ class ExperimentRunner:
             gpu_ids=self.config.gpu_ids,
             num_workers=self.config.num_workers,
             save_filter_interpretations=self.config.save_filter_interpretations,
-            filter_interpretation_top_k=self.config.filter_interpretation_top_k
+            filter_interpretation_top_k=self.config.filter_interpretation_top_k,
+            save_confounder_interpretations=self.config.save_confounder_interpretations,
+            confounder_interpretation_top_k=self.config.confounder_interpretation_top_k
         )
 
         logger.info(f"Applied inference complete: {predictions_path}")

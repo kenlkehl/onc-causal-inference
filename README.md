@@ -62,6 +62,8 @@ For long clinical documents where confounders are mentioned in specific sentence
 
 - **GRUHierarchicalConfounderExtractor**: Learns entirely from scratch via the causal objective. Uses BiGRU with learnable embeddings instead of pretrained BERT. All parameters (embeddings, GRU, attention, latent confounders) optimize together.
 
+**Task-Specific Multi-Head Aggregation**: The hierarchical confounder extractors use task-specific aggregation to combine the K latent confounder representations. Separate learnable queries for propensity and outcome tasks allow each to weight confounders differently based on patient characteristics. This reduces dimensionality from K×D to 2×D while enabling patient-specific and task-specific weighting.
+
 See `examples/confounder_config.json` and `examples/gru_confounder_config.json` for configuration examples.
 
 ### Workflow Modes
@@ -305,6 +307,12 @@ A configuration file controls all aspects of the experiment:
 - `n_bootstrap`: Number of bootstrap iterations for confidence intervals (default: 1000)
 - `ci_level`: Confidence level for intervals (default: 0.95)
 
+**Interpretation:**
+- `save_filter_interpretations`: Save CNN filter interpretation analysis (default: false, CNN only)
+- `filter_interpretation_top_k`: Number of top n-grams per filter to save (default: 10)
+- `save_confounder_interpretations`: Save confounder attention analysis (default: false, confounder extractors only)
+- `confounder_interpretation_top_k`: Number of top-attended sentences per confounder (default: 5)
+
 ### CLI Options
 
 ```bash
@@ -327,6 +335,11 @@ output_dir/
 ├── applied_inference/
 │   ├── predictions.parquet        # Per-sample treatment effect estimates
 │   ├── training_log.csv           # Training metrics per epoch
+│   ├── filter_interpretations.json           # (if save_filter_interpretations=true, CNN only)
+│   ├── filter_interpretations_summary.txt    # Human-readable filter summary
+│   ├── confounder_interpretations.json       # (if save_confounder_interpretations=true)
+│   ├── confounder_interpretations_summary.txt # Human-readable confounder summary
+│   ├── confounder_task_weights.json          # Task-specific confounder weights
 │   └── psm_analysis/              # (if matching_analysis.enabled=true)
 │       ├── matched_pairs.csv      # Matched treated-control pairs with distances
 │       ├── balance_statistics.csv # SMD before/after matching

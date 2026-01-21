@@ -158,7 +158,18 @@ Sentence-Level Sparse Attention (entmax) → Sentence Weights (K × S)
         ↓
 Token-Level Cross-Attention (within each sentence, gated by sentence weights)
         ↓
-K Confounder Representations → Causal Head
+K Confounder Representations (K × D)
+        ↓
+Task-Specific Multi-Head Aggregation (3-way):
+  - Propensity Query → weighted sum → propensity_repr (D,)
+  - For DragonNet:
+    - Y0 Query → weighted sum → y0_repr (D,)
+    - Y1 Query → weighted sum → y1_repr (D,)
+  - For R-Learner:
+    - Outcome Query → weighted sum → outcome_repr (D,)
+    - Tau Query → weighted sum → tau_repr (D,)
+        ↓
+Concatenate: (3*D,) → MLP → Causal Head
 ```
 
 **Key features:**
@@ -168,6 +179,7 @@ K Confounder Representations → Causal Head
 - **Self-attention between latents**: Allows confounders to share information
 - **Attention visualization**: `interpret_attention()` method shows top-attended sentences
 - **Hierarchical mode**: Preserves token-level distinctions (e.g., "ECOG PS 0" vs "ECOG PS 2")
+- **3-way task-specific aggregation**: Different learnable queries for each prediction head (propensity + Y0/Y1 for DragonNet, propensity + outcome/tau for R-Learner) allow distinct confounder weighting per task
 
 **Key configuration:**
 ```python
@@ -215,14 +227,28 @@ Sentence-Level Sparse Attention (entmax) → Sentence Weights (K × S)
         ↓
 Token-Level Cross-Attention (within each sentence, gated by sentence weights)
         ↓
-K Confounder Representations → Causal Head
+K Confounder Representations (K × D)
+        ↓
+Task-Specific Multi-Head Aggregation (3-way):
+  - Propensity Query → weighted sum → propensity_repr (D,)
+  - For DragonNet:
+    - Y0 Query → weighted sum → y0_repr (D,)
+    - Y1 Query → weighted sum → y1_repr (D,)
+  - For R-Learner:
+    - Outcome Query → weighted sum → outcome_repr (D,)
+    - Tau Query → weighted sum → tau_repr (D,)
+        ↓
+Concatenate: (3*D,) → MLP → Causal Head
 ```
 
 **Key advantages of GRU mode:**
-- All parameters (embeddings, GRU, attention, latent confounders) optimized together
+- All parameters (embeddings, GRU, attention, latent confounders, task queries) optimized together
 - No domain mismatch from pretrained encoder
 - Lighter weight than BERT-based approaches
 - Better adaptation to specific clinical vocabulary
+- 3-way task-specific aggregation reduces dimensionality from K*D to 3*D (e.g., 8*256=2048 → 768)
+- DragonNet can learn different confounder weights for Y0 vs Y1 (treatment effect modifiers)
+- R-Learner can learn which confounders are prognostic (m) vs effect-modifying (τ)
 - **Important**: Requires `fit_tokenizer(texts)` before training (like CNN/GRU extractors)
 
 **Why this helps for long documents:**
@@ -601,6 +627,11 @@ output_dir/
 ├── applied_inference/
 │   ├── predictions.parquet     # Per-sample predictions
 │   ├── training_log.csv        # Training metrics
+│   ├── filter_interpretations.json          # If save_filter_interpretations=true (CNN only)
+│   ├── filter_interpretations_summary.txt   # Human-readable filter summary
+│   ├── confounder_interpretations.json      # If save_confounder_interpretations=true
+│   ├── confounder_interpretations_summary.txt  # Human-readable confounder summary
+│   ├── confounder_task_weights.json         # Task-specific confounder weights (propensity vs outcome)
 │   └── psm_analysis/           # If matching_analysis.enabled=true
 │       ├── matched_pairs.csv   # Matched treated-control pairs
 │       ├── balance_statistics.csv # SMD before/after matching

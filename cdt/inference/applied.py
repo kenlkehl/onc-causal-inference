@@ -38,7 +38,9 @@ def run_applied_inference(
     gpu_ids: Optional[List[int]] = None,
     num_workers: int = 1,
     save_filter_interpretations: bool = False,
-    filter_interpretation_top_k: int = 10
+    filter_interpretation_top_k: int = 10,
+    save_confounder_interpretations: bool = False,
+    confounder_interpretation_top_k: int = 5
 ) -> None:
     """
     Run applied causal inference on real data using CNN backbone.
@@ -54,6 +56,8 @@ def run_applied_inference(
         num_workers: Number of parallel workers
         save_filter_interpretations: Whether to save filter interpretation analysis
         filter_interpretation_top_k: Number of top n-grams per filter to save
+        save_confounder_interpretations: Whether to save confounder attention analysis
+        confounder_interpretation_top_k: Number of top-attended sentences per confounder
     """
     logger.info("=" * 80)
     logger.info("APPLIED CAUSAL INFERENCE (CNN)")
@@ -134,12 +138,14 @@ def run_applied_inference(
     if config.cv_folds > 1:
         _run_cv_inference(
             dataset, config, output_path, device, gpu_ids, num_workers,
-            save_filter_interpretations, filter_interpretation_top_k
+            save_filter_interpretations, filter_interpretation_top_k,
+            save_confounder_interpretations, confounder_interpretation_top_k
         )
     else:
         _run_fixed_split_inference(
             dataset, config, output_path, device,
-            save_filter_interpretations, filter_interpretation_top_k
+            save_filter_interpretations, filter_interpretation_top_k,
+            save_confounder_interpretations, confounder_interpretation_top_k
         )
 
 
@@ -151,7 +157,9 @@ def _run_cv_inference(
     gpu_ids: Optional[List[int]] = None,
     num_workers: int = 1,
     save_filter_interpretations: bool = False,
-    filter_interpretation_top_k: int = 10
+    filter_interpretation_top_k: int = 10,
+    save_confounder_interpretations: bool = False,
+    confounder_interpretation_top_k: int = 5
 ) -> None:
     """Run K-Fold Cross-Validation inference."""
     k = config.cv_folds
@@ -202,8 +210,8 @@ def _run_cv_inference(
 
     # Save filter interpretations for the last fold if requested
     # (In CV mode, we train one more model on the last fold's training data for interpretation)
-    if save_filter_interpretations:
-        logger.info("Generating filter interpretations from final fold model...")
+    if save_filter_interpretations or save_confounder_interpretations:
+        logger.info("Generating interpretations from final fold model...")
         last_fold = k - 1
         train_idx, _ = splits[last_fold]
         train_df = dataset.iloc[train_idx]
@@ -212,10 +220,18 @@ def _run_cv_inference(
         # Train a model on the last fold for interpretation
         model, _ = _train_single_model(train_df, val_df, config, devices[0])
         train_texts = train_df[config.text_column].tolist()
-        _save_filter_interpretations(
-            model, train_texts, output_path.parent,
-            top_k=filter_interpretation_top_k
-        )
+
+        if save_filter_interpretations:
+            _save_filter_interpretations(
+                model, train_texts, output_path.parent,
+                top_k=filter_interpretation_top_k
+            )
+
+        if save_confounder_interpretations:
+            _save_confounder_interpretations(
+                model, train_texts, output_path.parent,
+                top_k=confounder_interpretation_top_k
+            )
 
         # Cleanup
         del model
@@ -288,7 +304,9 @@ def _run_fixed_split_inference(
     output_path: Path,
     device: torch.device,
     save_filter_interpretations: bool = False,
-    filter_interpretation_top_k: int = 10
+    filter_interpretation_top_k: int = 10,
+    save_confounder_interpretations: bool = False,
+    confounder_interpretation_top_k: int = 5
 ) -> None:
     """Run inference using fixed train/val/test splits."""
     logger.info("Running Fixed Split Inference (Train/Val/Test)")
@@ -308,12 +326,19 @@ def _run_fixed_split_inference(
     pd.DataFrame(history).to_csv(log_path, index=False)
     logger.info(f"Training logs saved to: {log_path}")
 
-    # Save filter interpretations if requested
+    # Save interpretations if requested
+    train_texts = train_df[config.text_column].tolist()
+
     if save_filter_interpretations:
-        train_texts = train_df[config.text_column].tolist()
         _save_filter_interpretations(
             model, train_texts, output_path.parent,
             top_k=filter_interpretation_top_k
+        )
+
+    if save_confounder_interpretations:
+        _save_confounder_interpretations(
+            model, train_texts, output_path.parent,
+            top_k=confounder_interpretation_top_k
         )
 
     # Predict on Test
@@ -805,3 +830,114 @@ def _save_filter_interpretations(
     with open(summary_path, 'w') as f:
         f.write(summary)
     logger.info(f"Filter interpretation summary saved to: {summary_path}")
+
+
+def _save_confounder_interpretations(
+    model: CausalText,
+    train_texts: List[str],
+    output_dir: Path,
+    top_k: int = 5,
+    max_samples: int = 100
+) -> None:
+    """
+    Generate and save confounder attention interpretation analysis.
+
+    Saves JSON files with structured data showing:
+    - Which sentences each confounder attends to (sentence-level weights)
+    - How confounders are weighted for propensity vs outcome tasks (task-specific aggregation)
+
+    Only applicable for confounder feature extractors.
+
+    Args:
+        model: Trained CausalText model
+        train_texts: Training texts to analyze
+        output_dir: Directory to save interpretation files
+        top_k: Number of top-attended sentences per confounder
+        max_samples: Maximum number of samples to analyze (for efficiency)
+    """
+    # Confounder interpretations only available for confounder extractors
+    if model.feature_extractor_type != "confounder":
+        logger.info("Confounder interpretations not available for this feature extractor type")
+        return
+
+    # Limit samples for efficiency
+    texts_to_analyze = train_texts[:max_samples]
+    logger.info(f"Analyzing confounder attention on {len(texts_to_analyze)} texts...")
+
+    # Get interpretations from the feature extractor
+    interpretations = model.feature_extractor.interpret_attention(
+        texts_to_analyze,
+        top_k=top_k
+    )
+
+    # Save interpretations JSON
+    json_path = output_dir / "confounder_interpretations.json"
+    with open(json_path, 'w') as f:
+        json.dump(interpretations, f, indent=2, default=str)
+    logger.info(f"Confounder interpretations saved to: {json_path}")
+
+    # Get task-specific aggregation weights if available (for a sample batch)
+    try:
+        _, attention_info = model.feature_extractor(texts_to_analyze[:10], return_attention=True)
+
+        # Extract task-specific confounder weights (3-way aggregation)
+        task_weights = []
+        for i, info in enumerate(attention_info):
+            sample_info = {'sample_idx': i}
+            if 'propensity_confounder_weights' in info:
+                sample_info['propensity_weights'] = info['propensity_confounder_weights'].tolist()
+            # DragonNet weights: y0, y1
+            if 'y0_confounder_weights' in info:
+                sample_info['y0_weights'] = info['y0_confounder_weights'].tolist()
+            if 'y1_confounder_weights' in info:
+                sample_info['y1_weights'] = info['y1_confounder_weights'].tolist()
+            # R-Learner weights: outcome, tau
+            if 'outcome_confounder_weights' in info:
+                sample_info['outcome_weights'] = info['outcome_confounder_weights'].tolist()
+            if 'tau_confounder_weights' in info:
+                sample_info['tau_weights'] = info['tau_confounder_weights'].tolist()
+            if len(sample_info) > 1:
+                task_weights.append(sample_info)
+
+        if task_weights:
+            task_weights_path = output_dir / "confounder_task_weights.json"
+            with open(task_weights_path, 'w') as f:
+                json.dump(task_weights, f, indent=2)
+            logger.info(f"Task-specific confounder weights saved to: {task_weights_path}")
+
+    except Exception as e:
+        logger.warning(f"Could not extract task-specific weights: {e}")
+
+    # Generate human-readable summary
+    summary_lines = [
+        "=" * 80,
+        "CONFOUNDER ATTENTION INTERPRETATION SUMMARY",
+        "=" * 80,
+        f"\nAnalyzed {len(texts_to_analyze)} documents",
+        f"Top {top_k} attended sentences shown per confounder\n",
+    ]
+
+    # Aggregate across documents to find common patterns
+    confounder_patterns = {}
+    for doc_interp in interpretations:
+        for conf_name, attended_sentences in doc_interp.items():
+            if conf_name not in confounder_patterns:
+                confounder_patterns[conf_name] = []
+            for sent_info in attended_sentences:
+                confounder_patterns[conf_name].append(sent_info)
+
+    for conf_name in sorted(confounder_patterns.keys()):
+        summary_lines.append(f"\n--- {conf_name} ---")
+        attended = confounder_patterns[conf_name]
+        # Sort by attention weight and show unique sentences
+        seen = set()
+        for info in sorted(attended, key=lambda x: -x['attention'])[:10]:
+            sent = info['sentence'][:100]
+            if sent not in seen:
+                summary_lines.append(f"  [{info['attention']:.3f}] {sent}...")
+                seen.add(sent)
+
+    summary_path = output_dir / "confounder_interpretations_summary.txt"
+    with open(summary_path, 'w') as f:
+        f.write('\n'.join(summary_lines))
+    logger.info(f"Confounder interpretation summary saved to: {summary_path}")

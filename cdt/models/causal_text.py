@@ -273,6 +273,7 @@ class CausalText(nn.Module):
                     max_sentences=confounder_max_sentences,
                     value_dim=confounder_value_dim,
                     dropout=confounder_dropout,
+                    model_type=model_type,
                     device=self._device
                 )
                 logger.info(f"Using GRU Hierarchical Confounder feature extractor: {confounder_num_latents} latents, "
@@ -293,6 +294,7 @@ class CausalText(nn.Module):
                     sparse_alpha=confounder_sparse_alpha,
                     top_k=confounder_top_k,
                     dropout=confounder_dropout,
+                    model_type=model_type,
                     device=self._device
                 )
                 logger.info(f"Using Hierarchical Confounder feature extractor: {confounder_num_latents} latents, "

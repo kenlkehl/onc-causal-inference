@@ -305,6 +305,10 @@ class ExperimentConfig:
     save_filter_interpretations: bool = False  # Save post-hoc filter interpretations after training
     filter_interpretation_top_k: int = 10  # Number of top n-grams per filter to save
 
+    # Confounder interpretation settings (for confounder extractor)
+    save_confounder_interpretations: bool = False  # Save confounder attention interpretations after training
+    confounder_interpretation_top_k: int = 5  # Number of top-attended sentences per confounder to save
+
     applied_inference: AppliedInferenceConfig = field(default_factory=AppliedInferenceConfig)
     plasmode_experiments: PlasmodeExperimentConfig = field(default_factory=PlasmodeExperimentConfig)
 
@@ -360,6 +364,8 @@ class ExperimentConfig:
             gpu_ids=data.get('gpu_ids'),
             save_filter_interpretations=data.get('save_filter_interpretations', False),
             filter_interpretation_top_k=data.get('filter_interpretation_top_k', 10),
+            save_confounder_interpretations=data.get('save_confounder_interpretations', False),
+            confounder_interpretation_top_k=data.get('confounder_interpretation_top_k', 5),
             applied_inference=applied,
             plasmode_experiments=plasmode
         )
