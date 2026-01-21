@@ -23,7 +23,7 @@ cdt/                          # Main package
 │   ├── cnn_extractor.py      # CNNFeatureExtractor - 1D CNN with semantic filter init
 │   ├── bert_extractor.py     # BertFeatureExtractor - HuggingFace transformer CLS token
 │   ├── gru_extractor.py      # GRUFeatureExtractor - BiGRU with attention pooling
-│   ├── confounder_extractor.py # ConfounderExtractor, HierarchicalConfounderExtractor
+│   ├── confounder_extractor.py # ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 │   ├── dragonnet.py          # DragonNet head (propensity + potential outcomes)
 │   ├── uplift.py             # UpliftNet head (alternative parametrization)
 │   ├── rlearner.py           # RLearnerNet head (direct tau optimization)
@@ -54,7 +54,8 @@ examples/                     # Example config files
 ├── bert_config.json          # BERT feature extractor config
 ├── modernbert_config.json    # ModernBERT config
 ├── rlearner_config.json      # R-Learner with direct tau optimization
-└── confounder_config.json    # Confounder extractor with sparse cross-attention
+├── confounder_config.json    # Confounder extractor with sparse cross-attention
+└── gru_confounder_config.json # GRU-based confounder extractor (learns from scratch)
 ```
 
 ## Architecture
@@ -177,12 +178,52 @@ confounder_sparse_attention: bool = True
 confounder_sparse_alpha: float = 1.5   # 1.5=entmax15, 2.0=sparsemax
 confounder_sparse_method: str = "entmax"  # "entmax", "topk", "softmax"
 
-# Hierarchical mode (token-level attention)
+# Hierarchical mode (BERT-based token-level attention)
 confounder_hierarchical: bool = False   # Enable token-level attention
 confounder_token_encoder: str = "distilbert-base-uncased"  # BERT for token encoding
 confounder_freeze_token_encoder: bool = True
 confounder_max_sentence_tokens: int = 128
+
+# GRU-based mode (learns from scratch)
+confounder_use_gru: bool = False          # Enable GRU-based extraction
+confounder_gru_embedding_dim: int = 128   # Word embedding dimension
+confounder_gru_hidden_dim: int = 128      # GRU hidden state per direction
+confounder_gru_num_layers: int = 1        # Stacked GRU layers
+confounder_gru_bidirectional: bool = True # Bidirectional GRU
+confounder_gru_dropout: float = 0.1
+confounder_gru_max_vocab: int = 50000
+confounder_gru_min_word_freq: int = 2
+confounder_gru_max_sentence_length: int = 128
 ```
+
+**GRU-based Hierarchical Architecture (learns from scratch):**
+With `confounder_use_gru=True`, all parameters learn together via the causal objective:
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tokenize each sentence (word-level vocabulary)
+        ↓
+Embed tokens with learnable embeddings
+        ↓
+Encode each sentence with BiGRU + attention pooling → (S × encoder_dim)
+        ↓
+Latent Queries (K learnable confounder vectors)
+        ↓
+Sentence-Level Sparse Attention (entmax) → Sentence Weights (K × S)
+        ↓
+Token-Level Cross-Attention (within each sentence, gated by sentence weights)
+        ↓
+K Confounder Representations → Causal Head
+```
+
+**Key advantages of GRU mode:**
+- All parameters (embeddings, GRU, attention, latent confounders) optimized together
+- No domain mismatch from pretrained encoder
+- Lighter weight than BERT-based approaches
+- Better adaptation to specific clinical vocabulary
+- **Important**: Requires `fit_tokenizer(texts)` before training (like CNN/GRU extractors)
 
 **Why this helps for long documents:**
 - Sentence-level attention reduces search space from 2048 tokens to ~50-100 sentences
@@ -346,7 +387,7 @@ Supports both OpenAI API and local vLLM batch inference.
 
 - **Main model**: `cdt/models/causal_text.py` (CausalText)
 - **Causal heads**: `cdt/models/dragonnet.py`, `cdt/models/uplift.py`, `cdt/models/rlearner.py`
-- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor)
+- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor)
 - **Sparse attention**: `cdt/models/sparse_attention.py` (entmax, top-k, SparseCrossAttention)
 - **Training loop**: `cdt/inference/applied.py` (_train_single_model, _train_epoch)
 - **Plasmode**: `cdt/training/plasmode.py` (plasmode simulation experiments)
@@ -490,6 +531,51 @@ for batch in dataloader:
     optimizer.step()
 ```
 
+### Training with GRU Hierarchical ConfounderExtractor
+```python
+from cdt.models import CausalText
+
+# GRU mode: learns entirely from scratch via causal objective
+model = CausalText(
+    feature_extractor_type="confounder",
+    model_type="rlearner",
+    # Enable GRU-based mode (learns from scratch)
+    confounder_use_gru=True,
+    confounder_gru_embedding_dim=128,
+    confounder_gru_hidden_dim=128,
+    confounder_gru_num_layers=1,
+    confounder_gru_bidirectional=True,
+    confounder_gru_min_word_freq=2,
+    confounder_gru_max_sentence_length=128,
+    # Confounder architecture
+    confounder_num_latents=8,
+    confounder_value_dim=128,
+    confounder_max_sentences=100,
+    confounder_num_heads=4,
+    # Sparse attention
+    confounder_sparse_attention=True,
+    confounder_sparse_method="entmax",
+    confounder_sparse_alpha=1.5,
+    device="cuda:0"
+)
+
+# IMPORTANT: GRU mode requires tokenizer fitting (like CNN/GRU extractors)
+model.fit_tokenizer(train_texts)
+
+# Training loop
+for batch in dataloader:
+    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
+    losses['loss'].backward()
+    optimizer.step()
+
+# Interpret attention weights
+interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
+for doc_idx, doc_interp in enumerate(interpretations):
+    print(f"Document {doc_idx}:")
+    for conf_name, attended in doc_interp.items():
+        print(f"  {conf_name}: {[a['sentence'][:50] for a in attended]}")
+```
+
 ### Getting predictions
 ```python
 preds = model.predict(texts)
@@ -527,7 +613,7 @@ output_dir/
 ## Notes for Development
 
 1. **Feature extractor type**: CNN is fastest, BERT is most expressive, GRU is efficient for long sequences, Confounder is best for extracting specific signals from long documents
-2. **Tokenizer fitting**: CNN/GRU require `fit_tokenizer()` before use; BERT/Confounder use pretrained tokenizers
+2. **Tokenizer fitting**: CNN/GRU require `fit_tokenizer()` before use; BERT/Confounder (pretrained) use pretrained tokenizers; GRU Confounder (`confounder_use_gru=True`) requires `fit_tokenizer()`
 3. **Filter initialization**: Semantic filters improve interpretability; k-means captures data patterns
 4. **Propensity trimming**: Optional preprocessing to enforce positivity assumption
 5. **All predictions are on probability scale**: ITE = P(Y=1|T=1,X) - P(Y=1|T=0,X)
@@ -536,3 +622,4 @@ output_dir/
 8. **R-Learner vs DragonNet**: R-Learner provides stronger gradient signal for tau(X) by detaching nuisance functions; use when treatment effect heterogeneity is the primary focus
 9. **Confounder extractor**: Use for long documents (2048+ tokens) where confounders are mentioned in specific sentences. Sparse attention (entmax) forces focus on relevant sentences. Use `interpret_attention()` to visualize what each latent confounder attends to.
 10. **Hierarchical confounder mode**: Enable with `confounder_hierarchical=True` when fine-grained token distinctions matter (e.g., "ECOG PS 0" vs "ECOG PS 2"). Uses sentence-level sparse attention to focus on relevant sentences, then token-level attention to preserve specific values.
+11. **GRU confounder mode**: Enable with `confounder_use_gru=True` for learning confounder extraction from scratch. All parameters (embeddings, GRU, attention, latent confounders) are optimized together via the causal loss. Requires `fit_tokenizer()` before training. Best when pretrained encoders may have domain mismatch or when you want the model to learn clinical-specific representations.

@@ -390,6 +390,27 @@ def _train_cnn_model(
                 texts=train_texts,
                 freeze=arch_config.cnn_freeze_filters
             )
+    elif feature_extractor_type == "gru":
+        # GRU-specific initialization
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Fitted word tokenizer on {len(train_texts)} training texts")
+
+        # Initialize embeddings from BERT if configured
+        if getattr(arch_config, 'gru_init_embeddings_from', None):
+            model.feature_extractor.init_embeddings_from_bert(
+                arch_config.gru_init_embeddings_from,
+                freeze=getattr(arch_config, 'gru_freeze_embeddings', False)
+            )
+    elif feature_extractor_type == "confounder":
+        # Confounder extractor initialization
+        # Check if GRU-based (requires fit_tokenizer)
+        if getattr(arch_config, 'confounder_use_gru', False):
+            model.fit_tokenizer(train_texts)
+            logger.info(f"Fitted word tokenizer for GRU confounder extractor on {len(train_texts)} texts")
+        else:
+            # BERT-based or sentence-level: trigger lazy initialization
+            model.fit_tokenizer(train_texts)  # No-op for pretrained encoders, triggers init
+            logger.info("Using confounder feature extractor (pretrained encoder)")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")

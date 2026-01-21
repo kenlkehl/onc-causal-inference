@@ -157,6 +157,19 @@ class ModelArchitectureConfig:
     confounder_freeze_token_encoder: bool = True  # Whether to freeze token encoder
     confounder_max_sentence_tokens: int = 128  # Max tokens per sentence in hierarchical mode
 
+    # GRU-based hierarchical confounder extractor (learns from scratch)
+    # When enabled, uses BiGRU instead of pretrained BERT for sentence encoding
+    # All parameters (embeddings, GRU, attention) learn together via causal loss
+    confounder_use_gru: bool = False  # Use GRU instead of BERT for sentence encoding
+    confounder_gru_embedding_dim: int = 128  # Word embedding dimension
+    confounder_gru_hidden_dim: int = 128  # GRU hidden state dimension per direction
+    confounder_gru_num_layers: int = 1  # Number of stacked GRU layers
+    confounder_gru_bidirectional: bool = True  # Use bidirectional GRU
+    confounder_gru_dropout: float = 0.1  # Dropout rate
+    confounder_gru_max_vocab: int = 50000  # Maximum vocabulary size
+    confounder_gru_min_word_freq: int = 2  # Minimum word frequency for vocabulary
+    confounder_gru_max_sentence_length: int = 128  # Maximum tokens per sentence
+
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128
     dragonnet_hidden_outcome_dim: int = 64

@@ -33,7 +33,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .sparse_attention import sparse_softmax, SparseCrossAttention
+from .sparse_attention import sparse_softmax, SparseCrossAttention, top_k_attention
 
 
 logger = logging.getLogger(__name__)
@@ -959,6 +959,11 @@ class HierarchicalConfounderExtractor(nn.Module):
         else:
             self.register_buffer('explicit_confounders', torch.zeros(0, self._encoder_dim, device=self._device))
 
+        # Confounder-specific sentence pooling projections
+        # Each confounder uses its own attention query to pool token embeddings
+        self._W_pool_k = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False).to(self._device)
+        self._W_pool_v = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False).to(self._device)
+
         # Token-level cross-attention projections
         head_dim = self._encoder_dim // self.num_attention_heads
         self._W_q = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False).to(self._device)
@@ -996,6 +1001,47 @@ class HierarchicalConfounderExtractor(nn.Module):
             return torch.cat([self._latent_confounders, self.explicit_confounders], dim=0)
         return self._latent_confounders
 
+    def _compute_confounder_sentence_embeddings(
+        self,
+        confounders: torch.Tensor,
+        token_embeddings: torch.Tensor,
+        attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute K confounder-specific sentence embeddings from BERT token embeddings.
+
+        Each confounder uses its own attention query to pool the token embeddings,
+        creating K different sentence embeddings per sentence. This allows
+        each confounder to focus on different aspects of the sentence.
+
+        Args:
+            confounders: (K, D) confounder vectors used as attention queries
+            token_embeddings: (L, D) BERT hidden states for one sentence
+            attention_mask: (L,) attention mask where 1 = valid token, 0 = padding
+
+        Returns:
+            sentence_embs: (K, D) one embedding per confounder
+        """
+        K = confounders.size(0)
+
+        # Project to keys and values
+        keys = self._W_pool_k(token_embeddings)    # (L, D)
+        values = self._W_pool_v(token_embeddings)  # (L, D)
+
+        # Each confounder queries the sentence: (K, D) @ (D, L) -> (K, L)
+        scores = torch.matmul(confounders, keys.T) / (keys.size(-1) ** 0.5)
+
+        # Mask padding tokens
+        scores = scores.masked_fill(attention_mask.unsqueeze(0) == 0, -1e9)
+
+        # Softmax per confounder
+        weights = F.softmax(scores, dim=-1)  # (K, L)
+
+        # Weighted sum: (K, L) @ (L, D) -> (K, D)
+        sentence_embs = torch.matmul(weights, values)
+
+        return sentence_embs
+
     def _compute_sentence_attention(
         self,
         confounders: torch.Tensor,
@@ -1003,18 +1049,35 @@ class HierarchicalConfounderExtractor(nn.Module):
         mask: Optional[torch.Tensor] = None
     ) -> torch.Tensor:
         """
-        Compute sparse sentence-level attention.
+        Compute sparse sentence-level attention with confounder-specific views.
+
+        Each confounder k attends to its own confounder-specific sentence embeddings,
+        so different confounders can have different relevance assessments of the
+        same sentence.
 
         Args:
             confounders: (K, D) confounder vectors
-            sentence_embeddings: (S, D) sentence embeddings
+            sentence_embeddings: (S, K, D) confounder-specific sentence embeddings
             mask: (S,) optional mask where True = ignore
 
         Returns:
             sentence_weights: (K, S) sparse attention weights
         """
-        # Dot-product attention: (K, D) @ (D, S) -> (K, S)
-        scores = torch.matmul(confounders, sentence_embeddings.T) / (confounders.size(-1) ** 0.5)
+        K, D = confounders.shape
+        S = sentence_embeddings.size(0)
+
+        # Each confounder k attends to its own view of sentences
+        # scores[k, s] = confounders[k] · sentence_embeddings[s, k]
+        # Efficient computation: batch dot products
+        # confounders: (K, D), sentence_embeddings: (S, K, D)
+        # We want: for each k, compute confounders[k] @ sentence_embeddings[:, k, :].T
+        # This gives us (K, S) scores
+
+        # Reshape for batch matmul: (K, 1, D) @ (K, D, S) -> (K, 1, S) -> (K, S)
+        confounders_expanded = confounders.unsqueeze(1)  # (K, 1, D)
+        sentence_embs_transposed = sentence_embeddings.permute(1, 2, 0)  # (K, D, S)
+        scores = torch.bmm(confounders_expanded, sentence_embs_transposed).squeeze(1)  # (K, S)
+        scores = scores / (D ** 0.5)
 
         # Apply mask
         if mask is not None:
@@ -1026,6 +1089,11 @@ class HierarchicalConfounderExtractor(nn.Module):
                 weights = top_k_attention(scores, k=self.top_k, dim=-1)
             else:
                 weights = sparse_softmax(scores, dim=-1, alpha=self.sparse_alpha)
+
+            # Fallback to softmax if sparse attention produces all zeros
+            # This can happen early in training when embeddings are random
+            if weights.sum() < 1e-6:
+                weights = F.softmax(scores, dim=-1)
         else:
             weights = F.softmax(scores, dim=-1)
 
@@ -1071,6 +1139,10 @@ class HierarchicalConfounderExtractor(nn.Module):
         """
         Extract confounder representations from texts using hierarchical attention.
 
+        Uses confounder-specific sentence pooling: each confounder uses its own
+        attention query to create a different view of each sentence before
+        computing sentence-level sparse attention.
+
         Args:
             texts: List of document texts
             return_attention: Whether to return attention weights
@@ -1089,13 +1161,28 @@ class HierarchicalConfounderExtractor(nn.Module):
             if not sentences:
                 sentences = [text[:500]]  # Fallback
 
-            # 2. Encode each sentence (get both token and sentence embeddings)
-            token_embeddings_list, sentence_embeddings = self.token_encoder.encode_sentences_batch(sentences)
-
-            # 3. Get all confounders
+            # 2. Get all confounders (needed for confounder-specific pooling)
             all_confounders = self._get_all_confounders()  # (K, D)
 
-            # 4. Sentence-level sparse attention
+            # 3. Encode each sentence and compute confounder-specific embeddings
+            # token_embeddings_list: List[(L_i, D)], one per sentence
+            # sentence_embeddings: (S, K, D), one embedding per confounder per sentence
+            token_embeddings_list, _ = self.token_encoder.encode_sentences_batch(sentences)
+
+            # Compute confounder-specific sentence embeddings
+            confounder_sentence_embeddings = []
+            for sent_tokens in token_embeddings_list:
+                # Create a simple attention mask (all valid since we have the tokens)
+                attention_mask = torch.ones(sent_tokens.size(0), device=self._device)
+                conf_sent_emb = self._compute_confounder_sentence_embeddings(
+                    all_confounders, sent_tokens, attention_mask
+                )  # (K, D)
+                confounder_sentence_embeddings.append(conf_sent_emb)
+
+            # Stack to (S, K, D)
+            sentence_embeddings = torch.stack(confounder_sentence_embeddings)
+
+            # 4. Sentence-level sparse attention (each confounder uses its own view)
             sentence_weights = self._compute_sentence_attention(
                 all_confounders, sentence_embeddings
             )  # (K, S)
@@ -1214,6 +1301,9 @@ class HierarchicalConfounderExtractor(nn.Module):
         """Override to track device properly."""
         self._device = device if isinstance(device, torch.device) else torch.device(device)
         self.token_encoder = self.token_encoder.to(device)
+        if hasattr(self, '_W_pool_k') and self._W_pool_k is not None:
+            self._W_pool_k = self._W_pool_k.to(device)
+            self._W_pool_v = self._W_pool_v.to(device)
         if self._W_q is not None:
             self._W_q = self._W_q.to(device)
             self._W_k = self._W_k.to(device)
@@ -1238,3 +1328,645 @@ class HierarchicalConfounderExtractor(nn.Module):
         """No-op for compatibility. Uses pretrained token encoder."""
         self._ensure_initialized()
         return self
+
+
+class GRUHierarchicalConfounderExtractor(nn.Module):
+    """
+    GRU-based hierarchical confounder extractor that learns entirely from scratch.
+
+    Unlike HierarchicalConfounderExtractor which uses pretrained BERT for token encoding,
+    this extractor uses a BiGRU with learnable word embeddings. All parameters (embeddings,
+    GRU weights, attention layers, latent confounders) are learned together via the causal
+    loss. This ensures that confounder representations are optimized directly for causal
+    inference rather than general language understanding.
+
+    Architecture:
+    1. Split text into sentences
+    2. Tokenize each sentence with word-level tokenizer
+    3. Embed tokens with learnable embeddings
+    4. Encode each sentence with BiGRU + attention pooling
+    5. Sentence-Level Sparse Attention (entmax) → Sentence Weights (K × S)
+    6. Token-Level Cross-Attention (within each sentence, gated by sentence weights)
+    7. K Confounder Representations → Causal Head
+
+    Key advantages:
+    - All parameters learn together from causal objective
+    - No domain mismatch from pretrained encoder
+    - Latent confounders adapt to the specific clinical context
+    - Lighter weight than BERT-based approaches
+    """
+
+    def __init__(
+        self,
+        # Vocabulary / tokenizer
+        vocab_size: int = 50000,
+        embedding_dim: int = 128,
+        min_word_freq: int = 2,
+        max_sentence_length: int = 128,
+        # GRU encoder
+        gru_hidden_dim: int = 128,
+        gru_num_layers: int = 1,
+        gru_bidirectional: bool = True,
+        gru_dropout: float = 0.1,
+        # Confounder architecture
+        num_latent_confounders: int = 8,
+        num_attention_heads: int = 4,
+        sparse_attention: bool = True,
+        sparse_alpha: float = 1.5,
+        sparse_method: str = "entmax",
+        top_k: int = 5,
+        max_sentences: int = 100,
+        value_dim: int = 128,
+        # Regularization
+        dropout: float = 0.1,
+        # Device
+        device: Optional[torch.device] = None
+    ):
+        """
+        Initialize GRU-based hierarchical confounder extractor.
+
+        Args:
+            vocab_size: Maximum vocabulary size
+            embedding_dim: Dimension of word embeddings
+            min_word_freq: Minimum word frequency for vocabulary inclusion
+            max_sentence_length: Maximum tokens per sentence
+            gru_hidden_dim: GRU hidden state dimension per direction
+            gru_num_layers: Number of stacked GRU layers
+            gru_bidirectional: Use bidirectional GRU
+            gru_dropout: Dropout rate in GRU
+            num_latent_confounders: Number of learnable latent confounder vectors
+            num_attention_heads: Number of attention heads for token cross-attention
+            sparse_attention: Whether to use sparse attention (entmax/top-k)
+            sparse_alpha: Alpha for entmax (1.5=entmax15, 2.0=sparsemax)
+            sparse_method: Sparsity method ("entmax", "topk", "softmax")
+            top_k: K for top-k attention method
+            max_sentences: Maximum sentences to process per document
+            value_dim: Output dimension per confounder
+            dropout: Dropout rate
+            device: Device to place model on
+        """
+        super().__init__()
+
+        self._device = device or torch.device('cpu')
+        self.max_sentences = max_sentences
+        self.max_sentence_length = max_sentence_length
+        self.num_latent_confounders = num_latent_confounders
+        self.value_dim = value_dim
+        self.num_attention_heads = num_attention_heads
+        self.sparse_attention = sparse_attention
+        self.sparse_alpha = sparse_alpha
+        self.sparse_method = sparse_method
+        self.top_k = top_k
+        self.gru_bidirectional = gru_bidirectional
+
+        # Import WordTokenizer from cnn_extractor
+        from .cnn_extractor import WordTokenizer
+
+        # Word tokenizer (learns vocabulary from training data)
+        self.tokenizer = WordTokenizer(
+            max_length=max_sentence_length,
+            min_freq=min_word_freq,
+            max_vocab_size=vocab_size
+        )
+
+        # Store config for later initialization
+        self._embedding_dim = embedding_dim
+        self._gru_hidden_dim = gru_hidden_dim
+        self._gru_num_layers = gru_num_layers
+        self._gru_dropout = gru_dropout
+        self._dropout_rate = dropout
+
+        # Compute GRU output dimension
+        self.num_directions = 2 if gru_bidirectional else 1
+        self._encoder_dim = gru_hidden_dim * self.num_directions
+
+        # These will be initialized after fit_tokenizer()
+        self.embedding = None
+        self.gru = None
+        self._W_pool_k = None
+        self._W_pool_v = None
+        self._initialized = False
+
+        # Latent confounders: learnable, in GRU embedding space
+        self.latent_confounders = nn.Parameter(
+            torch.randn(num_latent_confounders, self._encoder_dim, device=self._device) * 0.02
+        )
+
+        # Token-level cross-attention projections
+        self._W_q = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False)
+        self._W_k = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False)
+        self._W_v = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False)
+
+        # Dropout
+        self.dropout = nn.Dropout(dropout)
+
+        # Output projection
+        output_input_dim = self._encoder_dim * num_latent_confounders
+        self._output_projection = nn.Sequential(
+            nn.Linear(output_input_dim, output_input_dim),
+            nn.LayerNorm(output_input_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(output_input_dim, value_dim),
+            nn.LayerNorm(value_dim)
+        )
+
+        self._output_dim = value_dim
+
+        # No explicit confounders for GRU version (all learned from scratch)
+        self.num_explicit_confounders = 0
+        self.total_confounders = num_latent_confounders
+
+        logger.info(f"GRUHierarchicalConfounderExtractor initialized:")
+        logger.info(f"  Latent confounders: {num_latent_confounders}")
+        logger.info(f"  Embedding dim: {embedding_dim}")
+        logger.info(f"  GRU hidden dim: {gru_hidden_dim} x {self.num_directions}")
+        logger.info(f"  Encoder dim: {self._encoder_dim}")
+        logger.info(f"  Sparse attention: {sparse_attention} ({sparse_method}, alpha={sparse_alpha})")
+
+    def _ensure_initialized(self):
+        """Ensure embedding and GRU are initialized after tokenizer is fitted."""
+        if self._initialized:
+            return
+
+        if self.tokenizer.vocab_size == 0:
+            raise RuntimeError("Must call fit_tokenizer() before using the model")
+
+        # Initialize embedding layer
+        self.embedding = nn.Embedding(
+            num_embeddings=self.tokenizer.vocab_size,
+            embedding_dim=self._embedding_dim,
+            padding_idx=self.tokenizer.pad_token
+        )
+        self.embedding.to(self._device)
+
+        # Initialize GRU
+        self.gru = nn.GRU(
+            input_size=self._embedding_dim,
+            hidden_size=self._gru_hidden_dim,
+            num_layers=self._gru_num_layers,
+            batch_first=True,
+            dropout=self._gru_dropout if self._gru_num_layers > 1 else 0,
+            bidirectional=self.gru_bidirectional
+        )
+        self.gru.to(self._device)
+
+        # Confounder-specific sentence pooling projections
+        # Instead of a single shared attention pooling, each confounder uses its own
+        # attention query to pool the sentence, creating K different sentence embeddings
+        self._W_pool_k = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False)
+        self._W_pool_v = nn.Linear(self._encoder_dim, self._encoder_dim, bias=False)
+        self._W_pool_k.to(self._device)
+        self._W_pool_v.to(self._device)
+
+        # Embedding layer norm and dropout
+        self._embed_layer_norm = nn.LayerNorm(self._embedding_dim)
+        self._embed_layer_norm.to(self._device)
+        self._embed_dropout = nn.Dropout(self._dropout_rate)
+
+        self._initialized = True
+        logger.info(f"  Vocab size: {self.tokenizer.vocab_size}")
+
+    @property
+    def output_dim(self) -> int:
+        """Get output embedding dimension."""
+        return self._output_dim
+
+    def _compute_confounder_sentence_embeddings(
+        self,
+        confounders: torch.Tensor,
+        gru_output: torch.Tensor,
+        attention_mask: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute K confounder-specific sentence embeddings from GRU output.
+
+        Each confounder uses its own attention query to pool the sentence,
+        creating K different sentence embeddings per sentence. This allows
+        each confounder to focus on different aspects of the sentence.
+
+        Args:
+            confounders: (K, D) confounder vectors used as attention queries
+            gru_output: (L, D) GRU hidden states for one sentence
+            attention_mask: (L,) attention mask where 1 = valid token, 0 = padding
+
+        Returns:
+            sentence_embs: (K, D) one embedding per confounder
+        """
+        K = confounders.size(0)
+
+        # Project to keys and values
+        keys = self._W_pool_k(gru_output)    # (L, D)
+        values = self._W_pool_v(gru_output)  # (L, D)
+
+        # Each confounder queries the sentence: (K, D) @ (D, L) -> (K, L)
+        scores = torch.matmul(confounders, keys.T) / (keys.size(-1) ** 0.5)
+
+        # Mask padding tokens
+        scores = scores.masked_fill(attention_mask.unsqueeze(0) == 0, -1e9)
+
+        # Softmax per confounder
+        weights = F.softmax(scores, dim=-1)  # (K, L)
+
+        # Weighted sum: (K, L) @ (L, D) -> (K, D)
+        sentence_embs = torch.matmul(weights, values)
+
+        return sentence_embs
+
+    def fit_tokenizer(self, texts: List[str]) -> 'GRUHierarchicalConfounderExtractor':
+        """
+        Fit tokenizer on training texts and initialize embedding layer.
+
+        MUST be called before using the model for training or inference.
+
+        Args:
+            texts: List of training text strings
+
+        Returns:
+            self for method chaining
+        """
+        # Collect all sentences from all documents
+        all_sentences = []
+        for text in texts:
+            sentences = split_into_sentences(text, self.max_sentences)
+            all_sentences.extend(sentences)
+
+        # Fit tokenizer on all sentences
+        self.tokenizer.fit(all_sentences)
+
+        # Initialize embedding and GRU
+        self._ensure_initialized()
+
+        logger.info(f"Tokenizer fitted on {len(all_sentences)} sentences, vocab size = {self.tokenizer.vocab_size}")
+
+        return self
+
+    def _encode_sentence_tokens(
+        self,
+        sentence: str,
+        confounders: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Encode a single sentence, returning token embeddings and confounder-specific
+        sentence embeddings.
+
+        Args:
+            sentence: Input sentence string
+            confounders: (K, D) confounder vectors used as attention queries
+
+        Returns:
+            token_embeddings: (L, encoder_dim) tensor of token embeddings from GRU
+            sentence_embeddings: (K, encoder_dim) tensor with one embedding per confounder
+        """
+        self._ensure_initialized()
+
+        # Tokenize
+        encoded = self.tokenizer(
+            [sentence],
+            padding=True,
+            truncation=True,
+            return_tensors='pt'
+        )
+
+        input_ids = encoded['input_ids'].to(self._device)  # (1, L)
+        attention_mask = encoded['attention_mask'].to(self._device)  # (1, L)
+
+        # Embed tokens
+        embeddings = self.embedding(input_ids)  # (1, L, embedding_dim)
+        embeddings = self._embed_layer_norm(embeddings)
+        embeddings = self._embed_dropout(embeddings)
+
+        # GRU forward
+        gru_output, _ = self.gru(embeddings)  # (1, L, encoder_dim)
+
+        # Token embeddings
+        token_embs = gru_output[0]  # (L, encoder_dim)
+
+        # Confounder-specific sentence embeddings using query-based pooling
+        sentence_embs = self._compute_confounder_sentence_embeddings(
+            confounders, token_embs, attention_mask[0]
+        )  # (K, encoder_dim)
+
+        return token_embs, sentence_embs
+
+    def _encode_sentences_batch(
+        self,
+        sentences: List[str],
+        confounders: torch.Tensor
+    ) -> Tuple[List[torch.Tensor], torch.Tensor]:
+        """
+        Encode multiple sentences, returning token embeddings per sentence
+        and confounder-specific sentence embeddings.
+
+        Args:
+            sentences: List of sentence strings
+            confounders: (K, D) confounder vectors used as attention queries
+
+        Returns:
+            token_embeddings_list: List of (L_i, encoder_dim) tensors for each sentence
+            sentence_embeddings: (S, K, encoder_dim) tensor with one embedding per
+                                 confounder per sentence
+        """
+        K = confounders.size(0)
+        if not sentences:
+            return [], torch.zeros(0, K, self._encoder_dim, device=self._device)
+
+        token_embeddings_list = []
+        sentence_embeddings = []
+
+        for sentence in sentences:
+            token_embs, sentence_emb = self._encode_sentence_tokens(sentence, confounders)
+            token_embeddings_list.append(token_embs)
+            sentence_embeddings.append(sentence_emb)  # (K, encoder_dim)
+
+        # Stack to (S, K, encoder_dim)
+        return token_embeddings_list, torch.stack(sentence_embeddings)
+
+    def _compute_sentence_attention(
+        self,
+        confounders: torch.Tensor,
+        sentence_embeddings: torch.Tensor,
+        mask: Optional[torch.Tensor] = None
+    ) -> torch.Tensor:
+        """
+        Compute sparse sentence-level attention with confounder-specific views.
+
+        Each confounder k attends to its own confounder-specific sentence embeddings,
+        so different confounders can have different relevance assessments of the
+        same sentence.
+
+        Args:
+            confounders: (K, D) confounder vectors
+            sentence_embeddings: (S, K, D) confounder-specific sentence embeddings
+            mask: (S,) optional mask where True = ignore
+
+        Returns:
+            sentence_weights: (K, S) sparse attention weights
+        """
+        K, D = confounders.shape
+        S = sentence_embeddings.size(0)
+
+        # Each confounder k attends to its own view of sentences
+        # scores[k, s] = confounders[k] · sentence_embeddings[s, k]
+        # Efficient computation: batch dot products
+        # confounders: (K, D), sentence_embeddings: (S, K, D)
+        # We want: for each k, compute confounders[k] @ sentence_embeddings[:, k, :].T
+        # This gives us (K, S) scores
+
+        # Reshape for batch matmul: (K, 1, D) @ (K, D, S) -> (K, 1, S) -> (K, S)
+        confounders_expanded = confounders.unsqueeze(1)  # (K, 1, D)
+        sentence_embs_transposed = sentence_embeddings.permute(1, 2, 0)  # (K, D, S)
+        scores = torch.bmm(confounders_expanded, sentence_embs_transposed).squeeze(1)  # (K, S)
+        scores = scores / (D ** 0.5)
+
+        # Apply mask
+        if mask is not None:
+            scores = scores.masked_fill(mask.unsqueeze(0), float('-inf'))
+
+        # Apply sparse attention
+        if self.sparse_attention:
+            if self.sparse_method == "topk":
+                weights = top_k_attention(scores, k=self.top_k, dim=-1)
+            else:
+                weights = sparse_softmax(scores, dim=-1, alpha=self.sparse_alpha)
+
+            # Fallback to softmax if sparse attention produces all zeros
+            # This can happen early in training when embeddings are random
+            if weights.sum() < 1e-6:
+                weights = F.softmax(scores, dim=-1)
+        else:
+            weights = F.softmax(scores, dim=-1)
+
+        return weights
+
+    def _compute_token_attention(
+        self,
+        confounder: torch.Tensor,
+        token_embeddings: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Compute token-level cross-attention within a sentence.
+
+        Args:
+            confounder: (D,) single confounder vector
+            token_embeddings: (L, D) token embeddings for one sentence
+
+        Returns:
+            attended: (D,) weighted sum of tokens
+        """
+        # Project query (confounder), keys, values
+        q = self._W_q(confounder.unsqueeze(0))  # (1, D)
+        k = self._W_k(token_embeddings)  # (L, D)
+        v = self._W_v(token_embeddings)  # (L, D)
+
+        # Compute attention scores
+        scores = torch.matmul(q, k.T) / (q.size(-1) ** 0.5)  # (1, L)
+
+        # Softmax (token attention is typically dense within sentence)
+        weights = F.softmax(scores, dim=-1)  # (1, L)
+        weights = self.dropout(weights)
+
+        # Weighted sum
+        attended = torch.matmul(weights, v)  # (1, D)
+
+        return attended.squeeze(0)
+
+    def forward(
+        self,
+        texts: List[str],
+        return_attention: bool = False
+    ) -> torch.Tensor:
+        """
+        Extract confounder representations from texts using hierarchical attention.
+
+        Uses confounder-specific sentence pooling: each confounder uses its own
+        attention query to create a different view of each sentence before
+        computing sentence-level sparse attention.
+
+        Args:
+            texts: List of document texts
+            return_attention: Whether to return attention weights
+
+        Returns:
+            features: Feature tensor (batch, output_dim)
+        """
+        self._ensure_initialized()
+        batch_size = len(texts)
+        batch_results = []
+        all_attention_weights = [] if return_attention else None
+
+        for text in texts:
+            # 1. Split into sentences
+            sentences = split_into_sentences(text, self.max_sentences)
+            if not sentences:
+                sentences = [text[:500]]  # Fallback
+
+            # 2. Get latent confounders (needed for confounder-specific pooling)
+            all_confounders = self.latent_confounders  # (K, D)
+
+            # 3. Encode each sentence with confounder-specific pooling
+            # Returns: token_embeddings_list: List[(L_i, D)], sentence_embeddings: (S, K, D)
+            token_embeddings_list, sentence_embeddings = self._encode_sentences_batch(
+                sentences, all_confounders
+            )
+
+            # 4. Sentence-level sparse attention (each confounder uses its own view)
+            sentence_weights = self._compute_sentence_attention(
+                all_confounders, sentence_embeddings
+            )  # (K, S)
+
+            if return_attention:
+                all_attention_weights.append({
+                    'sentence_weights': sentence_weights.detach().cpu(),
+                    'sentences': sentences
+                })
+
+            # 5. Token-level cross-attention per sentence, gated by sentence weights
+            confounder_reprs = []
+            for k in range(self.total_confounders):
+                weighted_repr = torch.zeros(self._encoder_dim, device=self._device)
+
+                for s, sent_tokens in enumerate(token_embeddings_list):
+                    weight = sentence_weights[k, s].item()
+                    if weight < 1e-6:
+                        continue  # Skip zero-weight sentences (sparse!)
+
+                    # Token attention within sentence
+                    sent_repr = self._compute_token_attention(
+                        all_confounders[k], sent_tokens
+                    )
+
+                    # Gate by sentence importance
+                    weighted_repr = weighted_repr + sentence_weights[k, s] * sent_repr
+
+                confounder_reprs.append(weighted_repr)
+
+            # Stack confounders: (K, D)
+            doc_confounders = torch.stack(confounder_reprs)
+            batch_results.append(doc_confounders)
+
+        # Stack batch: (B, K, D)
+        batch_confounders = torch.stack(batch_results)
+
+        # Flatten and project: (B, K*D) -> (B, value_dim)
+        flat_confounders = batch_confounders.reshape(batch_size, -1)
+        features = self._output_projection(flat_confounders)
+
+        if return_attention:
+            return features, all_attention_weights
+        return features
+
+    def get_attention_weights(
+        self,
+        texts: List[str]
+    ) -> Dict[str, Any]:
+        """
+        Get attention weights for visualization and interpretation.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            Dictionary with attention information per document
+        """
+        _, attention_info = self.forward(texts, return_attention=True)
+
+        confounder_names = [f"latent_{i}" for i in range(self.num_latent_confounders)]
+
+        return {
+            'attention_info': attention_info,
+            'confounder_names': confounder_names
+        }
+
+    def interpret_attention(
+        self,
+        texts: List[str],
+        top_k: int = 5
+    ) -> List[Dict[str, Any]]:
+        """
+        Get human-readable interpretation of what each confounder attends to.
+
+        Args:
+            texts: List of document texts
+            top_k: Number of top-attended sentences to show per confounder
+
+        Returns:
+            List of dictionaries per document with interpretations
+        """
+        result = self.get_attention_weights(texts)
+        attention_info = result['attention_info']
+        confounder_names = result['confounder_names']
+
+        interpretations = []
+        for doc_idx, doc_info in enumerate(attention_info):
+            sentences = doc_info['sentences']
+            sentence_weights = doc_info['sentence_weights']  # (K, S)
+
+            doc_interp = {}
+            for conf_idx, conf_name in enumerate(confounder_names):
+                conf_weights = sentence_weights[conf_idx]  # (S,)
+
+                # Get top-k
+                k_actual = min(top_k, len(sentences))
+                top_vals, top_indices = torch.topk(conf_weights, k_actual)
+
+                top_sentences = []
+                for val, idx in zip(top_vals.tolist(), top_indices.tolist()):
+                    if val > 0.001:
+                        top_sentences.append({
+                            'sentence': sentences[idx],
+                            'attention': val
+                        })
+
+                doc_interp[conf_name] = top_sentences
+
+            interpretations.append(doc_interp)
+
+        return interpretations
+
+    def to(self, device):
+        """Override to track device properly."""
+        self._device = device if isinstance(device, torch.device) else torch.device(device)
+        if self.embedding is not None:
+            self.embedding = self.embedding.to(device)
+        if self.gru is not None:
+            self.gru = self.gru.to(device)
+        if hasattr(self, '_W_pool_k') and self._W_pool_k is not None:
+            self._W_pool_k = self._W_pool_k.to(device)
+            self._W_pool_v = self._W_pool_v.to(device)
+        if hasattr(self, '_embed_layer_norm') and self._embed_layer_norm is not None:
+            self._embed_layer_norm = self._embed_layer_norm.to(device)
+        self._W_q = self._W_q.to(device)
+        self._W_k = self._W_k.to(device)
+        self._W_v = self._W_v.to(device)
+        self._output_projection = self._output_projection.to(device)
+        return super().to(device)
+
+    def get_state(self) -> Dict[str, Any]:
+        """Get extractor state for checkpoint saving."""
+        return {
+            'num_latent_confounders': self.num_latent_confounders,
+            'value_dim': self.value_dim,
+            'max_sentences': self.max_sentences,
+            'output_dim': self._output_dim,
+            'gru_hierarchical': True,
+            'vocab_size': self.tokenizer.vocab_size if self._initialized else 0
+        }
+
+    def get_tokenizer_state(self) -> Dict[str, Any]:
+        """Get tokenizer state for checkpoint saving."""
+        return {
+            'word_to_id': self.tokenizer.word_to_id,
+            'id_to_word': self.tokenizer.id_to_word,
+            'vocab_size': self.tokenizer.vocab_size,
+            'max_length': self.tokenizer.max_length,
+            'min_freq': self.tokenizer.min_freq,
+            'max_vocab_size': self.tokenizer.max_vocab_size
+        }
+
+    def load_tokenizer_state(self, state: Dict[str, Any]) -> None:
+        """Load tokenizer state from checkpoint."""
+        self.tokenizer.word_to_id = state['word_to_id']
+        self.tokenizer.id_to_word = state['id_to_word']
+        self.tokenizer._vocab_size = state['vocab_size']
+        self._ensure_initialized()

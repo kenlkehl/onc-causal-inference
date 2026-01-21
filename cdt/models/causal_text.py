@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from .cnn_extractor import CNNFeatureExtractor
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor
-from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor
+from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
@@ -101,6 +101,16 @@ class CausalText(nn.Module):
         confounder_token_encoder: str = "distilbert-base-uncased",
         confounder_freeze_token_encoder: bool = True,
         confounder_max_sentence_tokens: int = 128,
+        # GRU-based hierarchical confounder args (learns from scratch)
+        confounder_use_gru: bool = False,
+        confounder_gru_embedding_dim: int = 128,
+        confounder_gru_hidden_dim: int = 128,
+        confounder_gru_num_layers: int = 1,
+        confounder_gru_bidirectional: bool = True,
+        confounder_gru_dropout: float = 0.1,
+        confounder_gru_max_vocab: int = 50000,
+        confounder_gru_min_word_freq: int = 2,
+        confounder_gru_max_sentence_length: int = 128,
         # DragonNet args
         dragonnet_representation_dim: int = 128,
         dragonnet_hidden_outcome_dim: int = 64,
@@ -194,6 +204,15 @@ class CausalText(nn.Module):
             'confounder_token_encoder': confounder_token_encoder,
             'confounder_freeze_token_encoder': confounder_freeze_token_encoder,
             'confounder_max_sentence_tokens': confounder_max_sentence_tokens,
+            'confounder_use_gru': confounder_use_gru,
+            'confounder_gru_embedding_dim': confounder_gru_embedding_dim,
+            'confounder_gru_hidden_dim': confounder_gru_hidden_dim,
+            'confounder_gru_num_layers': confounder_gru_num_layers,
+            'confounder_gru_bidirectional': confounder_gru_bidirectional,
+            'confounder_gru_dropout': confounder_gru_dropout,
+            'confounder_gru_max_vocab': confounder_gru_max_vocab,
+            'confounder_gru_min_word_freq': confounder_gru_min_word_freq,
+            'confounder_gru_max_sentence_length': confounder_gru_max_sentence_length,
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
@@ -234,8 +253,32 @@ class CausalText(nn.Module):
             logger.info(f"Using GRU feature extractor: {gru_num_layers} layers, "
                        f"hidden_dim={gru_hidden_dim}, bidirectional={gru_bidirectional}")
         elif self.feature_extractor_type == "confounder":
-            if confounder_hierarchical:
-                # Hierarchical extractor with token-level attention
+            if confounder_use_gru:
+                # GRU-based hierarchical extractor (learns from scratch)
+                self.feature_extractor = GRUHierarchicalConfounderExtractor(
+                    vocab_size=confounder_gru_max_vocab,
+                    embedding_dim=confounder_gru_embedding_dim,
+                    min_word_freq=confounder_gru_min_word_freq,
+                    max_sentence_length=confounder_gru_max_sentence_length,
+                    gru_hidden_dim=confounder_gru_hidden_dim,
+                    gru_num_layers=confounder_gru_num_layers,
+                    gru_bidirectional=confounder_gru_bidirectional,
+                    gru_dropout=confounder_gru_dropout,
+                    num_latent_confounders=confounder_num_latents,
+                    num_attention_heads=confounder_num_heads,
+                    sparse_attention=confounder_sparse_attention,
+                    sparse_alpha=confounder_sparse_alpha,
+                    sparse_method=confounder_sparse_method,
+                    top_k=confounder_top_k,
+                    max_sentences=confounder_max_sentences,
+                    value_dim=confounder_value_dim,
+                    dropout=confounder_dropout,
+                    device=self._device
+                )
+                logger.info(f"Using GRU Hierarchical Confounder feature extractor: {confounder_num_latents} latents, "
+                           f"GRU hidden_dim={confounder_gru_hidden_dim}, sparse={confounder_sparse_attention}")
+            elif confounder_hierarchical:
+                # Hierarchical extractor with token-level attention (BERT-based)
                 self.feature_extractor = HierarchicalConfounderExtractor(
                     num_latent_confounders=confounder_num_latents,
                     explicit_confounder_texts=confounder_explicit_texts,

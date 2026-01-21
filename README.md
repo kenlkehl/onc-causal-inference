@@ -52,6 +52,18 @@ Kernel Size 5 (5-word phrases):
 
 Each explicit concept is converted to an embedding sequence using the BERT-initialized word embeddings, creating a filter that responds strongly to that clinical pattern. Additional "latent" filters are learned by clustering n-grams from the training corpus.
 
+### Confounder Extractors
+
+For long clinical documents where confounders are mentioned in specific sentences, CDT offers specialized confounder extractors:
+
+- **ConfounderExtractor**: Sentence-level attention with Perceiver-style cross-attention. Learnable latent queries attend to sentence embeddings using sparse attention (entmax).
+
+- **HierarchicalConfounderExtractor**: Token-level attention using pretrained BERT. Sentence-level sparse attention identifies relevant sentences, then token-level attention preserves fine-grained signal (e.g., "ECOG PS 0" vs "ECOG PS 2").
+
+- **GRUHierarchicalConfounderExtractor**: Learns entirely from scratch via the causal objective. Uses BiGRU with learnable embeddings instead of pretrained BERT. All parameters (embeddings, GRU, attention, latent confounders) optimize together.
+
+See `examples/confounder_config.json` and `examples/gru_confounder_config.json` for configuration examples.
+
 ### Workflow Modes
 
 #### Applied Inference
