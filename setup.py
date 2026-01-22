@@ -37,6 +37,7 @@ setup(
         "tqdm>=4.65.0",
         "pyarrow",
         "joblib>=1.2.0",
+        "entmax>=1.0",
     ],
     extras_require={
         "dev": [
