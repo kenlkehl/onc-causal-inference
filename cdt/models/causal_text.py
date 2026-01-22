@@ -11,6 +11,7 @@ from .cnn_extractor import CNNFeatureExtractor
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
+from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
@@ -111,6 +112,16 @@ class CausalText(nn.Module):
         confounder_gru_max_vocab: int = 50000,
         confounder_gru_min_word_freq: int = 2,
         confounder_gru_max_sentence_length: int = 128,
+        # Hierarchical Transformer args
+        hier_transformer_sentence_model: str = "prajjwal1/bert-tiny",
+        hier_transformer_freeze_sentence_encoder: bool = True,
+        hier_transformer_max_sentences: int = 100,
+        hier_transformer_max_sentence_length: int = 128,
+        hier_transformer_num_layers: int = 2,
+        hier_transformer_num_heads: int = 4,
+        hier_transformer_dim: int = 256,
+        hier_transformer_dropout: float = 0.1,
+        hier_transformer_projection_dim: int = 128,
         # DragonNet args
         dragonnet_representation_dim: int = 128,
         dragonnet_hidden_outcome_dim: int = 64,
@@ -213,6 +224,15 @@ class CausalText(nn.Module):
             'confounder_gru_max_vocab': confounder_gru_max_vocab,
             'confounder_gru_min_word_freq': confounder_gru_min_word_freq,
             'confounder_gru_max_sentence_length': confounder_gru_max_sentence_length,
+            'hier_transformer_sentence_model': hier_transformer_sentence_model,
+            'hier_transformer_freeze_sentence_encoder': hier_transformer_freeze_sentence_encoder,
+            'hier_transformer_max_sentences': hier_transformer_max_sentences,
+            'hier_transformer_max_sentence_length': hier_transformer_max_sentence_length,
+            'hier_transformer_num_layers': hier_transformer_num_layers,
+            'hier_transformer_num_heads': hier_transformer_num_heads,
+            'hier_transformer_dim': hier_transformer_dim,
+            'hier_transformer_dropout': hier_transformer_dropout,
+            'hier_transformer_projection_dim': hier_transformer_projection_dim,
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
@@ -320,6 +340,22 @@ class CausalText(nn.Module):
                 )
                 logger.info(f"Using Confounder feature extractor: {confounder_num_latents} latents, "
                            f"{confounder_num_iterations} iterations, sparse={confounder_sparse_attention}")
+        elif self.feature_extractor_type == "hierarchical_transformer":
+            # Hierarchical Transformer: sentence BERT + transformer pooling
+            self.feature_extractor = HierarchicalTransformerExtractor(
+                sentence_encoder_model=hier_transformer_sentence_model,
+                freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
+                max_sentences=hier_transformer_max_sentences,
+                max_sentence_length=hier_transformer_max_sentence_length,
+                num_transformer_layers=hier_transformer_num_layers,
+                num_attention_heads=hier_transformer_num_heads,
+                transformer_dim=hier_transformer_dim,
+                transformer_dropout=hier_transformer_dropout,
+                projection_dim=hier_transformer_projection_dim,
+                device=self._device
+            )
+            logger.info(f"Using Hierarchical Transformer feature extractor: {hier_transformer_sentence_model}, "
+                       f"{hier_transformer_num_layers} layers, projection_dim={hier_transformer_projection_dim}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(
@@ -717,12 +753,19 @@ class CausalText(nn.Module):
         with torch.no_grad():
             return self.feature_extractor(texts)
 
-    def fit_tokenizer(self, texts: List[str]) -> 'CausalText':
+    def init_extractor(self, texts: List[str]) -> 'CausalText':
         """
-        Fit the word tokenizer on training texts.
+        Initialize the feature extractor with training texts.
 
-        For CNN/GRU: This MUST be called before using the model for training or inference.
-        For BERT: This is a no-op (BERT uses its pretrained tokenizer).
+        This method performs different operations depending on the feature extractor type:
+        - CNN/GRU: Builds vocabulary from texts and initializes embeddings (required)
+        - BERT: No-op (uses pretrained tokenizer)
+        - ConfounderExtractor: Triggers lazy initialization of pretrained encoder
+        - HierarchicalTransformer: Triggers lazy initialization of sentence encoder
+
+        MUST be called before training for CNN/GRU/GRUConfounder extractors.
+        For pretrained extractors (BERT, Confounder, HierarchicalTransformer), this
+        triggers lazy initialization but the texts argument is not used.
 
         Args:
             texts: List of training text strings
@@ -734,6 +777,14 @@ class CausalText(nn.Module):
             self.feature_extractor.fit_tokenizer(texts)
         # BERT uses pretrained tokenizer, no fitting needed
         return self
+
+    def fit_tokenizer(self, texts: List[str]) -> 'CausalText':
+        """
+        Alias for init_extractor() for backward compatibility.
+
+        See init_extractor() for documentation.
+        """
+        return self.init_extractor(texts)
 
     def save_checkpoint(
         self,

@@ -10,6 +10,7 @@ from .cnn_extractor import CNNFeatureExtractor, WordTokenizer
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor, AttentionPooling
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
+from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .sparse_attention import (
     sparse_softmax,
     top_k_attention,
@@ -34,6 +35,7 @@ __all__ = [
     'ConfounderExtractor',
     'HierarchicalConfounderExtractor',
     'GRUHierarchicalConfounderExtractor',
+    'HierarchicalTransformerExtractor',
     'sparse_softmax',
     'top_k_attention',
     'adaptive_top_k',

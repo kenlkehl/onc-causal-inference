@@ -66,6 +66,44 @@ For long clinical documents where confounders are mentioned in specific sentence
 
 See `examples/confounder_config.json` and `examples/gru_confounder_config.json` for configuration examples.
 
+### Hierarchical Transformer Extractor
+
+For a simpler alternative to ConfounderExtractor, the **HierarchicalTransformerExtractor** provides straightforward hierarchical encoding without latent confounders or sparse attention:
+
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → [CLS] token (S × hidden_dim)
+        ↓
+Transformer Layer(s) with learnable [POOL] token
+        ↓
+Final Representation (D,) → DragonNet/RLearner
+```
+
+**Key features:**
+- **Sentence encoding**: Uses `prajjwal1/bert-tiny` (4.4M params) by default - fast and lightweight
+- **Learnable [POOL] token**: Like BERT's [CLS], aggregates all sentence embeddings through self-attention
+- **Transformer pooling**: 1-2 transformer layers allow sentences to attend to each other
+- **Interpretability**: `interpret_attention()` method shows which sentences contribute most to the final representation
+- **Optional fine-tuning**: Sentence encoder can be frozen or fine-tuned
+
+**Key configuration:**
+```python
+hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
+hier_transformer_freeze_sentence_encoder: bool = True  # Freeze or fine-tune
+hier_transformer_max_sentences: int = 100  # Max sentences per document
+hier_transformer_max_sentence_length: int = 128  # Max tokens per sentence
+hier_transformer_num_layers: int = 2  # Transformer layers for pooling
+hier_transformer_num_heads: int = 4  # Attention heads
+hier_transformer_dim: int = 256  # Transformer hidden dimension
+hier_transformer_dropout: float = 0.1
+hier_transformer_projection_dim: int = 128  # Final output dimension
+```
+
+See `examples/hierarchical_transformer_config.json` for a complete configuration example.
+
 ### Workflow Modes
 
 #### Applied Inference

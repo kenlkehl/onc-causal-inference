@@ -45,7 +45,7 @@ class MatchingAnalysisConfig:
 
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
-    Normalize feature extractor type to one of: "cnn", "bert", "gru", or "confounder".
+    Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder", or "hierarchical_transformer".
 
     This handles variants like "modernbert" which should be treated as "bert".
 
@@ -53,12 +53,16 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
         feature_type: The raw feature extractor type string
 
     Returns:
-        Normalized type: "cnn", "bert", "gru", or "confounder"
+        Normalized type: "cnn", "bert", "gru", "confounder", or "hierarchical_transformer"
     """
     if feature_type is None:
         return "cnn"
 
     feature_type_lower = feature_type.lower()
+
+    # Check for hierarchical transformer extractor
+    if feature_type_lower in ("hierarchical_transformer", "hier_transformer", "hierarchical"):
+        return "hierarchical_transformer"
 
     # Check for confounder extractor
     if feature_type_lower in ("confounder", "perceiver", "sentence_perceiver"):
@@ -169,6 +173,18 @@ class ModelArchitectureConfig:
     confounder_gru_max_vocab: int = 50000  # Maximum vocabulary size
     confounder_gru_min_word_freq: int = 2  # Minimum word frequency for vocabulary
     confounder_gru_max_sentence_length: int = 128  # Maximum tokens per sentence
+
+    # Hierarchical Transformer extractor (used when feature_extractor_type="hierarchical_transformer")
+    # Simple hierarchical approach: sentence-level BERT encoding + transformer pooling
+    hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder model
+    hier_transformer_freeze_sentence_encoder: bool = True  # Whether to freeze sentence encoder
+    hier_transformer_max_sentences: int = 100  # Maximum sentences per document
+    hier_transformer_max_sentence_length: int = 128  # Maximum tokens per sentence
+    hier_transformer_num_layers: int = 2  # Number of transformer layers for pooling
+    hier_transformer_num_heads: int = 4  # Number of attention heads
+    hier_transformer_dim: int = 256  # Hidden dimension for transformer layers
+    hier_transformer_dropout: float = 0.1  # Dropout rate
+    hier_transformer_projection_dim: int = 128  # Final output dimension
 
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128

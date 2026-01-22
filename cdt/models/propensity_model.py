@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from .cnn_extractor import CNNFeatureExtractor
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor
+from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from ..config import normalize_feature_extractor_type
 
 
@@ -106,6 +107,16 @@ class PropensityOnlyModel(nn.Module):
         gru_max_length: int = 8192,
         gru_min_word_freq: int = 2,
         gru_max_vocab_size: Optional[int] = 50000,
+        # Hierarchical Transformer args
+        hier_transformer_sentence_model: str = "prajjwal1/bert-tiny",
+        hier_transformer_freeze_sentence_encoder: bool = True,
+        hier_transformer_max_sentences: int = 100,
+        hier_transformer_max_sentence_length: int = 128,
+        hier_transformer_num_layers: int = 2,
+        hier_transformer_num_heads: int = 4,
+        hier_transformer_dim: int = 256,
+        hier_transformer_dropout: float = 0.1,
+        hier_transformer_projection_dim: int = 128,
         # Propensity network args
         representation_dim: int = 128,
         device: str = "cuda:0"
@@ -169,6 +180,15 @@ class PropensityOnlyModel(nn.Module):
             'gru_max_length': gru_max_length,
             'gru_min_word_freq': gru_min_word_freq,
             'gru_max_vocab_size': gru_max_vocab_size,
+            'hier_transformer_sentence_model': hier_transformer_sentence_model,
+            'hier_transformer_freeze_sentence_encoder': hier_transformer_freeze_sentence_encoder,
+            'hier_transformer_max_sentences': hier_transformer_max_sentences,
+            'hier_transformer_max_sentence_length': hier_transformer_max_sentence_length,
+            'hier_transformer_num_layers': hier_transformer_num_layers,
+            'hier_transformer_num_heads': hier_transformer_num_heads,
+            'hier_transformer_dim': hier_transformer_dim,
+            'hier_transformer_dropout': hier_transformer_dropout,
+            'hier_transformer_projection_dim': hier_transformer_projection_dim,
             'representation_dim': representation_dim
         }
 
@@ -200,6 +220,20 @@ class PropensityOnlyModel(nn.Module):
                 device=self._device
             )
             logger.info("Propensity model using GRU feature extractor")
+        elif self.feature_extractor_type == "hierarchical_transformer":
+            self.feature_extractor = HierarchicalTransformerExtractor(
+                sentence_encoder_model=hier_transformer_sentence_model,
+                freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
+                max_sentences=hier_transformer_max_sentences,
+                max_sentence_length=hier_transformer_max_sentence_length,
+                num_transformer_layers=hier_transformer_num_layers,
+                num_attention_heads=hier_transformer_num_heads,
+                transformer_dim=hier_transformer_dim,
+                transformer_dropout=hier_transformer_dropout,
+                projection_dim=hier_transformer_projection_dim,
+                device=self._device
+            )
+            logger.info(f"Propensity model using Hierarchical Transformer: {hier_transformer_sentence_model}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(
@@ -362,6 +396,16 @@ def create_propensity_model_from_config(
         gru_max_length=getattr(arch_config, 'gru_max_length', 8192),
         gru_min_word_freq=getattr(arch_config, 'gru_min_word_freq', 2),
         gru_max_vocab_size=getattr(arch_config, 'gru_max_vocab_size', 50000),
+        # Hierarchical Transformer args
+        hier_transformer_sentence_model=getattr(arch_config, 'hier_transformer_sentence_model', 'prajjwal1/bert-tiny'),
+        hier_transformer_freeze_sentence_encoder=getattr(arch_config, 'hier_transformer_freeze_sentence_encoder', True),
+        hier_transformer_max_sentences=getattr(arch_config, 'hier_transformer_max_sentences', 100),
+        hier_transformer_max_sentence_length=getattr(arch_config, 'hier_transformer_max_sentence_length', 128),
+        hier_transformer_num_layers=getattr(arch_config, 'hier_transformer_num_layers', 2),
+        hier_transformer_num_heads=getattr(arch_config, 'hier_transformer_num_heads', 4),
+        hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
+        hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
+        hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
         # Propensity network args
         representation_dim=representation_dim,
         device=str(device)

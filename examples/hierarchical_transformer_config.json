@@ -1,0 +1,143 @@
+{
+  "output_dir": "./cdt_results_hierarchical_transformer",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 4,
+
+  "_comment_overview": "HierarchicalTransformerExtractor uses a simple hierarchical approach: split text into sentences, encode each with tiny BERT, then use transformer layers with a learnable [POOL] token to aggregate into a final representation. This is simpler than ConfounderExtractor - no latent confounders or sparse attention, just straightforward sentence encoding with transformer pooling.",
+
+  "applied_inference": {
+    "dataset_path": "./data/clinical_notes.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "split_column": "split",
+    "cv_folds": 5,
+
+    "architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "hierarchical_transformer",
+
+      "_comment_sentence_encoder": "Sentence encoder model from HuggingFace. prajjwal1/bert-tiny is very fast (4.4M params). For better quality, try distilbert-base-uncased or prajjwal1/bert-small.",
+      "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
+
+      "_comment_freeze": "Whether to freeze the sentence encoder weights. True is faster and uses less memory; False allows fine-tuning.",
+      "hier_transformer_freeze_sentence_encoder": true,
+
+      "_comment_max_sentences": "Maximum sentences per document. Documents with more sentences will have later sentences truncated.",
+      "hier_transformer_max_sentences": 100,
+
+      "_comment_max_sentence_length": "Maximum tokens per sentence for BERT encoding. Sentences longer than this are truncated.",
+      "hier_transformer_max_sentence_length": 128,
+
+      "_comment_transformer_layers": "Number of transformer layers for pooling sentence embeddings. More layers = more expressiveness but slower.",
+      "hier_transformer_num_layers": 2,
+
+      "_comment_attention_heads": "Number of attention heads in transformer layers.",
+      "hier_transformer_num_heads": 4,
+
+      "_comment_transformer_dim": "Hidden dimension for transformer layers. Should be divisible by num_heads.",
+      "hier_transformer_dim": 256,
+
+      "_comment_dropout": "Dropout rate in transformer layers.",
+      "hier_transformer_dropout": 0.1,
+
+      "_comment_projection_dim": "Final output dimension of the feature extractor. This feeds into DragonNet/RLearner.",
+      "hier_transformer_projection_dim": 128,
+
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64,
+      "dragonnet_dropout": 0.2
+    },
+
+    "training": {
+      "epochs": 50,
+      "batch_size": 8,
+      "learning_rate": 0.0001,
+      "optimizer": "adamw",
+      "lr_schedule": "linear",
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1,
+      "gamma_rlearner": 1.0,
+      "weight_decay": 0.01,
+      "gradient_clip_norm": 1.0,
+      "label_smoothing": 0.0
+    },
+
+    "use_pretrained_weights": false,
+
+    "matching_analysis": {
+      "enabled": true,
+      "method": "nearest",
+      "caliper": 0.2,
+      "caliper_scale": "std",
+      "ratio": 1,
+      "replacement": false,
+      "n_bootstrap": 1000,
+      "ci_level": 0.95
+    }
+  },
+
+  "plasmode_experiments": {
+    "enabled": false,
+    "num_repeats": 3,
+    "save_datasets": false,
+    "train_fraction": 0.8,
+    "generator_architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "hierarchical_transformer",
+      "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
+      "hier_transformer_freeze_sentence_encoder": true,
+      "hier_transformer_max_sentences": 100,
+      "hier_transformer_max_sentence_length": 128,
+      "hier_transformer_num_layers": 2,
+      "hier_transformer_num_heads": 4,
+      "hier_transformer_dim": 256,
+      "hier_transformer_dropout": 0.1,
+      "hier_transformer_projection_dim": 128,
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+    "generator_training": {
+      "learning_rate": 0.0001,
+      "epochs": 20,
+      "batch_size": 8,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1,
+      "gamma_rlearner": 1.0
+    },
+    "evaluator_architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "hierarchical_transformer",
+      "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
+      "hier_transformer_freeze_sentence_encoder": true,
+      "hier_transformer_max_sentences": 100,
+      "hier_transformer_max_sentence_length": 128,
+      "hier_transformer_num_layers": 2,
+      "hier_transformer_num_heads": 4,
+      "hier_transformer_dim": 256,
+      "hier_transformer_dropout": 0.1,
+      "hier_transformer_projection_dim": 128,
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+    "evaluator_training": {
+      "learning_rate": 0.0001,
+      "epochs": 20,
+      "batch_size": 8,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1,
+      "gamma_rlearner": 1.0
+    },
+    "plasmode_scenarios": [
+      {
+        "generation_mode": "phi_linear",
+        "preserve_observed_treatments": true,
+        "baseline_control_outcome_rate": 0.2,
+        "target_ate_prob": 0.10,
+        "outcome_heterogeneity_scale": 1.0,
+        "ite_heterogeneity_scale": 1.0
+      }
+    ]
+  }
+}

@@ -265,6 +265,10 @@ def _train_propensity_model(
             # BERT-based or sentence-level: trigger lazy initialization
             model.fit_tokenizer(train_texts)  # No-op for pretrained encoders, triggers init
             logger.info("Using confounder feature extractor (pretrained encoder)")
+    elif feature_extractor_type == "hierarchical_transformer":
+        # Hierarchical Transformer: trigger lazy initialization
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        logger.info(f"Using Hierarchical Transformer feature extractor: {arch_config.hier_transformer_sentence_model}")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")

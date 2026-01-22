@@ -24,6 +24,7 @@ cdt/                          # Main package
 │   ├── bert_extractor.py     # BertFeatureExtractor - HuggingFace transformer CLS token
 │   ├── gru_extractor.py      # GRUFeatureExtractor - BiGRU with attention pooling
 │   ├── confounder_extractor.py # ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
+│   ├── hierarchical_transformer_extractor.py # HierarchicalTransformerExtractor - sentence BERT + transformer pooling
 │   ├── dragonnet.py          # DragonNet head (propensity + potential outcomes)
 │   ├── uplift.py             # UpliftNet head (alternative parametrization)
 │   ├── rlearner.py           # RLearnerNet head (direct tau optimization)
@@ -55,7 +56,8 @@ examples/                     # Example config files
 ├── modernbert_config.json    # ModernBERT config
 ├── rlearner_config.json      # R-Learner with direct tau optimization
 ├── confounder_config.json    # Confounder extractor with sparse cross-attention
-└── gru_confounder_config.json # GRU-based confounder extractor (learns from scratch)
+├── gru_confounder_config.json # GRU-based confounder extractor (learns from scratch)
+└── hierarchical_transformer_config.json # Hierarchical transformer (sentence BERT + pooling)
 ```
 
 ## Architecture
@@ -63,11 +65,12 @@ examples/                     # Example config files
 ### Core Model: CausalText (`cdt/models/causal_text.py`)
 
 The main model combines:
-1. **Feature Extractor** (one of four types):
+1. **Feature Extractor** (one of five types):
    - `cnn`: 1D CNN with word-level tokenization (default, fastest)
    - `bert`: HuggingFace transformer (Bio_ClinicalBERT, ModernBERT, etc.)
    - `gru`: Bidirectional GRU with attention (O(N) for long sequences)
    - `confounder`: Perceiver-style cross-attention with sparse attention for long documents
+   - `hierarchical_transformer`: Sentence-level BERT + transformer pooling (simple, effective for long docs)
 
 2. **Causal Inference Head** (one of three types):
    - `dragonnet`: Classic DragonNet (propensity + Y0/Y1 potential outcomes)
@@ -258,6 +261,49 @@ Concatenate: (3*D,) → MLP → Causal Head
 - Hierarchical mode preserves fine-grained signal that sentence embeddings may lose
 - Works with standard causal loss - no concept labels needed
 
+### HierarchicalTransformerExtractor (`cdt/models/hierarchical_transformer_extractor.py`)
+
+Simple hierarchical feature extractor using sentence-level BERT encoding + transformer pooling.
+
+**Architecture:**
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → [CLS] token (S × hidden_dim)
+        ↓
+Transformer Layer(s) with learnable [POOL] token
+        ↓
+Final Representation (D,) → DragonNet/RLearner
+```
+
+**Key features:**
+- **Simple design**: No latent confounders or sparse attention - just straightforward hierarchical encoding
+- **Sentence encoder**: Uses lightweight BERT models (e.g., `prajjwal1/bert-tiny` with 4.4M params)
+- **Transformer pooling**: Learnable [POOL] token aggregates sentence embeddings via self-attention
+- **Interpretability**: `interpret_attention()` method shows which sentences the [POOL] token attends to
+- **No fit_tokenizer needed**: Uses pretrained BERT tokenizer
+
+**Key configuration:**
+```python
+hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
+hier_transformer_freeze_sentence_encoder: bool = True  # Freeze encoder weights
+hier_transformer_max_sentences: int = 100  # Max sentences per document
+hier_transformer_max_sentence_length: int = 128  # Max tokens per sentence
+hier_transformer_num_layers: int = 2  # Transformer pooling layers
+hier_transformer_num_heads: int = 4  # Attention heads
+hier_transformer_dim: int = 256  # Transformer hidden dimension
+hier_transformer_dropout: float = 0.1
+hier_transformer_projection_dim: int = 128  # Final output dimension
+```
+
+**When to use:**
+- Long documents where sentence-level processing is appropriate
+- When you want a simpler alternative to ConfounderExtractor
+- When interpretability via sentence attention is desired
+- When you don't need explicit confounder queries
+
 ### Sparse Attention Utilities (`cdt/models/sparse_attention.py`)
 
 Provides sparse attention mechanisms that produce exact zeros for irrelevant positions:
@@ -413,7 +459,7 @@ Supports both OpenAI API and local vLLM batch inference.
 
 - **Main model**: `cdt/models/causal_text.py` (CausalText)
 - **Causal heads**: `cdt/models/dragonnet.py`, `cdt/models/uplift.py`, `cdt/models/rlearner.py`
-- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor)
+- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor), `cdt/models/hierarchical_transformer_extractor.py` (HierarchicalTransformerExtractor)
 - **Sparse attention**: `cdt/models/sparse_attention.py` (entmax, top-k, SparseCrossAttention)
 - **Training loop**: `cdt/inference/applied.py` (_train_single_model, _train_epoch)
 - **Plasmode**: `cdt/training/plasmode.py` (plasmode simulation experiments)
@@ -602,6 +648,46 @@ for doc_idx, doc_interp in enumerate(interpretations):
         print(f"  {conf_name}: {[a['sentence'][:50] for a in attended]}")
 ```
 
+### Training with HierarchicalTransformerExtractor
+```python
+from cdt.models import CausalText
+
+# Simple hierarchical approach: sentence BERT + transformer pooling
+model = CausalText(
+    feature_extractor_type="hierarchical_transformer",
+    model_type="rlearner",
+    # Sentence encoder (prajjwal1/bert-tiny is fast and lightweight)
+    hier_transformer_sentence_model="prajjwal1/bert-tiny",
+    hier_transformer_freeze_sentence_encoder=True,
+    # Transformer pooling
+    hier_transformer_num_layers=2,
+    hier_transformer_num_heads=4,
+    hier_transformer_dim=256,
+    hier_transformer_dropout=0.1,
+    hier_transformer_projection_dim=128,
+    # Document limits
+    hier_transformer_max_sentences=100,
+    hier_transformer_max_sentence_length=128,
+    device="cuda:0"
+)
+
+# No fit_tokenizer needed - uses pretrained BERT tokenizer
+model.fit_tokenizer(train_texts)  # Triggers lazy initialization
+
+# Training loop
+for batch in dataloader:
+    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
+    losses['loss'].backward()
+    optimizer.step()
+
+# Interpret attention weights (which sentences the [POOL] token attends to)
+interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
+for doc_idx, interp in enumerate(interpretations):
+    print(f"Document {doc_idx}:")
+    for sent_info in interp['top_sentences']:
+        print(f"  [{sent_info['attention']:.3f}] {sent_info['sentence'][:60]}...")
+```
+
 ### Getting predictions
 ```python
 preds = model.predict(texts)
@@ -643,8 +729,8 @@ output_dir/
 
 ## Notes for Development
 
-1. **Feature extractor type**: CNN is fastest, BERT is most expressive, GRU is efficient for long sequences, Confounder is best for extracting specific signals from long documents
-2. **Tokenizer fitting**: CNN/GRU require `fit_tokenizer()` before use; BERT/Confounder (pretrained) use pretrained tokenizers; GRU Confounder (`confounder_use_gru=True`) requires `fit_tokenizer()`
+1. **Feature extractor type**: CNN is fastest, BERT is most expressive, GRU is efficient for long sequences, Confounder is best for extracting specific signals from long documents, Hierarchical Transformer is simple and effective for long documents
+2. **Tokenizer fitting**: CNN/GRU require `fit_tokenizer()` before use; BERT/Confounder (pretrained)/Hierarchical Transformer use pretrained tokenizers; GRU Confounder (`confounder_use_gru=True`) requires `fit_tokenizer()`
 3. **Filter initialization**: Semantic filters improve interpretability; k-means captures data patterns
 4. **Propensity trimming**: Optional preprocessing to enforce positivity assumption
 5. **All predictions are on probability scale**: ITE = P(Y=1|T=1,X) - P(Y=1|T=0,X)
@@ -654,3 +740,4 @@ output_dir/
 9. **Confounder extractor**: Use for long documents (2048+ tokens) where confounders are mentioned in specific sentences. Sparse attention (entmax) forces focus on relevant sentences. Use `interpret_attention()` to visualize what each latent confounder attends to.
 10. **Hierarchical confounder mode**: Enable with `confounder_hierarchical=True` when fine-grained token distinctions matter (e.g., "ECOG PS 0" vs "ECOG PS 2"). Uses sentence-level sparse attention to focus on relevant sentences, then token-level attention to preserve specific values.
 11. **GRU confounder mode**: Enable with `confounder_use_gru=True` for learning confounder extraction from scratch. All parameters (embeddings, GRU, attention, latent confounders) are optimized together via the causal loss. Requires `fit_tokenizer()` before training. Best when pretrained encoders may have domain mismatch or when you want the model to learn clinical-specific representations.
+12. **Hierarchical Transformer extractor**: Use `feature_extractor_type="hierarchical_transformer"` for a simple sentence-level encoding approach. Uses lightweight BERT (e.g., `prajjwal1/bert-tiny`) to encode each sentence, then transformer layers with a learnable [POOL] token to aggregate. Simpler than ConfounderExtractor but still effective for long documents. Use `interpret_attention()` to see which sentences contribute most to the representation.
