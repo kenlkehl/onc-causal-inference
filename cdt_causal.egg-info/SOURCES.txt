@@ -25,7 +25,10 @@ cdt/models/cnn_extractor.py
 cdt/models/components.py
 cdt/models/confounder_extractor.py
 cdt/models/dragonnet.py
+cdt/models/gated_mil_attention.py
+cdt/models/gated_mil_hierarchical_extractor.py
 cdt/models/gru_extractor.py
+cdt/models/hierarchical_transformer_extractor.py
 cdt/models/mlp_dragonnet.py
 cdt/models/outcome_heads.py
 cdt/models/outcome_model.py
@@ -49,7 +52,10 @@ cdt_causal.egg-info/top_level.txt
 examples/bert_config.json
 examples/concept_aware_metastatic_sites.json
 examples/confounder_config.json
+examples/gated_mil_config.json
+examples/gru_confounder_3way_config.json
 examples/gru_confounder_config.json
+examples/hierarchical_transformer_config.json
 examples/modernbert_config.json
 examples/rlearner_config.json
 examples/semantic_cnn_config.json

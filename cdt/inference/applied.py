@@ -421,6 +421,15 @@ def _train_single_model(
         hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
         hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
         hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
+        # Gated MIL Hierarchical args
+        gated_mil_sentence_model=getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny'),
+        gated_mil_freeze_sentence_encoder=getattr(arch_config, 'gated_mil_freeze_sentence_encoder', True),
+        gated_mil_max_sentences=getattr(arch_config, 'gated_mil_max_sentences', 100),
+        gated_mil_max_sentence_length=getattr(arch_config, 'gated_mil_max_sentence_length', 128),
+        gated_mil_hidden_dim=getattr(arch_config, 'gated_mil_hidden_dim', 128),
+        gated_mil_num_confounders=getattr(arch_config, 'gated_mil_num_confounders', 4),
+        gated_mil_dropout=getattr(arch_config, 'gated_mil_dropout', 0.1),
+        gated_mil_projection_dim=getattr(arch_config, 'gated_mil_projection_dim', 128),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -480,6 +489,11 @@ def _train_single_model(
         # Hierarchical Transformer: trigger lazy initialization
         model.fit_tokenizer(train_texts)  # No-op, triggers init
         logger.info(f"Using Hierarchical Transformer feature extractor: {arch_config.hier_transformer_sentence_model}")
+    elif feature_extractor_type == "gated_mil_hierarchical":
+        # Gated MIL Hierarchical: trigger lazy initialization
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        logger.info(f"Using Gated MIL Hierarchical feature extractor: {getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny')}, "
+                   f"{getattr(arch_config, 'gated_mil_num_confounders', 4)} confounders")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")

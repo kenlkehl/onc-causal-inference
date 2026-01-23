@@ -45,7 +45,8 @@ class MatchingAnalysisConfig:
 
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
-    Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder", or "hierarchical_transformer".
+    Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder",
+    "hierarchical_transformer", or "gated_mil_hierarchical".
 
     This handles variants like "modernbert" which should be treated as "bert".
 
@@ -53,12 +54,17 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
         feature_type: The raw feature extractor type string
 
     Returns:
-        Normalized type: "cnn", "bert", "gru", "confounder", or "hierarchical_transformer"
+        Normalized type: "cnn", "bert", "gru", "confounder", "hierarchical_transformer",
+        or "gated_mil_hierarchical"
     """
     if feature_type is None:
         return "cnn"
 
     feature_type_lower = feature_type.lower()
+
+    # Check for gated MIL hierarchical extractor
+    if feature_type_lower in ("gated_mil", "gated_mil_hierarchical", "mil", "gated_mil_hier"):
+        return "gated_mil_hierarchical"
 
     # Check for hierarchical transformer extractor
     if feature_type_lower in ("hierarchical_transformer", "hier_transformer", "hierarchical"):
@@ -185,6 +191,18 @@ class ModelArchitectureConfig:
     hier_transformer_dim: int = 256  # Hidden dimension for transformer layers
     hier_transformer_dropout: float = 0.1  # Dropout rate
     hier_transformer_projection_dim: int = 128  # Final output dimension
+
+    # Gated MIL Hierarchical extractor (used when feature_extractor_type="gated_mil_hierarchical")
+    # Uses gated MIL attention (tanh * sigmoid gating) with K confounder queries
+    # Task-specific weighting of shared confounders for propensity, tau, outcome
+    gated_mil_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder model
+    gated_mil_freeze_sentence_encoder: bool = True  # Whether to freeze sentence encoder
+    gated_mil_max_sentences: int = 100  # Maximum sentences per document
+    gated_mil_max_sentence_length: int = 128  # Maximum tokens per sentence
+    gated_mil_hidden_dim: int = 128  # Hidden dimension for gated attention
+    gated_mil_num_confounders: int = 4  # Number of confounder queries (K)
+    gated_mil_dropout: float = 0.1  # Dropout rate
+    gated_mil_projection_dim: int = 128  # Final output dimension
 
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128

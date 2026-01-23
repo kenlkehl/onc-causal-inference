@@ -12,6 +12,7 @@ from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
+from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
@@ -122,6 +123,15 @@ class CausalText(nn.Module):
         hier_transformer_dim: int = 256,
         hier_transformer_dropout: float = 0.1,
         hier_transformer_projection_dim: int = 128,
+        # Gated MIL Hierarchical args
+        gated_mil_sentence_model: str = "prajjwal1/bert-tiny",
+        gated_mil_freeze_sentence_encoder: bool = True,
+        gated_mil_max_sentences: int = 100,
+        gated_mil_max_sentence_length: int = 128,
+        gated_mil_hidden_dim: int = 128,
+        gated_mil_num_confounders: int = 4,
+        gated_mil_dropout: float = 0.1,
+        gated_mil_projection_dim: int = 128,
         # DragonNet args
         dragonnet_representation_dim: int = 128,
         dragonnet_hidden_outcome_dim: int = 64,
@@ -233,6 +243,14 @@ class CausalText(nn.Module):
             'hier_transformer_dim': hier_transformer_dim,
             'hier_transformer_dropout': hier_transformer_dropout,
             'hier_transformer_projection_dim': hier_transformer_projection_dim,
+            'gated_mil_sentence_model': gated_mil_sentence_model,
+            'gated_mil_freeze_sentence_encoder': gated_mil_freeze_sentence_encoder,
+            'gated_mil_max_sentences': gated_mil_max_sentences,
+            'gated_mil_max_sentence_length': gated_mil_max_sentence_length,
+            'gated_mil_hidden_dim': gated_mil_hidden_dim,
+            'gated_mil_num_confounders': gated_mil_num_confounders,
+            'gated_mil_dropout': gated_mil_dropout,
+            'gated_mil_projection_dim': gated_mil_projection_dim,
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
@@ -356,6 +374,22 @@ class CausalText(nn.Module):
             )
             logger.info(f"Using Hierarchical Transformer feature extractor: {hier_transformer_sentence_model}, "
                        f"{hier_transformer_num_layers} layers, projection_dim={hier_transformer_projection_dim}")
+        elif self.feature_extractor_type == "gated_mil_hierarchical":
+            # Gated MIL Hierarchical: sentence BERT + gated MIL attention with task-specific weighting
+            self.feature_extractor = GatedMILHierarchicalExtractor(
+                sentence_encoder_model=gated_mil_sentence_model,
+                freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
+                max_sentences=gated_mil_max_sentences,
+                max_sentence_length=gated_mil_max_sentence_length,
+                mil_hidden_dim=gated_mil_hidden_dim,
+                num_confounders=gated_mil_num_confounders,
+                model_type=model_type,
+                projection_dim=gated_mil_projection_dim,
+                dropout=gated_mil_dropout,
+                device=self._device
+            )
+            logger.info(f"Using Gated MIL Hierarchical feature extractor: {gated_mil_sentence_model}, "
+                       f"{gated_mil_num_confounders} confounders, projection_dim={gated_mil_projection_dim}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(

@@ -28,6 +28,7 @@ Requires-Dist: tqdm>=4.65.0
 Requires-Dist: pyarrow
 Requires-Dist: joblib>=1.2.0
 Requires-Dist: openai>=1.0.0
+Requires-Dist: entmax>=1.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: black>=23.0.0; extra == "dev"
@@ -102,7 +103,47 @@ For long clinical documents where confounders are mentioned in specific sentence
 
 - **GRUHierarchicalConfounderExtractor**: Learns entirely from scratch via the causal objective. Uses BiGRU with learnable embeddings instead of pretrained BERT. All parameters (embeddings, GRU, attention, latent confounders) optimize together.
 
+**Task-Specific Multi-Head Aggregation**: The hierarchical confounder extractors use task-specific aggregation to combine the K latent confounder representations. Separate learnable queries for propensity and outcome tasks allow each to weight confounders differently based on patient characteristics. This reduces dimensionality from K×D to 2×D while enabling patient-specific and task-specific weighting.
+
 See `examples/confounder_config.json` and `examples/gru_confounder_config.json` for configuration examples.
+
+### Hierarchical Transformer Extractor
+
+For a simpler alternative to ConfounderExtractor, the **HierarchicalTransformerExtractor** provides straightforward hierarchical encoding without latent confounders or sparse attention:
+
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → [CLS] token (S × hidden_dim)
+        ↓
+Transformer Layer(s) with learnable [POOL] token
+        ↓
+Final Representation (D,) → DragonNet/RLearner
+```
+
+**Key features:**
+- **Sentence encoding**: Uses `prajjwal1/bert-tiny` (4.4M params) by default - fast and lightweight
+- **Learnable [POOL] token**: Like BERT's [CLS], aggregates all sentence embeddings through self-attention
+- **Transformer pooling**: 1-2 transformer layers allow sentences to attend to each other
+- **Interpretability**: `interpret_attention()` method shows which sentences contribute most to the final representation
+- **Optional fine-tuning**: Sentence encoder can be frozen or fine-tuned
+
+**Key configuration:**
+```python
+hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
+hier_transformer_freeze_sentence_encoder: bool = True  # Freeze or fine-tune
+hier_transformer_max_sentences: int = 100  # Max sentences per document
+hier_transformer_max_sentence_length: int = 128  # Max tokens per sentence
+hier_transformer_num_layers: int = 2  # Transformer layers for pooling
+hier_transformer_num_heads: int = 4  # Attention heads
+hier_transformer_dim: int = 256  # Transformer hidden dimension
+hier_transformer_dropout: float = 0.1
+hier_transformer_projection_dim: int = 128  # Final output dimension
+```
+
+See `examples/hierarchical_transformer_config.json` for a complete configuration example.
 
 ### Workflow Modes
 
@@ -345,6 +386,12 @@ A configuration file controls all aspects of the experiment:
 - `n_bootstrap`: Number of bootstrap iterations for confidence intervals (default: 1000)
 - `ci_level`: Confidence level for intervals (default: 0.95)
 
+**Interpretation:**
+- `save_filter_interpretations`: Save CNN filter interpretation analysis (default: false, CNN only)
+- `filter_interpretation_top_k`: Number of top n-grams per filter to save (default: 10)
+- `save_confounder_interpretations`: Save confounder attention analysis (default: false, confounder extractors only)
+- `confounder_interpretation_top_k`: Number of top-attended sentences per confounder (default: 5)
+
 ### CLI Options
 
 ```bash
@@ -367,6 +414,11 @@ output_dir/
 ├── applied_inference/
 │   ├── predictions.parquet        # Per-sample treatment effect estimates
 │   ├── training_log.csv           # Training metrics per epoch
+│   ├── filter_interpretations.json           # (if save_filter_interpretations=true, CNN only)
+│   ├── filter_interpretations_summary.txt    # Human-readable filter summary
+│   ├── confounder_interpretations.json       # (if save_confounder_interpretations=true)
+│   ├── confounder_interpretations_summary.txt # Human-readable confounder summary
+│   ├── confounder_task_weights.json          # Task-specific confounder weights
 │   └── psm_analysis/              # (if matching_analysis.enabled=true)
 │       ├── matched_pairs.csv      # Matched treated-control pairs with distances
 │       ├── balance_statistics.csv # SMD before/after matching

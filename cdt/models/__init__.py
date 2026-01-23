@@ -11,6 +11,8 @@ from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor, AttentionPooling
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
+from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
+from .gated_mil_attention import GatedMILAttention, TaskSpecificConfounderWeighting
 from .sparse_attention import (
     sparse_softmax,
     top_k_attention,
@@ -36,6 +38,9 @@ __all__ = [
     'HierarchicalConfounderExtractor',
     'GRUHierarchicalConfounderExtractor',
     'HierarchicalTransformerExtractor',
+    'GatedMILHierarchicalExtractor',
+    'GatedMILAttention',
+    'TaskSpecificConfounderWeighting',
     'sparse_softmax',
     'top_k_attention',
     'adaptive_top_k',
