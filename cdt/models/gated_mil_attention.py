@@ -304,3 +304,169 @@ class TaskSpecificConfounderWeighting(nn.Module):
             weights['y1'] = F.softmax(self.y1_weight_logits, dim=0).detach().cpu().tolist()
 
         return weights
+
+
+class TokenLevelGatedPooling(nn.Module):
+    """
+    Token-level gated attention for creating confounder-specific sentence representations.
+
+    Instead of using [CLS] tokens from BERT, this module applies gated attention
+    over tokens within each sentence. Each confounder query attends to different
+    tokens, producing K distinct sentence representations per sentence.
+
+    This preserves fine-grained distinctions that [CLS] embeddings may lose,
+    such as "ECOG PS 0" vs "ECOG PS 2" or "no metastatic disease" vs "metastatic disease".
+
+    Architecture:
+        Token Embeddings (L x D)
+                |
+        Gated Features: g = tanh(V @ tokens) * sigmoid(U @ tokens)
+                |
+        For each confounder k:
+            b_k = softmax(q_k @ W @ g.T)  # (L,) token weights
+            r_k = sum(b_k * tokens)       # (D,) confounder-specific representation
+                |
+        Output: K confounder-specific representations (K x D)
+
+    Args:
+        input_dim: Dimension of token embeddings (D)
+        hidden_dim: Hidden dimension for gated attention
+        num_confounders: Number of confounder queries (K)
+        dropout: Dropout rate for attention weights
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int,
+        num_confounders: int,
+        dropout: float = 0.1
+    ):
+        super().__init__()
+
+        self.input_dim = input_dim
+        self.hidden_dim = hidden_dim
+        self.num_confounders = num_confounders
+
+        # Gating transforms
+        # V: tanh branch - captures semantic content
+        self.V = nn.Linear(input_dim, hidden_dim)
+        # U: sigmoid branch - learns to gate/suppress
+        self.U = nn.Linear(input_dim, hidden_dim)
+
+        # Query projection for attention scores
+        self.W = nn.Linear(hidden_dim, hidden_dim, bias=False)
+
+        # K learnable confounder query vectors for token attention
+        self.confounder_queries = nn.Parameter(
+            torch.randn(num_confounders, hidden_dim) * 0.02
+        )
+
+        self.dropout = nn.Dropout(dropout)
+        self.layer_norm = nn.LayerNorm(hidden_dim)
+
+        logger.info(f"TokenLevelGatedPooling initialized: "
+                   f"input_dim={input_dim}, hidden_dim={hidden_dim}, "
+                   f"num_confounders={num_confounders}")
+
+    def forward(
+        self,
+        tokens: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        return_attention: bool = False
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Apply token-level gated attention to create K confounder-specific representations.
+
+        Args:
+            tokens: Token embeddings of shape (L, D) where L is num tokens
+            attention_mask: Optional mask of shape (L,) where True indicates valid tokens
+            return_attention: Whether to return attention weights
+
+        Returns:
+            representations: Tensor of shape (K, D) with K confounder-specific representations
+            attention_weights: Optional tensor of shape (K, L) with token attention weights
+        """
+        L, D = tokens.shape
+
+        # 1. Compute gated features
+        # g = tanh(V @ tokens) * sigmoid(U @ tokens)
+        tanh_branch = torch.tanh(self.V(tokens))  # (L, hidden_dim)
+        sigmoid_branch = torch.sigmoid(self.U(tokens))  # (L, hidden_dim)
+        g = tanh_branch * sigmoid_branch  # (L, hidden_dim)
+        g = self.layer_norm(g)
+
+        # 2. Project gated features
+        g_projected = self.W(g)  # (L, hidden_dim)
+
+        # 3. Compute attention scores for each confounder query
+        # scores[k, l] = dot(confounder_queries[k], g_projected[l])
+        scores = torch.matmul(self.confounder_queries, g_projected.T)  # (K, L)
+
+        # 4. Apply mask if provided
+        if attention_mask is not None:
+            # Mask out padding tokens
+            scores = scores.masked_fill(~attention_mask.unsqueeze(0), float('-inf'))
+
+        # 5. Apply softmax to get attention weights
+        attention_weights = F.softmax(scores, dim=-1)  # (K, L)
+        attention_weights = self.dropout(attention_weights)
+
+        # 6. Compute weighted sum of original token embeddings
+        # representations[k] = sum_l(attention_weights[k, l] * tokens[l])
+        representations = torch.matmul(attention_weights, tokens)  # (K, D)
+
+        if return_attention:
+            return representations, attention_weights
+        return representations, None
+
+    def forward_batch(
+        self,
+        tokens: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        return_attention: bool = False
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Batched forward pass for multiple sentences.
+
+        Args:
+            tokens: Token embeddings of shape (S, L, D) where S is num sentences
+            attention_mask: Optional mask of shape (S, L) where True indicates valid tokens
+            return_attention: Whether to return attention weights
+
+        Returns:
+            representations: Tensor of shape (S, K, D) with K representations per sentence
+            attention_weights: Optional tensor of shape (S, K, L)
+        """
+        S, L, D = tokens.shape
+
+        # 1. Compute gated features
+        tanh_branch = torch.tanh(self.V(tokens))  # (S, L, hidden_dim)
+        sigmoid_branch = torch.sigmoid(self.U(tokens))  # (S, L, hidden_dim)
+        g = tanh_branch * sigmoid_branch  # (S, L, hidden_dim)
+        g = self.layer_norm(g)
+
+        # 2. Project gated features
+        g_projected = self.W(g)  # (S, L, hidden_dim)
+
+        # 3. Compute attention scores
+        # (S, L, hidden_dim) @ (hidden_dim, K) -> (S, L, K) -> transpose -> (S, K, L)
+        scores = torch.einsum('slh,kh->skl', g_projected, self.confounder_queries)
+
+        # 4. Apply mask if provided
+        if attention_mask is not None:
+            # attention_mask: (S, L) -> expand to (S, K, L)
+            mask_expanded = attention_mask.unsqueeze(1).expand(-1, self.num_confounders, -1)
+            scores = scores.masked_fill(~mask_expanded, float('-inf'))
+
+        # 5. Apply softmax
+        attention_weights = F.softmax(scores, dim=-1)  # (S, K, L)
+        attention_weights = self.dropout(attention_weights)
+
+        # 6. Compute weighted sum
+        # (S, K, L) @ (S, L, D) -> (S, K, D)
+        representations = torch.bmm(attention_weights, tokens)
+
+        if return_attention:
+            return representations, attention_weights
+        return representations, None

@@ -130,7 +130,8 @@ def compute_metrics(
     pred_y0: np.ndarray,
     pred_y1: np.ndarray,
     true_y0: np.ndarray,
-    true_y1: np.ndarray
+    true_y1: np.ndarray,
+    true_outcome: np.ndarray
 ) -> Dict[str, float]:
     """Compute all evaluation metrics."""
     metrics = {}
@@ -149,9 +150,36 @@ def compute_metrics(
     except ValueError:
         metrics['propensity_auroc'] = np.nan
 
-    # Outcome metrics
+    # Outcome metrics (MSE against ground truth probabilities)
     metrics['y0_mse'] = mean_squared_error(true_y0, pred_y0)
     metrics['y1_mse'] = mean_squared_error(true_y1, pred_y1)
+
+    # Outcome AUROC metrics (on factual outcomes only)
+    # y0_auroc: evaluate on untreated (T=0), where outcome_indicator = Y(0)
+    untreated_mask = true_treatment == 0
+    if untreated_mask.sum() > 0:
+        try:
+            metrics['y0_auroc'] = roc_auc_score(
+                true_outcome[untreated_mask],
+                pred_y0[untreated_mask]
+            )
+        except ValueError:
+            metrics['y0_auroc'] = np.nan
+    else:
+        metrics['y0_auroc'] = np.nan
+
+    # y1_auroc: evaluate on treated (T=1), where outcome_indicator = Y(1)
+    treated_mask = true_treatment == 1
+    if treated_mask.sum() > 0:
+        try:
+            metrics['y1_auroc'] = roc_auc_score(
+                true_outcome[treated_mask],
+                pred_y1[treated_mask]
+            )
+        except ValueError:
+            metrics['y1_auroc'] = np.nan
+    else:
+        metrics['y1_auroc'] = np.nan
 
     return metrics
 
@@ -399,7 +427,8 @@ def run_condition(
         pred_y0=results_df['pred_y0_prob'].values,
         pred_y1=results_df['pred_y1_prob'].values,
         true_y0=results_df['true_y0_prob'].values,
-        true_y1=results_df['true_y1_prob'].values
+        true_y1=results_df['true_y1_prob'].values,
+        true_outcome=results_df['outcome_indicator'].values
     )
 
     logger.info(f"  Results for {config.name}:")
@@ -410,6 +439,8 @@ def run_condition(
     logger.info(f"    ATE Predicted: {metrics['ate_pred']:.4f}")
     logger.info(f"    ATE True: {metrics['ate_true']:.4f}")
     logger.info(f"    Propensity AUROC: {metrics['propensity_auroc']:.4f}")
+    logger.info(f"    Y0 AUROC (T=0): {metrics['y0_auroc']:.4f}")
+    logger.info(f"    Y1 AUROC (T=1): {metrics['y1_auroc']:.4f}")
 
     return results_df, metrics
 

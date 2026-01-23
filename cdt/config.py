@@ -203,6 +203,9 @@ class ModelArchitectureConfig:
     gated_mil_num_confounders: int = 4  # Number of confounder queries (K)
     gated_mil_dropout: float = 0.1  # Dropout rate
     gated_mil_projection_dim: int = 128  # Final output dimension
+    # Token-level hierarchical mode (preserves fine-grained signal like "PS 0" vs "PS 2")
+    gated_mil_hierarchical: bool = False  # Enable token-level gated pooling
+    gated_mil_token_hidden_dim: int = 64  # Hidden dimension for token-level gating
 
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128

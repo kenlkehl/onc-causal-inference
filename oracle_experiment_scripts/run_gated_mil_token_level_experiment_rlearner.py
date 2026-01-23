@@ -1,26 +1,44 @@
 #!/usr/bin/env python
-"""Hierarchical Transformer experiment using R-Learner for synthetic clinical text.
+"""Gated MIL Token-Level Hierarchical experiment using R-Learner for synthetic clinical text.
 
-This script runs experiments using the HierarchicalTransformerExtractor with
-R-Learner architecture for direct treatment effect optimization.
+This script runs experiments using the GatedMILHierarchicalExtractor with TOKEN-LEVEL
+gated pooling enabled (`gated_mil_hierarchical=True`), combined with R-Learner
+architecture for direct treatment effect optimization.
 
-HierarchicalTransformerExtractor architecture:
-- Splits text into sentences
-- Encodes each sentence with tiny BERT (prajjwal1/bert-tiny) taking [CLS] token
-- Applies transformer layers with learnable [POOL] token to aggregate
-- Simpler than ConfounderExtractor - no latent confounders or sparse attention
+Token-level mode preserves fine-grained distinctions that sentence-level [CLS]
+embeddings may lose, such as:
+- "ECOG performance status 0" vs "ECOG performance status 2"
+- "no metastatic disease" vs "metastatic disease"
+- "stable disease" vs "progressive disease"
+
+Architecture with token-level gating:
+1. Split text into sentences
+2. Encode each sentence with BERT, keeping ALL token embeddings (not just [CLS])
+3. Token-level gated pooling: Each of K confounder queries attends to tokens,
+   creating K confounder-specific sentence representations per sentence
+4. Sentence-level gated MIL attention: Each confounder's view is aggregated
+5. Task-specific weighting of shared confounders (propensity, tau, outcome)
+
+Key insight: Token-level gated attention creates K DIFFERENT representations per
+sentence. Confounder 1 might focus on "metastatic" while confounder 2 focuses on
+"PS 2". This preserves fine-grained signal that gets lost in a single [CLS] embedding.
 
 Experimental Conditions:
-1. Oracle: patient_prompt (structured ground truth) with hierarchical transformer
-2. Clinical Text: clinical_text (natural language) with hierarchical transformer
+1. Oracle: patient_prompt (structured ground truth) with token-level gated MIL
+2. Clinical Text: clinical_text (natural language) with token-level gated MIL
 3. LLM-as-Text: llm_structured_text (LLM extracted, converted to text)
 
 Usage:
-    python oracle_experiment_scripts/run_hierarchical_transformer.py \
-        --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
-        --output-dir results/hierarchical_transformer_experiment \
+    python oracle_experiment_scripts/run_gated_mil_token_level_experiment.py \
+        --dataset ../pcori_experiments/explicit_confounder_experiments_1-19-26/dataset_with_extraction.parquet \
+        --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/token_mil_experiment \
         --device cuda:0 \
-        --epochs 50
+        --epochs 25
+
+Comparison with sentence-level:
+    To compare, run both experiments:
+    1. run_gated_mil_hierarchical_experiment.py (sentence-level, default)
+    2. run_gated_mil_token_level_experiment.py (token-level, this script)
 """
 
 import argparse
@@ -62,24 +80,26 @@ class ExperimentConfig:
     freeze_sentence_encoder: bool = False  # Fine-tune by default
     max_sentences: int = 100
     max_sentence_length: int = 128
-    num_transformer_layers: int = 2
-    num_attention_heads: int = 4
-    transformer_dim: int = 256
+    mil_hidden_dim: int = 128
+    num_confounders: int = 4
     projection_dim: int = 128
+    # Token-level settings
+    hierarchical: bool = True  # ENABLED for token-level gating
+    token_hidden_dim: int = 64
 
 
 # Define experimental conditions
 EXPERIMENT_CONDITIONS = [
     ExperimentConfig(
-        name="1_oracle",
+        name="1_oracle_token_level",
         text_column="patient_prompt",
     ),
     ExperimentConfig(
-        name="2_clinical_text",
+        name="2_clinical_text_token_level",
         text_column="clinical_text",
     ),
     ExperimentConfig(
-        name="3_llm_as_text",
+        name="3_llm_as_text_token_level",
         text_column="llm_structured_text",
     ),
 ]
@@ -184,7 +204,7 @@ def compute_metrics(
     return metrics
 
 
-def train_hierarchical_transformer_model(
+def train_gated_mil_token_model(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     config: ExperimentConfig,
@@ -194,23 +214,25 @@ def train_hierarchical_transformer_model(
     learning_rate: float,
     gamma_rlearner: float = 1.0
 ) -> Tuple[CausalText, List[Dict]]:
-    """Train a Hierarchical Transformer R-Learner model for one fold."""
+    """Train a Gated MIL Token-Level Hierarchical R-Learner model for one fold."""
     text_column = config.text_column
 
-    # Create model with Hierarchical Transformer + R-Learner
+    # Create model with Gated MIL Hierarchical + Token-Level + R-Learner
     model = CausalText(
-        feature_extractor_type="hierarchical_transformer",
+        feature_extractor_type="gated_mil_hierarchical",
         model_type="rlearner",
-        # Hierarchical Transformer settings
-        hier_transformer_sentence_model=config.sentence_model,
-        hier_transformer_freeze_sentence_encoder=config.freeze_sentence_encoder,
-        hier_transformer_max_sentences=config.max_sentences,
-        hier_transformer_max_sentence_length=config.max_sentence_length,
-        hier_transformer_num_layers=config.num_transformer_layers,
-        hier_transformer_num_heads=config.num_attention_heads,
-        hier_transformer_dim=config.transformer_dim,
-        hier_transformer_dropout=0.1,
-        hier_transformer_projection_dim=config.projection_dim,
+        # Gated MIL Hierarchical settings
+        gated_mil_sentence_model=config.sentence_model,
+        gated_mil_freeze_sentence_encoder=config.freeze_sentence_encoder,
+        gated_mil_max_sentences=config.max_sentences,
+        gated_mil_max_sentence_length=config.max_sentence_length,
+        gated_mil_hidden_dim=config.mil_hidden_dim,
+        gated_mil_num_confounders=config.num_confounders,
+        gated_mil_dropout=0.1,
+        gated_mil_projection_dim=config.projection_dim,
+        # TOKEN-LEVEL GATING ENABLED
+        gated_mil_hierarchical=config.hierarchical,  # True for token-level
+        gated_mil_token_hidden_dim=config.token_hidden_dim,
         # DragonNet/RLearner head settings
         dragonnet_representation_dim=128,
         dragonnet_hidden_outcome_dim=64,
@@ -368,7 +390,9 @@ def run_condition(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    gamma_rlearner: float = 1.0
+    gamma_rlearner: float = 1.0,
+    save_attention: bool = False,
+    output_dir: Optional[Path] = None
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Run cross-validation for one experimental condition."""
     logger.info(f"\n{'='*60}")
@@ -376,6 +400,9 @@ def run_condition(
     logger.info(f"  Text column: {config.text_column}")
     logger.info(f"  Sentence model: {config.sentence_model}")
     logger.info(f"  Freeze encoder: {config.freeze_sentence_encoder}")
+    logger.info(f"  Num confounders: {config.num_confounders}")
+    logger.info(f"  Token-level hierarchical: {config.hierarchical}")  # Key difference
+    logger.info(f"  Token hidden dim: {config.token_hidden_dim}")
     logger.info(f"{'='*60}")
 
     # Reset index
@@ -384,6 +411,7 @@ def run_condition(
     kf = KFold(n_splits=n_folds, shuffle=True, random_state=42)
 
     all_predictions = []
+    last_model = None
 
     for fold, (train_idx, test_idx) in enumerate(kf.split(df)):
         logger.info(f"  Fold {fold + 1}/{n_folds}")
@@ -391,7 +419,7 @@ def run_condition(
         train_df = df.iloc[train_idx]
         test_df = df.iloc[test_idx]
 
-        model, history = train_hierarchical_transformer_model(
+        model, history = train_gated_mil_token_model(
             train_df, test_df, config, device,
             epochs, batch_size, learning_rate,
             gamma_rlearner=gamma_rlearner
@@ -409,8 +437,37 @@ def run_condition(
 
         all_predictions.append(fold_preds)
 
-        # Cleanup
-        del model
+        # Keep last model for attention visualization
+        if fold == n_folds - 1:
+            last_model = model
+        else:
+            del model
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    # Save attention weights from last fold if requested
+    if save_attention and last_model is not None and output_dir is not None:
+        logger.info("  Saving attention interpretations from last fold...")
+        try:
+            sample_texts = df[config.text_column].head(20).tolist()
+            interpretations = last_model.feature_extractor.interpret_attention(sample_texts, top_k=5)
+            task_weights = last_model.feature_extractor.get_task_weights()
+
+            interp_path = output_dir / f"{config.name}_attention_interpretations.json"
+            with open(interp_path, 'w') as f:
+                json.dump({
+                    'interpretations': interpretations,
+                    'task_weights': task_weights,
+                    'token_level_enabled': True
+                }, f, indent=2, default=str)
+            logger.info(f"  Saved attention interpretations to: {interp_path}")
+        except Exception as e:
+            logger.warning(f"  Failed to save attention interpretations: {e}")
+
+    # Cleanup last model
+    if last_model is not None:
+        del last_model
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -460,7 +517,7 @@ def create_llm_structured_text(df: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run Hierarchical Transformer experiment with R-Learner"
+        description="Run Gated MIL Token-Level Hierarchical experiment with R-Learner"
     )
     parser.add_argument(
         "--dataset", "-d",
@@ -471,7 +528,7 @@ def main():
     parser.add_argument(
         "--output-dir", "-o",
         type=str,
-        default="results/hierarchical_transformer_experiment",
+        default="results/gated_mil_token_level_experiment",
         help="Output directory for results"
     )
     parser.add_argument(
@@ -487,6 +544,24 @@ def main():
         help="Sentence encoder model (e.g., prajjwal1/bert-tiny, prajjwal1/bert-small)"
     )
     parser.add_argument(
+        "--num-confounders",
+        type=int,
+        default=4,
+        help="Number of confounder queries (K)"
+    )
+    parser.add_argument(
+        "--mil-hidden-dim",
+        type=int,
+        default=128,
+        help="Hidden dimension for gated MIL attention"
+    )
+    parser.add_argument(
+        "--token-hidden-dim",
+        type=int,
+        default=64,
+        help="Hidden dimension for token-level gated attention"
+    )
+    parser.add_argument(
         "--epochs",
         type=int,
         default=50,
@@ -496,7 +571,7 @@ def main():
         "--batch-size",
         type=int,
         default=8,
-        help="Batch size (smaller for hierarchical transformer due to memory)"
+        help="Batch size"
     )
     parser.add_argument(
         "--learning-rate",
@@ -521,12 +596,17 @@ def main():
         type=str,
         nargs="+",
         default=None,
-        help="Specific conditions to run (e.g., 1_oracle 2_clinical_text)"
+        help="Specific conditions to run (e.g., 1_oracle_token_level 2_clinical_text_token_level)"
     )
     parser.add_argument(
         "--skip-llm-condition",
         action="store_true",
         help="Skip condition 3 that requires LLM extractions"
+    )
+    parser.add_argument(
+        "--save-attention",
+        action="store_true",
+        help="Save attention interpretations for analysis"
     )
 
     args = parser.parse_args()
@@ -537,8 +617,12 @@ def main():
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
-    logger.info(f"Using Hierarchical Transformer with R-Learner")
+    logger.info(f"Using Gated MIL Token-Level Hierarchical with R-Learner")
     logger.info(f"  Sentence model: {args.sentence_model}")
+    logger.info(f"  Num confounders: {args.num_confounders}")
+    logger.info(f"  MIL hidden dim: {args.mil_hidden_dim}")
+    logger.info(f"  Token hidden dim: {args.token_hidden_dim}")
+    logger.info(f"  Token-level gating: ENABLED")
     logger.info(f"  Freeze encoder: False (fine-tuning enabled)")
     logger.info(f"  gamma_rlearner: {args.gamma_rlearner}")
 
@@ -560,10 +644,10 @@ def main():
     if has_llm_extraction:
         df = create_llm_structured_text(df)
 
-    # Update experiment configs with command-line sentence model
+    # Update experiment configs with command-line parameters
     conditions = []
     for config in EXPERIMENT_CONDITIONS:
-        # Create new config with updated sentence model
+        # Create new config with updated parameters
         new_config = ExperimentConfig(
             name=config.name,
             text_column=config.text_column,
@@ -571,10 +655,12 @@ def main():
             freeze_sentence_encoder=False,  # Always fine-tune as requested
             max_sentences=config.max_sentences,
             max_sentence_length=config.max_sentence_length,
-            num_transformer_layers=config.num_transformer_layers,
-            num_attention_heads=config.num_attention_heads,
-            transformer_dim=config.transformer_dim,
-            projection_dim=config.projection_dim
+            mil_hidden_dim=args.mil_hidden_dim,
+            num_confounders=args.num_confounders,
+            projection_dim=config.projection_dim,
+            # Token-level settings
+            hierarchical=True,  # Always enabled in this script
+            token_hidden_dim=args.token_hidden_dim
         )
         conditions.append(new_config)
 
@@ -585,7 +671,7 @@ def main():
 
     # Skip LLM condition if requested or extraction not available
     if args.skip_llm_condition or not has_llm_extraction:
-        conditions = [c for c in conditions if c.name != "3_llm_as_text"]
+        conditions = [c for c in conditions if c.name != "3_llm_as_text_token_level"]
         if not has_llm_extraction:
             logger.warning("LLM extraction column not found. Skipping condition 3.")
 
@@ -601,7 +687,9 @@ def main():
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
-                gamma_rlearner=args.gamma_rlearner
+                gamma_rlearner=args.gamma_rlearner,
+                save_attention=args.save_attention,
+                output_dir=output_dir
             )
 
             all_metrics[config.name] = metrics
@@ -625,16 +713,20 @@ def main():
 
     # Print summary table
     logger.info("\n" + "=" * 80)
-    logger.info("EXPERIMENT RESULTS SUMMARY (Hierarchical Transformer + R-Learner)")
+    logger.info("EXPERIMENT RESULTS SUMMARY (Gated MIL Token-Level Hierarchical + R-Learner)")
     logger.info("=" * 80)
     logger.info("\n" + metrics_df.to_string())
 
     # Save config
     config_info = {
         'dataset': args.dataset,
-        'feature_extractor_type': 'hierarchical_transformer',
+        'feature_extractor_type': 'gated_mil_hierarchical',
         'model_type': 'rlearner',
         'sentence_model': args.sentence_model,
+        'num_confounders': args.num_confounders,
+        'mil_hidden_dim': args.mil_hidden_dim,
+        'token_hidden_dim': args.token_hidden_dim,
+        'gated_mil_hierarchical': True,  # Token-level enabled
         'freeze_sentence_encoder': False,
         'epochs': args.epochs,
         'batch_size': args.batch_size,

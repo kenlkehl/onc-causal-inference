@@ -430,6 +430,8 @@ def _train_single_model(
         gated_mil_num_confounders=getattr(arch_config, 'gated_mil_num_confounders', 4),
         gated_mil_dropout=getattr(arch_config, 'gated_mil_dropout', 0.1),
         gated_mil_projection_dim=getattr(arch_config, 'gated_mil_projection_dim', 128),
+        gated_mil_hierarchical=getattr(arch_config, 'gated_mil_hierarchical', False),
+        gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,

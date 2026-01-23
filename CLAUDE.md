@@ -25,6 +25,8 @@ cdt/                          # Main package
 │   ├── gru_extractor.py      # GRUFeatureExtractor - BiGRU with attention pooling
 │   ├── confounder_extractor.py # ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 │   ├── hierarchical_transformer_extractor.py # HierarchicalTransformerExtractor - sentence BERT + transformer pooling
+│   ├── gated_mil_hierarchical_extractor.py # GatedMILHierarchicalExtractor - gated MIL with task-specific weighting
+│   ├── gated_mil_attention.py # GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling
 │   ├── dragonnet.py          # DragonNet head (propensity + potential outcomes)
 │   ├── uplift.py             # UpliftNet head (alternative parametrization)
 │   ├── rlearner.py           # RLearnerNet head (direct tau optimization)
@@ -57,7 +59,8 @@ examples/                     # Example config files
 ├── rlearner_config.json      # R-Learner with direct tau optimization
 ├── confounder_config.json    # Confounder extractor with sparse cross-attention
 ├── gru_confounder_config.json # GRU-based confounder extractor (learns from scratch)
-└── hierarchical_transformer_config.json # Hierarchical transformer (sentence BERT + pooling)
+├── hierarchical_transformer_config.json # Hierarchical transformer (sentence BERT + pooling)
+└── gated_mil_config.json     # Gated MIL hierarchical extractor
 ```
 
 ## Architecture
@@ -65,12 +68,13 @@ examples/                     # Example config files
 ### Core Model: CausalText (`cdt/models/causal_text.py`)
 
 The main model combines:
-1. **Feature Extractor** (one of five types):
+1. **Feature Extractor** (one of six types):
    - `cnn`: 1D CNN with word-level tokenization (default, fastest)
    - `bert`: HuggingFace transformer (Bio_ClinicalBERT, ModernBERT, etc.)
    - `gru`: Bidirectional GRU with attention (O(N) for long sequences)
    - `confounder`: Perceiver-style cross-attention with sparse attention for long documents
    - `hierarchical_transformer`: Sentence-level BERT + transformer pooling (simple, effective for long docs)
+   - `gated_mil_hierarchical`: Gated MIL attention with K confounder queries + task-specific weighting
 
 2. **Causal Inference Head** (one of three types):
    - `dragonnet`: Classic DragonNet (propensity + Y0/Y1 potential outcomes)
@@ -304,6 +308,83 @@ hier_transformer_projection_dim: int = 128  # Final output dimension
 - When interpretability via sentence attention is desired
 - When you don't need explicit confounder queries
 
+### GatedMILHierarchicalExtractor (`cdt/models/gated_mil_hierarchical_extractor.py`)
+
+Gated MIL (Multiple Instance Learning) attention extractor with task-specific confounder weighting. Uses gated attention (tanh × sigmoid gating from pathology AI) with K learnable confounder queries.
+
+**Sentence-level Architecture (default, `gated_mil_hierarchical=False`):**
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → [CLS] token (S × D)
+        ↓
+Gated MIL Attention: h = tanh(V·sent) ⊙ sigmoid(U·sent)
+  For each confounder k: a_k = softmax(q_k · W · h)
+        ↓
+K Confounder Representations (K × D)
+        ↓
+Task-Specific Weighting (propensity, tau/y0, outcome/y1)
+        ↓
+Concatenate: [prop_repr || task2_repr || task3_repr] (3 × D)
+        ↓
+MLP Projection → Final Representation
+```
+
+**Token-level Architecture (`gated_mil_hierarchical=True`):**
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → ALL tokens (S × L × D)
+        ↓
+Token-Level Gated Pooling: Each confounder query attends to tokens
+  Creates K confounder-specific sentence embeddings per sentence
+        ↓
+S × K × D confounder-specific sentence embeddings
+        ↓
+Sentence-Level Gated MIL Attention (per confounder view)
+        ↓
+K Confounder Representations (K × D)
+        ↓
+Task-Specific Weighting → (3 × D)
+        ↓
+MLP Projection → Final Representation
+```
+
+Token-level mode preserves fine-grained distinctions that [CLS] embeddings may lose, such as "ECOG PS 0" vs "ECOG PS 2" or "no metastatic disease" vs "metastatic disease".
+
+**Key features:**
+- **Gated attention**: tanh × sigmoid gating suppresses irrelevant sentences
+- **K confounder queries**: Each learns to extract one type of confounder signal
+- **Task-specific weighting**: Same K confounders, but weighted differently per task
+- **Token-level option**: Preserves fine-grained signal when `gated_mil_hierarchical=True`
+- **Interpretability**: `interpret_attention()` shows top-attended sentences per confounder
+- **No fit_tokenizer needed**: Uses pretrained BERT tokenizer
+
+**Key configuration:**
+```python
+gated_mil_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
+gated_mil_freeze_sentence_encoder: bool = True  # Freeze encoder weights
+gated_mil_max_sentences: int = 100  # Max sentences per document
+gated_mil_max_sentence_length: int = 128  # Max tokens per sentence
+gated_mil_hidden_dim: int = 128  # Hidden dim for gated attention
+gated_mil_num_confounders: int = 4  # Number of confounder queries (K)
+gated_mil_dropout: float = 0.1
+gated_mil_projection_dim: int = 128  # Final output dimension
+# Token-level mode
+gated_mil_hierarchical: bool = False  # Enable token-level gated pooling
+gated_mil_token_hidden_dim: int = 64  # Hidden dim for token-level gating
+```
+
+**When to use:**
+- Long documents with multiple confounders mentioned in different sentences
+- When you want explicit K confounder queries with task-specific weighting
+- When interpretability (which sentences each confounder attends to) is important
+- Use `gated_mil_hierarchical=True` when fine-grained token distinctions matter
+
 ### Sparse Attention Utilities (`cdt/models/sparse_attention.py`)
 
 Provides sparse attention mechanisms that produce exact zeros for irrelevant positions:
@@ -459,7 +540,8 @@ Supports both OpenAI API and local vLLM batch inference.
 
 - **Main model**: `cdt/models/causal_text.py` (CausalText)
 - **Causal heads**: `cdt/models/dragonnet.py`, `cdt/models/uplift.py`, `cdt/models/rlearner.py`
-- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor), `cdt/models/hierarchical_transformer_extractor.py` (HierarchicalTransformerExtractor)
+- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor), `cdt/models/hierarchical_transformer_extractor.py` (HierarchicalTransformerExtractor), `cdt/models/gated_mil_hierarchical_extractor.py` (GatedMILHierarchicalExtractor)
+- **Gated MIL attention**: `cdt/models/gated_mil_attention.py` (GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling)
 - **Sparse attention**: `cdt/models/sparse_attention.py` (entmax, top-k, SparseCrossAttention)
 - **Training loop**: `cdt/inference/applied.py` (_train_single_model, _train_epoch)
 - **Plasmode**: `cdt/training/plasmode.py` (plasmode simulation experiments)
@@ -688,6 +770,54 @@ for doc_idx, interp in enumerate(interpretations):
         print(f"  [{sent_info['attention']:.3f}] {sent_info['sentence'][:60]}...")
 ```
 
+### Training with GatedMILHierarchicalExtractor
+```python
+from cdt.models import CausalText
+
+# Gated MIL with K confounder queries and task-specific weighting
+model = CausalText(
+    feature_extractor_type="gated_mil_hierarchical",
+    model_type="rlearner",
+    # Sentence encoder
+    gated_mil_sentence_model="prajjwal1/bert-tiny",
+    gated_mil_freeze_sentence_encoder=True,
+    # Gated MIL attention
+    gated_mil_num_confounders=4,  # K confounder queries
+    gated_mil_hidden_dim=128,
+    gated_mil_projection_dim=128,
+    # Document limits
+    gated_mil_max_sentences=100,
+    gated_mil_max_sentence_length=128,
+    # Optional: token-level mode for fine-grained signal
+    gated_mil_hierarchical=False,  # Set True to enable token-level pooling
+    gated_mil_token_hidden_dim=64,  # Only used when hierarchical=True
+    device="cuda:0"
+)
+
+# No fit_tokenizer needed - uses pretrained BERT tokenizer
+model.fit_tokenizer(train_texts)  # Triggers lazy initialization
+
+# Training loop
+for batch in dataloader:
+    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
+    losses['loss'].backward()
+    optimizer.step()
+
+# Interpret attention weights (which sentences each confounder attends to)
+interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
+for doc_idx, interp in enumerate(interpretations):
+    print(f"Document {doc_idx}:")
+    for conf_name, top_sents in interp['top_sentences_per_confounder'].items():
+        print(f"  {conf_name}:")
+        for sent_info in top_sents[:3]:
+            print(f"    [{sent_info['attention']:.3f}] {sent_info['sentence'][:50]}...")
+
+# Get task-specific confounder weights
+task_weights = model.feature_extractor.get_task_weights()
+print(f"Propensity weights: {task_weights['propensity']}")
+print(f"Tau weights: {task_weights['tau']}")
+```
+
 ### Getting predictions
 ```python
 preds = model.predict(texts)
@@ -741,3 +871,4 @@ output_dir/
 10. **Hierarchical confounder mode**: Enable with `confounder_hierarchical=True` when fine-grained token distinctions matter (e.g., "ECOG PS 0" vs "ECOG PS 2"). Uses sentence-level sparse attention to focus on relevant sentences, then token-level attention to preserve specific values.
 11. **GRU confounder mode**: Enable with `confounder_use_gru=True` for learning confounder extraction from scratch. All parameters (embeddings, GRU, attention, latent confounders) are optimized together via the causal loss. Requires `fit_tokenizer()` before training. Best when pretrained encoders may have domain mismatch or when you want the model to learn clinical-specific representations.
 12. **Hierarchical Transformer extractor**: Use `feature_extractor_type="hierarchical_transformer"` for a simple sentence-level encoding approach. Uses lightweight BERT (e.g., `prajjwal1/bert-tiny`) to encode each sentence, then transformer layers with a learnable [POOL] token to aggregate. Simpler than ConfounderExtractor but still effective for long documents. Use `interpret_attention()` to see which sentences contribute most to the representation.
+13. **Gated MIL Hierarchical extractor**: Use `feature_extractor_type="gated_mil_hierarchical"` for gated MIL attention with K confounder queries and task-specific weighting. Uses tanh × sigmoid gating (from pathology AI) to suppress irrelevant sentences. K confounders are shared across tasks but weighted differently for propensity vs tau vs outcome. Enable `gated_mil_hierarchical=True` for token-level gated pooling when fine-grained distinctions matter. Use `interpret_attention()` to see which sentences each confounder attends to, and `get_task_weights()` to see how confounders are weighted per task.

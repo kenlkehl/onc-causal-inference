@@ -104,6 +104,86 @@ hier_transformer_projection_dim: int = 128  # Final output dimension
 
 See `examples/hierarchical_transformer_config.json` for a complete configuration example.
 
+### Gated MIL Hierarchical Extractor
+
+For causally-motivated confounder extraction with task-specific weighting, the **GatedMILHierarchicalExtractor** uses gated MIL (Multiple Instance Learning) attention from pathology AI:
+
+**Key insight**: Confounders are patient characteristics (e.g., performance status, metastatic burden) that affect both treatment assignment and outcomes. The same K confounders should feed into all tasks, but each task can weight them differently:
+- Propensity: "Which confounders predict treatment?"
+- Tau: "Which confounders modify treatment effect?"
+- Outcome: "Which confounders predict baseline outcome?"
+
+**Sentence-level Architecture (default):**
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → [CLS] token (S × D)
+        ↓
+Gated MIL Attention: h = tanh(V·sent) ⊙ sigmoid(U·sent)
+  For each confounder k: a_k = softmax(q_k · W · h)
+        ↓
+K Confounder Representations (K × D)
+        ↓
+Task-Specific Weighting (propensity, tau/y0, outcome/y1)
+        ↓
+Concatenate + MLP Projection → Final Representation
+```
+
+**Token-level Architecture (`gated_mil_hierarchical=True`):**
+
+When fine-grained token distinctions matter (e.g., "ECOG PS 0" vs "ECOG PS 2"), enable token-level gated pooling:
+
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → ALL tokens (S × L × D)
+        ↓
+Token-Level Gated Pooling:
+  Each confounder query attends to tokens,
+  creating K confounder-specific sentence embeddings
+        ↓
+S × K × D confounder-specific sentence embeddings
+        ↓
+Sentence-Level Gated MIL Attention (per confounder view)
+        ↓
+K Confounder Representations → Task-Specific Weighting
+```
+
+**Key features:**
+- **Gated attention**: tanh × sigmoid gating suppresses irrelevant sentences (from pathology AI)
+- **K confounder queries**: Each learns to extract one type of confounder signal
+- **Task-specific weighting**: Same K confounders, but weighted differently per task
+- **Token-level option**: Preserves fine-grained distinctions when enabled
+- **Interpretability**: `interpret_attention()` shows top-attended sentences per confounder
+- **`get_task_weights()`**: Shows how confounders are weighted per task
+
+**Key configuration:**
+```python
+gated_mil_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
+gated_mil_freeze_sentence_encoder: bool = True  # Freeze or fine-tune
+gated_mil_max_sentences: int = 100  # Max sentences per document
+gated_mil_max_sentence_length: int = 128  # Max tokens per sentence
+gated_mil_hidden_dim: int = 128  # Hidden dim for gated attention
+gated_mil_num_confounders: int = 4  # Number of confounder queries (K)
+gated_mil_dropout: float = 0.1
+gated_mil_projection_dim: int = 128  # Final output dimension
+# Token-level mode (optional)
+gated_mil_hierarchical: bool = False  # Enable token-level gated pooling
+gated_mil_token_hidden_dim: int = 64  # Hidden dim for token-level gating
+```
+
+**When to use:**
+- Long documents with multiple confounders mentioned in different sentences
+- When you want explicit K confounder queries with task-specific weighting
+- When interpretability (which sentences each confounder attends to) is important
+- Use `gated_mil_hierarchical=True` when fine-grained token distinctions matter
+
+See `examples/gated_mil_config.json` for a complete configuration example.
+
 ### Workflow Modes
 
 #### Applied Inference

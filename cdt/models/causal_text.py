@@ -132,6 +132,8 @@ class CausalText(nn.Module):
         gated_mil_num_confounders: int = 4,
         gated_mil_dropout: float = 0.1,
         gated_mil_projection_dim: int = 128,
+        gated_mil_hierarchical: bool = False,
+        gated_mil_token_hidden_dim: int = 64,
         # DragonNet args
         dragonnet_representation_dim: int = 128,
         dragonnet_hidden_outcome_dim: int = 64,
@@ -251,6 +253,8 @@ class CausalText(nn.Module):
             'gated_mil_num_confounders': gated_mil_num_confounders,
             'gated_mil_dropout': gated_mil_dropout,
             'gated_mil_projection_dim': gated_mil_projection_dim,
+            'gated_mil_hierarchical': gated_mil_hierarchical,
+            'gated_mil_token_hidden_dim': gated_mil_token_hidden_dim,
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
@@ -386,10 +390,13 @@ class CausalText(nn.Module):
                 model_type=model_type,
                 projection_dim=gated_mil_projection_dim,
                 dropout=gated_mil_dropout,
+                hierarchical=gated_mil_hierarchical,
+                token_hidden_dim=gated_mil_token_hidden_dim,
                 device=self._device
             )
             logger.info(f"Using Gated MIL Hierarchical feature extractor: {gated_mil_sentence_model}, "
-                       f"{gated_mil_num_confounders} confounders, projection_dim={gated_mil_projection_dim}")
+                       f"{gated_mil_num_confounders} confounders, projection_dim={gated_mil_projection_dim}, "
+                       f"hierarchical={gated_mil_hierarchical}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(

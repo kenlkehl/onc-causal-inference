@@ -44,6 +44,12 @@
       "_comment_projection_dim": "Final output dimension of the feature extractor. This feeds into DragonNet/RLearner.",
       "gated_mil_projection_dim": 128,
 
+      "_comment_hierarchical": "Token-level hierarchical mode. When true, applies token-level gated attention to create K confounder-specific sentence representations. Preserves fine-grained distinctions like 'ECOG PS 0' vs 'ECOG PS 2'.",
+      "gated_mil_hierarchical": false,
+
+      "_comment_token_hidden_dim": "Hidden dimension for token-level gated attention. Only used when gated_mil_hierarchical=true.",
+      "gated_mil_token_hidden_dim": 64,
+
       "dragonnet_representation_dim": 128,
       "dragonnet_hidden_outcome_dim": 64,
       "dragonnet_dropout": 0.2
@@ -93,6 +99,8 @@
       "gated_mil_num_confounders": 4,
       "gated_mil_dropout": 0.1,
       "gated_mil_projection_dim": 128,
+      "gated_mil_hierarchical": false,
+      "gated_mil_token_hidden_dim": 64,
       "dragonnet_representation_dim": 128,
       "dragonnet_hidden_outcome_dim": 64
     },
@@ -115,6 +123,8 @@
       "gated_mil_num_confounders": 4,
       "gated_mil_dropout": 0.1,
       "gated_mil_projection_dim": 128,
+      "gated_mil_hierarchical": false,
+      "gated_mil_token_hidden_dim": 64,
       "dragonnet_representation_dim": 128,
       "dragonnet_hidden_outcome_dim": 64
     },
