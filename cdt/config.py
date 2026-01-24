@@ -335,6 +335,77 @@ class PlasmodeExperimentConfig:
 
 
 @dataclass
+class MatchedPairConfig:
+    """Configuration for matched pair ITE estimation.
+
+    Two-stage approach:
+    1. Train propensity model using hierarchical attention
+    2. Match patients by propensity score or embedding similarity
+    3. Train outcome/tau model on matched pairs only
+
+    The tau head predicts treatment effect from untreated patient's embedding only,
+    with target being the log-odds difference between matched pair outcomes.
+    """
+
+    # Data columns
+    text_column: str = "clinical_text"
+    treatment_column: str = "treatment_indicator"
+    outcome_column: str = "outcome_indicator"
+
+    # Dataset path (optional, can also use applied_inference.dataset_path)
+    dataset_path: Optional[str] = None
+
+    # Propensity training (Stage 1)
+    propensity_epochs: int = 50
+    propensity_lr: float = 1e-4
+    propensity_batch_size: int = 32
+    propensity_early_stopping_patience: int = 10
+
+    # Hierarchical transformer architecture for propensity model
+    hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"
+    hier_transformer_freeze_sentence_encoder: bool = True
+    hier_transformer_max_sentences: int = 100
+    hier_transformer_max_sentence_length: int = 128
+    hier_transformer_num_layers: int = 2
+    hier_transformer_num_heads: int = 4
+    hier_transformer_dim: int = 256
+    hier_transformer_dropout: float = 0.1
+
+    # Representation dimension (output of propensity model)
+    representation_dim: int = 256
+
+    # Matching (Stage 2)
+    matching_method: str = "propensity"  # "propensity" or "embedding"
+    caliper: float = 0.2  # Max distance for valid match
+    caliper_scale: str = "std"  # For propensity: "propensity", "logit", "std"
+                                 # For embedding: caliper is cosine distance
+    matching_algorithm: str = "optimal"  # "nearest" or "optimal"
+
+    # Outcome/Tau training (Stage 3)
+    outcome_epochs: int = 50
+    outcome_lr: float = 1e-4
+    outcome_batch_size: int = 32
+    hidden_outcome_dim: int = 128
+    dropout: float = 0.2
+    alpha_outcome: float = 1.0  # Weight for outcome loss
+    beta_tau: float = 1.0  # Weight for tau loss
+
+    # Cross-validation settings
+    cv_folds: int = 5  # Number of CV folds (0 or 1 = fixed split)
+    split_column: str = "split"  # Column for fixed train/val/test splits
+
+    # Skip flag
+    skip: bool = False
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: Dict[str, Any]) -> 'MatchedPairConfig':
+        return cls(**d)
+
+
+@dataclass
 class ExperimentConfig:
     """Main configuration for CDT experiments."""
     output_dir: str = "./cdt_results"
@@ -353,6 +424,7 @@ class ExperimentConfig:
 
     applied_inference: AppliedInferenceConfig = field(default_factory=AppliedInferenceConfig)
     plasmode_experiments: PlasmodeExperimentConfig = field(default_factory=PlasmodeExperimentConfig)
+    matched_pair: Optional[MatchedPairConfig] = None  # Matched pair ITE estimation config
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
@@ -398,6 +470,10 @@ class ExperimentConfig:
             oracle_mode=plasmode_data.get('oracle_mode', False)
         )
 
+        # Parse matched pair config if present
+        matched_pair_data = data.get('matched_pair', None)
+        matched_pair = MatchedPairConfig.from_dict(matched_pair_data) if matched_pair_data else None
+
         return cls(
             output_dir=data.get('output_dir', './cdt_results'),
             seed=data.get('seed', 42),
@@ -409,7 +485,8 @@ class ExperimentConfig:
             save_confounder_interpretations=data.get('save_confounder_interpretations', False),
             confounder_interpretation_top_k=data.get('confounder_interpretation_top_k', 5),
             applied_inference=applied,
-            plasmode_experiments=plasmode
+            plasmode_experiments=plasmode,
+            matched_pair=matched_pair
         )
 
     def get_hash(self) -> str:
@@ -419,11 +496,18 @@ class ExperimentConfig:
 
     def validate(self) -> None:
         """Validate configuration."""
-        if not self.applied_inference.dataset_path:
-            raise ValueError("applied_inference.dataset_path is required")
+        # Check dataset path: either applied_inference or matched_pair should have it
+        has_applied_dataset = bool(self.applied_inference.dataset_path)
+        has_matched_pair_dataset = self.matched_pair is not None and bool(self.matched_pair.dataset_path)
 
-        if not Path(self.applied_inference.dataset_path).exists():
+        if not has_applied_dataset and not has_matched_pair_dataset:
+            raise ValueError("Either applied_inference.dataset_path or matched_pair.dataset_path is required")
+
+        if has_applied_dataset and not Path(self.applied_inference.dataset_path).exists():
             raise ValueError(f"Dataset not found: {self.applied_inference.dataset_path}")
+
+        if has_matched_pair_dataset and not Path(self.matched_pair.dataset_path).exists():
+            raise ValueError(f"Dataset not found: {self.matched_pair.dataset_path}")
 
         if self.plasmode_experiments.enabled and not self.plasmode_experiments.plasmode_scenarios:
             raise ValueError("plasmode_experiments.plasmode_scenarios cannot be empty when enabled=True")
@@ -433,6 +517,16 @@ class ExperimentConfig:
             valid_methods = {'nearest', 'optimal', 'caliper'}
             if self.applied_inference.matching_analysis.method not in valid_methods:
                 raise ValueError(f"matching_analysis.method must be one of {valid_methods}")
+
+        # Validate matched pair config
+        if self.matched_pair is not None and not self.matched_pair.skip:
+            valid_matching_methods = {'propensity', 'embedding'}
+            if self.matched_pair.matching_method not in valid_matching_methods:
+                raise ValueError(f"matched_pair.matching_method must be one of {valid_matching_methods}")
+
+            valid_algorithms = {'nearest', 'optimal'}
+            if self.matched_pair.matching_algorithm not in valid_algorithms:
+                raise ValueError(f"matched_pair.matching_algorithm must be one of {valid_algorithms}")
 
 
 def create_default_config(output_path: str) -> None:

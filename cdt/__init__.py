@@ -13,10 +13,11 @@ from .config import (
     ModelArchitectureConfig,
     TrainingConfig,
     MatchingAnalysisConfig,
+    MatchedPairConfig,
     create_default_config
 )
 
-from .experiments import ExperimentRunner
+from .experiments import ExperimentRunner, MatchedPairExperimentRunner
 
 __all__ = [
     'ExperimentConfig',
@@ -25,6 +26,8 @@ __all__ = [
     'ModelArchitectureConfig',
     'TrainingConfig',
     'MatchingAnalysisConfig',
+    'MatchedPairConfig',
     'ExperimentRunner',
+    'MatchedPairExperimentRunner',
     'create_default_config',
 ]

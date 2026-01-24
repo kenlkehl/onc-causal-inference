@@ -1,0 +1,48 @@
+{
+  "output_dir": "./matched_pair_embedding_results",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 1,
+  "gpu_ids": [0],
+
+  "applied_inference": {
+    "dataset_path": "./data.parquet",
+    "skip": true
+  },
+
+  "matched_pair": {
+    "text_column": "clinical_text",
+    "treatment_column": "treatment_indicator",
+    "outcome_column": "outcome_indicator",
+
+    "propensity_epochs": 50,
+    "propensity_lr": 1e-4,
+    "propensity_batch_size": 32,
+    "propensity_early_stopping_patience": 10,
+
+    "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
+    "hier_transformer_freeze_sentence_encoder": true,
+    "hier_transformer_max_sentences": 100,
+    "hier_transformer_max_sentence_length": 128,
+    "hier_transformer_num_layers": 2,
+    "hier_transformer_num_heads": 4,
+    "hier_transformer_dim": 256,
+    "hier_transformer_dropout": 0.1,
+
+    "representation_dim": 256,
+
+    "matching_method": "embedding",
+    "caliper": 0.15,
+    "matching_algorithm": "optimal",
+
+    "outcome_epochs": 50,
+    "outcome_lr": 1e-4,
+    "outcome_batch_size": 32,
+    "hidden_outcome_dim": 128,
+    "dropout": 0.2,
+    "alpha_outcome": 1.0,
+    "beta_tau": 1.0,
+
+    "cv_folds": 5
+  }
+}

@@ -6,7 +6,8 @@ from .propensity_matcher import (
     MatchResult,
     compute_standardized_mean_difference,
     compute_balance_statistics,
-    assess_overlap
+    assess_overlap,
+    match_by_cosine_similarity
 )
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     'MatchResult',
     'compute_standardized_mean_difference',
     'compute_balance_statistics',
-    'assess_overlap'
+    'assess_overlap',
+    'match_by_cosine_similarity'
 ]

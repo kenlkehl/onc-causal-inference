@@ -317,6 +317,146 @@ class PropensityMatcher:
             )
 
 
+def match_by_cosine_similarity(
+    embeddings: np.ndarray,
+    treatment: np.ndarray,
+    caliper: float = 0.1,
+    method: str = 'optimal'
+) -> MatchResult:
+    """
+    Match treated to controls by cosine similarity of embeddings.
+
+    This is an alternative to propensity score matching that uses learned
+    representation embeddings. Matching in embedding space may capture
+    richer similarity than scalar propensity scores.
+
+    Args:
+        embeddings: (N, D) representation vectors
+        treatment: (N,) binary treatment indicator
+        caliper: Maximum cosine distance (1 - cosine_similarity) for valid match.
+                 0.0 = only exact matches, 1.0 = orthogonal vectors allowed.
+                 Default 0.1 means minimum cosine similarity of 0.9.
+        method: Matching method - 'nearest' for greedy, 'optimal' for Hungarian algorithm
+
+    Returns:
+        MatchResult with matched pairs and diagnostics
+    """
+    embeddings = np.asarray(embeddings)
+    treatment = np.asarray(treatment).flatten()
+
+    if len(embeddings) != len(treatment):
+        raise ValueError("Embeddings and treatment must have same length")
+
+    # Get treated and control indices
+    treated_idx = np.where(treatment == 1)[0]
+    control_idx = np.where(treatment == 0)[0]
+
+    n_treated = len(treated_idx)
+    n_control = len(control_idx)
+
+    logger.info(f"Cosine matching {n_treated} treated to {n_control} controls")
+    logger.info(f"  Method: {method}, Caliper: {caliper}")
+
+    if n_treated == 0 or n_control == 0:
+        logger.warning("No treated or control units to match")
+        return MatchResult(
+            matched_pairs=np.array([]).reshape(0, 2),
+            treated_propensities=np.array([]),
+            control_propensities=np.array([]),
+            distances=np.array([]),
+            n_unmatched_treated=n_treated,
+            n_unmatched_control=n_control,
+            n_treated=n_treated,
+            n_control=n_control
+        )
+
+    # Normalize embeddings for cosine similarity
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms = np.maximum(norms, 1e-10)  # Avoid division by zero
+    embeddings_norm = embeddings / norms
+
+    treated_emb = embeddings_norm[treated_idx]
+    control_emb = embeddings_norm[control_idx]
+
+    # Compute cosine similarity matrix: dot product of normalized vectors
+    similarity_matrix = treated_emb @ control_emb.T  # (n_treated, n_control)
+
+    # Convert to cosine distance: 1 - cosine_similarity
+    distance_matrix = 1.0 - similarity_matrix
+
+    # Apply caliper by setting invalid matches to infinity
+    distance_matrix[distance_matrix > caliper] = 1e10
+
+    if method == 'optimal':
+        # Hungarian algorithm for optimal 1:1 matching
+        row_ind, col_ind = linear_sum_assignment(distance_matrix)
+
+        # Filter out invalid matches (distance = inf)
+        valid_mask = distance_matrix[row_ind, col_ind] < 1e9
+        row_ind = row_ind[valid_mask]
+        col_ind = col_ind[valid_mask]
+
+        matched_pairs = np.column_stack([treated_idx[row_ind], control_idx[col_ind]])
+        distances = distance_matrix[row_ind, col_ind]
+
+        logger.info(f"  Matched {len(matched_pairs)} pairs (optimal)")
+        logger.info(f"  Mean cosine distance: {distances.mean():.4f}")
+
+        return MatchResult(
+            matched_pairs=matched_pairs,
+            treated_propensities=np.zeros(len(matched_pairs)),  # Not applicable for cosine matching
+            control_propensities=np.zeros(len(matched_pairs)),
+            distances=distances,
+            n_unmatched_treated=n_treated - len(row_ind),
+            n_unmatched_control=n_control - len(col_ind),
+            n_treated=n_treated,
+            n_control=n_control
+        )
+    else:
+        # Greedy nearest neighbor matching
+        matched_pairs = []
+        distances = []
+        available_controls = set(range(n_control))
+
+        # Random order for fairness
+        order = np.random.permutation(n_treated)
+
+        for i in order:
+            if not available_controls:
+                break
+
+            available_list = list(available_controls)
+            dists = distance_matrix[i, available_list]
+
+            # Find minimum distance control
+            min_idx = np.argmin(dists)
+            min_dist = dists[min_idx]
+
+            if min_dist < 1e9:  # Valid match within caliper
+                control_local_idx = available_list[min_idx]
+                matched_pairs.append([treated_idx[i], control_idx[control_local_idx]])
+                distances.append(min_dist)
+                available_controls.discard(control_local_idx)
+
+        matched_pairs = np.array(matched_pairs) if matched_pairs else np.array([]).reshape(0, 2)
+        distances = np.array(distances)
+
+        logger.info(f"  Matched {len(matched_pairs)} pairs (greedy)")
+        if len(distances) > 0:
+            logger.info(f"  Mean cosine distance: {distances.mean():.4f}")
+
+        return MatchResult(
+            matched_pairs=matched_pairs,
+            treated_propensities=np.zeros(len(matched_pairs)),
+            control_propensities=np.zeros(len(matched_pairs)),
+            distances=distances,
+            n_unmatched_treated=n_treated - len(matched_pairs),
+            n_unmatched_control=len(available_controls),
+            n_treated=n_treated,
+            n_control=n_control
+        )
+
+
 def compute_standardized_mean_difference(
     treated_values: np.ndarray,
     control_values: np.ndarray

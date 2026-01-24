@@ -12,9 +12,11 @@ cdt/analysis/statistical_analysis.py
 cdt/data/__init__.py
 cdt/data/dataset.py
 cdt/experiments/__init__.py
+cdt/experiments/matched_pair_runner.py
 cdt/experiments/runner.py
 cdt/inference/__init__.py
 cdt/inference/applied.py
+cdt/inference/matched_pair_applied.py
 cdt/matching/__init__.py
 cdt/matching/propensity_matcher.py
 cdt/models/__init__.py
@@ -29,6 +31,7 @@ cdt/models/gated_mil_attention.py
 cdt/models/gated_mil_hierarchical_extractor.py
 cdt/models/gru_extractor.py
 cdt/models/hierarchical_transformer_extractor.py
+cdt/models/matched_pair_ite.py
 cdt/models/mlp_dragonnet.py
 cdt/models/outcome_heads.py
 cdt/models/outcome_model.py
@@ -37,6 +40,7 @@ cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/uplift.py
 cdt/training/__init__.py
+cdt/training/matched_pair_training.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py
 cdt/training/propensity_trimming.py
@@ -56,10 +60,11 @@ examples/gated_mil_config.json
 examples/gru_confounder_3way_config.json
 examples/gru_confounder_config.json
 examples/hierarchical_transformer_config.json
+examples/matched_pair_config.json
+examples/matched_pair_embedding_config.json
 examples/modernbert_config.json
 examples/rlearner_config.json
 examples/semantic_cnn_config.json
-examples/.ipynb_checkpoints/hierarchical_transformer_config-checkpoint.json
 synthetic_data/__init__.py
 synthetic_data/cli.py
 synthetic_data/config.py
