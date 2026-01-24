@@ -218,7 +218,10 @@ def train_gated_mil_token_model(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    beta_targreg: float = 0.1
+    beta_targreg: float = 0.1,
+    stop_grad_propensity: bool = False,
+    attention_entropy_weight: float = 0.0,
+    use_mean_pooling: bool = False
 ) -> Tuple[CausalText, List[Dict]]:
     """Train a Gated MIL Token-Level Hierarchical DragonNet model for one fold."""
     text_column = config.text_column
@@ -239,6 +242,7 @@ def train_gated_mil_token_model(
         # TOKEN-LEVEL GATING ENABLED
         gated_mil_hierarchical=config.hierarchical,  # True for token-level
         gated_mil_token_hidden_dim=config.token_hidden_dim,
+        gated_mil_use_mean_pooling=use_mean_pooling,
         # DragonNet head settings
         dragonnet_representation_dim=128,
         dragonnet_hidden_outcome_dim=64,
@@ -292,6 +296,7 @@ def train_gated_mil_token_model(
         model.train()
         train_loss = 0.0
         train_targreg_loss = 0.0
+        train_entropy_loss = 0.0
         for batch in train_loader:
             batch['treatment'] = batch['treatment'].to(device)
             batch['outcome'] = batch['outcome'].to(device)
@@ -300,7 +305,9 @@ def train_gated_mil_token_model(
             losses = model.train_step(
                 batch,
                 alpha_propensity=1.0,
-                beta_targreg=beta_targreg
+                beta_targreg=beta_targreg,
+                stop_grad_propensity=stop_grad_propensity,
+                attention_entropy_weight=attention_entropy_weight
             )
             losses['loss'].backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -309,6 +316,8 @@ def train_gated_mil_token_model(
             train_targreg_loss += losses.get('targreg_loss', 0.0)
             if isinstance(train_targreg_loss, torch.Tensor):
                 train_targreg_loss = train_targreg_loss.item()
+            if 'entropy_loss' in losses:
+                train_entropy_loss += losses['entropy_loss'].item() if hasattr(losses['entropy_loss'], 'item') else losses['entropy_loss']
 
         scheduler.step()
 
@@ -316,6 +325,7 @@ def train_gated_mil_token_model(
         model.eval()
         val_loss = 0.0
         val_targreg_loss = 0.0
+        val_entropy_loss = 0.0
         with torch.no_grad():
             for batch in val_loader:
                 batch['treatment'] = batch['treatment'].to(device)
@@ -323,18 +333,25 @@ def train_gated_mil_token_model(
                 losses = model.train_step(
                     batch,
                     alpha_propensity=1.0,
-                    beta_targreg=beta_targreg
+                    beta_targreg=beta_targreg,
+                    stop_grad_propensity=stop_grad_propensity,
+                    attention_entropy_weight=attention_entropy_weight
                 )
                 val_loss += losses['loss'].item()
                 targreg = losses.get('targreg_loss', 0.0)
                 if isinstance(targreg, torch.Tensor):
                     targreg = targreg.item()
                 val_targreg_loss += targreg
+                if 'entropy_loss' in losses:
+                    val_entropy_loss += losses['entropy_loss'].item() if hasattr(losses['entropy_loss'], 'item') else losses['entropy_loss']
 
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
         train_targreg_loss /= len(train_loader)
         val_targreg_loss /= len(val_loader)
+        if attention_entropy_weight > 0:
+            train_entropy_loss /= len(train_loader)
+            val_entropy_loss /= len(val_loader)
 
         history.append({
             'epoch': epoch + 1,
@@ -342,12 +359,16 @@ def train_gated_mil_token_model(
             'val_loss': val_loss,
             'train_targreg_loss': train_targreg_loss,
             'val_targreg_loss': val_targreg_loss,
+            'train_entropy_loss': train_entropy_loss if attention_entropy_weight > 0 else None,
+            'val_entropy_loss': val_entropy_loss if attention_entropy_weight > 0 else None,
             'lr': scheduler.get_last_lr()[0]
         })
 
         if (epoch + 1) % 10 == 0:
-            logger.info(f"    Epoch {epoch+1}/{epochs}: train_loss={train_loss:.4f}, "
-                       f"val_loss={val_loss:.4f}, train_targreg={train_targreg_loss:.4f}")
+            log_msg = f"    Epoch {epoch+1}/{epochs}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}, train_targreg={train_targreg_loss:.4f}"
+            if attention_entropy_weight > 0:
+                log_msg += f", entropy_loss={train_entropy_loss:.4f}"
+            logger.info(log_msg)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -403,7 +424,10 @@ def run_condition(
     learning_rate: float,
     beta_targreg: float = 0.1,
     save_attention: bool = False,
-    output_dir: Optional[Path] = None
+    output_dir: Optional[Path] = None,
+    stop_grad_propensity: bool = False,
+    attention_entropy_weight: float = 0.0,
+    use_mean_pooling: bool = False
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Run cross-validation for one experimental condition."""
     logger.info(f"\n{'='*60}")
@@ -414,6 +438,9 @@ def run_condition(
     logger.info(f"  Num confounders: {config.num_confounders}")
     logger.info(f"  Token-level hierarchical: {config.hierarchical}")  # Key difference
     logger.info(f"  Token hidden dim: {config.token_hidden_dim}")
+    logger.info(f"  Stop grad propensity: {stop_grad_propensity}")
+    logger.info(f"  Attention entropy weight: {attention_entropy_weight}")
+    logger.info(f"  Use mean pooling: {use_mean_pooling}")
     logger.info(f"{'='*60}")
 
     # Reset index
@@ -433,7 +460,10 @@ def run_condition(
         model, history = train_gated_mil_token_model(
             train_df, test_df, config, device,
             epochs, batch_size, learning_rate,
-            beta_targreg=beta_targreg
+            beta_targreg=beta_targreg,
+            stop_grad_propensity=stop_grad_propensity,
+            attention_entropy_weight=attention_entropy_weight,
+            use_mean_pooling=use_mean_pooling
         )
         preds = predict_model(model, test_df, config.text_column, device, batch_size)
 
@@ -618,6 +648,22 @@ def main():
         action="store_true",
         help="Save attention interpretations for analysis"
     )
+    parser.add_argument(
+        "--stop-grad-propensity",
+        action="store_true",
+        help="Detach features before propensity loss (prevents propensity from dominating representation)"
+    )
+    parser.add_argument(
+        "--attention-entropy-weight",
+        type=float,
+        default=0.0,
+        help="Weight for attention entropy regularization (encourages focused attention)"
+    )
+    parser.add_argument(
+        "--use-mean-pooling",
+        action="store_true",
+        help="Use mean pooling instead of [CLS] token for sentence embeddings"
+    )
 
     args = parser.parse_args()
 
@@ -635,6 +681,9 @@ def main():
     logger.info(f"  Token-level gating: ENABLED")
     logger.info(f"  Freeze encoder: False (fine-tuning enabled)")
     logger.info(f"  beta_targreg: {args.beta_targreg}")
+    logger.info(f"  stop_grad_propensity: {args.stop_grad_propensity}")
+    logger.info(f"  attention_entropy_weight: {args.attention_entropy_weight}")
+    logger.info(f"  use_mean_pooling: {args.use_mean_pooling}")
 
     # Load dataset
     df = pd.read_parquet(args.dataset)
@@ -699,7 +748,10 @@ def main():
                 learning_rate=args.learning_rate,
                 beta_targreg=args.beta_targreg,
                 save_attention=args.save_attention,
-                output_dir=output_dir
+                output_dir=output_dir,
+                stop_grad_propensity=args.stop_grad_propensity,
+                attention_entropy_weight=args.attention_entropy_weight,
+                use_mean_pooling=args.use_mean_pooling
             )
 
             all_metrics[config.name] = metrics
@@ -742,6 +794,9 @@ def main():
         'batch_size': args.batch_size,
         'learning_rate': args.learning_rate,
         'beta_targreg': args.beta_targreg,
+        'stop_grad_propensity': args.stop_grad_propensity,
+        'attention_entropy_weight': args.attention_entropy_weight,
+        'use_mean_pooling': args.use_mean_pooling,
         'n_folds': args.n_folds,
         'device': str(device),
         'conditions_run': [c.name for c in conditions]

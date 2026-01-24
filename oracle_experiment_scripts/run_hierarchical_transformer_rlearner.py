@@ -192,7 +192,8 @@ def train_hierarchical_transformer_model(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    gamma_rlearner: float = 1.0
+    gamma_rlearner: float = 1.0,
+    stop_grad_propensity: bool = False
 ) -> Tuple[CausalText, List[Dict]]:
     """Train a Hierarchical Transformer R-Learner model for one fold."""
     text_column = config.text_column
@@ -272,7 +273,8 @@ def train_hierarchical_transformer_model(
             losses = model.train_step(
                 batch,
                 alpha_propensity=1.0,
-                gamma_rlearner=gamma_rlearner
+                gamma_rlearner=gamma_rlearner,
+                stop_grad_propensity=stop_grad_propensity
             )
             losses['loss'].backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -293,7 +295,8 @@ def train_hierarchical_transformer_model(
                 losses = model.train_step(
                     batch,
                     alpha_propensity=1.0,
-                    gamma_rlearner=gamma_rlearner
+                    gamma_rlearner=gamma_rlearner,
+                    stop_grad_propensity=stop_grad_propensity
                 )
                 val_loss += losses['loss'].item()
                 val_r_loss += losses['r_loss'].item()
@@ -368,7 +371,8 @@ def run_condition(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    gamma_rlearner: float = 1.0
+    gamma_rlearner: float = 1.0,
+    stop_grad_propensity: bool = False
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Run cross-validation for one experimental condition."""
     logger.info(f"\n{'='*60}")
@@ -376,6 +380,7 @@ def run_condition(
     logger.info(f"  Text column: {config.text_column}")
     logger.info(f"  Sentence model: {config.sentence_model}")
     logger.info(f"  Freeze encoder: {config.freeze_sentence_encoder}")
+    logger.info(f"  Stop grad propensity: {stop_grad_propensity}")
     logger.info(f"{'='*60}")
 
     # Reset index
@@ -394,7 +399,8 @@ def run_condition(
         model, history = train_hierarchical_transformer_model(
             train_df, test_df, config, device,
             epochs, batch_size, learning_rate,
-            gamma_rlearner=gamma_rlearner
+            gamma_rlearner=gamma_rlearner,
+            stop_grad_propensity=stop_grad_propensity
         )
         preds = predict_model(model, test_df, config.text_column, device, batch_size)
 
@@ -528,6 +534,11 @@ def main():
         action="store_true",
         help="Skip condition 3 that requires LLM extractions"
     )
+    parser.add_argument(
+        "--stop-grad-propensity",
+        action="store_true",
+        help="Detach features before propensity loss (prevents propensity from dominating representation)"
+    )
 
     args = parser.parse_args()
 
@@ -541,6 +552,7 @@ def main():
     logger.info(f"  Sentence model: {args.sentence_model}")
     logger.info(f"  Freeze encoder: False (fine-tuning enabled)")
     logger.info(f"  gamma_rlearner: {args.gamma_rlearner}")
+    logger.info(f"  stop_grad_propensity: {args.stop_grad_propensity}")
 
     # Load dataset
     df = pd.read_parquet(args.dataset)
@@ -601,7 +613,8 @@ def main():
                 epochs=args.epochs,
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
-                gamma_rlearner=args.gamma_rlearner
+                gamma_rlearner=args.gamma_rlearner,
+                stop_grad_propensity=args.stop_grad_propensity
             )
 
             all_metrics[config.name] = metrics
@@ -640,6 +653,7 @@ def main():
         'batch_size': args.batch_size,
         'learning_rate': args.learning_rate,
         'gamma_rlearner': args.gamma_rlearner,
+        'stop_grad_propensity': args.stop_grad_propensity,
         'n_folds': args.n_folds,
         'device': str(device),
         'conditions_run': [c.name for c in conditions]

@@ -206,6 +206,8 @@ class ModelArchitectureConfig:
     # Token-level hierarchical mode (preserves fine-grained signal like "PS 0" vs "PS 2")
     gated_mil_hierarchical: bool = False  # Enable token-level gated pooling
     gated_mil_token_hidden_dim: int = 64  # Hidden dimension for token-level gating
+    # Mean pooling option (use mean over tokens instead of [CLS] token)
+    gated_mil_use_mean_pooling: bool = False  # Use mean pooling instead of [CLS] for sentence embeddings
 
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128
@@ -241,6 +243,9 @@ class TrainingConfig:
     weight_decay: float = 0.01  # L2 regularization (AdamW decoupled weight decay)
     gradient_clip_norm: float = 1.0  # Max gradient norm (0 to disable)
     label_smoothing: float = 0.0  # Label smoothing for BCE (0 to disable)
+    # Advanced training options for improving tau learning
+    stop_grad_propensity: bool = False  # Detach features before propensity loss (prevents propensity from dominating representation)
+    attention_entropy_weight: float = 0.0  # Weight for attention entropy regularization (encourages focused attention)
 
 
 @dataclass

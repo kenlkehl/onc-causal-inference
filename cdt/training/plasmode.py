@@ -381,6 +381,7 @@ def _train_cnn_model(
         gated_mil_projection_dim=getattr(arch_config, 'gated_mil_projection_dim', 128),
         gated_mil_hierarchical=getattr(arch_config, 'gated_mil_hierarchical', False),
         gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
+        gated_mil_use_mean_pooling=getattr(arch_config, 'gated_mil_use_mean_pooling', False),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -484,8 +485,10 @@ def _train_cnn_model(
     best_val_loss = float('inf')
     best_model_state = None
 
-    # Get gamma_rlearner from config (default 1.0 for backward compatibility)
+    # Get gamma_rlearner and advanced training options from config
     gamma_rlearner = getattr(train_config, 'gamma_rlearner', 1.0)
+    stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
+    attention_entropy_weight = getattr(train_config, 'attention_entropy_weight', 0.0)
 
     for epoch in range(train_config.epochs):
         model.train()
@@ -500,7 +503,9 @@ def _train_cnn_model(
                 batch,
                 alpha_propensity=train_config.alpha_propensity,
                 beta_targreg=train_config.beta_targreg,
-                gamma_rlearner=gamma_rlearner
+                gamma_rlearner=gamma_rlearner,
+                stop_grad_propensity=stop_grad_propensity,
+                attention_entropy_weight=attention_entropy_weight
             )
             losses['loss'].backward()
             optimizer.step()
@@ -519,7 +524,9 @@ def _train_cnn_model(
                     batch,
                     alpha_propensity=train_config.alpha_propensity,
                     beta_targreg=train_config.beta_targreg,
-                    gamma_rlearner=gamma_rlearner
+                    gamma_rlearner=gamma_rlearner,
+                    stop_grad_propensity=stop_grad_propensity,
+                    attention_entropy_weight=attention_entropy_weight
                 )
                 val_loss += losses['loss'].item()
 

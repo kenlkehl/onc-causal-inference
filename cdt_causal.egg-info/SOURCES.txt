@@ -59,6 +59,7 @@ examples/hierarchical_transformer_config.json
 examples/modernbert_config.json
 examples/rlearner_config.json
 examples/semantic_cnn_config.json
+examples/.ipynb_checkpoints/hierarchical_transformer_config-checkpoint.json
 synthetic_data/__init__.py
 synthetic_data/cli.py
 synthetic_data/config.py

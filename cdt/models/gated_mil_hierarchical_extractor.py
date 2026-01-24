@@ -72,6 +72,7 @@ import logging
 import math
 from typing import Optional, List, Dict, Any, Tuple
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -121,6 +122,7 @@ class GatedMILHierarchicalExtractor(nn.Module):
         dropout: float = 0.1,
         hierarchical: bool = False,
         token_hidden_dim: int = 64,
+        use_mean_pooling: bool = False,
         device: Optional[torch.device] = None
     ):
         super().__init__()
@@ -137,6 +139,7 @@ class GatedMILHierarchicalExtractor(nn.Module):
         self._dropout = dropout
         self._hierarchical = hierarchical
         self._token_hidden_dim = token_hidden_dim
+        self._use_mean_pooling = use_mean_pooling
 
         # Lazy initialization
         self._sentence_encoder = None
@@ -156,6 +159,7 @@ class GatedMILHierarchicalExtractor(nn.Module):
         logger.info(f"  Model type: {model_type}")
         logger.info(f"  Projection dim: {projection_dim}")
         logger.info(f"  Hierarchical (token-level): {hierarchical}")
+        logger.info(f"  Use mean pooling (not [CLS]): {use_mean_pooling}")
         if hierarchical:
             logger.info(f"  Token hidden dim: {token_hidden_dim}")
 
@@ -224,13 +228,17 @@ class GatedMILHierarchicalExtractor(nn.Module):
 
     def _encode_sentences_batch(self, sentences: List[str]) -> torch.Tensor:
         """
-        Encode sentences with BERT, returning [CLS] tokens.
+        Encode sentences with BERT, returning [CLS] tokens or mean-pooled embeddings.
+
+        When use_mean_pooling=True, computes mean over all tokens (excluding padding)
+        instead of using [CLS] token. This can provide more robust sentence
+        representations that capture the full sentence content.
 
         Args:
             sentences: List of sentence strings
 
         Returns:
-            Tensor of shape (num_sentences, sentence_dim) containing [CLS] embeddings
+            Tensor of shape (num_sentences, sentence_dim) containing sentence embeddings
         """
         if not sentences:
             self._ensure_initialized()
@@ -253,8 +261,22 @@ class GatedMILHierarchicalExtractor(nn.Module):
                 attention_mask=attention_mask
             )
 
-        # [CLS] token at position 0
-        return outputs.last_hidden_state[:, 0, :]
+        if self._use_mean_pooling:
+            # Mean pooling: average over all tokens (excluding padding)
+            # outputs.last_hidden_state: (batch, seq_len, hidden_dim)
+            # attention_mask: (batch, seq_len) with 1 for real tokens, 0 for padding
+            token_embeddings = outputs.last_hidden_state
+            # Expand mask for broadcasting: (batch, seq_len, 1)
+            mask_expanded = attention_mask.unsqueeze(-1).float()
+            # Sum embeddings for valid tokens
+            sum_embeddings = torch.sum(token_embeddings * mask_expanded, dim=1)
+            # Count valid tokens
+            sum_mask = torch.clamp(mask_expanded.sum(dim=1), min=1e-9)
+            # Mean pooling
+            return sum_embeddings / sum_mask
+        else:
+            # [CLS] token at position 0
+            return outputs.last_hidden_state[:, 0, :]
 
     def _encode_sentence_tokens_batch(
         self,
@@ -472,13 +494,15 @@ class GatedMILHierarchicalExtractor(nn.Module):
             'projection_dim': self._projection_dim,
             'dropout': self._dropout,
             'hierarchical': self._hierarchical,
-            'token_hidden_dim': self._token_hidden_dim
+            'token_hidden_dim': self._token_hidden_dim,
+            'use_mean_pooling': self._use_mean_pooling
         }
 
     def interpret_attention(
         self,
         texts: List[str],
-        top_k: int = 5
+        top_k: int = 5,
+        include_token_attention: bool = True
     ) -> List[Dict[str, Any]]:
         """
         Get human-readable interpretation of gated MIL attention.
@@ -487,9 +511,15 @@ class GatedMILHierarchicalExtractor(nn.Module):
         showing which sentences each confounder focuses on, plus the task-specific
         weights for each confounder.
 
+        For hierarchical (token-level) mode, also includes:
+        - Token-level attention weights within each sentence
+        - Which specific tokens each confounder attends to
+        - Attention entropy metrics (low = focused, high = diffuse)
+
         Args:
             texts: List of document texts
             top_k: Number of top-attended sentences to show per confounder
+            include_token_attention: Whether to include token-level attention (only for hierarchical mode)
 
         Returns:
             List of dicts per document with attention interpretations:
@@ -497,6 +527,8 @@ class GatedMILHierarchicalExtractor(nn.Module):
             - 'confounder_attention': Dict mapping confounder index to attention weights
             - 'top_sentences_per_confounder': Top-k sentences per confounder
             - 'task_weights': Task-specific weights for each confounder
+            - 'attention_entropy': Dict with entropy metrics per confounder (lower = more focused)
+            - 'token_attention' (hierarchical only): Token-level attention info
         """
         self._ensure_initialized()
         interpretations = []
@@ -510,50 +542,239 @@ class GatedMILHierarchicalExtractor(nn.Module):
                 if not sentences:
                     sentences = [text[:500]]
 
-                # Encode sentences
-                sentence_embeddings = self._encode_sentences_batch(sentences)
-
-                # Get attention weights
-                _, attention_weights = self._gated_mil_attention(
-                    sentence_embeddings, return_attention=True
-                )  # (K, S)
-
-                if attention_weights is not None and len(sentences) > 0:
-                    confounder_attention = {}
-                    top_sentences_per_confounder = {}
-
-                    for k in range(self._num_confounders):
-                        attn = attention_weights[k].cpu()  # (S,)
-                        confounder_attention[f'confounder_{k}'] = attn.tolist()
-
-                        # Get top-k sentences for this confounder
-                        k_actual = min(top_k, len(sentences))
-                        top_vals, top_indices = torch.topk(attn, k_actual)
-
-                        top_sentences_per_confounder[f'confounder_{k}'] = [
-                            {
-                                'sentence': sentences[idx],
-                                'attention': val.item(),
-                                'idx': int(idx)
-                            }
-                            for val, idx in zip(top_vals, top_indices)
-                        ]
-
-                    interpretations.append({
-                        'sentences': sentences,
-                        'confounder_attention': confounder_attention,
-                        'top_sentences_per_confounder': top_sentences_per_confounder,
-                        'task_weights': task_weights
-                    })
+                if self._hierarchical and include_token_attention:
+                    # Hierarchical (token-level) mode
+                    interp = self._interpret_hierarchical(sentences, top_k, task_weights)
                 else:
-                    interpretations.append({
-                        'sentences': sentences,
-                        'confounder_attention': {},
-                        'top_sentences_per_confounder': {},
-                        'task_weights': task_weights
-                    })
+                    # Standard sentence-level mode
+                    interp = self._interpret_sentence_level(sentences, top_k, task_weights)
+
+                interpretations.append(interp)
 
         return interpretations
+
+    def _interpret_sentence_level(
+        self,
+        sentences: List[str],
+        top_k: int,
+        task_weights: Dict[str, List[float]]
+    ) -> Dict[str, Any]:
+        """Interpret attention for sentence-level mode."""
+        # Encode sentences
+        sentence_embeddings = self._encode_sentences_batch(sentences)
+
+        # Get attention weights
+        _, attention_weights = self._gated_mil_attention(
+            sentence_embeddings, return_attention=True
+        )  # (K, S)
+
+        if attention_weights is not None and len(sentences) > 0:
+            confounder_attention = {}
+            top_sentences_per_confounder = {}
+            attention_entropy = {}
+
+            for k in range(self._num_confounders):
+                attn = attention_weights[k].cpu()  # (S,)
+                confounder_attention[f'confounder_{k}'] = attn.tolist()
+
+                # Compute attention entropy (lower = more focused)
+                entropy = self._compute_attention_entropy(attn)
+                attention_entropy[f'confounder_{k}'] = entropy
+
+                # Get top-k sentences for this confounder
+                k_actual = min(top_k, len(sentences))
+                top_vals, top_indices = torch.topk(attn, k_actual)
+
+                top_sentences_per_confounder[f'confounder_{k}'] = [
+                    {
+                        'sentence': sentences[idx],
+                        'attention': val.item(),
+                        'idx': int(idx)
+                    }
+                    for val, idx in zip(top_vals, top_indices)
+                ]
+
+            return {
+                'sentences': sentences,
+                'confounder_attention': confounder_attention,
+                'top_sentences_per_confounder': top_sentences_per_confounder,
+                'task_weights': task_weights,
+                'attention_entropy': attention_entropy,
+                'hierarchical_mode': False
+            }
+        else:
+            return {
+                'sentences': sentences,
+                'confounder_attention': {},
+                'top_sentences_per_confounder': {},
+                'task_weights': task_weights,
+                'attention_entropy': {},
+                'hierarchical_mode': False
+            }
+
+    def _interpret_hierarchical(
+        self,
+        sentences: List[str],
+        top_k: int,
+        task_weights: Dict[str, List[float]]
+    ) -> Dict[str, Any]:
+        """Interpret attention for hierarchical (token-level) mode."""
+        S = len(sentences)
+        K = self._num_confounders
+
+        # 1. Encode all sentences with BERT (full token embeddings)
+        token_embeddings, attention_mask = self._encode_sentence_tokens_batch(sentences)
+        # token_embeddings: (S, L, D)
+        # attention_mask: (S, L) boolean
+
+        # 2. Apply token-level gated pooling with attention returned
+        confounder_sentence_embeddings, token_attention = self._token_level_pooling.forward_batch(
+            token_embeddings, attention_mask, return_attention=True
+        )  # confounder_sentence_embeddings: (S, K, D), token_attention: (S, K, L)
+
+        # 3. Get sentence-level attention for each confounder view
+        confounder_views = confounder_sentence_embeddings.permute(1, 0, 2)  # (K, S, D)
+
+        sentence_attention_per_confounder = []
+        for k in range(K):
+            view_k = confounder_views[k]  # (S, D)
+            _, sent_attn = self._gated_mil_attention(view_k, return_attention=True)
+            sentence_attention_per_confounder.append(sent_attn.mean(dim=0).cpu())  # (S,)
+
+        # Build interpretation
+        confounder_attention = {}
+        top_sentences_per_confounder = {}
+        attention_entropy = {}
+        token_attention_info = {}
+
+        # Get tokenized sentences for token-level interpretation
+        encoded = self._tokenizer(
+            sentences,
+            padding='max_length',
+            truncation=True,
+            max_length=self._max_sentence_length,
+            return_tensors='pt'
+        )
+        input_ids = encoded['input_ids']
+
+        for k in range(K):
+            # Sentence-level attention
+            sent_attn = sentence_attention_per_confounder[k]  # (S,)
+            confounder_attention[f'confounder_{k}'] = sent_attn.tolist()
+
+            # Compute sentence-level entropy
+            entropy = self._compute_attention_entropy(sent_attn)
+            attention_entropy[f'confounder_{k}'] = {
+                'sentence_entropy': entropy,
+                'token_entropy_mean': 0.0  # Will compute below
+            }
+
+            # Get top-k sentences
+            k_actual = min(top_k, S)
+            top_vals, top_indices = torch.topk(sent_attn, k_actual)
+
+            top_sentences_data = []
+            token_entropies = []
+
+            for val, sent_idx in zip(top_vals, top_indices):
+                sent_idx = int(sent_idx)
+
+                # Get token attention for this sentence and confounder
+                if token_attention is not None:
+                    tok_attn = token_attention[sent_idx, k, :].cpu()  # (L,)
+                    valid_mask = attention_mask[sent_idx].cpu()
+
+                    # Get top tokens
+                    valid_tok_attn = tok_attn.clone()
+                    valid_tok_attn[~valid_mask] = 0.0
+
+                    # Decode tokens to get actual words
+                    tokens = self._tokenizer.convert_ids_to_tokens(
+                        input_ids[sent_idx].tolist()
+                    )
+
+                    # Get top attended tokens (excluding padding)
+                    top_token_vals, top_token_indices = torch.topk(
+                        valid_tok_attn, min(5, valid_mask.sum().item())
+                    )
+
+                    top_tokens = [
+                        {
+                            'token': tokens[int(idx)],
+                            'attention': float(val_t),
+                            'position': int(idx)
+                        }
+                        for val_t, idx in zip(top_token_vals, top_token_indices)
+                        if tokens[int(idx)] not in ['[PAD]', '[CLS]', '[SEP]']
+                    ]
+
+                    # Compute token-level entropy for valid tokens
+                    valid_attn = tok_attn[valid_mask]
+                    if len(valid_attn) > 0:
+                        tok_entropy = self._compute_attention_entropy(valid_attn)
+                        token_entropies.append(tok_entropy)
+                else:
+                    top_tokens = []
+
+                top_sentences_data.append({
+                    'sentence': sentences[sent_idx],
+                    'attention': float(val),
+                    'idx': sent_idx,
+                    'top_tokens': top_tokens
+                })
+
+            top_sentences_per_confounder[f'confounder_{k}'] = top_sentences_data
+
+            # Update token entropy mean
+            if token_entropies:
+                attention_entropy[f'confounder_{k}']['token_entropy_mean'] = float(np.mean(token_entropies))
+
+            # Store full token attention for analysis
+            if token_attention is not None:
+                token_attention_info[f'confounder_{k}'] = {
+                    'shape': list(token_attention[:, k, :].shape),
+                    'mean_attention': float(token_attention[:, k, :].mean()),
+                    'max_attention': float(token_attention[:, k, :].max())
+                }
+
+        return {
+            'sentences': sentences,
+            'confounder_attention': confounder_attention,
+            'top_sentences_per_confounder': top_sentences_per_confounder,
+            'task_weights': task_weights,
+            'attention_entropy': attention_entropy,
+            'token_attention_info': token_attention_info,
+            'hierarchical_mode': True
+        }
+
+    def _compute_attention_entropy(self, attention_weights: torch.Tensor) -> float:
+        """
+        Compute normalized entropy of attention distribution.
+
+        Lower entropy = more focused attention (good for needle-in-haystack)
+        Higher entropy = more diffuse attention (bad, spreading attention everywhere)
+
+        Args:
+            attention_weights: 1D tensor of attention weights (should sum to ~1)
+
+        Returns:
+            Normalized entropy in [0, 1] where 0 = completely focused, 1 = uniform
+        """
+        eps = 1e-8
+        attn = attention_weights.clamp(min=eps)
+
+        # Compute entropy: -sum(p * log(p))
+        entropy = -torch.sum(attn * torch.log(attn))
+
+        # Normalize by max entropy (uniform distribution)
+        n = len(attention_weights)
+        if n > 1:
+            max_entropy = math.log(n)
+            normalized_entropy = entropy / max_entropy
+        else:
+            normalized_entropy = torch.tensor(0.0)
+
+        return float(normalized_entropy)
 
     def get_attention_weights(self, texts: List[str]) -> Dict[str, Any]:
         """
@@ -585,3 +806,198 @@ class GatedMILHierarchicalExtractor(nn.Module):
         """
         self._ensure_initialized()
         return self._task_weighting.get_weights()
+
+    def forward_with_attention(
+        self,
+        texts: List[str]
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        """
+        Extract features and return attention weights for regularization.
+
+        This is used during training when attention_entropy_weight > 0 to compute
+        entropy regularization loss that penalizes diffuse attention.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            features: Feature tensor of shape (batch_size, projection_dim)
+            attention_info: Dict with attention weights for entropy computation:
+                - 'sentence_attention': (batch, K, S) sentence-level attention
+                - 'token_attention': (batch, K, S, L) token-level attention (hierarchical only)
+                - 'attention_entropy': Mean normalized entropy across batch (scalar)
+        """
+        self._ensure_initialized()
+        batch_outputs = []
+        all_sentence_attention = []
+        all_token_attention = []
+        all_entropies = []
+
+        for text in texts:
+            # 1. Split into sentences
+            sentences = split_into_sentences(text, self._max_sentences)
+            if not sentences:
+                sentences = [text[:500]]
+
+            if self._hierarchical:
+                # Hierarchical (token-level) mode
+                combined, sent_attn, tok_attn, entropy = self._forward_hierarchical_with_attention(sentences)
+                all_token_attention.append(tok_attn)
+            else:
+                # Standard sentence-level mode
+                combined, sent_attn, entropy = self._forward_sentence_level_with_attention(sentences)
+
+            batch_outputs.append(combined)
+            all_sentence_attention.append(sent_attn)
+            all_entropies.append(entropy)
+
+        # Stack batch
+        batch_outputs = torch.stack(batch_outputs)  # (B, 3 * sentence_dim)
+
+        # Project to output dimension
+        features = self._output_projection(batch_outputs)  # (B, projection_dim)
+
+        # Compute mean entropy
+        mean_entropy = torch.stack(all_entropies).mean()
+
+        attention_info = {
+            'attention_entropy': mean_entropy,
+            'sentence_attention': all_sentence_attention,  # List of (K, S) tensors
+        }
+
+        if self._hierarchical and all_token_attention:
+            attention_info['token_attention'] = all_token_attention
+
+        return features, attention_info
+
+    def _forward_sentence_level_with_attention(
+        self,
+        sentences: List[str]
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Sentence-level forward pass returning attention for regularization.
+
+        Returns:
+            combined: (3 * sentence_dim,) combined task representations
+            attention: (K, S) attention weights
+            entropy: Scalar mean entropy across confounders
+        """
+        # Encode sentences
+        sentence_embeddings = self._encode_sentences_batch(sentences)  # (S, D)
+
+        # Get attention weights
+        confounders, attention_weights = self._gated_mil_attention(
+            sentence_embeddings, return_attention=True
+        )  # confounders: (K, D), attention: (K, S)
+
+        # Compute entropy for regularization (lower = more focused)
+        K = self._num_confounders
+        entropies = []
+        for k in range(K):
+            attn = attention_weights[k]
+            # Entropy: -sum(p * log(p))
+            eps = 1e-8
+            entropy_k = -torch.sum(attn * torch.log(attn + eps))
+            # Normalize by max entropy
+            max_entropy = math.log(len(sentences)) if len(sentences) > 1 else 1.0
+            normalized_entropy_k = entropy_k / max_entropy
+            entropies.append(normalized_entropy_k)
+
+        mean_entropy = torch.stack(entropies).mean()
+
+        # Apply task-specific weighting
+        prop_repr, task2_repr, task3_repr = self._task_weighting(confounders)
+
+        combined = torch.cat([prop_repr, task2_repr, task3_repr], dim=0)
+
+        return combined, attention_weights, mean_entropy
+
+    def _forward_hierarchical_with_attention(
+        self,
+        sentences: List[str]
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Hierarchical forward pass returning attention for regularization.
+
+        Returns:
+            combined: (3 * sentence_dim,) combined task representations
+            sentence_attention: (K, S) sentence-level attention
+            token_attention: (S, K, L) token-level attention
+            entropy: Scalar mean entropy across confounders
+        """
+        S = len(sentences)
+        K = self._num_confounders
+
+        # 1. Encode all sentences with BERT (full token embeddings)
+        token_embeddings, attention_mask = self._encode_sentence_tokens_batch(sentences)
+
+        # 2. Apply token-level gated pooling
+        confounder_sentence_embeddings, token_attention = self._token_level_pooling.forward_batch(
+            token_embeddings, attention_mask, return_attention=True
+        )
+
+        # 3. For each confounder, apply sentence-level attention
+        confounder_views = confounder_sentence_embeddings.permute(1, 0, 2)  # (K, S, D)
+
+        all_confounders = []
+        all_sentence_attentions = []
+        entropies = []
+
+        for k in range(K):
+            view_k = confounder_views[k]  # (S, D)
+            conf_k, sent_attn_k = self._gated_mil_attention(view_k, return_attention=True)
+            all_confounders.append(conf_k.mean(dim=0))  # (D,)
+
+            # Aggregate sentence attention across queries
+            sent_attn_mean = sent_attn_k.mean(dim=0)  # (S,)
+            all_sentence_attentions.append(sent_attn_mean)
+
+            # Compute entropy
+            eps = 1e-8
+            entropy_k = -torch.sum(sent_attn_mean * torch.log(sent_attn_mean + eps))
+            max_entropy = math.log(S) if S > 1 else 1.0
+            normalized_entropy_k = entropy_k / max_entropy
+            entropies.append(normalized_entropy_k)
+
+            # Also add token-level entropy
+            if token_attention is not None:
+                for s in range(S):
+                    tok_attn = token_attention[s, k, :]
+                    valid_len = attention_mask[s].sum().item()
+                    if valid_len > 1:
+                        valid_attn = tok_attn[:valid_len]
+                        tok_entropy = -torch.sum(valid_attn * torch.log(valid_attn + eps))
+                        tok_max_entropy = math.log(valid_len)
+                        entropies.append(tok_entropy / tok_max_entropy)
+
+        confounders = torch.stack(all_confounders, dim=0)  # (K, D)
+        sentence_attention = torch.stack(all_sentence_attentions, dim=0)  # (K, S)
+        mean_entropy = torch.stack(entropies).mean()
+
+        # Apply task-specific weighting
+        prop_repr, task2_repr, task3_repr = self._task_weighting(confounders)
+        combined = torch.cat([prop_repr, task2_repr, task3_repr], dim=0)
+
+        return combined, sentence_attention, token_attention, mean_entropy
+
+    def compute_attention_entropy_loss(
+        self,
+        texts: List[str]
+    ) -> torch.Tensor:
+        """
+        Compute attention entropy loss for regularization.
+
+        This loss penalizes high-entropy (diffuse) attention distributions,
+        encouraging the model to focus on specific sentences rather than
+        spreading attention uniformly.
+
+        Lower entropy = more focused attention = lower loss
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            entropy_loss: Mean normalized entropy across batch (scalar in [0, 1])
+        """
+        _, attention_info = self.forward_with_attention(texts)
+        return attention_info['attention_entropy']

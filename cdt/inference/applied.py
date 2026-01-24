@@ -432,6 +432,7 @@ def _train_single_model(
         gated_mil_projection_dim=getattr(arch_config, 'gated_mil_projection_dim', 128),
         gated_mil_hierarchical=getattr(arch_config, 'gated_mil_hierarchical', False),
         gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
+        gated_mil_use_mean_pooling=getattr(arch_config, 'gated_mil_use_mean_pooling', False),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -640,6 +641,8 @@ def _train_epoch(
     label_smoothing = getattr(config, 'label_smoothing', 0.0)
     gradient_clip_norm = getattr(config, 'gradient_clip_norm', 0.0)
     gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
+    stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
+    attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
 
     for batch in tqdm(loader, desc="Training", leave=False):
         # Move tensors to device
@@ -654,7 +657,9 @@ def _train_epoch(
             alpha_propensity=config.alpha_propensity,
             beta_targreg=config.beta_targreg,
             gamma_rlearner=gamma_rlearner,
-            label_smoothing=label_smoothing
+            label_smoothing=label_smoothing,
+            stop_grad_propensity=stop_grad_propensity,
+            attention_entropy_weight=attention_entropy_weight
         )
 
         losses['loss'].backward()
@@ -695,6 +700,8 @@ def _eval_epoch(
     all_prop = []
 
     gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
+    stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
+    attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Validation", leave=False):
@@ -705,7 +712,9 @@ def _eval_epoch(
                 batch,
                 alpha_propensity=config.alpha_propensity,
                 beta_targreg=config.beta_targreg,
-                gamma_rlearner=gamma_rlearner
+                gamma_rlearner=gamma_rlearner,
+                stop_grad_propensity=stop_grad_propensity,
+                attention_entropy_weight=attention_entropy_weight
             )
 
             epoch_loss += losses['loss'].item()

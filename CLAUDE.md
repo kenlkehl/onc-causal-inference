@@ -827,6 +827,90 @@ preds = model.predict(texts)
 ite = preds['y1_prob'] - preds['y0_prob']
 ```
 
+### Advanced Training Options for Improving Tau Learning
+
+When training with the Gated MIL Hierarchical extractor and R-Learner, several options help improve treatment effect (τ) learning:
+
+**1. Stop Gradient from Propensity (`stop_grad_propensity=True`)**
+
+Prevents propensity loss from affecting the feature extractor. Since propensity is easier to learn than treatment effects, it can dominate representation learning. This forces the representation to optimize for tau/outcome:
+
+```python
+losses = model.train_step(
+    batch,
+    alpha_propensity=1.0,
+    gamma_rlearner=1.0,
+    stop_grad_propensity=True  # Feature extractor ignores propensity gradient
+)
+```
+
+**2. Attention Entropy Regularization (`attention_entropy_weight > 0`)**
+
+Penalizes diffuse attention distributions to encourage focused attention on specific sentences. Low entropy = focused attention (good for needle-in-haystack). Only applies to Gated MIL Hierarchical extractor:
+
+```python
+losses = model.train_step(
+    batch,
+    alpha_propensity=1.0,
+    gamma_rlearner=1.0,
+    attention_entropy_weight=0.1  # Encourage focused attention
+)
+# losses['entropy_loss'] contains the entropy loss component
+```
+
+**3. Stronger R-Loss Weighting (`gamma_rlearner > 1.0`)**
+
+Increases the weight of the R-learner loss relative to propensity and outcome losses, shifting optimization focus toward treatment effect:
+
+```python
+losses = model.train_step(
+    batch,
+    alpha_propensity=1.0,
+    gamma_rlearner=5.0  # Stronger tau signal (default 1.0)
+)
+```
+
+**4. Mean Pooling Instead of [CLS] (`gated_mil_use_mean_pooling=True`)**
+
+Uses mean pooling over all tokens instead of [CLS] token for sentence embeddings. May provide more robust representations that capture the full sentence content:
+
+```python
+model = CausalText(
+    feature_extractor_type="gated_mil_hierarchical",
+    model_type="rlearner",
+    gated_mil_use_mean_pooling=True,  # Mean pool instead of [CLS]
+    # ... other options
+)
+```
+
+**Command-line usage:**
+
+```bash
+python oracle_experiment_scripts/run_gated_mil_token_level_experiment_rlearner.py \
+    --dataset ../data.parquet \
+    --output-dir ./results \
+    --gamma-rlearner 5.0 \
+    --stop-grad-propensity \
+    --attention-entropy-weight 0.1 \
+    --use-mean-pooling \
+    --save-attention \
+    --epochs 25
+```
+
+**Interpreting attention entropy:**
+
+When `--save-attention` is enabled, the output includes entropy metrics:
+
+```python
+interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
+for doc in interpretations:
+    for conf_name, entropy_info in doc['attention_entropy'].items():
+        print(f"{conf_name}:")
+        print(f"  Sentence entropy: {entropy_info['sentence_entropy']:.3f}")  # Lower = more focused
+        if 'token_entropy_mean' in entropy_info:
+            print(f"  Token entropy: {entropy_info['token_entropy_mean']:.3f}")
+```
+
 ## Dependencies
 
 Core: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow
@@ -872,3 +956,6 @@ output_dir/
 11. **GRU confounder mode**: Enable with `confounder_use_gru=True` for learning confounder extraction from scratch. All parameters (embeddings, GRU, attention, latent confounders) are optimized together via the causal loss. Requires `fit_tokenizer()` before training. Best when pretrained encoders may have domain mismatch or when you want the model to learn clinical-specific representations.
 12. **Hierarchical Transformer extractor**: Use `feature_extractor_type="hierarchical_transformer"` for a simple sentence-level encoding approach. Uses lightweight BERT (e.g., `prajjwal1/bert-tiny`) to encode each sentence, then transformer layers with a learnable [POOL] token to aggregate. Simpler than ConfounderExtractor but still effective for long documents. Use `interpret_attention()` to see which sentences contribute most to the representation.
 13. **Gated MIL Hierarchical extractor**: Use `feature_extractor_type="gated_mil_hierarchical"` for gated MIL attention with K confounder queries and task-specific weighting. Uses tanh × sigmoid gating (from pathology AI) to suppress irrelevant sentences. K confounders are shared across tasks but weighted differently for propensity vs tau vs outcome. Enable `gated_mil_hierarchical=True` for token-level gated pooling when fine-grained distinctions matter. Use `interpret_attention()` to see which sentences each confounder attends to, and `get_task_weights()` to see how confounders are weighted per task.
+14. **Stop gradient from propensity**: Enable `stop_grad_propensity=True` in `train_step()` to prevent propensity loss from dominating feature extraction. This forces the representation to optimize for tau/outcome prediction, which can improve treatment effect learning.
+15. **Attention entropy regularization**: Use `attention_entropy_weight > 0` in `train_step()` to penalize diffuse attention. This encourages the model to focus on specific sentences rather than spreading attention uniformly, which helps with "needle in a haystack" confounder extraction.
+16. **Mean pooling option**: Use `gated_mil_use_mean_pooling=True` to use mean pooling over all tokens instead of [CLS] token. This may provide more robust sentence representations that capture the full sentence content.

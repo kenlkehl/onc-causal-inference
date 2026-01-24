@@ -134,6 +134,7 @@ class CausalText(nn.Module):
         gated_mil_projection_dim: int = 128,
         gated_mil_hierarchical: bool = False,
         gated_mil_token_hidden_dim: int = 64,
+        gated_mil_use_mean_pooling: bool = False,
         # DragonNet args
         dragonnet_representation_dim: int = 128,
         dragonnet_hidden_outcome_dim: int = 64,
@@ -255,6 +256,7 @@ class CausalText(nn.Module):
             'gated_mil_projection_dim': gated_mil_projection_dim,
             'gated_mil_hierarchical': gated_mil_hierarchical,
             'gated_mil_token_hidden_dim': gated_mil_token_hidden_dim,
+            'gated_mil_use_mean_pooling': gated_mil_use_mean_pooling,
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
@@ -392,11 +394,12 @@ class CausalText(nn.Module):
                 dropout=gated_mil_dropout,
                 hierarchical=gated_mil_hierarchical,
                 token_hidden_dim=gated_mil_token_hidden_dim,
+                use_mean_pooling=gated_mil_use_mean_pooling,
                 device=self._device
             )
             logger.info(f"Using Gated MIL Hierarchical feature extractor: {gated_mil_sentence_model}, "
                        f"{gated_mil_num_confounders} confounders, projection_dim={gated_mil_projection_dim}, "
-                       f"hierarchical={gated_mil_hierarchical}")
+                       f"hierarchical={gated_mil_hierarchical}, mean_pooling={gated_mil_use_mean_pooling}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(
@@ -518,7 +521,9 @@ class CausalText(nn.Module):
         alpha_propensity: float = 1.0,
         beta_targreg: float = 0.1,
         gamma_rlearner: float = 1.0,
-        label_smoothing: float = 0.0
+        label_smoothing: float = 0.0,
+        stop_grad_propensity: bool = False,
+        attention_entropy_weight: float = 0.0
     ) -> Dict[str, torch.Tensor]:
         """
         Perform single training step.
@@ -530,6 +535,12 @@ class CausalText(nn.Module):
             beta_targreg: Weight for targeted regularization (dragonnet/uplift)
             gamma_rlearner: Weight for R-learner loss (rlearner only)
             label_smoothing: Label smoothing factor (0 = no smoothing)
+            stop_grad_propensity: If True, detach features before propensity loss
+                so propensity optimization doesn't affect the feature extractor.
+                This forces the representation to optimize for tau/outcome.
+            attention_entropy_weight: Weight for attention entropy regularization.
+                Higher = stronger penalty on diffuse attention. Only applies to
+                gated_mil_hierarchical extractor.
 
         Returns:
             Dictionary with loss components and detached predictions
@@ -537,7 +548,8 @@ class CausalText(nn.Module):
         # Dispatch to specialized training step for rlearner
         if self.model_type == "rlearner":
             return self._train_step_rlearner(
-                batch, alpha_propensity, gamma_rlearner, label_smoothing
+                batch, alpha_propensity, gamma_rlearner, label_smoothing,
+                stop_grad_propensity, attention_entropy_weight
             )
 
         texts = batch['texts']
@@ -609,7 +621,9 @@ class CausalText(nn.Module):
         batch: Dict[str, Any],
         alpha_propensity: float,
         gamma_rlearner: float,
-        label_smoothing: float
+        label_smoothing: float,
+        stop_grad_propensity: bool = False,
+        attention_entropy_weight: float = 0.0
     ) -> Dict[str, torch.Tensor]:
         """
         Perform R-learner training step with three-headed loss.
@@ -629,6 +643,8 @@ class CausalText(nn.Module):
             alpha_propensity: Weight for propensity loss
             gamma_rlearner: Weight for R-learner loss
             label_smoothing: Label smoothing factor
+            stop_grad_propensity: If True, detach features before propensity loss
+            attention_entropy_weight: Weight for attention entropy regularization
 
         Returns:
             Dictionary with loss components and predictions
@@ -646,14 +662,58 @@ class CausalText(nn.Module):
             treatments_smooth = treatments
             outcomes_smooth = outcomes
 
-        # Forward pass - RLearnerNet returns: m_logit, tau, t_logit, phi
-        m_logit, tau, t_logit, phi = self.forward(texts, auxiliary_features)
+        # Extract features
+        features = self.feature_extractor(texts)
 
-        # Loss 1: Propensity loss - BCE for e(X)
-        propensity_loss = F.binary_cross_entropy_with_logits(
-            t_logit.squeeze(-1),
-            treatments_smooth
-        )
+        # Compute attention entropy loss if enabled and extractor supports it
+        entropy_loss = torch.tensor(0.0, device=self._device)
+        if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
+            # Use forward_with_attention to get entropy
+            _, attention_info = self.feature_extractor.forward_with_attention(texts)
+            entropy_loss = attention_info['attention_entropy']
+
+        # Concatenate auxiliary features if provided
+        if self.auxiliary_projection is not None and auxiliary_features is not None:
+            aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+            features = torch.cat([features, aux_projected], dim=1)
+
+        if stop_grad_propensity:
+            # CRITICAL: Detach features for propensity to prevent propensity
+            # from dominating the representation learning
+            # Create two forward paths: one for propensity (detached), one for outcome/tau
+            features_for_propensity = features.detach()
+
+            # Forward pass through R-Learner heads with split features
+            # We need to run the propensity head separately with detached features
+            m_logit, tau, t_logit, phi = self.net(features)
+
+            # Re-compute propensity with detached features
+            # We need direct access to the propensity head
+            if hasattr(self.net, 'propensity_fc'):
+                # Get shared representation
+                shared_rep_detached = self.net.shared_layers(features_for_propensity)
+                t_logit_detached = self.net.propensity_fc(shared_rep_detached)
+
+                # Loss 1: Propensity loss with DETACHED features
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit_detached.squeeze(-1),
+                    treatments_smooth
+                )
+            else:
+                # Fallback: use detached t_logit
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit.detach().squeeze(-1),
+                    treatments_smooth
+                )
+        else:
+            # Standard forward pass
+            m_logit, tau, t_logit, phi = self.net(features)
+
+            # Loss 1: Propensity loss - BCE for e(X)
+            propensity_loss = F.binary_cross_entropy_with_logits(
+                t_logit.squeeze(-1),
+                treatments_smooth
+            )
 
         # Loss 2: Marginal outcome loss - BCE for m(X) = E[Y|X]
         outcome_loss = F.binary_cross_entropy_with_logits(
@@ -677,7 +737,8 @@ class CausalText(nn.Module):
         total_loss = (
             outcome_loss +
             alpha_propensity * propensity_loss +
-            gamma_rlearner * r_loss
+            gamma_rlearner * r_loss +
+            attention_entropy_weight * entropy_loss
         )
 
         # Derive y0/y1 for backward-compatible metrics
@@ -690,7 +751,7 @@ class CausalText(nn.Module):
             y0_logit_approx = m_logit - prop * tau_val
             y1_logit_approx = m_logit + (1 - prop) * tau_val
 
-        return {
+        result = {
             'loss': total_loss,
             'outcome_loss': outcome_loss.detach(),
             'propensity_loss': propensity_loss.detach(),
@@ -703,6 +764,12 @@ class CausalText(nn.Module):
             'y0_logit': y0_logit_approx.detach(),
             'y1_logit': y1_logit_approx.detach()
         }
+
+        # Add entropy loss if computed
+        if attention_entropy_weight > 0:
+            result['entropy_loss'] = entropy_loss.detach() if isinstance(entropy_loss, torch.Tensor) else entropy_loss
+
+        return result
 
     def predict(
         self,
