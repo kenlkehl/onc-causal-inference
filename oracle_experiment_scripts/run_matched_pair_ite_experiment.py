@@ -23,11 +23,24 @@ Experimental Conditions (grid search):
 4. Propensity epochs: 25, 50
 5. Outcome epochs: 25, 50
 
+Matching Options (CLI overrides):
+- --caliper: Maximum distance for valid match (default: 0.2)
+- --caliper-scale: Scale for caliper - 'propensity', 'logit', or 'std' (default: 'std')
+- --match-with-replacement: Allow controls to be matched to multiple treated units
+- --match-without-replacement: Each control matched at most once (default)
+
 Usage:
     python oracle_experiment_scripts/run_matched_pair_ite_experiment.py \
         --dataset example_synthetic_data_one_confounder/dataset.parquet \
+        --output-dir ../pcori_experiments/matched_pair_experiment_results_endtoend_with_replacement \
+        --gpu-ids 0 1 --caliper 0.2 --match-with-replacement
+
+With explicit caliper settings:
+    python oracle_experiment_scripts/run_matched_pair_ite_experiment.py \
+        --dataset example_synthetic_data_one_confounder/dataset.parquet \
         --output-dir ../pcori_experiments/matched_pair_experiment_results \
-        --gpu-ids 0 1
+        --gpu-ids 0 \
+        --caliper 0.25 --caliper-scale logit --match-with-replacement
 
 To run a quick test:
     python oracle_experiment_scripts/run_matched_pair_ite_experiment.py \
@@ -63,7 +76,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cdt.models.matched_pair_ite import (
     PropensityMatchingModel,
-    MatchedPairOutcomeModel
+    MatchedPairOutcomeModel,
+    EndToEndMatchedPairModel
 )
 from cdt.training.matched_pair_training import (
     train_propensity_model,
@@ -71,7 +85,8 @@ from cdt.training.matched_pair_training import (
     train_matched_pair_outcome_model_enhanced,
     extract_all_representations,
     extract_propensity_scores,
-    MatchedPairDataset
+    MatchedPairDataset,
+    train_end_to_end_matched_pair
 )
 from cdt.matching import PropensityMatcher, match_by_cosine_similarity
 from cdt.config import MatchedPairConfig
@@ -95,6 +110,8 @@ class ExperimentCondition:
     propensity_epochs: int
     outcome_epochs: int
     caliper: float = 0.2
+    caliper_scale: str = "std"  # "propensity", "logit", or "std"
+    match_with_replacement: bool = False  # Whether to match with replacement
     representation_dim: int = 256
     hidden_outcome_dim: int = 128
     batch_size: int = 32
@@ -115,23 +132,55 @@ class ExperimentCondition:
     cross_encoder_use_gating: bool = True
     gamma_discrimination: float = 0.1
     delta_consistency: float = 0.1
+    # End-to-end training options
+    end_to_end_training: bool = False
+    e2e_epochs: int = 100
+    e2e_lr: float = 1e-4
+    e2e_alpha_propensity: float = 1.0
+    e2e_alpha_outcome: float = 1.0
+    e2e_beta_tau: float = 1.0
+    e2e_rematching_frequency: int = 2
+    e2e_rematching_warmup_epochs: int = 1
+    e2e_initial_matching: str = "propensity"
+    e2e_lr_schedule: str = "linear"
+    e2e_early_stopping_patience: int = 20
 
 
-def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentCondition]:
+def generate_experiment_grid(
+    quick_test: bool = False,
+    caliper: Optional[float] = None,
+    caliper_scale: Optional[str] = None,
+    match_with_replacement: Optional[bool] = None
+) -> List[ExperimentCondition]:
     """Generate grid of experimental conditions.
 
     The grid explores:
+    - Training mode: 3-stage vs end-to-end
     - Matching method: propensity score vs embedding similarity
     - Matching algorithm: nearest neighbor (greedy) vs optimal (Hungarian)
     - Learning rate
-    - Propensity epochs
-    - Outcome epochs
+    - Propensity epochs (3-stage) / E2E epochs
+    - Outcome epochs (3-stage only)
     - Joint outcome training: whether to co-train Stage 1 on outcome (true confounder learning)
     - Freeze representation: whether to freeze Stage 1 representation during Stage 2
     - Dynamic re-matching: whether to re-match during Stage 2 (only when not frozen)
     - Cross-encoder: whether to use residual cross-encoder for Stage 3
+    - Caliper: maximum distance for valid match
+    - Caliper scale: 'propensity', 'logit', or 'std'
+    - Match with replacement: whether controls can be reused
+
+    Args:
+        quick_test: If True, run minimal test configuration
+        caliper: Override caliper value for all conditions (default: 0.2)
+        caliper_scale: Override caliper scale for all conditions (default: 'std')
+        match_with_replacement: Override replacement setting for all conditions (default: False)
     """
     conditions = []
+
+    # Set defaults
+    default_caliper = caliper if caliper is not None else 0.2
+    default_caliper_scale = caliper_scale if caliper_scale is not None else "std"
+    default_replacement = match_with_replacement if match_with_replacement is not None else False
 
     if quick_test:
         # Minimal test configuration
@@ -143,57 +192,98 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
         joint_outcome_options = [False]
         freeze_repr_options = [True]
         cross_encoder_options = [False]
+        e2e_training_options = [False]  # Quick test: 3-stage only
+        e2e_epochs_list = [10]
     else:
         # Full grid
         matching_methods = ["propensity", "embedding"]
         matching_algorithms = ["nearest", "optimal"]
-        lrs = [1e-4, 5e-5]
-        prop_epochs_list = [25, 50]
-        outcome_epochs_list = [25, 50]
-        # New: joint training and freeze options
+        lrs = [5e-5]
+        #prop_epochs_list = [25, 50]
+        #outcome_epochs_list = [25, 50]
+        # \joint training and freeze options
         joint_outcome_options = [False, True]  # Whether to co-train on outcome in Stage 1
         freeze_repr_options = [True, False]    # Whether to freeze representation in Stage 2
         # Cross-encoder as experimental factor
         cross_encoder_options = [False, True]  # With/without cross-encoder
+        # End-to-end training mode
+        e2e_training_options = [True]  # 3-stage vs end-to-end
+        e2e_epochs_list = [50]
 
     idx = 0
-    for matching_method in matching_methods:
-        for matching_algorithm in matching_algorithms:
-            for lr in lrs:
-                for prop_epochs in prop_epochs_list:
-                    for outcome_epochs in outcome_epochs_list:
-                        for joint_outcome in joint_outcome_options:
-                            for freeze_repr in freeze_repr_options:
-                                # Dynamic re-matching only makes sense when not frozen
-                                if freeze_repr:
-                                    dynamic_rematch_options = [False]
-                                else:
-                                    dynamic_rematch_options = [False, True] if not quick_test else [False]
 
-                                for dynamic_rematch in dynamic_rematch_options:
-                                    for use_cross_encoder in cross_encoder_options:
-                                        idx += 1
-                                        # Create descriptive name
-                                        joint_str = "joint" if joint_outcome else "prop"
-                                        freeze_str = "frozen" if freeze_repr else "finetune"
-                                        rematch_str = "_rematch" if dynamic_rematch else ""
-                                        crossenc_str = "_crossenc" if use_cross_encoder else ""
-                                        name = (f"{idx:02d}_{matching_method}_{matching_algorithm}_"
-                                               f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
-                                               f"{joint_str}_{freeze_str}{rematch_str}{crossenc_str}")
-                                        conditions.append(ExperimentCondition(
-                                            name=name,
-                                            matching_method=matching_method,
-                                            matching_algorithm=matching_algorithm,
-                                            propensity_lr=lr,
-                                            outcome_lr=lr,
-                                            propensity_epochs=prop_epochs,
-                                            outcome_epochs=outcome_epochs,
-                                            joint_outcome_training=joint_outcome,
-                                            freeze_representation_stage2=freeze_repr,
-                                            dynamic_rematching=dynamic_rematch,
-                                            use_cross_encoder=use_cross_encoder,
-                                        ))
+    # First: 3-stage conditions (existing)
+    for e2e_mode in e2e_training_options:
+        if e2e_mode:
+            # End-to-end training conditions (simpler grid)
+            for matching_method in matching_methods:
+                for matching_algorithm in matching_algorithms:
+                    for lr in lrs:
+                        for e2e_epochs in e2e_epochs_list:
+                            idx += 1
+                            repl_str = "_repl" if default_replacement else ""
+                            name = (f"{idx:02d}_e2e_{matching_method}_{matching_algorithm}_"
+                                   f"lr{lr}_ep{e2e_epochs}_cal{default_caliper}_{default_caliper_scale}{repl_str}")
+                            conditions.append(ExperimentCondition(
+                                name=name,
+                                matching_method=matching_method,
+                                matching_algorithm=matching_algorithm,
+                                propensity_lr=lr,
+                                outcome_lr=lr,
+                                propensity_epochs=0,  # Not used in E2E
+                                outcome_epochs=0,     # Not used in E2E
+                                caliper=default_caliper,
+                                caliper_scale=default_caliper_scale,
+                                match_with_replacement=default_replacement,
+                                end_to_end_training=True,
+                                e2e_epochs=e2e_epochs,
+                                e2e_lr=lr,
+                            ))
+        else:
+            # 3-stage conditions (original)
+            for matching_method in matching_methods:
+                for matching_algorithm in matching_algorithms:
+                    for lr in lrs:
+                        for prop_epochs in prop_epochs_list:
+                            for outcome_epochs in outcome_epochs_list:
+                                for joint_outcome in joint_outcome_options:
+                                    for freeze_repr in freeze_repr_options:
+                                        # Dynamic re-matching only makes sense when not frozen
+                                        if freeze_repr:
+                                            dynamic_rematch_options = [False]
+                                        else:
+                                            dynamic_rematch_options = [False, True] if not quick_test else [False]
+
+                                        for dynamic_rematch in dynamic_rematch_options:
+                                            for use_cross_encoder in cross_encoder_options:
+                                                idx += 1
+                                                # Create descriptive name
+                                                joint_str = "joint" if joint_outcome else "prop"
+                                                freeze_str = "frozen" if freeze_repr else "finetune"
+                                                rematch_str = "_rematch" if dynamic_rematch else ""
+                                                crossenc_str = "_crossenc" if use_cross_encoder else ""
+                                                repl_str = "_repl" if default_replacement else ""
+                                                name = (f"{idx:02d}_3stage_{matching_method}_{matching_algorithm}_"
+                                                       f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
+                                                       f"{joint_str}_{freeze_str}{rematch_str}{crossenc_str}"
+                                                       f"_cal{default_caliper}_{default_caliper_scale}{repl_str}")
+                                                conditions.append(ExperimentCondition(
+                                                    name=name,
+                                                    matching_method=matching_method,
+                                                    matching_algorithm=matching_algorithm,
+                                                    propensity_lr=lr,
+                                                    outcome_lr=lr,
+                                                    propensity_epochs=prop_epochs,
+                                                    outcome_epochs=outcome_epochs,
+                                                    caliper=default_caliper,
+                                                    caliper_scale=default_caliper_scale,
+                                                    match_with_replacement=default_replacement,
+                                                    joint_outcome_training=joint_outcome,
+                                                    freeze_representation_stage2=freeze_repr,
+                                                    dynamic_rematching=dynamic_rematch,
+                                                    use_cross_encoder=use_cross_encoder,
+                                                    end_to_end_training=False,
+                                                ))
 
     return conditions
 
@@ -309,6 +399,8 @@ def run_single_fold(
 
     Uses full training fold (80%) for both propensity and outcome model training.
     No inner validation split - trains for fixed epochs on full training data.
+
+    Supports both 3-stage and end-to-end training modes.
     """
     logger.info(f"  Fold {fold + 1}: Starting on {device}")
 
@@ -336,8 +428,9 @@ def run_single_fold(
         representation_dim=condition.representation_dim,
         matching_method=condition.matching_method,
         caliper=condition.caliper,
-        caliper_scale="std",
+        caliper_scale=condition.caliper_scale,
         matching_algorithm=condition.matching_algorithm,
+        match_with_replacement=condition.match_with_replacement,
         outcome_epochs=condition.outcome_epochs,
         outcome_lr=condition.outcome_lr,
         outcome_batch_size=condition.batch_size,
@@ -361,8 +454,26 @@ def run_single_fold(
         cross_encoder_use_gating=condition.cross_encoder_use_gating,
         gamma_discrimination=condition.gamma_discrimination,
         delta_consistency=condition.delta_consistency,
+        # End-to-end training options
+        end_to_end_training=condition.end_to_end_training,
+        e2e_epochs=condition.e2e_epochs,
+        e2e_lr=condition.e2e_lr,
+        e2e_batch_size=condition.batch_size,
+        e2e_alpha_propensity=condition.e2e_alpha_propensity,
+        e2e_alpha_outcome=condition.e2e_alpha_outcome,
+        e2e_beta_tau=condition.e2e_beta_tau,
+        e2e_rematching_frequency=condition.e2e_rematching_frequency,
+        e2e_rematching_warmup_epochs=condition.e2e_rematching_warmup_epochs,
+        e2e_initial_matching=condition.e2e_initial_matching,
+        e2e_lr_schedule=condition.e2e_lr_schedule,
+        e2e_early_stopping_patience=condition.e2e_early_stopping_patience,
     )
 
+    # Branch: End-to-end or 3-stage
+    if condition.end_to_end_training:
+        return _run_single_fold_e2e(fold, train_df, test_df, text_col, mp_config, device)
+
+    # 3-Stage Approach
     # Stage 1: Train propensity model
     logger.info(f"  Fold {fold + 1}: Training propensity model")
     propensity_model = PropensityMatchingModel(
@@ -414,7 +525,8 @@ def run_single_fold(
         matcher = PropensityMatcher(
             method=condition.matching_algorithm,
             caliper=condition.caliper,
-            caliper_scale=mp_config.caliper_scale
+            caliper_scale=condition.caliper_scale,
+            replacement=condition.match_with_replacement
         )
         match_result = matcher.match(train_propensity, treatment)
 
@@ -426,7 +538,10 @@ def run_single_fold(
         'n_matched': len(match_result.matched_pairs),
         'match_rate': len(match_result.matched_pairs) / min(match_result.n_treated, match_result.n_control)
             if min(match_result.n_treated, match_result.n_control) > 0 else 0.0,
-        'mean_distance': float(match_result.distances.mean()) if len(match_result.distances) > 0 else None
+        'mean_distance': float(match_result.distances.mean()) if len(match_result.distances) > 0 else None,
+        'caliper': condition.caliper,
+        'caliper_scale': condition.caliper_scale,
+        'match_with_replacement': condition.match_with_replacement
     }
     logger.info(f"  Fold {fold + 1}: Matched {match_stats['n_matched']} pairs ({match_stats['match_rate']:.1%})")
 
@@ -516,6 +631,115 @@ def run_single_fold(
     return preds_df, metrics, history_summary
 
 
+def _run_single_fold_e2e(
+    fold: int,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    text_col: str,
+    mp_config: MatchedPairConfig,
+    device: torch.device
+) -> Tuple[pd.DataFrame, Dict[str, Any], Dict[str, Any]]:
+    """Run a single fold with end-to-end training."""
+    logger.info(f"  Fold {fold + 1}: Using end-to-end training mode")
+
+    # Create unified model
+    model = EndToEndMatchedPairModel(
+        sentence_model=mp_config.hier_transformer_sentence_model,
+        freeze_sentence_encoder=mp_config.hier_transformer_freeze_sentence_encoder,
+        max_sentences=mp_config.hier_transformer_max_sentences,
+        max_sentence_length=mp_config.hier_transformer_max_sentence_length,
+        transformer_dim=mp_config.hier_transformer_dim,
+        num_transformer_layers=mp_config.hier_transformer_num_layers,
+        num_attention_heads=mp_config.hier_transformer_num_heads,
+        representation_dim=mp_config.representation_dim,
+        hidden_outcome_dim=mp_config.hidden_outcome_dim,
+        dropout=mp_config.dropout,
+        device=str(device)
+    ).to(device)
+
+    # Initialize feature extractor
+    model.fit_tokenizer(train_df[text_col].tolist())
+
+    # Train end-to-end (no validation split for fixed epochs)
+    model, history = train_end_to_end_matched_pair(
+        model, train_df, None, mp_config, device
+    )
+
+    # Predict on test set
+    logger.info(f"  Fold {fold + 1}: Predicting on test set")
+    test_texts = test_df[text_col].tolist()
+
+    model.eval()
+    batch_size = mp_config.e2e_batch_size
+
+    test_propensity = []
+    test_y0 = []
+    test_y1 = []
+    test_ite = []
+
+    with torch.no_grad():
+        for i in range(0, len(test_texts), batch_size):
+            batch_texts = test_texts[i:i + batch_size]
+            prop = model.predict_propensity(batch_texts)
+            y0, y1, ite = model.predict_potential_outcomes(batch_texts)
+
+            test_propensity.append(prop.cpu().numpy())
+            test_y0.append(y0.cpu().numpy().flatten())
+            test_y1.append(y1.cpu().numpy().flatten())
+            test_ite.append(ite.cpu().numpy().flatten())
+
+    test_propensity = np.concatenate(test_propensity)
+    test_y0 = np.concatenate(test_y0)
+    test_y1 = np.concatenate(test_y1)
+    test_ite = np.concatenate(test_ite)
+
+    # Create predictions DataFrame
+    preds_df = test_df.copy()
+    preds_df['pred_propensity_prob'] = test_propensity
+    preds_df['pred_y0_prob'] = test_y0
+    preds_df['pred_y1_prob'] = test_y1
+    preds_df['pred_ite_prob'] = test_ite
+    preds_df['cv_fold'] = fold + 1
+
+    # Compute metrics
+    metrics = compute_metrics(
+        pred_ite=preds_df['pred_ite_prob'].values,
+        true_ite=preds_df['true_ite_prob'].values,
+        pred_propensity=preds_df['pred_propensity_prob'].values,
+        true_treatment=preds_df['treatment_indicator'].values,
+        pred_y0=preds_df['pred_y0_prob'].values,
+        pred_y1=preds_df['pred_y1_prob'].values,
+        true_y0=preds_df['true_y0_prob'].values,
+        true_y1=preds_df['true_y1_prob'].values,
+        true_outcome=preds_df['outcome_indicator'].values
+    )
+    metrics['fold'] = fold + 1
+    metrics['training_mode'] = 'end_to_end'
+    metrics['n_epochs'] = len(history)
+    if history:
+        metrics['final_n_matched_pairs'] = history[-1].get('n_matched_pairs', 0)
+
+    logger.info(f"  Fold {fold + 1} (E2E): ITE corr={metrics['ite_corr']:.4f}, ATE bias={metrics['ate_bias']:.4f}")
+
+    # Cleanup
+    model.cpu()
+    del model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # History summary
+    history_summary = {
+        'e2e_final_loss': history[-1]['loss'] if history else None,
+        'e2e_final_propensity_loss': history[-1].get('propensity_loss') if history else None,
+        'e2e_final_outcome_loss': history[-1].get('outcome_loss') if history else None,
+        'e2e_final_tau_loss': history[-1].get('tau_loss') if history else None,
+        'e2e_n_epochs': len(history),
+    }
+
+    return preds_df, metrics, history_summary
+
+
 def run_experiment_condition(
     condition: ExperimentCondition,
     dataset: pd.DataFrame,
@@ -570,6 +794,9 @@ def run_experiment_condition(
         'propensity_lr': condition.propensity_lr,
         'propensity_epochs': condition.propensity_epochs,
         'outcome_epochs': condition.outcome_epochs,
+        'caliper': condition.caliper,
+        'caliper_scale': condition.caliper_scale,
+        'match_with_replacement': condition.match_with_replacement,
     }
 
     for col in ['ite_mse', 'ite_mae', 'ite_corr', 'ate_bias', 'propensity_auroc',
@@ -647,15 +874,60 @@ def main():
         action='store_true',
         help='Run conditions sequentially (no parallelization)'
     )
+    parser.add_argument(
+        '--caliper',
+        type=float,
+        default=None,
+        help='Caliper value for matching. If not specified, uses grid default (0.2)'
+    )
+    parser.add_argument(
+        '--caliper-scale',
+        type=str,
+        choices=['propensity', 'logit', 'std'],
+        default=None,
+        help='Scale for caliper: "propensity" (absolute), "logit" (logit scale), "std" (standard deviations of logit propensity). If not specified, uses grid default ("std")'
+    )
+    parser.add_argument(
+        '--match-with-replacement',
+        action='store_true',
+        default=None,
+        help='Match with replacement (controls can be matched to multiple treated units)'
+    )
+    parser.add_argument(
+        '--match-without-replacement',
+        action='store_true',
+        help='Match without replacement (default behavior, each control matched at most once)'
+    )
 
     args = parser.parse_args()
+
+    # Handle replacement flag logic
+    if args.match_with_replacement and args.match_without_replacement:
+        parser.error("Cannot specify both --match-with-replacement and --match-without-replacement")
+    if args.match_with_replacement:
+        args.replacement = True
+    elif args.match_without_replacement:
+        args.replacement = False
+    else:
+        args.replacement = None  # Use grid default
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Generate experiment grid
-    conditions = generate_experiment_grid(quick_test=args.quick_test)
+    conditions = generate_experiment_grid(
+        quick_test=args.quick_test,
+        caliper=args.caliper,
+        caliper_scale=args.caliper_scale,
+        match_with_replacement=args.replacement
+    )
     logger.info(f"Generated {len(conditions)} experimental conditions")
+    if args.caliper is not None:
+        logger.info(f"  Caliper: {args.caliper}")
+    if args.caliper_scale is not None:
+        logger.info(f"  Caliper scale: {args.caliper_scale}")
+    if args.replacement is not None:
+        logger.info(f"  Match with replacement: {args.replacement}")
 
     # Save experiment config
     with open(output_dir / "experiment_config.json", 'w') as f:
@@ -664,6 +936,9 @@ def main():
             'n_folds': args.n_folds,
             'gpu_ids': args.gpu_ids,
             'quick_test': args.quick_test,
+            'caliper_override': args.caliper,
+            'caliper_scale_override': args.caliper_scale,
+            'replacement_override': args.replacement,
             'n_conditions': len(conditions),
             'conditions': [asdict(c) for c in conditions]
         }, f, indent=2)

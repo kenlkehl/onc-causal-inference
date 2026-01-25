@@ -31,7 +31,8 @@ from ..models.matched_pair_ite import (
     PropensityMatchingModel,
     MatchedPairOutcomeModel,
     EnhancedMatchedPairOutcomeModel,
-    CombinedMatchedPairModel
+    CombinedMatchedPairModel,
+    EndToEndMatchedPairModel
 )
 from ..training.matched_pair_training import (
     train_propensity_model,
@@ -39,6 +40,7 @@ from ..training.matched_pair_training import (
     extract_all_representations,
     extract_propensity_scores,
     train_matched_pair_outcome_model_enhanced,
+    train_end_to_end_matched_pair,
 )
 from ..matching import PropensityMatcher, match_by_cosine_similarity
 from ..data import ClinicalTextDataset, collate_batch
@@ -171,12 +173,20 @@ def _process_matched_pair_fold(
     """
     Process a single CV fold with matched pair estimation.
 
-    Steps:
+    If end_to_end_training is enabled, uses a single unified model with
+    joint training. Otherwise, uses the 3-stage approach:
+
+    3-Stage Approach:
     1. Train propensity model on training data
     2. Extract representations for training data
     3. Match patients within training data
     4. Train outcome/tau model on matched pairs only
-    5. Predict ITE for test data (using trained propensity + outcome models)
+    5. Predict ITE for test data
+
+    End-to-End Approach:
+    1. Create unified model
+    2. Train with periodic re-matching
+    3. Predict ITE for test data
 
     Returns:
         Tuple of (test_predictions_df, training_logs, match_statistics)
@@ -195,6 +205,13 @@ def _process_matched_pair_fold(
     treatment_col = mp_config.treatment_column
     outcome_col = mp_config.outcome_column
 
+    # Branch based on training mode
+    if mp_config.end_to_end_training:
+        return _process_matched_pair_fold_e2e(
+            fold, train_df, test_df, mp_config, device
+        )
+
+    # 3-Stage Approach (original implementation)
     # Split train into train/val for propensity training
     # Use 80/20 split within training fold
     val_size = int(0.2 * len(train_df))
@@ -346,6 +363,136 @@ def _process_matched_pair_fold(
     cuda_cleanup()
 
     logger.info(f"FOLD {fold + 1} complete | {get_memory_info()}")
+    return preds_df, all_logs, match_stats
+
+
+def _process_matched_pair_fold_e2e(
+    fold: int,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    mp_config: MatchedPairConfig,
+    device: torch.device
+) -> Tuple[pd.DataFrame, List[Dict], Dict]:
+    """
+    Process a single CV fold with end-to-end matched pair training.
+
+    Uses a single unified EndToEndMatchedPairModel with joint training
+    and periodic re-matching.
+
+    Args:
+        fold: Fold number (0-indexed)
+        train_df: Training DataFrame (already reset index)
+        test_df: Test DataFrame (original indices preserved)
+        mp_config: MatchedPairConfig with e2e settings
+        device: PyTorch device
+
+    Returns:
+        Tuple of (test_predictions_df, training_logs, match_statistics)
+    """
+    logger.info(f"  FOLD {fold + 1}: Using end-to-end training mode")
+
+    text_col = mp_config.text_column
+    treatment_col = mp_config.treatment_column
+    outcome_col = mp_config.outcome_column
+
+    # Split train into train/val for early stopping
+    val_size = int(0.2 * len(train_df))
+    val_df_inner = train_df.iloc[:val_size].reset_index(drop=True) if val_size > 0 else None
+    train_df_inner = train_df.iloc[val_size:].reset_index(drop=True)
+
+    # Create unified model
+    model = EndToEndMatchedPairModel(
+        sentence_model=mp_config.hier_transformer_sentence_model,
+        freeze_sentence_encoder=mp_config.hier_transformer_freeze_sentence_encoder,
+        max_sentences=mp_config.hier_transformer_max_sentences,
+        max_sentence_length=mp_config.hier_transformer_max_sentence_length,
+        transformer_dim=mp_config.hier_transformer_dim,
+        num_transformer_layers=mp_config.hier_transformer_num_layers,
+        num_attention_heads=mp_config.hier_transformer_num_heads,
+        transformer_dropout=mp_config.hier_transformer_dropout,
+        representation_dim=mp_config.representation_dim,
+        hidden_outcome_dim=mp_config.hidden_outcome_dim,
+        dropout=mp_config.dropout,
+        device=str(device)
+    ).to(device)
+
+    # Initialize feature extractor
+    model.fit_tokenizer(train_df_inner[text_col].tolist())
+
+    # Train end-to-end
+    model, history = train_end_to_end_matched_pair(
+        model, train_df_inner, val_df_inner, mp_config, device
+    )
+
+    # Prepare logs
+    all_logs = []
+    for entry in history:
+        entry['fold'] = fold + 1
+        entry['stage'] = 'e2e'
+        all_logs.append(entry)
+
+    # Match statistics (from final epoch)
+    match_stats = {
+        'fold': fold + 1,
+        'n_train': len(train_df),
+        'training_mode': 'end_to_end',
+        'final_n_matched_pairs': history[-1].get('n_matched_pairs', 0) if history else 0,
+        'n_epochs': len(history),
+    }
+
+    # Predict on test data
+    logger.info(f"  FOLD {fold + 1}: Predicting ITE for {len(test_df)} test samples")
+    test_texts = test_df[text_col].tolist()
+
+    model.eval()
+    batch_size = mp_config.e2e_batch_size
+
+    test_propensity = []
+    test_y0 = []
+    test_y1 = []
+    test_ite = []
+    test_tau = []
+
+    with torch.no_grad():
+        for i in range(0, len(test_texts), batch_size):
+            batch_texts = test_texts[i:i + batch_size]
+
+            # Get propensity
+            prop = model.predict_propensity(batch_texts)
+            test_propensity.append(prop.cpu().numpy())
+
+            # Get potential outcomes
+            y0, y1, ite = model.predict_potential_outcomes(batch_texts)
+            test_y0.append(y0.cpu().numpy().flatten())
+            test_y1.append(y1.cpu().numpy().flatten())
+            test_ite.append(ite.cpu().numpy().flatten())
+
+            # Get tau
+            tau = model.predict_tau(batch_texts)
+            test_tau.append(tau.cpu().numpy().flatten())
+
+    test_propensity = np.concatenate(test_propensity)
+    test_y0 = np.concatenate(test_y0)
+    test_y1 = np.concatenate(test_y1)
+    test_ite = np.concatenate(test_ite)
+    test_tau = np.concatenate(test_tau)
+
+    # Create predictions DataFrame
+    preds_df = test_df.copy()
+    preds_df['pred_propensity_prob'] = test_propensity
+    preds_df['pred_tau_logodds'] = test_tau
+    preds_df['pred_y0_prob'] = test_y0
+    preds_df['pred_y1_prob'] = test_y1
+    preds_df['pred_ite_prob'] = test_ite
+    preds_df['cv_fold'] = fold + 1
+
+    # Cleanup
+    model.cpu()
+    del model
+    gc.collect()
+    cuda_cleanup()
+
+    logger.info(f"FOLD {fold + 1} (E2E) complete | {get_memory_info()}")
     return preds_df, all_logs, match_stats
 
 

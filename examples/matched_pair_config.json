@@ -52,6 +52,8 @@
     "freeze_representation_stage2": true,
     "dynamic_rematching": false,
 
+    "end_to_end_training": false,
+
     "use_cross_encoder": false,
     "cross_encoder_num_queries": 4,
     "cross_encoder_num_heads": 4,

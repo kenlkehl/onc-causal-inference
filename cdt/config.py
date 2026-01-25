@@ -380,6 +380,7 @@ class MatchedPairConfig:
     caliper_scale: str = "std"  # For propensity: "propensity", "logit", "std"
                                  # For embedding: caliper is cosine distance
     matching_algorithm: str = "optimal"  # "nearest" or "optimal"
+    match_with_replacement: bool = False  # Allow controls to match multiple treated
 
     # Outcome/Tau training (Stage 3)
     outcome_epochs: int = 50
@@ -427,6 +428,36 @@ class MatchedPairConfig:
     # Cross-encoder interpretability
     save_cross_encoder_attention: bool = False  # Save attention weights for analysis
     cross_encoder_top_k_sentences: int = 5  # Top sentences to return in interpretation
+
+    # End-to-end training mode
+    # When enabled, skips Stage 1 propensity pre-training and performs joint training
+    # from scratch using a single unified EndToEndMatchedPairModel
+    end_to_end_training: bool = False
+
+    # E2E training settings
+    e2e_epochs: int = 100  # Total training epochs
+    e2e_lr: float = 1e-4   # Learning rate
+    e2e_batch_size: int = 32  # Batch size
+
+    # E2E loss weights
+    e2e_alpha_propensity: float = 1.0  # Propensity loss weight
+    e2e_alpha_outcome: float = 1.0     # Outcome loss weight
+    e2e_beta_tau: float = 1.0          # Tau loss weight
+
+    # E2E re-matching (mandatory in E2E mode)
+    e2e_rematching_frequency: int = 5     # Re-match every N epochs
+    e2e_rematching_warmup_epochs: int = 5 # Skip re-matching for first N epochs
+
+    # Initial matching strategy for E2E
+    e2e_initial_matching: str = "propensity"  # "propensity", "embedding", or "random"
+    e2e_initial_caliper_multiplier: float = 2.0  # Relaxed caliper for initial random model
+
+    # E2E LR schedule
+    e2e_lr_schedule: str = "cosine"  # "cosine", "linear", or "constant"
+    e2e_warmup_ratio: float = 0.1    # Fraction of epochs for warmup
+
+    # E2E early stopping
+    e2e_early_stopping_patience: int = 20  # Stop if no improvement for N epochs
 
     # Skip flag
     skip: bool = False

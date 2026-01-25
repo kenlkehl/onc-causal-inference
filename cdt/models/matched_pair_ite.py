@@ -746,3 +746,275 @@ class CombinedMatchedPairModel(nn.Module):
     def predict(self, texts: List[str]) -> Dict[str, torch.Tensor]:
         """Alias for forward() for API consistency."""
         return self.forward(texts)
+
+
+class EndToEndMatchedPairModel(nn.Module):
+    """
+    Unified model for end-to-end matched pair ITE estimation.
+
+    Combines feature extraction, propensity prediction, outcome prediction,
+    and tau prediction in a single model for joint training. Unlike the
+    3-stage approach (PropensityMatchingModel + MatchedPairOutcomeModel),
+    this model trains all components together with periodic re-matching.
+
+    Key differences from 3-stage approach:
+    - Single unified model with shared feature extractor
+    - Propensity loss applied throughout training (not just Stage 1)
+    - Representation always trainable (never frozen)
+    - Re-matching is mandatory (computed periodically as model improves)
+
+    Architecture:
+        HierarchicalTransformerExtractor
+        -> repr_layers (Linear -> ELU -> Linear -> LayerNorm)
+        -> propensity_head (Linear -> ReLU -> Dropout -> Linear)
+        -> outcome_head (shared for Y_U and Y_T prediction)
+        -> tau_head (predicts ITE from untreated repr)
+
+    Args:
+        sentence_model: HuggingFace model name for sentence encoding
+        freeze_sentence_encoder: Whether to freeze the sentence encoder weights
+        max_sentences: Maximum number of sentences to process per document
+        max_sentence_length: Maximum tokens per sentence for BERT encoding
+        transformer_dim: Hidden dimension for transformer pooling layers
+        num_transformer_layers: Number of transformer layers for pooling
+        num_attention_heads: Number of attention heads in transformer layers
+        transformer_dropout: Dropout rate for transformer layers
+        representation_dim: Dimension of the learned representation layer
+        hidden_outcome_dim: Hidden dimension for outcome and tau heads
+        dropout: Dropout rate for heads
+        device: PyTorch device
+    """
+
+    def __init__(
+        self,
+        sentence_model: str = "prajjwal1/bert-tiny",
+        freeze_sentence_encoder: bool = True,
+        max_sentences: int = 100,
+        max_sentence_length: int = 128,
+        transformer_dim: int = 256,
+        num_transformer_layers: int = 2,
+        num_attention_heads: int = 4,
+        transformer_dropout: float = 0.1,
+        representation_dim: int = 256,
+        hidden_outcome_dim: int = 128,
+        dropout: float = 0.2,
+        device: str = "cuda:0"
+    ):
+        super().__init__()
+
+        self._device = torch.device(device) if isinstance(device, str) else device
+        self._representation_dim = representation_dim
+        self._hidden_outcome_dim = hidden_outcome_dim
+
+        # Feature extractor: HierarchicalTransformerExtractor
+        self.feature_extractor = HierarchicalTransformerExtractor(
+            sentence_encoder_model=sentence_model,
+            freeze_sentence_encoder=freeze_sentence_encoder,
+            max_sentences=max_sentences,
+            max_sentence_length=max_sentence_length,
+            num_transformer_layers=num_transformer_layers,
+            num_attention_heads=num_attention_heads,
+            transformer_dim=transformer_dim,
+            transformer_dropout=transformer_dropout,
+            projection_dim=transformer_dim,
+            device=self._device
+        )
+
+        # Representation layers
+        self.repr_fc1 = nn.Linear(transformer_dim, representation_dim)
+        self.repr_fc2 = nn.Linear(representation_dim, representation_dim)
+        self.repr_norm = nn.LayerNorm(representation_dim)
+
+        # Propensity head
+        self.propensity_head = nn.Sequential(
+            nn.Linear(representation_dim, representation_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(representation_dim // 2, 1)
+        )
+
+        # Outcome head (shared for Y_U and Y_T)
+        self.outcome_fc1 = nn.Linear(representation_dim, hidden_outcome_dim)
+        self.outcome_fc2 = nn.Linear(hidden_outcome_dim, hidden_outcome_dim)
+        self.outcome_fc3 = nn.Linear(hidden_outcome_dim, 1)
+
+        # Tau head (predicts ITE from untreated repr)
+        self.tau_fc1 = nn.Linear(representation_dim, hidden_outcome_dim)
+        self.tau_fc2 = nn.Linear(hidden_outcome_dim, hidden_outcome_dim)
+        self.tau_fc3 = nn.Linear(hidden_outcome_dim, 1)
+
+        self.dropout = nn.Dropout(dropout)
+
+        logger.info(f"EndToEndMatchedPairModel initialized:")
+        logger.info(f"  Sentence encoder: {sentence_model}")
+        logger.info(f"  Representation dim: {representation_dim}")
+        logger.info(f"  Transformer dim: {transformer_dim}")
+        logger.info(f"  Hidden outcome dim: {hidden_outcome_dim}")
+        logger.info(f"  Device: {self._device}")
+
+    def get_representation(self, texts: List[str]) -> torch.Tensor:
+        """
+        Extract representation from text.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            Representation tensor of shape (batch_size, representation_dim)
+        """
+        features = self.feature_extractor(texts)  # (B, transformer_dim)
+        h = F.relu(self.repr_fc1(features))
+        h = F.elu(self.repr_fc2(h))
+        return self.repr_norm(h)
+
+    def predict_propensity(self, texts: List[str]) -> torch.Tensor:
+        """
+        Predict propensity score (probability of treatment).
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            Propensity probabilities of shape (batch_size,)
+        """
+        repr = self.get_representation(texts)
+        return torch.sigmoid(self.propensity_head(repr)).squeeze(-1)
+
+    def _outcome_forward(self, repr: torch.Tensor) -> torch.Tensor:
+        """Shared outcome prediction head."""
+        h = F.relu(self.outcome_fc1(repr))
+        h = self.dropout(h)
+        h = F.relu(self.outcome_fc2(h))
+        h = self.dropout(h)
+        return self.outcome_fc3(h)
+
+    def _tau_forward(self, repr: torch.Tensor) -> torch.Tensor:
+        """Tau (treatment effect) prediction head."""
+        h = F.relu(self.tau_fc1(repr))
+        h = self.dropout(h)
+        h = F.relu(self.tau_fc2(h))
+        h = self.dropout(h)
+        return self.tau_fc3(h)
+
+    def forward_matched_pair(
+        self,
+        texts_T: List[str],
+        texts_U: List[str]
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Forward pass for matched pair training.
+
+        Takes paired treated (T) and untreated (U) texts, computes all
+        predictions needed for the joint loss.
+
+        Args:
+            texts_T: List of treated patient texts
+            texts_U: List of untreated patient texts (matched to T)
+
+        Returns:
+            Dictionary with:
+                - t_logit_T: Propensity logit for treated (B, 1)
+                - t_logit_U: Propensity logit for untreated (B, 1)
+                - y_U_logit: Outcome logit for untreated (B, 1)
+                - y_T_logit: Outcome logit for treated (B, 1)
+                - tau_pred: Treatment effect prediction (B, 1)
+                - repr_T: Treated representation (B, D)
+                - repr_U: Untreated representation (B, D)
+        """
+        repr_T = self.get_representation(texts_T)
+        repr_U = self.get_representation(texts_U)
+
+        # Propensity predictions
+        t_logit_T = self.propensity_head(repr_T)
+        t_logit_U = self.propensity_head(repr_U)
+
+        # Outcome predictions (shared head)
+        y_U_logit = self._outcome_forward(repr_U)
+        y_T_logit = self._outcome_forward(repr_T)
+
+        # Tau prediction (from U repr only)
+        tau_pred = self._tau_forward(repr_U)
+
+        return {
+            't_logit_T': t_logit_T,
+            't_logit_U': t_logit_U,
+            'y_U_logit': y_U_logit,
+            'y_T_logit': y_T_logit,
+            'tau_pred': tau_pred,
+            'repr_T': repr_T,
+            'repr_U': repr_U
+        }
+
+    def predict_potential_outcomes(
+        self,
+        texts: List[str]
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Predict potential outcomes Y(0), Y(1) and ITE for inference.
+
+        Uses the outcome head for Y(0) and tau head to derive Y(1):
+            Y(1) = Y(0) + tau in logit space
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            Tuple of (y0_prob, y1_prob, ite_prob), each of shape (B, 1)
+        """
+        repr = self.get_representation(texts)
+        y0_logit = self._outcome_forward(repr)
+        tau_logodds = self._tau_forward(repr)
+
+        # Y(1) = Y(0) + tau in logit space
+        y1_logit = y0_logit + tau_logodds
+
+        y0_prob = torch.sigmoid(y0_logit)
+        y1_prob = torch.sigmoid(y1_logit)
+        ite_prob = y1_prob - y0_prob
+
+        return y0_prob, y1_prob, ite_prob
+
+    def predict_tau(self, texts: List[str]) -> torch.Tensor:
+        """
+        Predict tau (ITE on log-odds scale) for any patient.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            Tau on log-odds scale of shape (B, 1)
+        """
+        repr = self.get_representation(texts)
+        return self._tau_forward(repr)
+
+    def fit_tokenizer(self, texts: List[str]) -> 'EndToEndMatchedPairModel':
+        """
+        Initialize the feature extractor (triggers lazy initialization).
+
+        Args:
+            texts: List of training text strings (triggers initialization)
+
+        Returns:
+            self for method chaining
+        """
+        self.feature_extractor.init_extractor(texts)
+        return self
+
+    def to(self, device):
+        """Override to track device properly."""
+        self._device = device if isinstance(device, torch.device) else torch.device(device)
+        self.feature_extractor = self.feature_extractor.to(device)
+        return super().to(device)
+
+    @property
+    def representation_dim(self) -> int:
+        """Return the representation dimension."""
+        return self._representation_dim
+
+    def get_state(self) -> Dict[str, Any]:
+        """Get model state for checkpoint saving."""
+        return {
+            'representation_dim': self._representation_dim,
+            'hidden_outcome_dim': self._hidden_outcome_dim,
+            'feature_extractor_state': self.feature_extractor.get_state()
+        }

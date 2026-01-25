@@ -25,7 +25,8 @@ from ..config import MatchedPairConfig
 from ..models.matched_pair_ite import (
     PropensityMatchingModel,
     MatchedPairOutcomeModel,
-    EnhancedMatchedPairOutcomeModel
+    EnhancedMatchedPairOutcomeModel,
+    EndToEndMatchedPairModel
 )
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup
@@ -491,7 +492,8 @@ def _perform_rematching(
             matcher = PropensityMatcher(
                 method=config.matching_algorithm,
                 caliper=config.caliper,
-                caliper_scale=config.caliper_scale
+                caliper_scale=config.caliper_scale,
+                replacement=config.match_with_replacement
             )
             match_result = matcher.match(propensity_scores, treatment)
 
@@ -1149,3 +1151,475 @@ def train_matched_pair_outcome_model_enhanced(
     gc.collect()
 
     return outcome_model, history
+
+
+# =============================================================================
+# END-TO-END MATCHED PAIR TRAINING
+# =============================================================================
+
+def end_to_end_matched_pair_loss(
+    output: Dict[str, torch.Tensor],
+    y_U: torch.Tensor,
+    y_T: torch.Tensor,
+    alpha_propensity: float = 1.0,
+    alpha_outcome: float = 1.0,
+    beta_tau: float = 1.0
+) -> Dict[str, torch.Tensor]:
+    """
+    Compute loss for end-to-end matched pair training.
+
+    Joint loss = α_prop * L_propensity + α_out * L_outcome + β * L_tau
+
+    Where:
+    - L_propensity = BCE(t_logit_T, 1) + BCE(t_logit_U, 0)
+    - L_outcome = BCE(y_U_logit, y_U) + BCE(y_T_logit, y_T)
+    - L_tau = MSE(tau_pred, detach(y_T_logit - y_U_logit))
+
+    Args:
+        output: Dictionary from EndToEndMatchedPairModel.forward_matched_pair()
+        y_U: Actual outcome for untreated (B,)
+        y_T: Actual outcome for treated (B,)
+        alpha_propensity: Weight for propensity loss
+        alpha_outcome: Weight for outcome loss
+        beta_tau: Weight for tau loss
+
+    Returns:
+        Dictionary with loss components
+    """
+    batch_size = y_U.size(0)
+    device = y_U.device
+
+    # Propensity loss: T should be predicted as treated (1), U as control (0)
+    t_target_T = torch.ones(batch_size, device=device)
+    t_target_U = torch.zeros(batch_size, device=device)
+
+    propensity_loss_T = F.binary_cross_entropy_with_logits(
+        output['t_logit_T'].squeeze(-1), t_target_T
+    )
+    propensity_loss_U = F.binary_cross_entropy_with_logits(
+        output['t_logit_U'].squeeze(-1), t_target_U
+    )
+    propensity_loss = propensity_loss_T + propensity_loss_U
+
+    # Outcome loss: predict Y for both T and U
+    outcome_loss_U = F.binary_cross_entropy_with_logits(
+        output['y_U_logit'].squeeze(-1), y_U
+    )
+    outcome_loss_T = F.binary_cross_entropy_with_logits(
+        output['y_T_logit'].squeeze(-1), y_T
+    )
+    outcome_loss = outcome_loss_U + outcome_loss_T
+
+    # Tau loss: tau should match log-odds difference (detached for stability)
+    tau_target = output['y_T_logit'].detach() - output['y_U_logit'].detach()
+    tau_loss = F.mse_loss(output['tau_pred'], tau_target)
+
+    # Total loss
+    total_loss = (alpha_propensity * propensity_loss +
+                  alpha_outcome * outcome_loss +
+                  beta_tau * tau_loss)
+
+    return {
+        'loss': total_loss,
+        'propensity_loss': propensity_loss,
+        'propensity_loss_T': propensity_loss_T,
+        'propensity_loss_U': propensity_loss_U,
+        'outcome_loss': outcome_loss,
+        'outcome_loss_U': outcome_loss_U,
+        'outcome_loss_T': outcome_loss_T,
+        'tau_loss': tau_loss,
+        'tau_pred_mean': output['tau_pred'].mean(),
+        'tau_target_mean': tau_target.mean()
+    }
+
+
+def _compute_initial_matches_e2e(
+    model: EndToEndMatchedPairModel,
+    train_df: pd.DataFrame,
+    config: MatchedPairConfig,
+    device: torch.device
+) -> np.ndarray:
+    """
+    Compute initial matches for end-to-end training.
+
+    Uses a relaxed caliper since the model is not yet trained.
+
+    Args:
+        model: EndToEndMatchedPairModel (may be random/untrained)
+        train_df: Training DataFrame
+        config: MatchedPairConfig
+        device: PyTorch device
+
+    Returns:
+        matched_pairs array of shape (n_pairs, 2)
+    """
+    texts = train_df[config.text_column].tolist()
+    treatment = train_df[config.treatment_column].values
+
+    # Relaxed caliper for initial matching
+    relaxed_caliper = config.caliper * config.e2e_initial_caliper_multiplier
+
+    model.eval()
+    with torch.no_grad():
+        if config.e2e_initial_matching == "random":
+            # Random matching: just pair treated/control randomly
+            treated_idx = np.where(treatment == 1)[0]
+            control_idx = np.where(treatment == 0)[0]
+            np.random.shuffle(control_idx)
+            n_pairs = min(len(treated_idx), len(control_idx))
+            matched_pairs = np.column_stack([treated_idx[:n_pairs], control_idx[:n_pairs]])
+            logger.info(f"  Initial random matching: {n_pairs} pairs")
+        elif config.e2e_initial_matching == "embedding":
+            # Embedding-based matching
+            representations = []
+            batch_size = config.e2e_batch_size
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_repr = model.get_representation(batch_texts)
+                representations.append(batch_repr.cpu())
+            representations = torch.cat(representations, dim=0)
+
+            match_result = match_by_cosine_similarity(
+                representations.numpy(), treatment,
+                caliper=relaxed_caliper,
+                method=config.matching_algorithm
+            )
+            matched_pairs = match_result.matched_pairs
+            logger.info(f"  Initial embedding matching: {len(matched_pairs)} pairs "
+                       f"(mean dist: {match_result.distances.mean():.4f})")
+        else:
+            # Propensity-based matching (default)
+            propensity_scores = []
+            batch_size = config.e2e_batch_size
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_scores = model.predict_propensity(batch_texts)
+                propensity_scores.append(batch_scores.cpu().numpy())
+            propensity_scores = np.concatenate(propensity_scores)
+
+            matcher = PropensityMatcher(
+                method=config.matching_algorithm,
+                caliper=relaxed_caliper,
+                caliper_scale=config.caliper_scale,
+                replacement=config.match_with_replacement
+            )
+            match_result = matcher.match(propensity_scores, treatment)
+            matched_pairs = match_result.matched_pairs
+            logger.info(f"  Initial propensity matching: {len(matched_pairs)} pairs "
+                       f"(mean dist: {match_result.distances.mean():.4f})")
+
+    model.train()
+    return matched_pairs
+
+
+def _recompute_matches_e2e(
+    model: EndToEndMatchedPairModel,
+    train_df: pd.DataFrame,
+    config: MatchedPairConfig,
+    device: torch.device
+) -> np.ndarray:
+    """
+    Re-compute matches based on current model state.
+
+    Uses the configured caliper (not relaxed) since model is partially trained.
+
+    Args:
+        model: EndToEndMatchedPairModel (partially trained)
+        train_df: Training DataFrame
+        config: MatchedPairConfig
+        device: PyTorch device
+
+    Returns:
+        matched_pairs array of shape (n_pairs, 2)
+    """
+    texts = train_df[config.text_column].tolist()
+    treatment = train_df[config.treatment_column].values
+
+    model.eval()
+    with torch.no_grad():
+        if config.matching_method == "embedding":
+            representations = []
+            batch_size = config.e2e_batch_size
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_repr = model.get_representation(batch_texts)
+                representations.append(batch_repr.cpu())
+            representations = torch.cat(representations, dim=0)
+
+            match_result = match_by_cosine_similarity(
+                representations.numpy(), treatment,
+                caliper=config.caliper,
+                method=config.matching_algorithm
+            )
+        else:
+            propensity_scores = []
+            batch_size = config.e2e_batch_size
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_scores = model.predict_propensity(batch_texts)
+                propensity_scores.append(batch_scores.cpu().numpy())
+            propensity_scores = np.concatenate(propensity_scores)
+
+            matcher = PropensityMatcher(
+                method=config.matching_algorithm,
+                caliper=config.caliper,
+                caliper_scale=config.caliper_scale,
+                replacement=config.match_with_replacement
+            )
+            match_result = matcher.match(propensity_scores, treatment)
+
+    model.train()
+
+    logger.info(f"    Re-matched: {len(match_result.matched_pairs)} pairs "
+               f"(mean dist: {match_result.distances.mean():.4f})")
+
+    return match_result.matched_pairs
+
+
+def train_end_to_end_matched_pair(
+    model: EndToEndMatchedPairModel,
+    train_df: pd.DataFrame,
+    val_df: Optional[pd.DataFrame],
+    config: MatchedPairConfig,
+    device: torch.device
+) -> Tuple[EndToEndMatchedPairModel, List[Dict[str, Any]]]:
+    """
+    End-to-end training with joint propensity + outcome + tau learning.
+
+    Single model, single optimizer, periodic re-matching. Unlike the 3-stage
+    approach, this jointly trains all heads from scratch, with matches
+    recomputed periodically as the model improves.
+
+    Training loop:
+    1. Compute initial matches (from random/untrained model with relaxed caliper)
+    2. For each epoch:
+       a. If past warmup and epoch % rematching_frequency == 0: re-compute matches
+       b. For each batch of matched pairs:
+          - Forward pass through matched pair forward
+          - Compute joint loss (propensity + outcome + tau)
+          - Backward + optimizer step
+       c. Validation metrics if val_df provided
+       d. Early stopping check
+
+    Args:
+        model: EndToEndMatchedPairModel to train
+        train_df: Training DataFrame with text, treatment, outcome columns
+        val_df: Optional validation DataFrame for early stopping
+        config: MatchedPairConfig with e2e training settings
+        device: PyTorch device
+
+    Returns:
+        Tuple of (trained_model, training_history)
+    """
+    logger.info(f"End-to-end matched pair training on {len(train_df)} samples")
+    logger.info(f"  Epochs: {config.e2e_epochs}, LR: {config.e2e_lr}")
+    logger.info(f"  Loss weights: α_prop={config.e2e_alpha_propensity}, "
+               f"α_out={config.e2e_alpha_outcome}, β_tau={config.e2e_beta_tau}")
+    logger.info(f"  Re-matching: every {config.e2e_rematching_frequency} epochs "
+               f"(warmup: {config.e2e_rematching_warmup_epochs})")
+    logger.info(f"  Initial matching: {config.e2e_initial_matching} "
+               f"(caliper multiplier: {config.e2e_initial_caliper_multiplier})")
+
+    text_col = config.text_column
+    treatment_col = config.treatment_column
+    outcome_col = config.outcome_column
+
+    # Store texts and outcomes
+    all_texts = train_df[text_col].tolist()
+    all_outcomes = train_df[outcome_col].values
+
+    # Step 1: Compute initial matches
+    logger.info("Computing initial matches from untrained model...")
+    matched_pairs = _compute_initial_matches_e2e(model, train_df, config, device)
+
+    if len(matched_pairs) < 10:
+        logger.warning(f"Very few initial matched pairs ({len(matched_pairs)})! "
+                      "Consider relaxing caliper or using random initial matching.")
+
+    # Create optimizer
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=config.e2e_lr,
+        weight_decay=0.01
+    )
+
+    # Learning rate scheduler
+    total_steps = config.e2e_epochs
+    warmup_steps = int(config.e2e_warmup_ratio * total_steps)
+
+    if config.e2e_lr_schedule == "cosine":
+        from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR, SequentialLR
+        if warmup_steps > 0:
+            warmup_scheduler = LinearLR(
+                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup_steps
+            )
+            cosine_scheduler = CosineAnnealingLR(
+                optimizer, T_max=total_steps - warmup_steps
+            )
+            scheduler = SequentialLR(
+                optimizer, schedulers=[warmup_scheduler, cosine_scheduler],
+                milestones=[warmup_steps]
+            )
+        else:
+            scheduler = CosineAnnealingLR(optimizer, T_max=total_steps)
+    elif config.e2e_lr_schedule == "linear":
+        from torch.optim.lr_scheduler import LinearLR
+        scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=total_steps)
+    else:
+        scheduler = None
+
+    # Training state
+    history = []
+    best_loss = float('inf')
+    best_model_state = None
+    patience_counter = 0
+
+    for epoch in range(config.e2e_epochs):
+        # Check for re-matching
+        if (epoch >= config.e2e_rematching_warmup_epochs and
+            epoch > 0 and
+            epoch % config.e2e_rematching_frequency == 0):
+            logger.info(f"  Epoch {epoch+1}: Re-computing matches...")
+            matched_pairs = _recompute_matches_e2e(model, train_df, config, device)
+
+            if len(matched_pairs) < 10:
+                logger.warning(f"  Very few matched pairs ({len(matched_pairs)}) after re-matching!")
+
+        # Create dataset for current matches
+        pair_dataset = MatchedPairTextDataset(all_texts, all_outcomes, matched_pairs)
+        pair_loader = DataLoader(
+            pair_dataset,
+            batch_size=config.e2e_batch_size,
+            shuffle=True,
+            collate_fn=collate_text_pairs
+        )
+
+        # Training epoch
+        model.train()
+        epoch_losses = []
+
+        for batch in tqdm(pair_loader, desc=f"E2E Epoch {epoch+1}", leave=False):
+            texts_T = batch['texts_T']
+            texts_U = batch['texts_U']
+            y_T = batch['y_T'].to(device)
+            y_U = batch['y_U'].to(device)
+
+            optimizer.zero_grad()
+
+            # Forward pass
+            output = model.forward_matched_pair(texts_T, texts_U)
+
+            # Compute loss
+            losses = end_to_end_matched_pair_loss(
+                output, y_U, y_T,
+                alpha_propensity=config.e2e_alpha_propensity,
+                alpha_outcome=config.e2e_alpha_outcome,
+                beta_tau=config.e2e_beta_tau
+            )
+
+            losses['loss'].backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            optimizer.step()
+
+            epoch_losses.append({k: v.item() for k, v in losses.items()})
+
+        # Step scheduler
+        if scheduler is not None:
+            scheduler.step()
+
+        # Aggregate epoch losses
+        epoch_summary = {k: np.mean([l[k] for l in epoch_losses]) for k in epoch_losses[0]}
+        epoch_summary['epoch'] = epoch + 1
+        epoch_summary['n_matched_pairs'] = len(matched_pairs)
+        epoch_summary['lr'] = optimizer.param_groups[0]['lr']
+
+        # Validation (if provided)
+        val_loss = None
+        if val_df is not None:
+            val_loss = _validate_e2e(model, val_df, config, device)
+            epoch_summary['val_loss'] = val_loss
+
+        history.append(epoch_summary)
+
+        # Logging
+        log_msg = (f"  Epoch {epoch+1}: loss={epoch_summary['loss']:.4f}, "
+                  f"prop={epoch_summary['propensity_loss']:.4f}, "
+                  f"out={epoch_summary['outcome_loss']:.4f}, "
+                  f"tau={epoch_summary['tau_loss']:.4f}, "
+                  f"pairs={epoch_summary['n_matched_pairs']}")
+        if val_loss is not None:
+            log_msg += f", val_loss={val_loss:.4f}"
+        logger.info(log_msg)
+
+        # Early stopping
+        current_loss = val_loss if val_loss is not None else epoch_summary['loss']
+        if current_loss < best_loss:
+            best_loss = current_loss
+            best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            patience_counter = 0
+        else:
+            patience_counter += 1
+            if patience_counter >= config.e2e_early_stopping_patience:
+                logger.info(f"  Early stopping at epoch {epoch+1}")
+                break
+
+        # Cleanup loader each epoch
+        del pair_loader, pair_dataset
+
+    # Restore best model
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        logger.info(f"Restored best model from epoch with loss={best_loss:.4f}")
+
+    gc.collect()
+    return model, history
+
+
+def _validate_e2e(
+    model: EndToEndMatchedPairModel,
+    val_df: pd.DataFrame,
+    config: MatchedPairConfig,
+    device: torch.device
+) -> float:
+    """
+    Compute validation loss for end-to-end model.
+
+    Computes propensity and outcome prediction loss on validation data
+    (without matching, since validation data shouldn't be matched).
+
+    Args:
+        model: EndToEndMatchedPairModel
+        val_df: Validation DataFrame
+        config: MatchedPairConfig
+        device: PyTorch device
+
+    Returns:
+        Validation loss (propensity + outcome)
+    """
+    model.eval()
+    val_texts = val_df[config.text_column].tolist()
+    val_treatment = val_df[config.treatment_column].values
+    val_outcome = val_df[config.outcome_column].values
+
+    total_loss = 0.0
+    n_batches = 0
+    batch_size = config.e2e_batch_size
+
+    with torch.no_grad():
+        for i in range(0, len(val_texts), batch_size):
+            batch_texts = val_texts[i:i + batch_size]
+            batch_treatment = torch.tensor(val_treatment[i:i + batch_size], dtype=torch.float32, device=device)
+            batch_outcome = torch.tensor(val_outcome[i:i + batch_size], dtype=torch.float32, device=device)
+
+            repr = model.get_representation(batch_texts)
+            t_logit = model.propensity_head(repr)
+            y_logit = model._outcome_forward(repr)
+
+            prop_loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), batch_treatment)
+            out_loss = F.binary_cross_entropy_with_logits(y_logit.squeeze(-1), batch_outcome)
+
+            total_loss += (prop_loss.item() + out_loss.item())
+            n_batches += 1
+
+    model.train()
+    return total_loss / n_batches if n_batches > 0 else float('inf')

@@ -211,6 +211,63 @@ The cross-encoder provides `interpret_discrimination()` to identify which senten
 
 See `examples/matched_pair_cross_encoder_config.json` for a complete example.
 
+### End-to-End Training Mode
+
+When `end_to_end_training=True`, training skips the separate Stage 1 propensity pre-training and performs joint training from scratch using a single unified `EndToEndMatchedPairModel`.
+
+**Key differences from 3-Stage approach:**
+- Single model with shared feature extractor + propensity/outcome/tau heads
+- Propensity loss applied throughout training (not just Stage 1)
+- Representation always trainable (never frozen)
+- Re-matching is mandatory (computed periodically as model improves)
+
+**Key options:**
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `end_to_end_training` | `False` | Enable end-to-end training mode |
+| `e2e_epochs` | `100` | Total training epochs |
+| `e2e_lr` | `1e-4` | Learning rate |
+| `e2e_batch_size` | `32` | Batch size |
+| `e2e_alpha_propensity` | `1.0` | Propensity loss weight |
+| `e2e_alpha_outcome` | `1.0` | Outcome loss weight |
+| `e2e_beta_tau` | `1.0` | Tau loss weight |
+| `e2e_rematching_frequency` | `5` | Re-match every N epochs |
+| `e2e_rematching_warmup_epochs` | `5` | Skip re-matching for warmup |
+| `e2e_initial_matching` | `"propensity"` | Initial matching strategy: "propensity", "embedding", or "random" |
+| `e2e_initial_caliper_multiplier` | `2.0` | Relaxed caliper for initial random model |
+| `e2e_lr_schedule` | `"cosine"` | LR schedule: "cosine", "linear", or "constant" |
+| `e2e_early_stopping_patience` | `20` | Stop if no improvement for N epochs |
+
+**Architecture:**
+```
+EndToEndMatchedPairModel
+├── HierarchicalTransformerExtractor
+├── repr_layers (Linear -> ELU -> Linear -> LayerNorm)
+├── propensity_head (Linear -> ReLU -> Dropout -> Linear)
+├── outcome_head (shared for Y_U and Y_T)
+└── tau_head (predicts ITE from untreated repr)
+```
+
+**Usage:**
+```python
+from cdt.models import EndToEndMatchedPairModel
+from cdt.training import train_end_to_end_matched_pair
+
+model = EndToEndMatchedPairModel(device="cuda:0")
+model.fit_tokenizer(texts)
+
+model, history = train_end_to_end_matched_pair(
+    model, train_df, val_df, config, device
+)
+
+# Inference
+y0, y1, ite = model.predict_potential_outcomes(test_texts)
+propensity = model.predict_propensity(test_texts)
+```
+
+See `examples/matched_pair_e2e_config.json` for a complete example.
+
 See `examples/matched_pair_config.json` for sample configs.
 
 ## Key Training Options

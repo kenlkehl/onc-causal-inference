@@ -1,0 +1,62 @@
+{
+  "output_dir": "./matched_pair_e2e_results",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 1,
+
+  "matched_pair": {
+    "text_column": "clinical_text",
+    "treatment_column": "treatment_indicator",
+    "outcome_column": "outcome_indicator",
+    "dataset_path": "./dataset.parquet",
+
+    "end_to_end_training": true,
+
+    "e2e_epochs": 100,
+    "e2e_lr": 1e-4,
+    "e2e_batch_size": 32,
+
+    "e2e_alpha_propensity": 1.0,
+    "e2e_alpha_outcome": 1.0,
+    "e2e_beta_tau": 1.0,
+
+    "e2e_rematching_frequency": 5,
+    "e2e_rematching_warmup_epochs": 5,
+
+    "e2e_initial_matching": "propensity",
+    "e2e_initial_caliper_multiplier": 2.0,
+
+    "e2e_lr_schedule": "cosine",
+    "e2e_warmup_ratio": 0.1,
+
+    "e2e_early_stopping_patience": 20,
+
+    "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
+    "hier_transformer_freeze_sentence_encoder": true,
+    "hier_transformer_max_sentences": 100,
+    "hier_transformer_max_sentence_length": 128,
+    "hier_transformer_num_layers": 2,
+    "hier_transformer_num_heads": 4,
+    "hier_transformer_dim": 256,
+    "hier_transformer_dropout": 0.1,
+
+    "representation_dim": 256,
+    "hidden_outcome_dim": 128,
+    "dropout": 0.2,
+
+    "matching_method": "propensity",
+    "matching_algorithm": "optimal",
+    "caliper": 0.2,
+    "caliper_scale": "std",
+
+    "cv_folds": 5
+  },
+
+  "applied_inference": {
+    "skip": true
+  },
+
+  "plasmode_experiments": {
+    "enabled": false
+  }
+}

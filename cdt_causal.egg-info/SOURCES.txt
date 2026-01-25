@@ -63,6 +63,7 @@ examples/gru_confounder_config.json
 examples/hierarchical_transformer_config.json
 examples/matched_pair_config.json
 examples/matched_pair_cross_encoder_config.json
+examples/matched_pair_e2e_config.json
 examples/matched_pair_embedding_config.json
 examples/modernbert_config.json
 examples/rlearner_config.json

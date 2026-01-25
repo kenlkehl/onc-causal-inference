@@ -15,6 +15,9 @@ from .matched_pair_training import (
     extract_sentence_embeddings,
     MatchedPairSentenceDataset,
     train_matched_pair_outcome_model_enhanced,
+    # End-to-end training
+    end_to_end_matched_pair_loss,
+    train_end_to_end_matched_pair,
 )
 
 __all__ = [
@@ -30,4 +33,7 @@ __all__ = [
     'extract_sentence_embeddings',
     'MatchedPairSentenceDataset',
     'train_matched_pair_outcome_model_enhanced',
+    # End-to-end training
+    'end_to_end_matched_pair_loss',
+    'train_end_to_end_matched_pair',
 ]
