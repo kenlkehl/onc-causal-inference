@@ -151,6 +151,10 @@ def train_propensity_model(
     Stage 1 of the matched pair pipeline. Trains the propensity model
     using binary cross-entropy for treatment prediction.
 
+    When joint_outcome_training is enabled in config, also trains on outcome
+    prediction to learn features that are true confounders (predictive of
+    both treatment and outcome).
+
     Args:
         model: PropensityMatchingModel to train
         train_df: Training DataFrame
@@ -162,8 +166,13 @@ def train_propensity_model(
     Returns:
         Tuple of (trained_model, training_history)
     """
+    joint_training = config.joint_outcome_training and model.joint_outcome_training
     logger.info(f"Training propensity model on {len(train_df)} samples")
     logger.info(f"  Epochs: {config.propensity_epochs}, LR: {config.propensity_lr}")
+    logger.info(f"  Joint outcome training: {joint_training}")
+    if joint_training:
+        logger.info(f"    alpha_propensity={config.alpha_propensity_stage1}, "
+                   f"alpha_outcome={config.alpha_outcome_stage1}")
     if val_df is None:
         logger.info("  No validation set - training for fixed epochs")
 
@@ -214,69 +223,143 @@ def train_propensity_model(
         # Train
         model.train()
         train_loss = 0.0
-        train_preds, train_targets = [], []
+        train_propensity_loss = 0.0
+        train_outcome_loss = 0.0
+        train_prop_preds, train_prop_targets = [], []
+        train_out_preds, train_out_targets = [], []
 
         for batch in tqdm(train_loader, desc=f"Propensity Epoch {epoch+1}", leave=False):
             texts = batch['texts']
             treatment = batch['treatment'].to(device)
+            outcome = batch['outcome'].to(device)
 
             optimizer.zero_grad()
 
-            logits = model(texts).squeeze(-1)
-            loss = F.binary_cross_entropy_with_logits(logits, treatment)
+            if joint_training:
+                # Joint training: propensity + outcome
+                t_logit, y_logit = model.forward_joint(texts)
+                propensity_loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), treatment)
+                outcome_loss = F.binary_cross_entropy_with_logits(y_logit.squeeze(-1), outcome)
+                loss = (config.alpha_propensity_stage1 * propensity_loss +
+                        config.alpha_outcome_stage1 * outcome_loss)
+
+                train_propensity_loss += propensity_loss.item()
+                train_outcome_loss += outcome_loss.item()
+                train_out_preds.append(torch.sigmoid(y_logit).detach().cpu())
+                train_out_targets.append(outcome.detach().cpu())
+                train_prop_preds.append(torch.sigmoid(t_logit).detach().cpu())
+            else:
+                # Propensity only
+                t_logit = model(texts)
+                loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), treatment)
+                train_propensity_loss += loss.item()
+                train_prop_preds.append(torch.sigmoid(t_logit).detach().cpu())
+
+            train_prop_targets.append(treatment.detach().cpu())
 
             loss.backward()
             optimizer.step()
 
             train_loss += loss.item()
-            train_preds.append(torch.sigmoid(logits).detach().cpu())
-            train_targets.append(treatment.detach().cpu())
 
         # Compute training metrics
-        train_loss_avg = train_loss / len(train_loader)
-        train_preds_cat = torch.cat(train_preds).numpy()
-        train_targets_cat = torch.cat(train_targets).numpy()
-        train_auroc = roc_auc_score(train_targets_cat, train_preds_cat) \
-            if len(np.unique(train_targets_cat)) > 1 else None
+        n_batches = len(train_loader)
+        train_loss_avg = train_loss / n_batches
+        train_propensity_loss_avg = train_propensity_loss / n_batches
+        train_outcome_loss_avg = train_outcome_loss / n_batches if joint_training else None
+
+        train_prop_preds_cat = torch.cat(train_prop_preds).numpy()
+        train_prop_targets_cat = torch.cat(train_prop_targets).numpy()
+        train_propensity_auroc = roc_auc_score(train_prop_targets_cat, train_prop_preds_cat) \
+            if len(np.unique(train_prop_targets_cat)) > 1 else None
+
+        train_outcome_auroc = None
+        if joint_training:
+            train_out_preds_cat = torch.cat(train_out_preds).numpy()
+            train_out_targets_cat = torch.cat(train_out_targets).numpy()
+            train_outcome_auroc = roc_auc_score(train_out_targets_cat, train_out_preds_cat) \
+                if len(np.unique(train_out_targets_cat)) > 1 else None
 
         # Validation (if val_loader is available)
         val_loss_avg = None
-        val_auroc = None
+        val_propensity_loss_avg = None
+        val_outcome_loss_avg = None
+        val_propensity_auroc = None
+        val_outcome_auroc = None
 
         if val_loader is not None:
             model.eval()
             val_loss = 0.0
-            val_preds, val_targets = [], []
+            val_propensity_loss = 0.0
+            val_outcome_loss = 0.0
+            val_prop_preds, val_prop_targets = [], []
+            val_out_preds, val_out_targets = [], []
 
             with torch.no_grad():
                 for batch in tqdm(val_loader, desc="Propensity Val", leave=False):
                     texts = batch['texts']
                     treatment = batch['treatment'].to(device)
+                    outcome = batch['outcome'].to(device)
 
-                    logits = model(texts).squeeze(-1)
-                    loss = F.binary_cross_entropy_with_logits(logits, treatment)
+                    if joint_training:
+                        t_logit, y_logit = model.forward_joint(texts)
+                        propensity_loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), treatment)
+                        outcome_loss = F.binary_cross_entropy_with_logits(y_logit.squeeze(-1), outcome)
+                        loss = (config.alpha_propensity_stage1 * propensity_loss +
+                                config.alpha_outcome_stage1 * outcome_loss)
+                        val_propensity_loss += propensity_loss.item()
+                        val_outcome_loss += outcome_loss.item()
+                        val_out_preds.append(torch.sigmoid(y_logit).cpu())
+                        val_out_targets.append(outcome.cpu())
+                        val_prop_preds.append(torch.sigmoid(t_logit).cpu())
+                    else:
+                        t_logit = model(texts)
+                        loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), treatment)
+                        val_propensity_loss += loss.item()
+                        val_prop_preds.append(torch.sigmoid(t_logit).cpu())
 
+                    val_prop_targets.append(treatment.cpu())
                     val_loss += loss.item()
-                    val_preds.append(torch.sigmoid(logits).cpu())
-                    val_targets.append(treatment.cpu())
 
-            val_loss_avg = val_loss / len(val_loader)
-            val_preds_cat = torch.cat(val_preds).numpy()
-            val_targets_cat = torch.cat(val_targets).numpy()
-            val_auroc = roc_auc_score(val_targets_cat, val_preds_cat) \
-                if len(np.unique(val_targets_cat)) > 1 else None
+            n_val_batches = len(val_loader)
+            val_loss_avg = val_loss / n_val_batches
+            val_propensity_loss_avg = val_propensity_loss / n_val_batches
+            val_outcome_loss_avg = val_outcome_loss / n_val_batches if joint_training else None
+
+            val_prop_preds_cat = torch.cat(val_prop_preds).numpy()
+            val_prop_targets_cat = torch.cat(val_prop_targets).numpy()
+            val_propensity_auroc = roc_auc_score(val_prop_targets_cat, val_prop_preds_cat) \
+                if len(np.unique(val_prop_targets_cat)) > 1 else None
+
+            if joint_training:
+                val_out_preds_cat = torch.cat(val_out_preds).numpy()
+                val_out_targets_cat = torch.cat(val_out_targets).numpy()
+                val_outcome_auroc = roc_auc_score(val_out_targets_cat, val_out_preds_cat) \
+                    if len(np.unique(val_out_targets_cat)) > 1 else None
 
         history.append({
             'epoch': epoch + 1,
             'train_loss': train_loss_avg,
+            'train_propensity_loss': train_propensity_loss_avg,
+            'train_outcome_loss': train_outcome_loss_avg,
+            'train_propensity_auroc': train_propensity_auroc,
+            'train_outcome_auroc': train_outcome_auroc,
             'val_loss': val_loss_avg,
-            'train_auroc': train_auroc,
-            'val_auroc': val_auroc
+            'val_propensity_loss': val_propensity_loss_avg,
+            'val_outcome_loss': val_outcome_loss_avg,
+            'val_propensity_auroc': val_propensity_auroc,
+            'val_outcome_auroc': val_outcome_auroc
         })
 
         if val_loss_avg is not None:
-            logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
-                       f"val_loss={val_loss_avg:.4f}, val_auroc={val_auroc:.4f}")
+            if joint_training:
+                logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
+                           f"val_loss={val_loss_avg:.4f}, "
+                           f"val_prop_auroc={val_propensity_auroc:.4f}, "
+                           f"val_out_auroc={val_outcome_auroc:.4f}")
+            else:
+                logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
+                           f"val_loss={val_loss_avg:.4f}, val_auroc={val_propensity_auroc:.4f}")
 
             # Early stopping (only when validation is available)
             if val_loss_avg < best_val_loss:
@@ -289,8 +372,13 @@ def train_propensity_model(
                     logger.info(f"  Early stopping at epoch {epoch+1}")
                     break
         else:
-            logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
-                       f"train_auroc={train_auroc:.4f}")
+            if joint_training:
+                logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
+                           f"prop_auroc={train_propensity_auroc:.4f}, "
+                           f"out_auroc={train_outcome_auroc:.4f}")
+            else:
+                logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
+                           f"train_auroc={train_propensity_auroc:.4f}")
 
     # Restore best model (only if we had validation-based early stopping)
     if best_model_state is not None:
@@ -306,6 +394,54 @@ def train_propensity_model(
     return model, history
 
 
+class MatchedPairTextDataset(Dataset):
+    """
+    Dataset of matched pairs using text indices for on-the-fly representation.
+
+    Used when freeze_representation_stage2=False and we need to compute
+    fresh representations each batch to enable fine-tuning.
+
+    Args:
+        texts: List of all patient texts (indexed by original dataframe index)
+        outcomes: Array of binary outcomes (indexed by original dataframe index)
+        matched_pairs: Array of (treated_idx, control_idx) pairs using original indices
+    """
+
+    def __init__(
+        self,
+        texts: List[str],
+        outcomes: np.ndarray,
+        matched_pairs: np.ndarray
+    ):
+        self.texts = texts
+        self.outcomes = torch.tensor(outcomes, dtype=torch.float32)
+        self.matched_pairs = matched_pairs
+
+        logger.info(f"MatchedPairTextDataset: {len(matched_pairs)} pairs")
+
+    def __len__(self) -> int:
+        return len(self.matched_pairs)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        treated_idx, control_idx = self.matched_pairs[idx]
+        return {
+            'text_T': self.texts[treated_idx],
+            'text_U': self.texts[control_idx],
+            'y_T': self.outcomes[treated_idx],
+            'y_U': self.outcomes[control_idx]
+        }
+
+
+def collate_text_pairs(batch: List[Dict]) -> Dict[str, Any]:
+    """Collate function for text pair batches."""
+    return {
+        'texts_T': [b['text_T'] for b in batch],
+        'texts_U': [b['text_U'] for b in batch],
+        'y_T': torch.stack([b['y_T'] for b in batch]),
+        'y_U': torch.stack([b['y_U'] for b in batch])
+    }
+
+
 def train_matched_pair_outcome_model(
     propensity_model: PropensityMatchingModel,
     train_df: pd.DataFrame,
@@ -317,12 +453,21 @@ def train_matched_pair_outcome_model(
     Train outcome/tau model on matched pairs.
 
     Stage 3 of the matched pair pipeline:
-    1. Extract frozen representations for all matched patients
+    1. Extract representations for all matched patients (frozen or trainable)
     2. Create MatchedPairDataset
     3. Train MatchedPairOutcomeModel
 
+    When freeze_representation_stage2=True (default):
+        - Representation is frozen and pre-extracted once
+        - Only outcome model parameters are optimized
+
+    When freeze_representation_stage2=False:
+        - Representation remains trainable
+        - Representations computed on-the-fly each batch
+        - Both outcome model and propensity model parameters optimized
+
     Args:
-        propensity_model: Trained and frozen PropensityMatchingModel
+        propensity_model: Trained PropensityMatchingModel
         train_df: Training DataFrame (must contain all matched patient indices)
         matched_pairs: Array of (treated_idx, control_idx) pairs
         config: MatchedPairConfig with training settings
@@ -331,50 +476,12 @@ def train_matched_pair_outcome_model(
     Returns:
         Tuple of (trained_outcome_model, training_history)
     """
+    freeze_repr = config.freeze_representation_stage2
     logger.info(f"Training outcome/tau model on {len(matched_pairs)} matched pairs")
-
-    # Ensure propensity model is frozen
-    propensity_model.freeze_representation()
-    propensity_model.eval()
+    logger.info(f"  Freeze representation: {freeze_repr}")
 
     # Get all unique patient indices from matched pairs
     all_indices = np.unique(matched_pairs.flatten())
-
-    # Extract texts and outcomes for matched patients
-    texts = train_df.iloc[all_indices][config.text_column].tolist()
-    outcomes = train_df.iloc[all_indices][config.outcome_column].values
-
-    # Extract representations (frozen)
-    logger.info(f"  Extracting representations for {len(all_indices)} patients...")
-    representations = []
-    batch_size = config.outcome_batch_size
-
-    with torch.no_grad():
-        for i in range(0, len(texts), batch_size):
-            batch_texts = texts[i:i + batch_size]
-            batch_repr = propensity_model.get_representation(batch_texts)
-            representations.append(batch_repr.cpu())
-
-    representations = torch.cat(representations, dim=0)  # (N, D)
-
-    # Create index mapping: original_idx -> representation_idx
-    idx_to_repr_idx = {orig_idx: i for i, orig_idx in enumerate(all_indices)}
-
-    # Remap matched pairs to representation indices
-    remapped_pairs = np.array([
-        [idx_to_repr_idx[t], idx_to_repr_idx[c]]
-        for t, c in matched_pairs
-    ])
-
-    # Create dataset
-    pair_dataset = MatchedPairDataset(representations, outcomes, remapped_pairs)
-
-    # Create dataloader
-    pair_loader = DataLoader(
-        pair_dataset,
-        batch_size=config.outcome_batch_size,
-        shuffle=True
-    )
 
     # Create outcome model
     outcome_model = MatchedPairOutcomeModel(
@@ -383,25 +490,100 @@ def train_matched_pair_outcome_model(
         dropout=config.dropout
     ).to(device)
 
-    # Optimizer
-    optimizer = torch.optim.AdamW(
-        outcome_model.parameters(),
-        lr=config.outcome_lr,
-        weight_decay=0.01
-    )
+    if freeze_repr:
+        # Frozen mode: pre-extract representations once
+        propensity_model.freeze_representation()
+        propensity_model.eval()
+
+        # Extract texts and outcomes for matched patients
+        texts = train_df.iloc[all_indices][config.text_column].tolist()
+        outcomes = train_df.iloc[all_indices][config.outcome_column].values
+
+        # Extract representations (frozen)
+        logger.info(f"  Extracting representations for {len(all_indices)} patients...")
+        representations = []
+        batch_size = config.outcome_batch_size
+
+        with torch.no_grad():
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_repr = propensity_model.get_representation(batch_texts)
+                representations.append(batch_repr.cpu())
+
+        representations = torch.cat(representations, dim=0)  # (N, D)
+
+        # Create index mapping: original_idx -> representation_idx
+        idx_to_repr_idx = {orig_idx: i for i, orig_idx in enumerate(all_indices)}
+
+        # Remap matched pairs to representation indices
+        remapped_pairs = np.array([
+            [idx_to_repr_idx[t], idx_to_repr_idx[c]]
+            for t, c in matched_pairs
+        ])
+
+        # Create dataset with pre-computed representations
+        pair_dataset = MatchedPairDataset(representations, outcomes, remapped_pairs)
+        pair_loader = DataLoader(
+            pair_dataset,
+            batch_size=config.outcome_batch_size,
+            shuffle=True
+        )
+
+        # Optimizer: only outcome model
+        optimizer = torch.optim.AdamW(
+            outcome_model.parameters(),
+            lr=config.outcome_lr,
+            weight_decay=0.01
+        )
+    else:
+        # Trainable mode: compute representations on-the-fly
+        propensity_model.unfreeze_representation()
+        propensity_model.train()
+
+        # Store texts indexed by original dataframe position
+        # We need to use iloc for matched_pairs which are row indices
+        all_texts = train_df[config.text_column].tolist()
+        all_outcomes = train_df[config.outcome_column].values
+
+        # Create dataset with text indices
+        pair_dataset = MatchedPairTextDataset(all_texts, all_outcomes, matched_pairs)
+        pair_loader = DataLoader(
+            pair_dataset,
+            batch_size=config.outcome_batch_size,
+            shuffle=True,
+            collate_fn=collate_text_pairs
+        )
+
+        # Optimizer: both outcome model and propensity model
+        optimizer = torch.optim.AdamW(
+            list(outcome_model.parameters()) + list(propensity_model.parameters()),
+            lr=config.outcome_lr,
+            weight_decay=0.01
+        )
 
     # Training loop
     history = []
     best_loss = float('inf')
     best_model_state = None
+    best_propensity_state = None if freeze_repr else None
 
     for epoch in range(config.outcome_epochs):
         outcome_model.train()
+        if not freeze_repr:
+            propensity_model.train()
+
         epoch_losses = []
 
         for batch in tqdm(pair_loader, desc=f"Outcome Epoch {epoch+1}", leave=False):
-            repr_U = batch['repr_U'].to(device)
-            repr_T = batch['repr_T'].to(device)
+            if freeze_repr:
+                # Pre-computed representations
+                repr_U = batch['repr_U'].to(device)
+                repr_T = batch['repr_T'].to(device)
+            else:
+                # Compute fresh representations
+                repr_T = propensity_model.get_representation(batch['texts_T'])
+                repr_U = propensity_model.get_representation(batch['texts_U'])
+
             y_U = batch['y_U'].to(device)
             y_T = batch['y_T'].to(device)
 
@@ -433,13 +615,19 @@ def train_matched_pair_outcome_model(
         if epoch_summary['loss'] < best_loss:
             best_loss = epoch_summary['loss']
             best_model_state = {k: v.cpu().clone() for k, v in outcome_model.state_dict().items()}
+            if not freeze_repr:
+                best_propensity_state = {k: v.cpu().clone() for k, v in propensity_model.state_dict().items()}
 
     # Restore best
     if best_model_state is not None:
         outcome_model.load_state_dict(best_model_state)
+    if best_propensity_state is not None:
+        propensity_model.load_state_dict(best_propensity_state)
 
     # Cleanup
-    del pair_loader, pair_dataset, representations
+    del pair_loader, pair_dataset
+    if freeze_repr:
+        del representations
     gc.collect()
 
     return outcome_model, history

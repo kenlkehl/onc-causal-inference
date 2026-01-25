@@ -98,10 +98,25 @@ class ExperimentCondition:
     hidden_outcome_dim: int = 128
     batch_size: int = 32
     text_column: str = "clinical_text"
+    # Joint training options
+    joint_outcome_training: bool = False
+    alpha_propensity_stage1: float = 1.0
+    alpha_outcome_stage1: float = 1.0
+    freeze_representation_stage2: bool = True
 
 
 def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentCondition]:
-    """Generate grid of experimental conditions."""
+    """Generate grid of experimental conditions.
+
+    The grid explores:
+    - Matching method: propensity score vs embedding similarity
+    - Matching algorithm: nearest neighbor (greedy) vs optimal (Hungarian)
+    - Learning rate
+    - Propensity epochs
+    - Outcome epochs
+    - Joint outcome training: whether to co-train Stage 1 on outcome (true confounder learning)
+    - Freeze representation: whether to freeze Stage 1 representation during Stage 2
+    """
     conditions = []
 
     if quick_test:
@@ -111,6 +126,8 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
         lrs = [1e-4]
         prop_epochs_list = [5]
         outcome_epochs_list = [5]
+        joint_outcome_options = [False]
+        freeze_repr_options = [True]
     else:
         # Full grid
         matching_methods = ["propensity", "embedding"]
@@ -118,6 +135,9 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
         lrs = [1e-4, 5e-5]
         prop_epochs_list = [25, 50]
         outcome_epochs_list = [25, 50]
+        # New: joint training and freeze options
+        joint_outcome_options = [False, True]  # Whether to co-train on outcome in Stage 1
+        freeze_repr_options = [True, False]    # Whether to freeze representation in Stage 2
 
     idx = 0
     for matching_method in matching_methods:
@@ -125,17 +145,26 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
             for lr in lrs:
                 for prop_epochs in prop_epochs_list:
                     for outcome_epochs in outcome_epochs_list:
-                        idx += 1
-                        name = f"{idx:02d}_{matching_method}_{matching_algorithm}_lr{lr}_pe{prop_epochs}_oe{outcome_epochs}"
-                        conditions.append(ExperimentCondition(
-                            name=name,
-                            matching_method=matching_method,
-                            matching_algorithm=matching_algorithm,
-                            propensity_lr=lr,
-                            outcome_lr=lr,
-                            propensity_epochs=prop_epochs,
-                            outcome_epochs=outcome_epochs,
-                        ))
+                        for joint_outcome in joint_outcome_options:
+                            for freeze_repr in freeze_repr_options:
+                                idx += 1
+                                # Create descriptive name
+                                joint_str = "joint" if joint_outcome else "prop"
+                                freeze_str = "frozen" if freeze_repr else "finetune"
+                                name = (f"{idx:02d}_{matching_method}_{matching_algorithm}_"
+                                       f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
+                                       f"{joint_str}_{freeze_str}")
+                                conditions.append(ExperimentCondition(
+                                    name=name,
+                                    matching_method=matching_method,
+                                    matching_algorithm=matching_algorithm,
+                                    propensity_lr=lr,
+                                    outcome_lr=lr,
+                                    propensity_epochs=prop_epochs,
+                                    outcome_epochs=outcome_epochs,
+                                    joint_outcome_training=joint_outcome,
+                                    freeze_representation_stage2=freeze_repr,
+                                ))
 
     return conditions
 
@@ -287,6 +316,11 @@ def run_single_fold(
         dropout=0.0,
         alpha_outcome=1.0,
         beta_tau=1.0,
+        # Joint training options
+        joint_outcome_training=condition.joint_outcome_training,
+        alpha_propensity_stage1=condition.alpha_propensity_stage1,
+        alpha_outcome_stage1=condition.alpha_outcome_stage1,
+        freeze_representation_stage2=condition.freeze_representation_stage2,
     )
 
     # Stage 1: Train propensity model
@@ -300,6 +334,7 @@ def run_single_fold(
         num_transformer_layers=mp_config.hier_transformer_num_layers,
         num_attention_heads=mp_config.hier_transformer_num_heads,
         representation_dim=mp_config.representation_dim,
+        joint_outcome_training=mp_config.joint_outcome_training,
         device=str(device)
     ).to(device)
 
@@ -360,7 +395,7 @@ def run_single_fold(
 
     # Stage 3: Train outcome/tau model
     logger.info(f"  Fold {fold + 1}: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
-    propensity_model.freeze_representation()
+    # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
     outcome_model, outcome_history = train_matched_pair_outcome_model(
         propensity_model, train_df, match_result.matched_pairs,

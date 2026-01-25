@@ -65,6 +65,7 @@ class PropensityMatchingModel(nn.Module):
         num_attention_heads: int = 4,
         transformer_dropout: float = 0.1,
         representation_dim: int = 256,
+        joint_outcome_training: bool = False,
         device: str = "cuda:0"
     ):
         super().__init__()
@@ -72,6 +73,7 @@ class PropensityMatchingModel(nn.Module):
         self._device = torch.device(device) if isinstance(device, str) else device
         self._representation_dim = representation_dim
         self._representation_frozen = False
+        self._joint_outcome_training = joint_outcome_training
 
         # Feature extractor: HierarchicalTransformerExtractor
         # The projection_dim from the extractor feeds into our representation layers
@@ -101,10 +103,22 @@ class PropensityMatchingModel(nn.Module):
             nn.Linear(representation_dim // 2, 1)
         )
 
+        # Outcome head (only if joint training enabled)
+        # This predicts P(Y=1|X), NOT potential outcomes
+        self.outcome_head = None
+        if joint_outcome_training:
+            self.outcome_head = nn.Sequential(
+                nn.Linear(representation_dim, representation_dim // 2),
+                nn.ReLU(),
+                nn.Dropout(0.2),
+                nn.Linear(representation_dim // 2, 1)
+            )
+
         logger.info(f"PropensityMatchingModel initialized:")
         logger.info(f"  Sentence encoder: {sentence_model}")
         logger.info(f"  Representation dim: {representation_dim}")
         logger.info(f"  Transformer dim: {transformer_dim}")
+        logger.info(f"  Joint outcome training: {joint_outcome_training}")
         logger.info(f"  Device: {self._device}")
 
     def forward(self, texts: List[str]) -> torch.Tensor:
@@ -152,6 +166,51 @@ class PropensityMatchingModel(nn.Module):
         """
         logits = self.forward(texts)
         return torch.sigmoid(logits).squeeze(-1)
+
+    def forward_joint(self, texts: List[str]) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
+        """
+        Forward pass returning both propensity and outcome logits.
+
+        Used during joint training when joint_outcome_training=True.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            Tuple of (t_logit, y_logit) where:
+                - t_logit: Propensity logits of shape (batch_size, 1)
+                - y_logit: Outcome logits of shape (batch_size, 1), or None if
+                          joint_outcome_training=False
+        """
+        repr = self.get_representation(texts)
+        t_logit = self.propensity_head(repr)
+        y_logit = self.outcome_head(repr) if self._joint_outcome_training else None
+        return t_logit, y_logit
+
+    def predict_outcome(self, texts: List[str]) -> torch.Tensor:
+        """
+        Predict outcome probabilities (requires joint_outcome_training=True).
+
+        Note: This predicts P(Y=1|X), not potential outcomes Y(0) or Y(1).
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            Outcome probabilities of shape (batch_size,)
+
+        Raises:
+            ValueError: If joint_outcome_training was not enabled
+        """
+        if not self._joint_outcome_training:
+            raise ValueError("Outcome prediction requires joint_outcome_training=True")
+        repr = self.get_representation(texts)
+        return torch.sigmoid(self.outcome_head(repr)).squeeze(-1)
+
+    @property
+    def joint_outcome_training(self) -> bool:
+        """Check if joint outcome training is enabled."""
+        return self._joint_outcome_training
 
     def freeze_representation(self) -> None:
         """
@@ -219,6 +278,7 @@ class PropensityMatchingModel(nn.Module):
         return {
             'representation_dim': self._representation_dim,
             'representation_frozen': self._representation_frozen,
+            'joint_outcome_training': self._joint_outcome_training,
             'feature_extractor_state': self.feature_extractor.get_state()
         }
 

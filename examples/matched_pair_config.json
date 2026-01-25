@@ -44,6 +44,11 @@
     "alpha_outcome": 1.0,
     "beta_tau": 1.0,
 
-    "cv_folds": 5
+    "cv_folds": 5,
+
+    "joint_outcome_training": false,
+    "alpha_propensity_stage1": 1.0,
+    "alpha_outcome_stage1": 1.0,
+    "freeze_representation_stage2": true
   }
 }

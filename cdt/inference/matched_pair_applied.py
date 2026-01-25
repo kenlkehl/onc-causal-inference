@@ -211,6 +211,7 @@ def _process_matched_pair_fold(
         num_attention_heads=mp_config.hier_transformer_num_heads,
         transformer_dropout=mp_config.hier_transformer_dropout,
         representation_dim=mp_config.representation_dim,
+        joint_outcome_training=mp_config.joint_outcome_training,
         device=str(device)
     ).to(device)
 
@@ -276,7 +277,7 @@ def _process_matched_pair_fold(
 
     # Step 4: Train outcome/tau model on matched pairs
     logger.info(f"  Step 4: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
-    propensity_model.freeze_representation()
+    # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
     outcome_model, outcome_history = train_matched_pair_outcome_model(
         propensity_model, train_df, match_result.matched_pairs,
@@ -377,6 +378,7 @@ def _run_matched_pair_fixed_split_inference(
         num_attention_heads=mp_config.hier_transformer_num_heads,
         transformer_dropout=mp_config.hier_transformer_dropout,
         representation_dim=mp_config.representation_dim,
+        joint_outcome_training=mp_config.joint_outcome_training,
         device=str(device)
     ).to(device)
 
@@ -435,7 +437,7 @@ def _run_matched_pair_fixed_split_inference(
 
     # Step 4: Train outcome/tau model
     logger.info(f"Step 4: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
-    propensity_model.freeze_representation()
+    # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
     outcome_model, outcome_history = train_matched_pair_outcome_model(
         propensity_model, train_val_df, match_result.matched_pairs,

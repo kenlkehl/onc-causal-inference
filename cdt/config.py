@@ -394,6 +394,15 @@ class MatchedPairConfig:
     cv_folds: int = 5  # Number of CV folds (0 or 1 = fixed split)
     split_column: str = "split"  # Column for fixed train/val/test splits
 
+    # Joint training options (Stage 1)
+    # When enabled, trains on both propensity AND outcome to learn true confounders
+    joint_outcome_training: bool = False  # Train on outcome in addition to propensity
+    alpha_propensity_stage1: float = 1.0  # Weight for propensity loss in Stage 1
+    alpha_outcome_stage1: float = 1.0     # Weight for outcome loss in Stage 1
+
+    # Stage 2 representation options
+    freeze_representation_stage2: bool = True  # Freeze Stage 1 model during Stage 2 training
+
     # Skip flag
     skip: bool = False
 

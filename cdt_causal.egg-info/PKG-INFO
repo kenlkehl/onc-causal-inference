@@ -269,6 +269,62 @@ CDT includes a traditional propensity score matching (PSM) module that can be ru
 
 This allows comparison of DragonNet's ITE estimates with traditional PSM estimates, providing validation and enabling traditional statistical inference.
 
+### Matched Pair ITE Estimation
+
+As an alternative to DragonNet's joint modeling approach, CDT provides a **two-stage matched pair ITE estimation** pipeline:
+
+```
+Stage 1: Train Propensity Model
+        ↓
+     (Optional: Joint outcome training for true confounder learning)
+        ↓
+Stage 2: Match Patients (propensity or embedding similarity)
+        ↓
+Stage 3: Train Outcome/Tau Model on Matched Pairs
+        ↓
+ITE Predictions for All Patients
+```
+
+**Key features:**
+
+- **Propensity matching**: Match treated/control patients by propensity score (caliper-based)
+- **Embedding matching**: Match by representation similarity (cosine distance)
+- **Tau head**: Predicts treatment effect from untreated patient's embedding
+- **Joint outcome training** (new): Co-train Stage 1 on both propensity AND outcome to learn true confounders
+- **Flexible freezing** (new): Optionally fine-tune representation during Stage 2
+
+**Joint Outcome Training:**
+
+By default, Stage 1 trains only on propensity (treatment prediction). However, features optimized only for propensity may miss outcome-relevant confounders. When `joint_outcome_training=True`, Stage 1 also trains on outcome prediction:
+
+```
+Loss = alpha_propensity * BCE(T_pred, T) + alpha_outcome * BCE(Y_pred, Y)
+```
+
+This encourages learning features that are true confounders (predictive of both T and Y) rather than just instruments (predict T only) or mediators.
+
+**Freeze vs Fine-tune Representation:**
+
+By default, the representation is frozen after Stage 1 to preserve covariate balance. Setting `freeze_representation_stage2=False` allows continued fine-tuning during matched pair training, which may improve outcome/tau prediction at the cost of potentially affecting balance.
+
+**Configuration:**
+```json
+{
+  "matched_pair": {
+    "matching_method": "propensity",
+    "matching_algorithm": "optimal",
+    "caliper": 0.2,
+
+    "joint_outcome_training": true,
+    "alpha_propensity_stage1": 1.0,
+    "alpha_outcome_stage1": 0.5,
+    "freeze_representation_stage2": false
+  }
+}
+```
+
+See `examples/matched_pair_config.json` for a complete configuration example.
+
 ## Installation
 
 ### Prerequisites
