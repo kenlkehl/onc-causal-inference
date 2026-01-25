@@ -403,6 +403,11 @@ class MatchedPairConfig:
     # Stage 2 representation options
     freeze_representation_stage2: bool = True  # Freeze Stage 1 model during Stage 2 training
 
+    # Dynamic re-matching options (only applies when freeze_representation_stage2=False)
+    dynamic_rematching: bool = False  # Re-match patients periodically during Stage 2
+    rematching_frequency: int = 5     # Re-match every N epochs
+    rematching_warmup_epochs: int = 0 # Skip re-matching for first N epochs (let model stabilize)
+
     # Skip flag
     skip: bool = False
 

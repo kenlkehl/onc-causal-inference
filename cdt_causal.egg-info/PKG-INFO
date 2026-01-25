@@ -307,6 +307,23 @@ This encourages learning features that are true confounders (predictive of both 
 
 By default, the representation is frozen after Stage 1 to preserve covariate balance. Setting `freeze_representation_stage2=False` allows continued fine-tuning during matched pair training, which may improve outcome/tau prediction at the cost of potentially affecting balance.
 
+**Dynamic Re-matching:**
+
+When the representation is not frozen (`freeze_representation_stage2=False`), the embedding space changes during training. By default, matched pairs are computed once before Stage 2. Enable `dynamic_rematching=True` to periodically recompute matches as the representation evolves:
+
+```json
+{
+  "matched_pair": {
+    "freeze_representation_stage2": false,
+    "dynamic_rematching": true,
+    "rematching_frequency": 5,
+    "rematching_warmup_epochs": 2
+  }
+}
+```
+
+This recomputes propensity scores (or embeddings) and re-runs the matching algorithm every `rematching_frequency` epochs, starting after `rematching_warmup_epochs`.
+
 **Configuration:**
 ```json
 {
@@ -318,7 +335,8 @@ By default, the representation is frozen after Stage 1 to preserve covariate bal
     "joint_outcome_training": true,
     "alpha_propensity_stage1": 1.0,
     "alpha_outcome_stage1": 0.5,
-    "freeze_representation_stage2": false
+    "freeze_representation_stage2": false,
+    "dynamic_rematching": false
   }
 }
 ```

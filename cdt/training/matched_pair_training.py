@@ -25,6 +25,7 @@ from ..config import MatchedPairConfig
 from ..models.matched_pair_ite import PropensityMatchingModel, MatchedPairOutcomeModel
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup
+from ..matching import PropensityMatcher, match_by_cosine_similarity
 
 
 logger = logging.getLogger(__name__)
@@ -442,6 +443,62 @@ def collate_text_pairs(batch: List[Dict]) -> Dict[str, Any]:
     }
 
 
+def _perform_rematching(
+    propensity_model: PropensityMatchingModel,
+    train_df: pd.DataFrame,
+    config: MatchedPairConfig,
+    device: torch.device
+) -> np.ndarray:
+    """
+    Re-compute matching based on current representations.
+
+    Called during dynamic re-matching when freeze_representation_stage2=False.
+    Extracts fresh propensity scores or embeddings from the current model state
+    and re-runs the matching algorithm.
+
+    Args:
+        propensity_model: Current PropensityMatchingModel (possibly updated during training)
+        train_df: Training DataFrame with text and treatment columns
+        config: MatchedPairConfig with matching settings
+        device: PyTorch device
+
+    Returns:
+        New matched_pairs array of shape (n_pairs, 2) where each row is
+        (treated_idx, control_idx)
+    """
+    propensity_model.eval()
+    texts = train_df[config.text_column].tolist()
+    treatment = train_df[config.treatment_column].values
+
+    with torch.no_grad():
+        if config.matching_method == "embedding":
+            representations = extract_all_representations(
+                propensity_model, texts, config.outcome_batch_size, device
+            )
+            match_result = match_by_cosine_similarity(
+                representations.numpy(), treatment,
+                caliper=config.caliper,
+                method=config.matching_algorithm
+            )
+        else:
+            propensity_scores = extract_propensity_scores(
+                propensity_model, texts, config.outcome_batch_size, device
+            )
+            matcher = PropensityMatcher(
+                method=config.matching_algorithm,
+                caliper=config.caliper,
+                caliper_scale=config.caliper_scale
+            )
+            match_result = matcher.match(propensity_scores, treatment)
+
+    propensity_model.train()
+
+    logger.info(f"    Re-matched {len(match_result.matched_pairs)} pairs "
+                f"(mean dist: {match_result.distances.mean():.4f})")
+
+    return match_result.matched_pairs
+
+
 def train_matched_pair_outcome_model(
     propensity_model: PropensityMatchingModel,
     train_df: pd.DataFrame,
@@ -479,6 +536,14 @@ def train_matched_pair_outcome_model(
     freeze_repr = config.freeze_representation_stage2
     logger.info(f"Training outcome/tau model on {len(matched_pairs)} matched pairs")
     logger.info(f"  Freeze representation: {freeze_repr}")
+
+    # Log dynamic re-matching config
+    if config.dynamic_rematching:
+        if freeze_repr:
+            logger.warning("  dynamic_rematching=True is ignored when freeze_representation_stage2=True")
+        else:
+            logger.info(f"  Dynamic re-matching: enabled (every {config.rematching_frequency} epochs, "
+                       f"warmup={config.rematching_warmup_epochs})")
 
     # Get all unique patient indices from matched pairs
     all_indices = np.unique(matched_pairs.flatten())
@@ -568,6 +633,26 @@ def train_matched_pair_outcome_model(
     best_propensity_state = None if freeze_repr else None
 
     for epoch in range(config.outcome_epochs):
+        # Dynamic re-matching check (only when representation is trainable)
+        if (not freeze_repr and
+            config.dynamic_rematching and
+            epoch >= config.rematching_warmup_epochs and
+            epoch > 0 and
+            epoch % config.rematching_frequency == 0):
+
+            logger.info(f"  Epoch {epoch+1}: Re-matching patients...")
+            matched_pairs = _perform_rematching(
+                propensity_model, train_df, config, device
+            )
+            # Recreate dataset with new pairs
+            pair_dataset = MatchedPairTextDataset(all_texts, all_outcomes, matched_pairs)
+            pair_loader = DataLoader(
+                pair_dataset,
+                batch_size=config.outcome_batch_size,
+                shuffle=True,
+                collate_fn=collate_text_pairs
+            )
+
         outcome_model.train()
         if not freeze_repr:
             propensity_model.train()

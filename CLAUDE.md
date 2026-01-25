@@ -168,10 +168,15 @@ Key options:
 | `alpha_propensity_stage1` | `1.0` | Weight for propensity loss in joint training |
 | `alpha_outcome_stage1` | `1.0` | Weight for outcome loss in joint training |
 | `freeze_representation_stage2` | `True` | Freeze representation during Stage 2 training |
+| `dynamic_rematching` | `False` | Re-match patients during Stage 2 (when representation not frozen) |
+| `rematching_frequency` | `5` | Re-match every N epochs |
+| `rematching_warmup_epochs` | `0` | Skip re-matching for first N epochs |
 
 **Joint outcome training**: When enabled, Stage 1 trains on both treatment and outcome prediction. This encourages learning features that are true confounders (predictive of both T and Y) rather than just instruments or mediators.
 
 **Freeze representation**: When `freeze_representation_stage2=False`, the representation continues to be fine-tuned during Stage 2 outcome/tau training.
+
+**Dynamic re-matching**: When the representation is not frozen (`freeze_representation_stage2=False`), the embedding space changes during training. By default, matched pairs are computed once before Stage 2. Enable `dynamic_rematching=True` to periodically recompute matches as the representation evolves. This recomputes propensity scores (or embeddings) and re-runs the matching algorithm every `rematching_frequency` epochs, starting after `rematching_warmup_epochs`.
 
 See `examples/matched_pair_config.json` for sample configs.
 

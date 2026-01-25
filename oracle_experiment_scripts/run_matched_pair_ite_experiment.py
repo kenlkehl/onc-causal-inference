@@ -103,6 +103,9 @@ class ExperimentCondition:
     alpha_propensity_stage1: float = 1.0
     alpha_outcome_stage1: float = 1.0
     freeze_representation_stage2: bool = True
+    # Dynamic re-matching options (only applies when freeze_representation_stage2=False)
+    dynamic_rematching: bool = False
+    rematching_frequency: int = 5
 
 
 def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentCondition]:
@@ -116,6 +119,7 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
     - Outcome epochs
     - Joint outcome training: whether to co-train Stage 1 on outcome (true confounder learning)
     - Freeze representation: whether to freeze Stage 1 representation during Stage 2
+    - Dynamic re-matching: whether to re-match during Stage 2 (only when not frozen)
     """
     conditions = []
 
@@ -147,24 +151,33 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
                     for outcome_epochs in outcome_epochs_list:
                         for joint_outcome in joint_outcome_options:
                             for freeze_repr in freeze_repr_options:
-                                idx += 1
-                                # Create descriptive name
-                                joint_str = "joint" if joint_outcome else "prop"
-                                freeze_str = "frozen" if freeze_repr else "finetune"
-                                name = (f"{idx:02d}_{matching_method}_{matching_algorithm}_"
-                                       f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
-                                       f"{joint_str}_{freeze_str}")
-                                conditions.append(ExperimentCondition(
-                                    name=name,
-                                    matching_method=matching_method,
-                                    matching_algorithm=matching_algorithm,
-                                    propensity_lr=lr,
-                                    outcome_lr=lr,
-                                    propensity_epochs=prop_epochs,
-                                    outcome_epochs=outcome_epochs,
-                                    joint_outcome_training=joint_outcome,
-                                    freeze_representation_stage2=freeze_repr,
-                                ))
+                                # Dynamic re-matching only makes sense when not frozen
+                                if freeze_repr:
+                                    dynamic_rematch_options = [False]
+                                else:
+                                    dynamic_rematch_options = [False, True] if not quick_test else [False]
+
+                                for dynamic_rematch in dynamic_rematch_options:
+                                    idx += 1
+                                    # Create descriptive name
+                                    joint_str = "joint" if joint_outcome else "prop"
+                                    freeze_str = "frozen" if freeze_repr else "finetune"
+                                    rematch_str = "_rematch" if dynamic_rematch else ""
+                                    name = (f"{idx:02d}_{matching_method}_{matching_algorithm}_"
+                                           f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
+                                           f"{joint_str}_{freeze_str}{rematch_str}")
+                                    conditions.append(ExperimentCondition(
+                                        name=name,
+                                        matching_method=matching_method,
+                                        matching_algorithm=matching_algorithm,
+                                        propensity_lr=lr,
+                                        outcome_lr=lr,
+                                        propensity_epochs=prop_epochs,
+                                        outcome_epochs=outcome_epochs,
+                                        joint_outcome_training=joint_outcome,
+                                        freeze_representation_stage2=freeze_repr,
+                                        dynamic_rematching=dynamic_rematch,
+                                    ))
 
     return conditions
 
@@ -321,6 +334,9 @@ def run_single_fold(
         alpha_propensity_stage1=condition.alpha_propensity_stage1,
         alpha_outcome_stage1=condition.alpha_outcome_stage1,
         freeze_representation_stage2=condition.freeze_representation_stage2,
+        # Dynamic re-matching options
+        dynamic_rematching=condition.dynamic_rematching,
+        rematching_frequency=condition.rematching_frequency,
     )
 
     # Stage 1: Train propensity model
