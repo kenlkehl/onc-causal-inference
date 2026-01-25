@@ -324,6 +324,40 @@ When the representation is not frozen (`freeze_representation_stage2=False`), th
 
 This recomputes propensity scores (or embeddings) and re-runs the matching algorithm every `rematching_frequency` epochs, starting after `rematching_warmup_epochs`.
 
+**Cross-Encoder for Residual Confounder Capture:**
+
+After propensity matching, matched pairs have similar propensity scores but may still differ in subtle ways captured in the clinical text. The optional cross-encoder learns to identify these discriminative features:
+
+- **How it works:**
+  1. Extract sentence embeddings for both matched patients
+  2. Cross-attention: T sentences attend to U sentences (and vice versa)
+  3. Discriminative queries aggregate differences
+  4. Residual features enhance tau prediction
+
+- **Enable with:**
+```json
+{
+  "matched_pair": {
+    "use_cross_encoder": true,
+    "cross_encoder_num_queries": 4,
+    "cross_encoder_num_heads": 4,
+    "gamma_discrimination": 0.1,
+    "delta_consistency": 0.1
+  }
+}
+```
+
+- **Loss function:**
+```
+L_total = α * L_outcome + β * L_tau + γ * L_disc + δ * L_consistency
+```
+
+- **Interpretation:** When `save_cross_encoder_attention=true`, the output includes:
+  - Top discriminative sentences for each matched pair
+  - Cross-attention matrices showing which sentences relate across patients
+
+See `examples/matched_pair_cross_encoder_config.json` for a complete example.
+
 **Configuration:**
 ```json
 {

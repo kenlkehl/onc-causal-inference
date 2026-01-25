@@ -68,6 +68,7 @@ from cdt.models.matched_pair_ite import (
 from cdt.training.matched_pair_training import (
     train_propensity_model,
     train_matched_pair_outcome_model,
+    train_matched_pair_outcome_model_enhanced,
     extract_all_representations,
     extract_propensity_scores,
     MatchedPairDataset
@@ -106,6 +107,14 @@ class ExperimentCondition:
     # Dynamic re-matching options (only applies when freeze_representation_stage2=False)
     dynamic_rematching: bool = False
     rematching_frequency: int = 5
+    # Cross-encoder options
+    use_cross_encoder: bool = False
+    cross_encoder_num_queries: int = 4
+    cross_encoder_num_heads: int = 4
+    cross_encoder_hidden_dim: int = 128
+    cross_encoder_use_gating: bool = True
+    gamma_discrimination: float = 0.1
+    delta_consistency: float = 0.1
 
 
 def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentCondition]:
@@ -120,6 +129,7 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
     - Joint outcome training: whether to co-train Stage 1 on outcome (true confounder learning)
     - Freeze representation: whether to freeze Stage 1 representation during Stage 2
     - Dynamic re-matching: whether to re-match during Stage 2 (only when not frozen)
+    - Cross-encoder: whether to use residual cross-encoder for Stage 3
     """
     conditions = []
 
@@ -132,6 +142,7 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
         outcome_epochs_list = [5]
         joint_outcome_options = [False]
         freeze_repr_options = [True]
+        cross_encoder_options = [False]
     else:
         # Full grid
         matching_methods = ["propensity", "embedding"]
@@ -142,6 +153,8 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
         # New: joint training and freeze options
         joint_outcome_options = [False, True]  # Whether to co-train on outcome in Stage 1
         freeze_repr_options = [True, False]    # Whether to freeze representation in Stage 2
+        # Cross-encoder as experimental factor
+        cross_encoder_options = [False, True]  # With/without cross-encoder
 
     idx = 0
     for matching_method in matching_methods:
@@ -158,26 +171,29 @@ def generate_experiment_grid(quick_test: bool = False) -> List[ExperimentConditi
                                     dynamic_rematch_options = [False, True] if not quick_test else [False]
 
                                 for dynamic_rematch in dynamic_rematch_options:
-                                    idx += 1
-                                    # Create descriptive name
-                                    joint_str = "joint" if joint_outcome else "prop"
-                                    freeze_str = "frozen" if freeze_repr else "finetune"
-                                    rematch_str = "_rematch" if dynamic_rematch else ""
-                                    name = (f"{idx:02d}_{matching_method}_{matching_algorithm}_"
-                                           f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
-                                           f"{joint_str}_{freeze_str}{rematch_str}")
-                                    conditions.append(ExperimentCondition(
-                                        name=name,
-                                        matching_method=matching_method,
-                                        matching_algorithm=matching_algorithm,
-                                        propensity_lr=lr,
-                                        outcome_lr=lr,
-                                        propensity_epochs=prop_epochs,
-                                        outcome_epochs=outcome_epochs,
-                                        joint_outcome_training=joint_outcome,
-                                        freeze_representation_stage2=freeze_repr,
-                                        dynamic_rematching=dynamic_rematch,
-                                    ))
+                                    for use_cross_encoder in cross_encoder_options:
+                                        idx += 1
+                                        # Create descriptive name
+                                        joint_str = "joint" if joint_outcome else "prop"
+                                        freeze_str = "frozen" if freeze_repr else "finetune"
+                                        rematch_str = "_rematch" if dynamic_rematch else ""
+                                        crossenc_str = "_crossenc" if use_cross_encoder else ""
+                                        name = (f"{idx:02d}_{matching_method}_{matching_algorithm}_"
+                                               f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
+                                               f"{joint_str}_{freeze_str}{rematch_str}{crossenc_str}")
+                                        conditions.append(ExperimentCondition(
+                                            name=name,
+                                            matching_method=matching_method,
+                                            matching_algorithm=matching_algorithm,
+                                            propensity_lr=lr,
+                                            outcome_lr=lr,
+                                            propensity_epochs=prop_epochs,
+                                            outcome_epochs=outcome_epochs,
+                                            joint_outcome_training=joint_outcome,
+                                            freeze_representation_stage2=freeze_repr,
+                                            dynamic_rematching=dynamic_rematch,
+                                            use_cross_encoder=use_cross_encoder,
+                                        ))
 
     return conditions
 
@@ -337,6 +353,14 @@ def run_single_fold(
         # Dynamic re-matching options
         dynamic_rematching=condition.dynamic_rematching,
         rematching_frequency=condition.rematching_frequency,
+        # Cross-encoder options
+        use_cross_encoder=condition.use_cross_encoder,
+        cross_encoder_num_queries=condition.cross_encoder_num_queries,
+        cross_encoder_num_heads=condition.cross_encoder_num_heads,
+        cross_encoder_hidden_dim=condition.cross_encoder_hidden_dim,
+        cross_encoder_use_gating=condition.cross_encoder_use_gating,
+        gamma_discrimination=condition.gamma_discrimination,
+        delta_consistency=condition.delta_consistency,
     )
 
     # Stage 1: Train propensity model
@@ -413,10 +437,18 @@ def run_single_fold(
     logger.info(f"  Fold {fold + 1}: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
     # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
-    outcome_model, outcome_history = train_matched_pair_outcome_model(
-        propensity_model, train_df, match_result.matched_pairs,
-        mp_config, device
-    )
+    # Use enhanced training if cross-encoder is enabled
+    if condition.use_cross_encoder:
+        logger.info(f"  Fold {fold + 1}: Using cross-encoder enhanced training")
+        outcome_model, outcome_history = train_matched_pair_outcome_model_enhanced(
+            propensity_model, train_df, match_result.matched_pairs,
+            mp_config, device
+        )
+    else:
+        outcome_model, outcome_history = train_matched_pair_outcome_model(
+            propensity_model, train_df, match_result.matched_pairs,
+            mp_config, device
+        )
 
     # Stage 4: Predict on test set
     logger.info(f"  Fold {fold + 1}: Predicting on test set")

@@ -9,7 +9,12 @@ from .matched_pair_training import (
     train_propensity_model,
     train_matched_pair_outcome_model,
     extract_all_representations,
-    extract_propensity_scores
+    extract_propensity_scores,
+    # Cross-encoder enhanced training
+    enhanced_matched_pair_loss,
+    extract_sentence_embeddings,
+    MatchedPairSentenceDataset,
+    train_matched_pair_outcome_model_enhanced,
 )
 
 __all__ = [
@@ -20,4 +25,9 @@ __all__ = [
     'train_matched_pair_outcome_model',
     'extract_all_representations',
     'extract_propensity_scores',
+    # Cross-encoder enhanced training
+    'enhanced_matched_pair_loss',
+    'extract_sentence_embeddings',
+    'MatchedPairSentenceDataset',
+    'train_matched_pair_outcome_model_enhanced',
 ]

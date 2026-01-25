@@ -24,8 +24,10 @@ from .propensity_model import PropensityOnlyModel, PropensityNet, create_propens
 from .matched_pair_ite import (
     PropensityMatchingModel,
     MatchedPairOutcomeModel,
+    EnhancedMatchedPairOutcomeModel,
     CombinedMatchedPairModel
 )
+from .residual_cross_encoder import ResidualCrossEncoder
 
 __all__ = [
     'CrossAttentionAggregator',
@@ -58,5 +60,7 @@ __all__ = [
     'create_propensity_model_from_config',
     'PropensityMatchingModel',
     'MatchedPairOutcomeModel',
+    'EnhancedMatchedPairOutcomeModel',
     'CombinedMatchedPairModel',
+    'ResidualCrossEncoder',
 ]

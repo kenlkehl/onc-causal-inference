@@ -1,5 +1,5 @@
 {
-  "output_dir": "./matched_pair_results",
+  "output_dir": "./matched_pair_cross_encoder_results",
   "seed": 42,
   "device": "cuda:0",
   "num_workers": 1,
@@ -52,14 +52,17 @@
     "freeze_representation_stage2": true,
     "dynamic_rematching": false,
 
-    "use_cross_encoder": false,
+    "use_cross_encoder": true,
     "cross_encoder_num_queries": 4,
     "cross_encoder_num_heads": 4,
     "cross_encoder_hidden_dim": 128,
     "cross_encoder_use_gating": true,
+
     "gamma_discrimination": 0.1,
     "delta_consistency": 0.1,
-    "save_cross_encoder_attention": false,
+
+    "extract_sentences_for_cross_encoder": true,
+    "save_cross_encoder_attention": true,
     "cross_encoder_top_k_sentences": 5
   }
 }

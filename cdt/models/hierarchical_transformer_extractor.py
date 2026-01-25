@@ -306,6 +306,61 @@ class HierarchicalTransformerExtractor(nn.Module):
 
         return features
 
+    def get_sentence_embeddings(self, texts: List[str]) -> torch.Tensor:
+        """
+        Extract sentence-level embeddings for cross-encoder input.
+
+        Returns sentence embeddings AFTER projection to transformer_dim but
+        BEFORE the transformer pooling layers. This preserves the per-sentence
+        information needed for cross-attention in the ResidualCrossEncoder.
+
+        Args:
+            texts: List of document texts (typically a single text)
+
+        Returns:
+            Tensor of shape (batch_size, max_sentences, transformer_dim)
+            Padded with zeros for documents with fewer sentences.
+            Returns None if extractor is not initialized.
+        """
+        self._ensure_initialized()
+
+        if not texts:
+            return None
+
+        batch_embeddings = []
+        max_sents = 0
+
+        for text in texts:
+            # Split into sentences
+            sentences = split_into_sentences(text, self._max_sentences)
+            if not sentences:
+                sentences = [text[:500]]
+
+            # Encode sentences with BERT
+            sentence_emb = self._encode_sentences_batch(sentences)  # (S, sentence_dim)
+
+            # Project to transformer dim
+            sentence_emb = self._input_projection(sentence_emb)  # (S, transformer_dim)
+
+            batch_embeddings.append(sentence_emb)
+            max_sents = max(max_sents, sentence_emb.size(0))
+
+        # Pad to same length
+        padded_embeddings = []
+        for emb in batch_embeddings:
+            if emb.size(0) < max_sents:
+                padding = torch.zeros(
+                    max_sents - emb.size(0),
+                    emb.size(1),
+                    device=emb.device
+                )
+                emb = torch.cat([emb, padding], dim=0)
+            padded_embeddings.append(emb)
+
+        # Stack batch
+        result = torch.stack(padded_embeddings)  # (B, max_sents, transformer_dim)
+        return result
+
     def init_extractor(self, texts: List[str]) -> 'HierarchicalTransformerExtractor':
         """
         Initialize the feature extractor (triggers lazy initialization).

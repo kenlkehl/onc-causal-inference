@@ -22,7 +22,11 @@ from tqdm import tqdm
 from sklearn.metrics import roc_auc_score
 
 from ..config import MatchedPairConfig
-from ..models.matched_pair_ite import PropensityMatchingModel, MatchedPairOutcomeModel
+from ..models.matched_pair_ite import (
+    PropensityMatchingModel,
+    MatchedPairOutcomeModel,
+    EnhancedMatchedPairOutcomeModel
+)
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup
 from ..matching import PropensityMatcher, match_by_cosine_similarity
@@ -776,3 +780,372 @@ def extract_propensity_scores(
             scores.append(batch_scores.cpu().numpy())
 
     return np.concatenate(scores, axis=0)
+
+
+# =============================================================================
+# ENHANCED CROSS-ENCODER TRAINING
+# =============================================================================
+
+def enhanced_matched_pair_loss(
+    y_U_logit: torch.Tensor,
+    y_T_logit: torch.Tensor,
+    tau_pred: torch.Tensor,
+    y_U: torch.Tensor,
+    y_T: torch.Tensor,
+    treatment_logit: Optional[torch.Tensor] = None,
+    alpha_outcome: float = 1.0,
+    beta_tau: float = 1.0,
+    gamma_discrimination: float = 0.1,
+    delta_consistency: float = 0.1
+) -> Dict[str, torch.Tensor]:
+    """
+    Enhanced matched pair loss with cross-encoder auxiliary losses.
+
+    Loss = α * L_outcome + β * L_tau + γ * L_disc + δ * L_consistency
+
+    Where:
+    - L_outcome = BCE(σ(y_U_logit), y_U) + BCE(σ(y_T_logit), y_T)
+    - L_tau = MSE(tau_pred, detach(y_T_logit - y_U_logit))
+    - L_disc = BCE(σ(treatment_logit), 1) - encourages discriminative features
+    - L_consistency = MSE(tau_pred, y_T_logit - y_U_logit) - tau ≈ implicit difference
+
+    Args:
+        y_U_logit: Predicted outcome logit for untreated (B, 1)
+        y_T_logit: Predicted outcome logit for treated (B, 1)
+        tau_pred: Predicted tau on log-odds scale (B, 1)
+        y_U: Actual outcome for untreated (B,)
+        y_T: Actual outcome for treated (B,)
+        treatment_logit: Treatment discrimination logit from cross-encoder (B, 1)
+        alpha_outcome: Weight for outcome loss
+        beta_tau: Weight for tau loss
+        gamma_discrimination: Weight for discrimination loss
+        delta_consistency: Weight for consistency loss
+
+    Returns:
+        Dictionary with loss components
+    """
+    # Outcome BCE loss (both patients)
+    outcome_loss_U = F.binary_cross_entropy_with_logits(
+        y_U_logit.squeeze(-1), y_U
+    )
+    outcome_loss_T = F.binary_cross_entropy_with_logits(
+        y_T_logit.squeeze(-1), y_T
+    )
+    outcome_loss = outcome_loss_U + outcome_loss_T
+
+    # Tau target: signed log-odds difference (detached)
+    tau_target = y_T_logit.detach() - y_U_logit.detach()
+    tau_loss = F.mse_loss(tau_pred, tau_target)
+
+    # Total loss starts with outcome + tau
+    total_loss = alpha_outcome * outcome_loss + beta_tau * tau_loss
+
+    # Optional: Discrimination loss (encourages cross-encoder to learn discriminative features)
+    disc_loss = torch.tensor(0.0, device=y_U_logit.device)
+    if treatment_logit is not None and gamma_discrimination > 0:
+        # Target: treated patient should be identified (label=1)
+        batch_size = treatment_logit.size(0)
+        disc_target = torch.ones(batch_size, device=treatment_logit.device)
+        disc_loss = F.binary_cross_entropy_with_logits(
+            treatment_logit.squeeze(-1), disc_target
+        )
+        total_loss = total_loss + gamma_discrimination * disc_loss
+
+    # Optional: Consistency loss (tau should match implicit outcome difference)
+    consistency_loss = torch.tensor(0.0, device=y_U_logit.device)
+    if delta_consistency > 0:
+        # Non-detached: encourages tau to be consistent with outcome predictions
+        implicit_tau = y_T_logit - y_U_logit
+        consistency_loss = F.mse_loss(tau_pred, implicit_tau)
+        total_loss = total_loss + delta_consistency * consistency_loss
+
+    return {
+        'loss': total_loss,
+        'outcome_loss': outcome_loss,
+        'outcome_loss_U': outcome_loss_U,
+        'outcome_loss_T': outcome_loss_T,
+        'tau_loss': tau_loss,
+        'disc_loss': disc_loss,
+        'consistency_loss': consistency_loss,
+        'tau_pred_mean': tau_pred.mean(),
+        'tau_target_mean': tau_target.mean()
+    }
+
+
+class MatchedPairSentenceDataset(Dataset):
+    """
+    Dataset of matched pairs with sentence embeddings for cross-encoder.
+
+    Each item includes representations, outcomes, and sentence embeddings
+    for both treated and untreated patients.
+
+    Args:
+        representations: Tensor of all patient representations (N, D)
+        sentence_embeddings: List of sentence embedding tensors [(S_i, D), ...]
+        outcomes: Array of binary outcomes (N,)
+        matched_pairs: Array of (treated_idx, control_idx) pairs (M, 2)
+    """
+
+    def __init__(
+        self,
+        representations: torch.Tensor,
+        sentence_embeddings: List[torch.Tensor],
+        outcomes: np.ndarray,
+        matched_pairs: np.ndarray
+    ):
+        self.representations = representations
+        self.sentence_embeddings = sentence_embeddings
+        self.outcomes = torch.tensor(outcomes, dtype=torch.float32)
+        self.matched_pairs = matched_pairs
+
+        logger.info(f"MatchedPairSentenceDataset: {len(matched_pairs)} pairs, "
+                   f"{len(representations)} patients")
+
+    def __len__(self) -> int:
+        return len(self.matched_pairs)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        treated_idx, control_idx = self.matched_pairs[idx]
+        return {
+            'repr_T': self.representations[treated_idx],
+            'repr_U': self.representations[control_idx],
+            'sent_T': self.sentence_embeddings[treated_idx],
+            'sent_U': self.sentence_embeddings[control_idx],
+            'y_T': self.outcomes[treated_idx],
+            'y_U': self.outcomes[control_idx],
+            'treated_idx': treated_idx,
+            'control_idx': control_idx
+        }
+
+
+def collate_sentence_pairs(batch: List[Dict]) -> Dict[str, Any]:
+    """Collate function for sentence pair batches."""
+    return {
+        'repr_T': torch.stack([b['repr_T'] for b in batch]),
+        'repr_U': torch.stack([b['repr_U'] for b in batch]),
+        'sent_T': [b['sent_T'] for b in batch],  # Variable length
+        'sent_U': [b['sent_U'] for b in batch],  # Variable length
+        'y_T': torch.stack([b['y_T'] for b in batch]),
+        'y_U': torch.stack([b['y_U'] for b in batch]),
+        'treated_idx': [b['treated_idx'] for b in batch],
+        'control_idx': [b['control_idx'] for b in batch]
+    }
+
+
+def extract_sentence_embeddings(
+    propensity_model: PropensityMatchingModel,
+    texts: List[str],
+    batch_size: int = 32,
+    device: torch.device = None
+) -> List[torch.Tensor]:
+    """
+    Extract sentence-level embeddings for cross-encoder input.
+
+    Uses the propensity model's feature extractor to get sentence embeddings
+    before the final pooling step.
+
+    Args:
+        propensity_model: Trained PropensityMatchingModel
+        texts: List of document texts
+        batch_size: Batch size for extraction
+        device: PyTorch device
+
+    Returns:
+        List of sentence embedding tensors [(S_i, D), ...] for each text
+    """
+    propensity_model.eval()
+    all_sent_embeddings = []
+
+    with torch.no_grad():
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+
+            # Get sentence embeddings from the hierarchical transformer
+            # This accesses the feature extractor's sentence encoding
+            extractor = propensity_model.feature_extractor
+
+            for text in batch_texts:
+                # Get sentence embeddings for single text
+                # The HierarchicalTransformerExtractor stores sentence-level info
+                sent_emb = extractor.get_sentence_embeddings([text])  # (1, S, D)
+                if sent_emb is not None:
+                    sent_emb = sent_emb.squeeze(0).cpu()  # (S, D)
+                else:
+                    # Fallback: use representation as single "sentence"
+                    repr = propensity_model.get_representation([text])
+                    sent_emb = repr.cpu()  # (1, D)
+
+                all_sent_embeddings.append(sent_emb)
+
+    return all_sent_embeddings
+
+
+def train_matched_pair_outcome_model_enhanced(
+    propensity_model: PropensityMatchingModel,
+    train_df: pd.DataFrame,
+    matched_pairs: np.ndarray,
+    config: MatchedPairConfig,
+    device: torch.device
+) -> Tuple[EnhancedMatchedPairOutcomeModel, List[Dict[str, Any]]]:
+    """
+    Train enhanced outcome/tau model with cross-encoder on matched pairs.
+
+    Stage 3 of the matched pair pipeline with cross-encoder support:
+    1. Extract representations and sentence embeddings for all matched patients
+    2. Create MatchedPairSentenceDataset
+    3. Train EnhancedMatchedPairOutcomeModel with cross-encoder losses
+
+    Args:
+        propensity_model: Trained PropensityMatchingModel
+        train_df: Training DataFrame (must contain all matched patient indices)
+        matched_pairs: Array of (treated_idx, control_idx) pairs
+        config: MatchedPairConfig with training settings
+        device: PyTorch device
+
+    Returns:
+        Tuple of (trained_outcome_model, training_history)
+    """
+    logger.info(f"Training enhanced outcome/tau model with cross-encoder on {len(matched_pairs)} pairs")
+    logger.info(f"  Cross-encoder: num_queries={config.cross_encoder_num_queries}, "
+               f"num_heads={config.cross_encoder_num_heads}")
+    logger.info(f"  Loss weights: gamma_discrimination={config.gamma_discrimination}, "
+               f"delta_consistency={config.delta_consistency}")
+
+    # Freeze representation for Stage 2
+    propensity_model.freeze_representation()
+    propensity_model.eval()
+
+    # Get all unique patient indices from matched pairs
+    all_indices = np.unique(matched_pairs.flatten())
+
+    # Extract texts and outcomes for matched patients
+    texts = train_df.iloc[all_indices][config.text_column].tolist()
+    outcomes = train_df.iloc[all_indices][config.outcome_column].values
+
+    # Extract representations
+    logger.info(f"  Extracting representations for {len(all_indices)} patients...")
+    representations = []
+    batch_size = config.outcome_batch_size
+
+    with torch.no_grad():
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_repr = propensity_model.get_representation(batch_texts)
+            representations.append(batch_repr.cpu())
+
+    representations = torch.cat(representations, dim=0)  # (N, D)
+
+    # Extract sentence embeddings for cross-encoder
+    logger.info("  Extracting sentence embeddings...")
+    sentence_embeddings = extract_sentence_embeddings(
+        propensity_model, texts, batch_size, device
+    )
+
+    # Create index mapping: original_idx -> representation_idx
+    idx_to_repr_idx = {orig_idx: i for i, orig_idx in enumerate(all_indices)}
+
+    # Remap matched pairs to representation indices
+    remapped_pairs = np.array([
+        [idx_to_repr_idx[t], idx_to_repr_idx[c]]
+        for t, c in matched_pairs
+    ])
+
+    # Create dataset with sentence embeddings
+    pair_dataset = MatchedPairSentenceDataset(
+        representations, sentence_embeddings, outcomes, remapped_pairs
+    )
+    pair_loader = DataLoader(
+        pair_dataset,
+        batch_size=config.outcome_batch_size,
+        shuffle=True,
+        collate_fn=collate_sentence_pairs
+    )
+
+    # Create enhanced outcome model with cross-encoder
+    outcome_model = EnhancedMatchedPairOutcomeModel(
+        representation_dim=config.representation_dim,
+        hidden_dim=config.hidden_outcome_dim,
+        dropout=config.dropout,
+        use_cross_encoder=True,
+        cross_encoder_num_queries=config.cross_encoder_num_queries,
+        cross_encoder_num_heads=config.cross_encoder_num_heads,
+        cross_encoder_hidden_dim=config.cross_encoder_hidden_dim,
+        cross_encoder_use_gating=config.cross_encoder_use_gating
+    ).to(device)
+
+    # Optimizer
+    optimizer = torch.optim.AdamW(
+        outcome_model.parameters(),
+        lr=config.outcome_lr,
+        weight_decay=0.01
+    )
+
+    # Training loop
+    history = []
+    best_loss = float('inf')
+    best_model_state = None
+
+    for epoch in range(config.outcome_epochs):
+        outcome_model.train()
+        epoch_losses = []
+
+        for batch in tqdm(pair_loader, desc=f"Enhanced Epoch {epoch+1}", leave=False):
+            repr_U = batch['repr_U'].to(device)
+            repr_T = batch['repr_T'].to(device)
+            sent_U = [s.to(device) for s in batch['sent_U']]
+            sent_T = [s.to(device) for s in batch['sent_T']]
+            y_U = batch['y_U'].to(device)
+            y_T = batch['y_T'].to(device)
+
+            optimizer.zero_grad()
+
+            # Forward pass with sentence embeddings
+            y_U_logit, y_T_logit, tau_pred, _ = outcome_model(
+                repr_U, repr_T, sent_U, sent_T, return_attention=False
+            )
+
+            # Get treatment discrimination logit (auxiliary task)
+            treatment_logit = None
+            if config.gamma_discrimination > 0:
+                treatment_logit = outcome_model.predict_treatment_from_residual(sent_T, sent_U)
+
+            # Compute enhanced loss
+            losses = enhanced_matched_pair_loss(
+                y_U_logit, y_T_logit, tau_pred, y_U, y_T,
+                treatment_logit=treatment_logit,
+                alpha_outcome=config.alpha_outcome,
+                beta_tau=config.beta_tau,
+                gamma_discrimination=config.gamma_discrimination,
+                delta_consistency=config.delta_consistency
+            )
+
+            losses['loss'].backward()
+            optimizer.step()
+
+            epoch_losses.append({k: v.item() for k, v in losses.items()})
+
+        # Aggregate epoch losses
+        epoch_summary = {k: np.mean([l[k] for l in epoch_losses]) for k in epoch_losses[0]}
+        epoch_summary['epoch'] = epoch + 1
+        history.append(epoch_summary)
+
+        logger.info(f"  Epoch {epoch+1}: loss={epoch_summary['loss']:.4f}, "
+                   f"outcome={epoch_summary['outcome_loss']:.4f}, "
+                   f"tau={epoch_summary['tau_loss']:.4f}, "
+                   f"disc={epoch_summary['disc_loss']:.4f}, "
+                   f"consist={epoch_summary['consistency_loss']:.4f}")
+
+        # Track best
+        if epoch_summary['loss'] < best_loss:
+            best_loss = epoch_summary['loss']
+            best_model_state = {k: v.cpu().clone() for k, v in outcome_model.state_dict().items()}
+
+    # Restore best
+    if best_model_state is not None:
+        outcome_model.load_state_dict(best_model_state)
+
+    # Cleanup
+    del pair_loader, pair_dataset, representations, sentence_embeddings
+    gc.collect()
+
+    return outcome_model, history

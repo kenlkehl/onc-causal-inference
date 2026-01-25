@@ -178,6 +178,39 @@ Key options:
 
 **Dynamic re-matching**: When the representation is not frozen (`freeze_representation_stage2=False`), the embedding space changes during training. By default, matched pairs are computed once before Stage 2. Enable `dynamic_rematching=True` to periodically recompute matches as the representation evolves. This recomputes propensity scores (or embeddings) and re-runs the matching algorithm every `rematching_frequency` epochs, starting after `rematching_warmup_epochs`.
 
+### Cross-Encoder for Residual Confounder Capture
+
+When `use_cross_encoder=True`, Stage 3 training uses a `ResidualCrossEncoder` to identify discriminative features between matched pairs that may represent residual confounders missed by propensity matching.
+
+**Architecture:**
+- Bidirectional cross-attention between treated and untreated sentence embeddings
+- Discriminative query aggregation to extract residual features
+- Gated attention (tanh × sigmoid) for focused attention
+- Enhanced tau head: repr_U + residual_features
+
+**Key options:**
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `use_cross_encoder` | `False` | Enable cross-encoder for Stage 3 |
+| `cross_encoder_num_queries` | `4` | Discriminative queries for aggregation |
+| `cross_encoder_num_heads` | `4` | Attention heads |
+| `cross_encoder_hidden_dim` | `128` | Hidden dimension for cross-encoder |
+| `cross_encoder_use_gating` | `True` | Use gated attention (tanh × sigmoid) |
+| `gamma_discrimination` | `0.1` | Weight for treatment discrimination loss |
+| `delta_consistency` | `0.1` | Weight for tau-outcome consistency loss |
+| `save_cross_encoder_attention` | `False` | Save attention weights for analysis |
+
+**Loss function:**
+```
+L_total = α * L_outcome + β * L_tau + γ * L_disc + δ * L_consistency
+```
+
+**Interpretability:**
+The cross-encoder provides `interpret_discrimination()` to identify which sentences from the treated patient most distinguish them from the untreated patient in their matched pair.
+
+See `examples/matched_pair_cross_encoder_config.json` for a complete example.
+
 See `examples/matched_pair_config.json` for sample configs.
 
 ## Key Training Options

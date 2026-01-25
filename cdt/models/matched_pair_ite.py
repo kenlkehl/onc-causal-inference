@@ -24,6 +24,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
+from .residual_cross_encoder import ResidualCrossEncoder
 
 
 logger = logging.getLogger(__name__)
@@ -434,6 +435,252 @@ class MatchedPairOutcomeModel(nn.Module):
         ite_prob = y1_prob - y0_prob
 
         return y0_prob, y1_prob, ite_prob
+
+
+class EnhancedMatchedPairOutcomeModel(nn.Module):
+    """
+    Outcome + Tau model with cross-encoder residual features.
+
+    Extends MatchedPairOutcomeModel by incorporating a ResidualCrossEncoder
+    that identifies discriminative features between matched pairs at the
+    sentence level. These residual features enhance tau prediction.
+
+    Architecture:
+        repr_U, repr_T (frozen, from PropensityMatchingModel)
+        -> outcome_head (shared): Same as MatchedPairOutcomeModel
+        -> cross_encoder: sent_T, sent_U -> residual_features
+        -> tau_head (enhanced): repr_U + residual_features -> tau
+
+    Args:
+        representation_dim: Dimension of input representations
+        hidden_dim: Hidden dimension for outcome and tau heads
+        dropout: Dropout rate
+        use_cross_encoder: Whether to use cross-encoder for residual features
+        cross_encoder_num_queries: Number of discriminative queries in cross-encoder
+        cross_encoder_num_heads: Number of attention heads in cross-encoder
+        cross_encoder_hidden_dim: Hidden dimension for cross-encoder
+        cross_encoder_use_gating: Whether to use gated attention in cross-encoder
+        residual_weight: Optional learnable weight for residual features
+    """
+
+    def __init__(
+        self,
+        representation_dim: int = 256,
+        hidden_dim: int = 128,
+        dropout: float = 0.2,
+        use_cross_encoder: bool = True,
+        cross_encoder_num_queries: int = 4,
+        cross_encoder_num_heads: int = 4,
+        cross_encoder_hidden_dim: int = 128,
+        cross_encoder_use_gating: bool = True,
+        residual_weight: Optional[float] = None
+    ):
+        super().__init__()
+
+        self._representation_dim = representation_dim
+        self._hidden_dim = hidden_dim
+        self._use_cross_encoder = use_cross_encoder
+
+        # Shared outcome head (predicts P(Y=1|repr)) - same as base model
+        self.outcome_fc1 = nn.Linear(representation_dim, hidden_dim)
+        self.outcome_fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.outcome_fc3 = nn.Linear(hidden_dim, 1)
+
+        # Cross-encoder for residual features
+        self.cross_encoder = None
+        if use_cross_encoder:
+            self.cross_encoder = ResidualCrossEncoder(
+                sentence_dim=representation_dim,
+                hidden_dim=cross_encoder_hidden_dim,
+                num_heads=cross_encoder_num_heads,
+                num_discriminative_queries=cross_encoder_num_queries,
+                dropout=dropout,
+                use_gated_attention=cross_encoder_use_gating
+            )
+
+        # Enhanced tau head: takes repr_U + residual_features
+        # Input dimension is representation_dim + representation_dim if using cross-encoder
+        tau_input_dim = representation_dim + representation_dim if use_cross_encoder else representation_dim
+        self.tau_fc1 = nn.Linear(tau_input_dim, hidden_dim)
+        self.tau_fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.tau_fc3 = nn.Linear(hidden_dim, 1)
+
+        # Learnable residual weight (optional)
+        if residual_weight is not None:
+            self.residual_weight = nn.Parameter(torch.tensor(residual_weight))
+        else:
+            self.residual_weight = None
+
+        self.dropout = nn.Dropout(dropout)
+
+        logger.info(f"EnhancedMatchedPairOutcomeModel initialized:")
+        logger.info(f"  Representation dim: {representation_dim}")
+        logger.info(f"  Hidden dim: {hidden_dim}")
+        logger.info(f"  Cross-encoder: {use_cross_encoder}")
+        if use_cross_encoder:
+            logger.info(f"    Num queries: {cross_encoder_num_queries}")
+            logger.info(f"    Num heads: {cross_encoder_num_heads}")
+            logger.info(f"    Gated attention: {cross_encoder_use_gating}")
+
+    def forward(
+        self,
+        repr_U: torch.Tensor,
+        repr_T: torch.Tensor,
+        sent_U: Optional[List[torch.Tensor]] = None,
+        sent_T: Optional[List[torch.Tensor]] = None,
+        return_attention: bool = False
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[List[Dict[str, torch.Tensor]]]]:
+        """
+        Forward pass for matched pair training.
+
+        Args:
+            repr_U: Untreated patient representations (B, D)
+            repr_T: Treated patient representations (B, D)
+            sent_U: List of sentence embeddings for untreated patients [(S_Ui, D), ...]
+            sent_T: List of sentence embeddings for treated patients [(S_Ti, D), ...]
+            return_attention: Whether to return cross-encoder attention weights
+
+        Returns:
+            y_U_logit: Outcome logit for untreated (B, 1)
+            y_T_logit: Outcome logit for treated (B, 1)
+            tau_pred: Treatment effect prediction on log-odds scale (B, 1)
+            attention_info: List of attention dicts if return_attention=True
+        """
+        # Outcome predictions (shared weights) - same as base model
+        y_U_logit = self._outcome_forward(repr_U)
+        y_T_logit = self._outcome_forward(repr_T)
+
+        # Cross-encoder residual features
+        attention_info = None
+        if self._use_cross_encoder and sent_U is not None and sent_T is not None:
+            residual_features, attention_info = self.cross_encoder.forward_batch(
+                sent_T, sent_U, return_attention=return_attention
+            )
+
+            # Apply residual weight if specified
+            if self.residual_weight is not None:
+                residual_features = self.residual_weight * residual_features
+
+            # Enhanced tau input: repr_U + residual_features
+            tau_input = torch.cat([repr_U, residual_features], dim=-1)
+        else:
+            # Fallback to base behavior if no sentence embeddings provided
+            tau_input = torch.cat([repr_U, torch.zeros_like(repr_U)], dim=-1) if self._use_cross_encoder else repr_U
+
+        # Tau prediction (enhanced)
+        tau_pred = self._tau_forward(tau_input)
+
+        return y_U_logit, y_T_logit, tau_pred, attention_info
+
+    def _outcome_forward(self, repr: torch.Tensor) -> torch.Tensor:
+        """Shared outcome prediction head."""
+        h = F.relu(self.outcome_fc1(repr))
+        h = self.dropout(h)
+        h = F.relu(self.outcome_fc2(h))
+        h = self.dropout(h)
+        return self.outcome_fc3(h)
+
+    def _tau_forward(self, tau_input: torch.Tensor) -> torch.Tensor:
+        """Enhanced tau (treatment effect) prediction head."""
+        h = F.relu(self.tau_fc1(tau_input))
+        h = self.dropout(h)
+        h = F.relu(self.tau_fc2(h))
+        h = self.dropout(h)
+        return self.tau_fc3(h)
+
+    def predict_ite(
+        self,
+        repr: torch.Tensor,
+        sent: Optional[List[torch.Tensor]] = None
+    ) -> torch.Tensor:
+        """
+        Predict ITE for patients given their representation.
+
+        When no sentence embeddings are provided, uses zero residual features.
+
+        Args:
+            repr: Patient representations of shape (B, D)
+            sent: Optional list of sentence embeddings
+
+        Returns:
+            tau on log-odds scale of shape (B, 1)
+        """
+        if self._use_cross_encoder:
+            # Without sentence embeddings, use zeros for residual features
+            residual_features = torch.zeros_like(repr)
+            tau_input = torch.cat([repr, residual_features], dim=-1)
+        else:
+            tau_input = repr
+
+        return self._tau_forward(tau_input)
+
+    def predict_outcome(self, repr: torch.Tensor) -> torch.Tensor:
+        """
+        Predict outcome probability for a patient.
+
+        Args:
+            repr: Patient representations of shape (B, D)
+
+        Returns:
+            Outcome probability of shape (B, 1)
+        """
+        logit = self._outcome_forward(repr)
+        return torch.sigmoid(logit)
+
+    def predict_potential_outcomes(
+        self,
+        repr: torch.Tensor,
+        sent: Optional[List[torch.Tensor]] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Predict potential outcomes Y(0), Y(1) and ITE for a patient.
+
+        Uses the outcome head for Y(0) and tau head to derive Y(1).
+
+        Args:
+            repr: Patient representations of shape (B, D)
+            sent: Optional list of sentence embeddings
+
+        Returns:
+            Tuple of (y0_prob, y1_prob, ite_prob), each of shape (B, 1)
+        """
+        y0_logit = self._outcome_forward(repr)
+        tau_logodds = self.predict_ite(repr, sent)
+
+        # Y(1) = Y(0) + tau in logit space
+        y1_logit = y0_logit + tau_logodds
+
+        y0_prob = torch.sigmoid(y0_logit)
+        y1_prob = torch.sigmoid(y1_logit)
+        ite_prob = y1_prob - y0_prob
+
+        return y0_prob, y1_prob, ite_prob
+
+    def predict_treatment_from_residual(
+        self,
+        sent_T: List[torch.Tensor],
+        sent_U: List[torch.Tensor]
+    ) -> torch.Tensor:
+        """
+        Predict treatment status from residual features (auxiliary task).
+
+        Args:
+            sent_T: List of sentence embeddings for treated patients
+            sent_U: List of sentence embeddings for untreated patients
+
+        Returns:
+            treatment_logit: Treatment prediction logit (B, 1)
+        """
+        if not self._use_cross_encoder:
+            raise ValueError("Treatment prediction requires use_cross_encoder=True")
+
+        residual_features, _ = self.cross_encoder.forward_batch(sent_T, sent_U, return_attention=False)
+        return self.cross_encoder.predict_treatment(residual_features)
+
+    @property
+    def uses_cross_encoder(self) -> bool:
+        """Check if cross-encoder is enabled."""
+        return self._use_cross_encoder
 
 
 class CombinedMatchedPairModel(nn.Module):

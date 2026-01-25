@@ -408,6 +408,26 @@ class MatchedPairConfig:
     rematching_frequency: int = 5     # Re-match every N epochs
     rematching_warmup_epochs: int = 0 # Skip re-matching for first N epochs (let model stabilize)
 
+    # Cross-Encoder Configuration
+    # When enabled, uses ResidualCrossEncoder for capturing discriminative features
+    # between matched pairs at the sentence level
+    use_cross_encoder: bool = False  # Enable cross-encoder for Stage 3
+    cross_encoder_num_queries: int = 4  # Number of discriminative queries for aggregation
+    cross_encoder_num_heads: int = 4  # Attention heads in cross-encoder
+    cross_encoder_hidden_dim: int = 128  # Hidden dimension for cross-encoder
+    cross_encoder_use_gating: bool = True  # Use gated attention (tanh * sigmoid)
+
+    # Cross-encoder loss weights
+    gamma_discrimination: float = 0.1  # Weight for treatment discrimination auxiliary loss
+    delta_consistency: float = 0.1  # Weight for tau-outcome consistency loss
+
+    # Sentence extraction for cross-encoder
+    extract_sentences_for_cross_encoder: bool = True  # Extract sentence embeddings
+
+    # Cross-encoder interpretability
+    save_cross_encoder_attention: bool = False  # Save attention weights for analysis
+    cross_encoder_top_k_sentences: int = 5  # Top sentences to return in interpretation
+
     # Skip flag
     skip: bool = False
 

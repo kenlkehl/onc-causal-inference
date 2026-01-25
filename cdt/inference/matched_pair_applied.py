@@ -30,13 +30,15 @@ from ..config import AppliedInferenceConfig, MatchedPairConfig
 from ..models.matched_pair_ite import (
     PropensityMatchingModel,
     MatchedPairOutcomeModel,
+    EnhancedMatchedPairOutcomeModel,
     CombinedMatchedPairModel
 )
 from ..training.matched_pair_training import (
     train_propensity_model,
     train_matched_pair_outcome_model,
     extract_all_representations,
-    extract_propensity_scores
+    extract_propensity_scores,
+    train_matched_pair_outcome_model_enhanced,
 )
 from ..matching import PropensityMatcher, match_by_cosine_similarity
 from ..data import ClinicalTextDataset, collate_batch
@@ -279,10 +281,18 @@ def _process_matched_pair_fold(
     logger.info(f"  Step 4: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
     # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
-    outcome_model, outcome_history = train_matched_pair_outcome_model(
-        propensity_model, train_df, match_result.matched_pairs,
-        mp_config, device
-    )
+    # Use enhanced training if cross-encoder is enabled
+    if mp_config.use_cross_encoder:
+        logger.info(f"    Using cross-encoder enhanced training")
+        outcome_model, outcome_history = train_matched_pair_outcome_model_enhanced(
+            propensity_model, train_df, match_result.matched_pairs,
+            mp_config, device
+        )
+    else:
+        outcome_model, outcome_history = train_matched_pair_outcome_model(
+            propensity_model, train_df, match_result.matched_pairs,
+            mp_config, device
+        )
 
     # Combine logs
     all_logs = []
@@ -439,10 +449,18 @@ def _run_matched_pair_fixed_split_inference(
     logger.info(f"Step 4: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
     # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
-    outcome_model, outcome_history = train_matched_pair_outcome_model(
-        propensity_model, train_val_df, match_result.matched_pairs,
-        mp_config, device
-    )
+    # Use enhanced training if cross-encoder is enabled
+    if mp_config.use_cross_encoder:
+        logger.info(f"  Using cross-encoder enhanced training")
+        outcome_model, outcome_history = train_matched_pair_outcome_model_enhanced(
+            propensity_model, train_val_df, match_result.matched_pairs,
+            mp_config, device
+        )
+    else:
+        outcome_model, outcome_history = train_matched_pair_outcome_model(
+            propensity_model, train_val_df, match_result.matched_pairs,
+            mp_config, device
+        )
 
     # Save training logs
     log_path = output_path.parent / "matched_pair_training_log.csv"

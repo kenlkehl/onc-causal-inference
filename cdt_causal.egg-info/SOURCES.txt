@@ -36,6 +36,7 @@ cdt/models/mlp_dragonnet.py
 cdt/models/outcome_heads.py
 cdt/models/outcome_model.py
 cdt/models/propensity_model.py
+cdt/models/residual_cross_encoder.py
 cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/uplift.py
@@ -61,6 +62,7 @@ examples/gru_confounder_3way_config.json
 examples/gru_confounder_config.json
 examples/hierarchical_transformer_config.json
 examples/matched_pair_config.json
+examples/matched_pair_cross_encoder_config.json
 examples/matched_pair_embedding_config.json
 examples/modernbert_config.json
 examples/rlearner_config.json
