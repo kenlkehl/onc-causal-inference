@@ -269,6 +269,18 @@ def _train_propensity_model(
         # Hierarchical Transformer: trigger lazy initialization
         model.fit_tokenizer(train_texts)  # No-op, triggers init
         logger.info(f"Using Hierarchical Transformer feature extractor: {arch_config.hier_transformer_sentence_model}")
+    elif feature_extractor_type == "gated_mil_hierarchical":
+        # Gated MIL Hierarchical: trigger lazy initialization
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        logger.info(f"Using Gated MIL Hierarchical feature extractor")
+    elif feature_extractor_type == "gru_transformer_mil":
+        # GRU-Transformer-MIL: requires fit_tokenizer
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Using GRU-Transformer-MIL feature extractor")
+    elif feature_extractor_type == "gru_pool":
+        # GRU-Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Using GRU-Pool feature extractor")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")

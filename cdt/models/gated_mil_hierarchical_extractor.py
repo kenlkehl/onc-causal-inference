@@ -1,21 +1,21 @@
 # cdt/models/gated_mil_hierarchical_extractor.py
-"""Gated MIL Hierarchical feature extractor using sentence-level BERT + gated attention.
+"""Gated MIL Hierarchical feature extractor using chunk-level BERT + gated attention.
 
 This module implements a hierarchical approach for extracting features from long
 clinical text using gated MIL (Multiple Instance Learning) attention:
 
-**Sentence-level mode (hierarchical=False, default):**
-1. Split text into sentences
-2. Encode each sentence with a tiny BERT (e.g., prajjwal1/bert-tiny), taking the [CLS] token
+**Chunk-level mode (hierarchical=False, default):**
+1. Split text into overlapping token chunks
+2. Encode each chunk with a tiny BERT (e.g., prajjwal1/bert-tiny), taking the [CLS] token
 3. Apply gated MIL attention with K learnable confounder queries
 4. Task-specific weighting of confounders (propensity, tau/y0, outcome/y1)
 5. Concatenate and project to output dimension
 
 **Token-level mode (hierarchical=True):**
-1. Split text into sentences
-2. Encode each sentence with BERT, keeping ALL token embeddings
-3. Apply token-level gated pooling to create K confounder-specific sentence representations
-4. Apply sentence-level gated MIL attention over the K-view representations
+1. Split text into overlapping token chunks
+2. Encode each chunk with BERT, keeping ALL token embeddings
+3. Apply token-level gated pooling to create K confounder-specific chunk representations
+4. Apply chunk-level gated MIL attention over the K-view representations
 5. Task-specific weighting of confounders
 6. Concatenate and project to output dimension
 
@@ -29,12 +29,12 @@ but each task can weight them differently:
 - Tau: "Which confounders modify treatment effect?"
 - Outcome: "Which confounders predict baseline outcome?"
 
-Sentence-level Architecture:
+Chunk-level Architecture:
     Long Clinical Text
             |
-    Split into Sentences (S sentences)
+    Split into Overlapping Token Chunks (C chunks)
             |
-    Tiny BERT per Sentence -> [CLS] token (S x D)
+    Tiny BERT per Chunk -> [CLS] token (C x D)
             |
     Gated MIL Attention with K Confounder Queries
             |
@@ -47,15 +47,15 @@ Sentence-level Architecture:
 Token-level Architecture (hierarchical=True):
     Long Clinical Text
             |
-    Split into Sentences (S sentences)
+    Split into Overlapping Token Chunks (C chunks)
             |
-    Tiny BERT per Sentence -> ALL tokens (S x L x D)
+    Tiny BERT per Chunk -> ALL tokens (C x L x D)
             |
-    Token-Level Gated Pooling (K queries per sentence)
+    Token-Level Gated Pooling (K queries per chunk)
             |
-    S x K confounder-specific sentence embeddings
+    C x K confounder-specific chunk embeddings
             |
-    Sentence-Level Gated MIL Attention (per confounder view)
+    Chunk-Level Gated MIL Attention (per confounder view)
             |
     K Confounder Representations (K x D)
             |
@@ -77,7 +77,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .confounder_extractor import split_into_sentences
+from .chunking import split_into_chunks_hf
 from .gated_mil_attention import GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling
 
 
@@ -89,16 +89,17 @@ class GatedMILHierarchicalExtractor(nn.Module):
     Hierarchical feature extractor using gated MIL attention.
 
     Combines:
-    - Sentence-level BERT encoding (tiny BERT for efficiency)
+    - Chunk-level BERT encoding (tiny BERT for efficiency)
     - Gated MIL attention with K learnable confounder queries
     - Task-specific weighting of shared confounders
     - Optional token-level gated pooling for fine-grained signal preservation
 
     Args:
-        sentence_encoder_model: HuggingFace model name for sentence encoding
-        freeze_sentence_encoder: Whether to freeze the sentence encoder weights
-        max_sentences: Maximum number of sentences to process per document
-        max_sentence_length: Maximum tokens per sentence for BERT encoding
+        sentence_encoder_model: HuggingFace model name for chunk encoding
+        freeze_sentence_encoder: Whether to freeze the encoder weights
+        max_chunks: Maximum number of chunks to process per document
+        chunk_size: Number of tokens per chunk
+        chunk_overlap: Number of overlapping tokens between chunks
         mil_hidden_dim: Hidden dimension for gated MIL attention
         num_confounders: Number of confounder queries (K)
         model_type: "rlearner" or "dragonnet"
@@ -113,8 +114,9 @@ class GatedMILHierarchicalExtractor(nn.Module):
         self,
         sentence_encoder_model: str = "prajjwal1/bert-tiny",
         freeze_sentence_encoder: bool = True,
-        max_sentences: int = 100,
-        max_sentence_length: int = 128,
+        max_chunks: int = 100,
+        chunk_size: int = 128,
+        chunk_overlap: int = 32,
         mil_hidden_dim: int = 128,
         num_confounders: int = 4,
         model_type: str = "rlearner",
@@ -130,8 +132,9 @@ class GatedMILHierarchicalExtractor(nn.Module):
         self._device = device or torch.device('cpu')
         self._sentence_encoder_model = sentence_encoder_model
         self._freeze = freeze_sentence_encoder
-        self._max_sentences = max_sentences
-        self._max_sentence_length = max_sentence_length
+        self._max_chunks = max_chunks
+        self._chunk_size = chunk_size
+        self._chunk_overlap = chunk_overlap
         self._mil_hidden_dim = mil_hidden_dim
         self._num_confounders = num_confounders
         self._model_type = model_type
@@ -152,8 +155,9 @@ class GatedMILHierarchicalExtractor(nn.Module):
         self._initialized = False
 
         logger.info(f"GatedMILHierarchicalExtractor initialized:")
-        logger.info(f"  Sentence encoder: {sentence_encoder_model}")
+        logger.info(f"  Chunk encoder: {sentence_encoder_model}")
         logger.info(f"  Freeze encoder: {freeze_sentence_encoder}")
+        logger.info(f"  Max chunks: {max_chunks}, chunk_size: {chunk_size}, overlap: {chunk_overlap}")
         logger.info(f"  Num confounders: {num_confounders}")
         logger.info(f"  MIL hidden dim: {mil_hidden_dim}")
         logger.info(f"  Model type: {model_type}")
@@ -226,29 +230,29 @@ class GatedMILHierarchicalExtractor(nn.Module):
         """Return the output dimension of this feature extractor."""
         return self._projection_dim
 
-    def _encode_sentences_batch(self, sentences: List[str]) -> torch.Tensor:
+    def _encode_chunks_batch(self, chunks: List[str]) -> torch.Tensor:
         """
-        Encode sentences with BERT, returning [CLS] tokens or mean-pooled embeddings.
+        Encode chunks with BERT, returning [CLS] tokens or mean-pooled embeddings.
 
         When use_mean_pooling=True, computes mean over all tokens (excluding padding)
-        instead of using [CLS] token. This can provide more robust sentence
-        representations that capture the full sentence content.
+        instead of using [CLS] token. This can provide more robust chunk
+        representations that capture the full chunk content.
 
         Args:
-            sentences: List of sentence strings
+            chunks: List of chunk strings
 
         Returns:
-            Tensor of shape (num_sentences, sentence_dim) containing sentence embeddings
+            Tensor of shape (num_chunks, sentence_dim) containing chunk embeddings
         """
-        if not sentences:
+        if not chunks:
             self._ensure_initialized()
             return torch.zeros(0, self._sentence_dim, device=self._device)
 
         encoded = self._tokenizer(
-            sentences,
+            chunks,
             padding=True,
             truncation=True,
-            max_length=self._max_sentence_length,
+            max_length=self._chunk_size,
             return_tensors='pt'
         )
 
@@ -278,35 +282,35 @@ class GatedMILHierarchicalExtractor(nn.Module):
             # [CLS] token at position 0
             return outputs.last_hidden_state[:, 0, :]
 
-    def _encode_sentence_tokens_batch(
+    def _encode_chunk_tokens_batch(
         self,
-        sentences: List[str]
+        chunks: List[str]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Encode sentences with BERT, returning ALL token embeddings.
+        Encode chunks with BERT, returning ALL token embeddings.
 
         Used in hierarchical mode to preserve fine-grained token signal.
 
         Args:
-            sentences: List of sentence strings
+            chunks: List of chunk strings
 
         Returns:
             Tuple of:
-                - token_embeddings: (num_sentences, max_len, sentence_dim)
-                - attention_mask: (num_sentences, max_len) boolean mask
+                - token_embeddings: (num_chunks, max_len, sentence_dim)
+                - attention_mask: (num_chunks, max_len) boolean mask
         """
-        if not sentences:
+        if not chunks:
             self._ensure_initialized()
             return (
-                torch.zeros(0, self._max_sentence_length, self._sentence_dim, device=self._device),
-                torch.zeros(0, self._max_sentence_length, dtype=torch.bool, device=self._device)
+                torch.zeros(0, self._chunk_size, self._sentence_dim, device=self._device),
+                torch.zeros(0, self._chunk_size, dtype=torch.bool, device=self._device)
             )
 
         encoded = self._tokenizer(
-            sentences,
+            chunks,
             padding='max_length',  # Pad to max length for consistent tensor shapes
             truncation=True,
-            max_length=self._max_sentence_length,
+            max_length=self._chunk_size,
             return_tensors='pt'
         )
 
@@ -336,17 +340,23 @@ class GatedMILHierarchicalExtractor(nn.Module):
         batch_outputs = []
 
         for text in texts:
-            # 1. Split into sentences
-            sentences = split_into_sentences(text, self._max_sentences)
-            if not sentences:
-                sentences = [text[:500]]  # Fallback for short/malformed text
+            # 1. Split into overlapping token chunks
+            chunks = split_into_chunks_hf(
+                text,
+                self._tokenizer,
+                chunk_size=self._chunk_size,
+                chunk_overlap=self._chunk_overlap,
+                max_chunks=self._max_chunks
+            )
+            if not chunks:
+                chunks = [text[:500]]  # Fallback for short/malformed text
 
             if self._hierarchical:
                 # Hierarchical (token-level) mode
-                combined = self._forward_hierarchical(sentences)
+                combined = self._forward_hierarchical(chunks)
             else:
-                # Standard sentence-level mode
-                combined = self._forward_sentence_level(sentences)
+                # Standard chunk-level mode
+                combined = self._forward_chunk_level(chunks)
 
             batch_outputs.append(combined)
 
@@ -358,21 +368,21 @@ class GatedMILHierarchicalExtractor(nn.Module):
 
         return features
 
-    def _forward_sentence_level(self, sentences: List[str]) -> torch.Tensor:
+    def _forward_chunk_level(self, chunks: List[str]) -> torch.Tensor:
         """
-        Standard sentence-level forward pass using [CLS] tokens.
+        Standard chunk-level forward pass using [CLS] tokens.
 
         Args:
-            sentences: List of sentence strings
+            chunks: List of chunk strings
 
         Returns:
             Combined representation of shape (3 * sentence_dim,)
         """
-        # Encode sentences with BERT [CLS]
-        sentence_embeddings = self._encode_sentences_batch(sentences)  # (S, sentence_dim)
+        # Encode chunks with BERT [CLS]
+        chunk_embeddings = self._encode_chunks_batch(chunks)  # (C, sentence_dim)
 
         # Apply gated MIL attention to get K confounders
-        confounders, _ = self._gated_mil_attention(sentence_embeddings)  # (K, sentence_dim)
+        confounders, _ = self._gated_mil_attention(chunk_embeddings)  # (K, sentence_dim)
 
         # Apply task-specific weighting
         prop_repr, task2_repr, task3_repr = self._task_weighting(confounders)
@@ -381,47 +391,47 @@ class GatedMILHierarchicalExtractor(nn.Module):
         # Concatenate task representations
         return torch.cat([prop_repr, task2_repr, task3_repr], dim=0)  # (3 * sentence_dim,)
 
-    def _forward_hierarchical(self, sentences: List[str]) -> torch.Tensor:
+    def _forward_hierarchical(self, chunks: List[str]) -> torch.Tensor:
         """
         Hierarchical forward pass with token-level gated pooling.
 
-        Each confounder query attends to tokens within sentences to create
-        confounder-specific sentence representations, then sentence-level
+        Each confounder query attends to tokens within chunks to create
+        confounder-specific chunk representations, then chunk-level
         gated attention aggregates these into K confounders.
 
         Args:
-            sentences: List of sentence strings
+            chunks: List of chunk strings
 
         Returns:
             Combined representation of shape (3 * sentence_dim,)
         """
-        S = len(sentences)
+        C = len(chunks)
         K = self._num_confounders
 
-        # 1. Encode all sentences with BERT (full token embeddings)
-        token_embeddings, attention_mask = self._encode_sentence_tokens_batch(sentences)
-        # token_embeddings: (S, L, D)
-        # attention_mask: (S, L) boolean
+        # 1. Encode all chunks with BERT (full token embeddings)
+        token_embeddings, attention_mask = self._encode_chunk_tokens_batch(chunks)
+        # token_embeddings: (C, L, D)
+        # attention_mask: (C, L) boolean
 
-        # 2. Apply token-level gated pooling to each sentence
-        # Each confounder query produces its own sentence representation
-        # Result: (S, K, D) - K confounder-specific representations per sentence
-        confounder_sentence_embeddings, _ = self._token_level_pooling.forward_batch(
+        # 2. Apply token-level gated pooling to each chunk
+        # Each confounder query produces its own chunk representation
+        # Result: (C, K, D) - K confounder-specific representations per chunk
+        confounder_chunk_embeddings, _ = self._token_level_pooling.forward_batch(
             token_embeddings, attention_mask
         )
 
-        # 3. For each confounder k, apply sentence-level gated MIL attention
-        # over that confounder's view of the sentences
-        # This is equivalent to K parallel applications of sentence-level attention
+        # 3. For each confounder k, apply chunk-level gated MIL attention
+        # over that confounder's view of the chunks
+        # This is equivalent to K parallel applications of chunk-level attention
 
-        # Rearrange to (K, S, D) for per-confounder attention
-        confounder_views = confounder_sentence_embeddings.permute(1, 0, 2)  # (K, S, D)
+        # Rearrange to (K, C, D) for per-confounder attention
+        confounder_views = confounder_chunk_embeddings.permute(1, 0, 2)  # (K, C, D)
 
-        # Apply sentence-level gated attention for each confounder view
+        # Apply chunk-level gated attention for each confounder view
         # We process each confounder's view through the shared gated MIL attention
         all_confounders = []
         for k in range(K):
-            view_k = confounder_views[k]  # (S, D) - confounder k's view of all sentences
+            view_k = confounder_views[k]  # (C, D) - confounder k's view of all chunks
             # Use the gated MIL attention to aggregate this view
             # Note: We only take the k-th output to avoid redundancy
             conf_k, _ = self._gated_mil_attention(view_k)  # (K, D)
@@ -486,8 +496,9 @@ class GatedMILHierarchicalExtractor(nn.Module):
         return {
             'sentence_encoder_model': self._sentence_encoder_model,
             'freeze_sentence_encoder': self._freeze,
-            'max_sentences': self._max_sentences,
-            'max_sentence_length': self._max_sentence_length,
+            'max_chunks': self._max_chunks,
+            'chunk_size': self._chunk_size,
+            'chunk_overlap': self._chunk_overlap,
             'mil_hidden_dim': self._mil_hidden_dim,
             'num_confounders': self._num_confounders,
             'model_type': self._model_type,
@@ -507,25 +518,25 @@ class GatedMILHierarchicalExtractor(nn.Module):
         """
         Get human-readable interpretation of gated MIL attention.
 
-        This extracts attention weights from each confounder query to sentences,
-        showing which sentences each confounder focuses on, plus the task-specific
+        This extracts attention weights from each confounder query to chunks,
+        showing which chunks each confounder focuses on, plus the task-specific
         weights for each confounder.
 
         For hierarchical (token-level) mode, also includes:
-        - Token-level attention weights within each sentence
+        - Token-level attention weights within each chunk
         - Which specific tokens each confounder attends to
         - Attention entropy metrics (low = focused, high = diffuse)
 
         Args:
             texts: List of document texts
-            top_k: Number of top-attended sentences to show per confounder
+            top_k: Number of top-attended chunks to show per confounder
             include_token_attention: Whether to include token-level attention (only for hierarchical mode)
 
         Returns:
             List of dicts per document with attention interpretations:
-            - 'sentences': List of sentence strings
+            - 'chunks': List of chunk strings
             - 'confounder_attention': Dict mapping confounder index to attention weights
-            - 'top_sentences_per_confounder': Top-k sentences per confounder
+            - 'top_chunks_per_confounder': Top-k chunks per confounder
             - 'task_weights': Task-specific weights for each confounder
             - 'attention_entropy': Dict with entropy metrics per confounder (lower = more focused)
             - 'token_attention' (hierarchical only): Token-level attention info
@@ -538,56 +549,62 @@ class GatedMILHierarchicalExtractor(nn.Module):
 
         with torch.no_grad():
             for text in texts:
-                sentences = split_into_sentences(text, self._max_sentences)
-                if not sentences:
-                    sentences = [text[:500]]
+                chunks = split_into_chunks_hf(
+                    text,
+                    self._tokenizer,
+                    chunk_size=self._chunk_size,
+                    chunk_overlap=self._chunk_overlap,
+                    max_chunks=self._max_chunks
+                )
+                if not chunks:
+                    chunks = [text[:500]]
 
                 if self._hierarchical and include_token_attention:
                     # Hierarchical (token-level) mode
-                    interp = self._interpret_hierarchical(sentences, top_k, task_weights)
+                    interp = self._interpret_hierarchical(chunks, top_k, task_weights)
                 else:
-                    # Standard sentence-level mode
-                    interp = self._interpret_sentence_level(sentences, top_k, task_weights)
+                    # Standard chunk-level mode
+                    interp = self._interpret_chunk_level(chunks, top_k, task_weights)
 
                 interpretations.append(interp)
 
         return interpretations
 
-    def _interpret_sentence_level(
+    def _interpret_chunk_level(
         self,
-        sentences: List[str],
+        chunks: List[str],
         top_k: int,
         task_weights: Dict[str, List[float]]
     ) -> Dict[str, Any]:
-        """Interpret attention for sentence-level mode."""
-        # Encode sentences
-        sentence_embeddings = self._encode_sentences_batch(sentences)
+        """Interpret attention for chunk-level mode."""
+        # Encode chunks
+        chunk_embeddings = self._encode_chunks_batch(chunks)
 
         # Get attention weights
         _, attention_weights = self._gated_mil_attention(
-            sentence_embeddings, return_attention=True
-        )  # (K, S)
+            chunk_embeddings, return_attention=True
+        )  # (K, C)
 
-        if attention_weights is not None and len(sentences) > 0:
+        if attention_weights is not None and len(chunks) > 0:
             confounder_attention = {}
-            top_sentences_per_confounder = {}
+            top_chunks_per_confounder = {}
             attention_entropy = {}
 
             for k in range(self._num_confounders):
-                attn = attention_weights[k].cpu()  # (S,)
+                attn = attention_weights[k].cpu()  # (C,)
                 confounder_attention[f'confounder_{k}'] = attn.tolist()
 
                 # Compute attention entropy (lower = more focused)
                 entropy = self._compute_attention_entropy(attn)
                 attention_entropy[f'confounder_{k}'] = entropy
 
-                # Get top-k sentences for this confounder
-                k_actual = min(top_k, len(sentences))
+                # Get top-k chunks for this confounder
+                k_actual = min(top_k, len(chunks))
                 top_vals, top_indices = torch.topk(attn, k_actual)
 
-                top_sentences_per_confounder[f'confounder_{k}'] = [
+                top_chunks_per_confounder[f'confounder_{k}'] = [
                     {
-                        'sentence': sentences[idx],
+                        'chunk': chunks[idx],
                         'attention': val.item(),
                         'idx': int(idx)
                     }
@@ -595,18 +612,18 @@ class GatedMILHierarchicalExtractor(nn.Module):
                 ]
 
             return {
-                'sentences': sentences,
+                'chunks': chunks,
                 'confounder_attention': confounder_attention,
-                'top_sentences_per_confounder': top_sentences_per_confounder,
+                'top_chunks_per_confounder': top_chunks_per_confounder,
                 'task_weights': task_weights,
                 'attention_entropy': attention_entropy,
                 'hierarchical_mode': False
             }
         else:
             return {
-                'sentences': sentences,
+                'chunks': chunks,
                 'confounder_attention': {},
-                'top_sentences_per_confounder': {},
+                'top_chunks_per_confounder': {},
                 'task_weights': task_weights,
                 'attention_entropy': {},
                 'hierarchical_mode': False
@@ -614,75 +631,75 @@ class GatedMILHierarchicalExtractor(nn.Module):
 
     def _interpret_hierarchical(
         self,
-        sentences: List[str],
+        chunks: List[str],
         top_k: int,
         task_weights: Dict[str, List[float]]
     ) -> Dict[str, Any]:
         """Interpret attention for hierarchical (token-level) mode."""
-        S = len(sentences)
+        C = len(chunks)
         K = self._num_confounders
 
-        # 1. Encode all sentences with BERT (full token embeddings)
-        token_embeddings, attention_mask = self._encode_sentence_tokens_batch(sentences)
-        # token_embeddings: (S, L, D)
-        # attention_mask: (S, L) boolean
+        # 1. Encode all chunks with BERT (full token embeddings)
+        token_embeddings, attention_mask = self._encode_chunk_tokens_batch(chunks)
+        # token_embeddings: (C, L, D)
+        # attention_mask: (C, L) boolean
 
         # 2. Apply token-level gated pooling with attention returned
-        confounder_sentence_embeddings, token_attention = self._token_level_pooling.forward_batch(
+        confounder_chunk_embeddings, token_attention = self._token_level_pooling.forward_batch(
             token_embeddings, attention_mask, return_attention=True
-        )  # confounder_sentence_embeddings: (S, K, D), token_attention: (S, K, L)
+        )  # confounder_chunk_embeddings: (C, K, D), token_attention: (C, K, L)
 
-        # 3. Get sentence-level attention for each confounder view
-        confounder_views = confounder_sentence_embeddings.permute(1, 0, 2)  # (K, S, D)
+        # 3. Get chunk-level attention for each confounder view
+        confounder_views = confounder_chunk_embeddings.permute(1, 0, 2)  # (K, C, D)
 
-        sentence_attention_per_confounder = []
+        chunk_attention_per_confounder = []
         for k in range(K):
-            view_k = confounder_views[k]  # (S, D)
-            _, sent_attn = self._gated_mil_attention(view_k, return_attention=True)
-            sentence_attention_per_confounder.append(sent_attn.mean(dim=0).cpu())  # (S,)
+            view_k = confounder_views[k]  # (C, D)
+            _, chunk_attn = self._gated_mil_attention(view_k, return_attention=True)
+            chunk_attention_per_confounder.append(chunk_attn.mean(dim=0).cpu())  # (C,)
 
         # Build interpretation
         confounder_attention = {}
-        top_sentences_per_confounder = {}
+        top_chunks_per_confounder = {}
         attention_entropy = {}
         token_attention_info = {}
 
-        # Get tokenized sentences for token-level interpretation
+        # Get tokenized chunks for token-level interpretation
         encoded = self._tokenizer(
-            sentences,
+            chunks,
             padding='max_length',
             truncation=True,
-            max_length=self._max_sentence_length,
+            max_length=self._chunk_size,
             return_tensors='pt'
         )
         input_ids = encoded['input_ids']
 
         for k in range(K):
-            # Sentence-level attention
-            sent_attn = sentence_attention_per_confounder[k]  # (S,)
-            confounder_attention[f'confounder_{k}'] = sent_attn.tolist()
+            # Chunk-level attention
+            chunk_attn = chunk_attention_per_confounder[k]  # (C,)
+            confounder_attention[f'confounder_{k}'] = chunk_attn.tolist()
 
-            # Compute sentence-level entropy
-            entropy = self._compute_attention_entropy(sent_attn)
+            # Compute chunk-level entropy
+            entropy = self._compute_attention_entropy(chunk_attn)
             attention_entropy[f'confounder_{k}'] = {
-                'sentence_entropy': entropy,
+                'chunk_entropy': entropy,
                 'token_entropy_mean': 0.0  # Will compute below
             }
 
-            # Get top-k sentences
-            k_actual = min(top_k, S)
-            top_vals, top_indices = torch.topk(sent_attn, k_actual)
+            # Get top-k chunks
+            k_actual = min(top_k, C)
+            top_vals, top_indices = torch.topk(chunk_attn, k_actual)
 
-            top_sentences_data = []
+            top_chunks_data = []
             token_entropies = []
 
-            for val, sent_idx in zip(top_vals, top_indices):
-                sent_idx = int(sent_idx)
+            for val, chunk_idx in zip(top_vals, top_indices):
+                chunk_idx = int(chunk_idx)
 
-                # Get token attention for this sentence and confounder
+                # Get token attention for this chunk and confounder
                 if token_attention is not None:
-                    tok_attn = token_attention[sent_idx, k, :].cpu()  # (L,)
-                    valid_mask = attention_mask[sent_idx].cpu()
+                    tok_attn = token_attention[chunk_idx, k, :].cpu()  # (L,)
+                    valid_mask = attention_mask[chunk_idx].cpu()
 
                     # Get top tokens
                     valid_tok_attn = tok_attn.clone()
@@ -690,7 +707,7 @@ class GatedMILHierarchicalExtractor(nn.Module):
 
                     # Decode tokens to get actual words
                     tokens = self._tokenizer.convert_ids_to_tokens(
-                        input_ids[sent_idx].tolist()
+                        input_ids[chunk_idx].tolist()
                     )
 
                     # Get top attended tokens (excluding padding)
@@ -716,14 +733,14 @@ class GatedMILHierarchicalExtractor(nn.Module):
                 else:
                     top_tokens = []
 
-                top_sentences_data.append({
-                    'sentence': sentences[sent_idx],
+                top_chunks_data.append({
+                    'chunk': chunks[chunk_idx],
                     'attention': float(val),
-                    'idx': sent_idx,
+                    'idx': chunk_idx,
                     'top_tokens': top_tokens
                 })
 
-            top_sentences_per_confounder[f'confounder_{k}'] = top_sentences_data
+            top_chunks_per_confounder[f'confounder_{k}'] = top_chunks_data
 
             # Update token entropy mean
             if token_entropies:
@@ -738,9 +755,9 @@ class GatedMILHierarchicalExtractor(nn.Module):
                 }
 
         return {
-            'sentences': sentences,
+            'chunks': chunks,
             'confounder_attention': confounder_attention,
-            'top_sentences_per_confounder': top_sentences_per_confounder,
+            'top_chunks_per_confounder': top_chunks_per_confounder,
             'task_weights': task_weights,
             'attention_entropy': attention_entropy,
             'token_attention_info': token_attention_info,
@@ -786,12 +803,12 @@ class GatedMILHierarchicalExtractor(nn.Module):
         Returns:
             Dictionary with interpretations and model metadata
         """
-        interpretations = self.interpret_attention(texts, top_k=self._max_sentences)
+        interpretations = self.interpret_attention(texts, top_k=self._max_chunks)
         return {
             'interpretations': interpretations,
             'num_confounders': self._num_confounders,
             'model_type': self._model_type,
-            'sentence_model': self._sentence_encoder_model
+            'chunk_encoder_model': self._sentence_encoder_model
         }
 
     def get_task_weights(self) -> Dict[str, List[float]]:

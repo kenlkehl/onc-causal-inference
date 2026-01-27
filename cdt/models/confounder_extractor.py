@@ -3,19 +3,19 @@
 
 This module implements a Perceiver-style architecture for extracting confounder
 representations from long clinical text. The key insight is that confounders are
-often mentioned in specific sentences, so the model should learn to focus
-attention on those sentences rather than spreading attention across the entire document.
+often mentioned in specific chunks, so the model should learn to focus
+attention on those chunks rather than spreading attention across the entire document.
 
 Architecture:
-1. Split text into sentences (chunks)
-2. Encode each sentence with a sentence transformer
-3. Use learnable latent vectors (confounders) to cross-attend to sentence embeddings
-4. Sparse attention (entmax) forces each latent to focus on few sentences
+1. Split text into overlapping token chunks
+2. Encode each chunk with a sentence transformer or BERT
+3. Use learnable latent vectors (confounders) to cross-attend to chunk embeddings
+4. Sparse attention (entmax) forces each latent to focus on few chunks
 5. Iterative refinement allows latents to progressively focus on relevant content
 6. Output is concatenation of refined latent vectors
 
 Key features:
-- Sparse attention via entmax (forces exact zeros on irrelevant sentences)
+- Sparse attention via entmax (forces exact zeros on irrelevant chunks)
 - Iterative cross-attention (Perceiver-IO style refinement)
 - Optional self-attention between latents (allows confounders to share information)
 - Explicit confounder initialization from clinical concept phrases
@@ -27,6 +27,7 @@ References:
 
 import logging
 import re
+import warnings
 from typing import Optional, List, Dict, Any, Tuple
 
 import torch
@@ -34,6 +35,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .sparse_attention import sparse_softmax, SparseCrossAttention, top_k_attention
+from .chunking import split_into_chunks_hf, split_into_chunks_vocab
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +43,10 @@ logger = logging.getLogger(__name__)
 
 def split_into_sentences(text: str, max_sentences: int = 100) -> List[str]:
     """
+    DEPRECATED: Use split_into_chunks_hf from chunking.py instead.
+
     Split text into sentences using simple regex-based splitting.
+    Kept for backward compatibility only.
 
     Args:
         text: Input text
@@ -50,6 +55,12 @@ def split_into_sentences(text: str, max_sentences: int = 100) -> List[str]:
     Returns:
         List of sentence strings
     """
+    warnings.warn(
+        "split_into_sentences is deprecated. Use split_into_chunks_hf from "
+        "cdt.models.chunking instead for token-based chunking.",
+        DeprecationWarning,
+        stacklevel=2
+    )
     # Simple sentence splitting on period, exclamation, question mark
     # followed by space and capital letter, or end of string
     pattern = r'(?<=[.!?])\s+(?=[A-Z])|(?<=[.!?])$'

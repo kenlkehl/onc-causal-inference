@@ -12,6 +12,8 @@ from .cnn_extractor import CNNFeatureExtractor
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
+from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
+from .gru_pool_extractor import GRUPoolExtractor
 from ..config import normalize_feature_extractor_type
 
 
@@ -110,13 +112,47 @@ class PropensityOnlyModel(nn.Module):
         # Hierarchical Transformer args
         hier_transformer_sentence_model: str = "prajjwal1/bert-tiny",
         hier_transformer_freeze_sentence_encoder: bool = True,
-        hier_transformer_max_sentences: int = 100,
-        hier_transformer_max_sentence_length: int = 128,
+        hier_transformer_max_chunks: int = 100,
+        hier_transformer_chunk_size: int = 128,
+        hier_transformer_chunk_overlap: int = 32,
         hier_transformer_num_layers: int = 2,
         hier_transformer_num_heads: int = 4,
         hier_transformer_dim: int = 256,
         hier_transformer_dropout: float = 0.1,
         hier_transformer_projection_dim: int = 128,
+        # GRU-Transformer-MIL args
+        gru_mil_embedding_dim: int = 128,
+        gru_mil_gru_hidden_dim: int = 128,
+        gru_mil_gru_num_layers: int = 1,
+        gru_mil_gru_bidirectional: bool = True,
+        gru_mil_gru_dropout: float = 0.1,
+        gru_mil_max_chunks: int = 100,
+        gru_mil_chunk_size: int = 128,
+        gru_mil_chunk_overlap: int = 32,
+        gru_mil_transformer_layers: int = 2,
+        gru_mil_transformer_heads: int = 4,
+        gru_mil_transformer_dim: int = 256,
+        gru_mil_num_confounders: int = 4,
+        gru_mil_mil_hidden_dim: int = 128,
+        gru_mil_projection_dim: int = 128,
+        gru_mil_max_vocab: int = 50000,
+        gru_mil_min_word_freq: int = 2,
+        # GRU-Pool args
+        gru_pool_embedding_dim: int = 128,
+        gru_pool_gru_hidden_dim: int = 128,
+        gru_pool_gru_num_layers: int = 1,
+        gru_pool_gru_bidirectional: bool = True,
+        gru_pool_gru_dropout: float = 0.1,
+        gru_pool_max_chunks: int = 100,
+        gru_pool_chunk_size: int = 128,
+        gru_pool_chunk_overlap: int = 32,
+        gru_pool_transformer_layers: int = 2,
+        gru_pool_transformer_heads: int = 4,
+        gru_pool_transformer_dim: int = 256,
+        gru_pool_gated_attention_dim: int = 128,
+        gru_pool_projection_dim: int = 128,
+        gru_pool_max_vocab: int = 50000,
+        gru_pool_min_word_freq: int = 2,
         # Propensity network args
         representation_dim: int = 128,
         device: str = "cuda:0"
@@ -182,13 +218,45 @@ class PropensityOnlyModel(nn.Module):
             'gru_max_vocab_size': gru_max_vocab_size,
             'hier_transformer_sentence_model': hier_transformer_sentence_model,
             'hier_transformer_freeze_sentence_encoder': hier_transformer_freeze_sentence_encoder,
-            'hier_transformer_max_sentences': hier_transformer_max_sentences,
-            'hier_transformer_max_sentence_length': hier_transformer_max_sentence_length,
+            'hier_transformer_max_chunks': hier_transformer_max_chunks,
+            'hier_transformer_chunk_size': hier_transformer_chunk_size,
+            'hier_transformer_chunk_overlap': hier_transformer_chunk_overlap,
             'hier_transformer_num_layers': hier_transformer_num_layers,
             'hier_transformer_num_heads': hier_transformer_num_heads,
             'hier_transformer_dim': hier_transformer_dim,
             'hier_transformer_dropout': hier_transformer_dropout,
             'hier_transformer_projection_dim': hier_transformer_projection_dim,
+            'gru_mil_embedding_dim': gru_mil_embedding_dim,
+            'gru_mil_gru_hidden_dim': gru_mil_gru_hidden_dim,
+            'gru_mil_gru_num_layers': gru_mil_gru_num_layers,
+            'gru_mil_gru_bidirectional': gru_mil_gru_bidirectional,
+            'gru_mil_gru_dropout': gru_mil_gru_dropout,
+            'gru_mil_max_chunks': gru_mil_max_chunks,
+            'gru_mil_chunk_size': gru_mil_chunk_size,
+            'gru_mil_chunk_overlap': gru_mil_chunk_overlap,
+            'gru_mil_transformer_layers': gru_mil_transformer_layers,
+            'gru_mil_transformer_heads': gru_mil_transformer_heads,
+            'gru_mil_transformer_dim': gru_mil_transformer_dim,
+            'gru_mil_num_confounders': gru_mil_num_confounders,
+            'gru_mil_mil_hidden_dim': gru_mil_mil_hidden_dim,
+            'gru_mil_projection_dim': gru_mil_projection_dim,
+            'gru_mil_max_vocab': gru_mil_max_vocab,
+            'gru_mil_min_word_freq': gru_mil_min_word_freq,
+            'gru_pool_embedding_dim': gru_pool_embedding_dim,
+            'gru_pool_gru_hidden_dim': gru_pool_gru_hidden_dim,
+            'gru_pool_gru_num_layers': gru_pool_gru_num_layers,
+            'gru_pool_gru_bidirectional': gru_pool_gru_bidirectional,
+            'gru_pool_gru_dropout': gru_pool_gru_dropout,
+            'gru_pool_max_chunks': gru_pool_max_chunks,
+            'gru_pool_chunk_size': gru_pool_chunk_size,
+            'gru_pool_chunk_overlap': gru_pool_chunk_overlap,
+            'gru_pool_transformer_layers': gru_pool_transformer_layers,
+            'gru_pool_transformer_heads': gru_pool_transformer_heads,
+            'gru_pool_transformer_dim': gru_pool_transformer_dim,
+            'gru_pool_gated_attention_dim': gru_pool_gated_attention_dim,
+            'gru_pool_projection_dim': gru_pool_projection_dim,
+            'gru_pool_max_vocab': gru_pool_max_vocab,
+            'gru_pool_min_word_freq': gru_pool_min_word_freq,
             'representation_dim': representation_dim
         }
 
@@ -224,8 +292,9 @@ class PropensityOnlyModel(nn.Module):
             self.feature_extractor = HierarchicalTransformerExtractor(
                 sentence_encoder_model=hier_transformer_sentence_model,
                 freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
-                max_sentences=hier_transformer_max_sentences,
-                max_sentence_length=hier_transformer_max_sentence_length,
+                max_chunks=hier_transformer_max_chunks,
+                chunk_size=hier_transformer_chunk_size,
+                chunk_overlap=hier_transformer_chunk_overlap,
                 num_transformer_layers=hier_transformer_num_layers,
                 num_attention_heads=hier_transformer_num_heads,
                 transformer_dim=hier_transformer_dim,
@@ -234,6 +303,52 @@ class PropensityOnlyModel(nn.Module):
                 device=self._device
             )
             logger.info(f"Propensity model using Hierarchical Transformer: {hier_transformer_sentence_model}")
+        elif self.feature_extractor_type == "gru_transformer_mil":
+            # GRU-Transformer-MIL: learned BiGRU + transformer + gated MIL attention
+            self.feature_extractor = GRUTransformerMILExtractor(
+                embedding_dim=gru_mil_embedding_dim,
+                gru_hidden_dim=gru_mil_gru_hidden_dim,
+                gru_num_layers=gru_mil_gru_num_layers,
+                gru_bidirectional=gru_mil_gru_bidirectional,
+                gru_dropout=gru_mil_gru_dropout,
+                max_chunks=gru_mil_max_chunks,
+                chunk_size=gru_mil_chunk_size,
+                chunk_overlap=gru_mil_chunk_overlap,
+                transformer_layers=gru_mil_transformer_layers,
+                transformer_heads=gru_mil_transformer_heads,
+                transformer_dim=gru_mil_transformer_dim,
+                num_confounders=gru_mil_num_confounders,
+                mil_hidden_dim=gru_mil_mil_hidden_dim,
+                projection_dim=gru_mil_projection_dim,
+                max_vocab_size=gru_mil_max_vocab,
+                min_word_freq=gru_mil_min_word_freq,
+                model_type="rlearner",  # Propensity model always uses rlearner-style weighting
+                device=self._device
+            )
+            logger.info(f"Propensity model using GRU-Transformer-MIL: "
+                       f"GRU {gru_mil_gru_hidden_dim}x{2 if gru_mil_gru_bidirectional else 1}")
+        elif self.feature_extractor_type == "gru_pool":
+            # GRU-Pool: learned BiGRU + transformer + gated attention pooling (no task-specific weighting)
+            self.feature_extractor = GRUPoolExtractor(
+                embedding_dim=gru_pool_embedding_dim,
+                gru_hidden_dim=gru_pool_gru_hidden_dim,
+                gru_num_layers=gru_pool_gru_num_layers,
+                gru_bidirectional=gru_pool_gru_bidirectional,
+                gru_dropout=gru_pool_gru_dropout,
+                max_chunks=gru_pool_max_chunks,
+                chunk_size=gru_pool_chunk_size,
+                chunk_overlap=gru_pool_chunk_overlap,
+                transformer_layers=gru_pool_transformer_layers,
+                transformer_heads=gru_pool_transformer_heads,
+                transformer_dim=gru_pool_transformer_dim,
+                gated_attention_dim=gru_pool_gated_attention_dim,
+                projection_dim=gru_pool_projection_dim,
+                max_vocab_size=gru_pool_max_vocab,
+                min_word_freq=gru_pool_min_word_freq,
+                device=self._device
+            )
+            logger.info(f"Propensity model using GRU-Pool: "
+                       f"GRU {gru_pool_gru_hidden_dim}x{2 if gru_pool_gru_bidirectional else 1}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(
@@ -399,13 +514,47 @@ def create_propensity_model_from_config(
         # Hierarchical Transformer args
         hier_transformer_sentence_model=getattr(arch_config, 'hier_transformer_sentence_model', 'prajjwal1/bert-tiny'),
         hier_transformer_freeze_sentence_encoder=getattr(arch_config, 'hier_transformer_freeze_sentence_encoder', True),
-        hier_transformer_max_sentences=getattr(arch_config, 'hier_transformer_max_sentences', 100),
-        hier_transformer_max_sentence_length=getattr(arch_config, 'hier_transformer_max_sentence_length', 128),
+        hier_transformer_max_chunks=getattr(arch_config, 'hier_transformer_max_chunks', 100),
+        hier_transformer_chunk_size=getattr(arch_config, 'hier_transformer_chunk_size', 128),
+        hier_transformer_chunk_overlap=getattr(arch_config, 'hier_transformer_chunk_overlap', 32),
         hier_transformer_num_layers=getattr(arch_config, 'hier_transformer_num_layers', 2),
         hier_transformer_num_heads=getattr(arch_config, 'hier_transformer_num_heads', 4),
         hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
         hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
         hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
+        # GRU-Transformer-MIL args
+        gru_mil_embedding_dim=getattr(arch_config, 'gru_mil_embedding_dim', 128),
+        gru_mil_gru_hidden_dim=getattr(arch_config, 'gru_mil_gru_hidden_dim', 128),
+        gru_mil_gru_num_layers=getattr(arch_config, 'gru_mil_gru_num_layers', 1),
+        gru_mil_gru_bidirectional=getattr(arch_config, 'gru_mil_gru_bidirectional', True),
+        gru_mil_gru_dropout=getattr(arch_config, 'gru_mil_gru_dropout', 0.1),
+        gru_mil_max_chunks=getattr(arch_config, 'gru_mil_max_chunks', 100),
+        gru_mil_chunk_size=getattr(arch_config, 'gru_mil_chunk_size', 128),
+        gru_mil_chunk_overlap=getattr(arch_config, 'gru_mil_chunk_overlap', 32),
+        gru_mil_transformer_layers=getattr(arch_config, 'gru_mil_transformer_layers', 2),
+        gru_mil_transformer_heads=getattr(arch_config, 'gru_mil_transformer_heads', 4),
+        gru_mil_transformer_dim=getattr(arch_config, 'gru_mil_transformer_dim', 256),
+        gru_mil_num_confounders=getattr(arch_config, 'gru_mil_num_confounders', 4),
+        gru_mil_mil_hidden_dim=getattr(arch_config, 'gru_mil_mil_hidden_dim', 128),
+        gru_mil_projection_dim=getattr(arch_config, 'gru_mil_projection_dim', 128),
+        gru_mil_max_vocab=getattr(arch_config, 'gru_mil_max_vocab', 50000),
+        gru_mil_min_word_freq=getattr(arch_config, 'gru_mil_min_word_freq', 2),
+        # GRU-Pool args
+        gru_pool_embedding_dim=getattr(arch_config, 'gru_pool_embedding_dim', 128),
+        gru_pool_gru_hidden_dim=getattr(arch_config, 'gru_pool_gru_hidden_dim', 128),
+        gru_pool_gru_num_layers=getattr(arch_config, 'gru_pool_gru_num_layers', 1),
+        gru_pool_gru_bidirectional=getattr(arch_config, 'gru_pool_gru_bidirectional', True),
+        gru_pool_gru_dropout=getattr(arch_config, 'gru_pool_gru_dropout', 0.1),
+        gru_pool_max_chunks=getattr(arch_config, 'gru_pool_max_chunks', 100),
+        gru_pool_chunk_size=getattr(arch_config, 'gru_pool_chunk_size', 128),
+        gru_pool_chunk_overlap=getattr(arch_config, 'gru_pool_chunk_overlap', 32),
+        gru_pool_transformer_layers=getattr(arch_config, 'gru_pool_transformer_layers', 2),
+        gru_pool_transformer_heads=getattr(arch_config, 'gru_pool_transformer_heads', 4),
+        gru_pool_transformer_dim=getattr(arch_config, 'gru_pool_transformer_dim', 256),
+        gru_pool_gated_attention_dim=getattr(arch_config, 'gru_pool_gated_attention_dim', 128),
+        gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
+        gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
+        gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
         # Propensity network args
         representation_dim=representation_dim,
         device=str(device)

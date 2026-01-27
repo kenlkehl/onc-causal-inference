@@ -1,21 +1,21 @@
-"""Hierarchical Transformer feature extractor using sentence-level BERT + transformer pooling.
+"""Hierarchical Transformer feature extractor using chunk-level BERT + transformer pooling.
 
 This module implements a simple hierarchical approach for extracting features from long
 clinical text:
 
-1. Split text into sentences
-2. Encode each sentence with a tiny BERT (e.g., prajjwal1/bert-tiny), taking the [CLS] token
-3. Apply transformer layer(s) on top to pool sentence embeddings into a final representation
+1. Split text into overlapping token chunks
+2. Encode each chunk with a tiny BERT (e.g., prajjwal1/bert-tiny), taking the [CLS] token
+3. Apply transformer layer(s) on top to pool chunk embeddings into a final representation
 
-This bypasses the latent confounder mechanism entirely - just straightforward sentence
+This bypasses the latent confounder mechanism entirely - just straightforward chunk
 encoding with transformer pooling.
 
 Architecture:
     Long Clinical Text
             |
-    Split into Sentences (S sentences)
+    Split into Overlapping Token Chunks (C chunks)
             |
-    Tiny BERT per Sentence -> [CLS] token (S x hidden_dim)
+    Tiny BERT per Chunk -> [CLS] token (C x hidden_dim)
             |
     Transformer Layer(s) with learnable [POOL] token
             |
@@ -30,7 +30,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .confounder_extractor import split_into_sentences
+from .chunking import split_into_chunks_hf
 
 
 logger = logging.getLogger(__name__)
@@ -81,8 +81,8 @@ class HierarchicalTransformerExtractor(nn.Module):
     Hierarchical transformer feature extractor.
 
     Architecture:
-    1. Split text into sentences
-    2. Encode each sentence with tiny BERT -> [CLS] token
+    1. Split text into overlapping token chunks
+    2. Encode each chunk with tiny BERT -> [CLS] token
     3. Apply transformer layer(s) with learnable [POOL] token
     4. Output [POOL] representation for causal head
 
@@ -90,10 +90,11 @@ class HierarchicalTransformerExtractor(nn.Module):
     no sparse attention, just straightforward hierarchical encoding.
 
     Args:
-        sentence_encoder_model: HuggingFace model name for sentence encoding (default: prajjwal1/bert-tiny)
-        freeze_sentence_encoder: Whether to freeze the sentence encoder weights
-        max_sentences: Maximum number of sentences to process per document
-        max_sentence_length: Maximum tokens per sentence for BERT encoding
+        sentence_encoder_model: HuggingFace model name for chunk encoding (default: prajjwal1/bert-tiny)
+        freeze_sentence_encoder: Whether to freeze the encoder weights
+        max_chunks: Maximum number of chunks to process per document
+        chunk_size: Number of tokens per chunk
+        chunk_overlap: Number of overlapping tokens between chunks
         num_transformer_layers: Number of transformer layers for pooling
         num_attention_heads: Number of attention heads in transformer layers
         transformer_dim: Hidden dimension for transformer layers
@@ -106,8 +107,9 @@ class HierarchicalTransformerExtractor(nn.Module):
         self,
         sentence_encoder_model: str = "prajjwal1/bert-tiny",
         freeze_sentence_encoder: bool = True,
-        max_sentences: int = 100,
-        max_sentence_length: int = 128,
+        max_chunks: int = 100,
+        chunk_size: int = 128,
+        chunk_overlap: int = 32,
         num_transformer_layers: int = 2,
         num_attention_heads: int = 4,
         transformer_dim: int = 256,
@@ -120,8 +122,9 @@ class HierarchicalTransformerExtractor(nn.Module):
         self._device = device or torch.device('cpu')
         self._sentence_encoder_model = sentence_encoder_model
         self._freeze = freeze_sentence_encoder
-        self._max_sentences = max_sentences
-        self._max_sentence_length = max_sentence_length
+        self._max_chunks = max_chunks
+        self._chunk_size = chunk_size
+        self._chunk_overlap = chunk_overlap
         self._num_layers = num_transformer_layers
         self._num_heads = num_attention_heads
         self._transformer_dim = transformer_dim
@@ -139,8 +142,9 @@ class HierarchicalTransformerExtractor(nn.Module):
         self._initialized = False
 
         logger.info(f"HierarchicalTransformerExtractor initialized:")
-        logger.info(f"  Sentence encoder: {sentence_encoder_model}")
+        logger.info(f"  Chunk encoder: {sentence_encoder_model}")
         logger.info(f"  Freeze encoder: {freeze_sentence_encoder}")
+        logger.info(f"  Max chunks: {max_chunks}, chunk_size: {chunk_size}, overlap: {chunk_overlap}")
         logger.info(f"  Transformer layers: {num_transformer_layers}")
         logger.info(f"  Transformer dim: {transformer_dim}")
         logger.info(f"  Attention heads: {num_attention_heads}")
@@ -202,7 +206,7 @@ class HierarchicalTransformerExtractor(nn.Module):
 
     def _register_positional_encoding(self):
         """Create sinusoidal positional encoding."""
-        max_len = self._max_sentences + 1  # +1 for pool token
+        max_len = self._max_chunks + 1  # +1 for pool token
         d_model = self._transformer_dim
 
         pe = torch.zeros(max_len, d_model)
@@ -222,25 +226,25 @@ class HierarchicalTransformerExtractor(nn.Module):
         """Return the output dimension of this feature extractor."""
         return self._projection_dim
 
-    def _encode_sentences_batch(self, sentences: List[str]) -> torch.Tensor:
+    def _encode_chunks_batch(self, chunks: List[str]) -> torch.Tensor:
         """
-        Encode sentences with BERT, returning [CLS] tokens.
+        Encode chunks with BERT, returning [CLS] tokens.
 
         Args:
-            sentences: List of sentence strings
+            chunks: List of chunk strings
 
         Returns:
-            Tensor of shape (num_sentences, sentence_dim) containing [CLS] embeddings
+            Tensor of shape (num_chunks, sentence_dim) containing [CLS] embeddings
         """
-        if not sentences:
+        if not chunks:
             self._ensure_initialized()
             return torch.zeros(0, self._sentence_dim, device=self._device)
 
         encoded = self._tokenizer(
-            sentences,
+            chunks,
             padding=True,
             truncation=True,
-            max_length=self._max_sentence_length,
+            max_length=self._chunk_size,
             return_tensors='pt'
         )
 
@@ -271,26 +275,32 @@ class HierarchicalTransformerExtractor(nn.Module):
         batch_outputs = []
 
         for text in texts:
-            # 1. Split into sentences
-            sentences = split_into_sentences(text, self._max_sentences)
-            if not sentences:
-                sentences = [text[:500]]  # Fallback for short/malformed text
+            # 1. Split into overlapping token chunks
+            chunks = split_into_chunks_hf(
+                text,
+                self._tokenizer,
+                chunk_size=self._chunk_size,
+                chunk_overlap=self._chunk_overlap,
+                max_chunks=self._max_chunks
+            )
+            if not chunks:
+                chunks = [text[:500]]  # Fallback for short/malformed text
 
-            # 2. Encode sentences with BERT
-            sentence_embeddings = self._encode_sentences_batch(sentences)  # (S, sentence_dim)
+            # 2. Encode chunks with BERT
+            chunk_embeddings = self._encode_chunks_batch(chunks)  # (C, sentence_dim)
 
             # 3. Project to transformer dim
-            sentence_embeddings = self._input_projection(sentence_embeddings)  # (S, transformer_dim)
+            chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, transformer_dim)
 
             # 4. Prepend [POOL] token
-            sequence = torch.cat([self._pool_token, sentence_embeddings], dim=0)  # (S+1, transformer_dim)
+            sequence = torch.cat([self._pool_token, chunk_embeddings], dim=0)  # (C+1, transformer_dim)
 
             # 5. Add positional encoding
             seq_len = sequence.size(0)
             sequence = sequence + self._positional_encoding[:seq_len].to(self._device)
 
             # 6. Run through transformer layers
-            sequence = sequence.unsqueeze(0)  # (1, S+1, transformer_dim)
+            sequence = sequence.unsqueeze(0)  # (1, C+1, transformer_dim)
             for layer in self._transformer_layers:
                 sequence, _ = layer(sequence, return_attention=False)
 
@@ -354,8 +364,9 @@ class HierarchicalTransformerExtractor(nn.Module):
         return {
             'sentence_encoder_model': self._sentence_encoder_model,
             'freeze_sentence_encoder': self._freeze,
-            'max_sentences': self._max_sentences,
-            'max_sentence_length': self._max_sentence_length,
+            'max_chunks': self._max_chunks,
+            'chunk_size': self._chunk_size,
+            'chunk_overlap': self._chunk_overlap,
             'num_transformer_layers': self._num_layers,
             'num_attention_heads': self._num_heads,
             'transformer_dim': self._transformer_dim,
@@ -369,36 +380,42 @@ class HierarchicalTransformerExtractor(nn.Module):
         top_k: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Get human-readable interpretation of sentence attention.
+        Get human-readable interpretation of chunk attention.
 
-        This extracts attention weights from the [POOL] token to each sentence,
-        showing which sentences contribute most to the final representation.
+        This extracts attention weights from the [POOL] token to each chunk,
+        showing which chunks contribute most to the final representation.
 
         Args:
             texts: List of document texts
-            top_k: Number of top-attended sentences to show
+            top_k: Number of top-attended chunks to show
 
         Returns:
             List of dicts per document with attention interpretations:
-            - 'sentences': List of sentence strings
-            - 'sentence_attention': Attention weights from [POOL] to each sentence
-            - 'top_sentences': Top-k sentences by attention weight
+            - 'chunks': List of chunk strings
+            - 'chunk_attention': Attention weights from [POOL] to each chunk
+            - 'top_chunks': Top-k chunks by attention weight
         """
         self._ensure_initialized()
         interpretations = []
 
         with torch.no_grad():
             for text in texts:
-                sentences = split_into_sentences(text, self._max_sentences)
-                if not sentences:
-                    sentences = [text[:500]]
+                chunks = split_into_chunks_hf(
+                    text,
+                    self._tokenizer,
+                    chunk_size=self._chunk_size,
+                    chunk_overlap=self._chunk_overlap,
+                    max_chunks=self._max_chunks
+                )
+                if not chunks:
+                    chunks = [text[:500]]
 
-                # Encode sentences
-                sentence_embeddings = self._encode_sentences_batch(sentences)
-                sentence_embeddings = self._input_projection(sentence_embeddings)
+                # Encode chunks
+                chunk_embeddings = self._encode_chunks_batch(chunks)
+                chunk_embeddings = self._input_projection(chunk_embeddings)
 
                 # Prepend [POOL] and add positional encoding
-                sequence = torch.cat([self._pool_token, sentence_embeddings], dim=0)
+                sequence = torch.cat([self._pool_token, chunk_embeddings], dim=0)
                 seq_len = sequence.size(0)
                 sequence = sequence + self._positional_encoding[:seq_len].to(self._device)
                 sequence = sequence.unsqueeze(0)
@@ -409,20 +426,20 @@ class HierarchicalTransformerExtractor(nn.Module):
                     sequence, attn_weights = layer(sequence, return_attention=True)
 
                 # attn_weights shape: (1, seq_len, seq_len)
-                # We want attention FROM [POOL] (position 0) TO all sentences
-                if attn_weights is not None and len(sentences) > 0:
+                # We want attention FROM [POOL] (position 0) TO all chunks
+                if attn_weights is not None and len(chunks) > 0:
                     pool_attention = attn_weights[0, 0, 1:].cpu()  # Skip position 0 (self-attention)
 
                     # Normalize
                     pool_attention = pool_attention / (pool_attention.sum() + 1e-9)
 
                     # Get top-k
-                    k_actual = min(top_k, len(sentences))
+                    k_actual = min(top_k, len(chunks))
                     top_vals, top_indices = torch.topk(pool_attention, k_actual)
 
-                    top_sentences = [
+                    top_chunks = [
                         {
-                            'sentence': sentences[idx],
+                            'chunk': chunks[idx],
                             'attention': val.item(),
                             'idx': int(idx)
                         }
@@ -430,15 +447,15 @@ class HierarchicalTransformerExtractor(nn.Module):
                     ]
 
                     interpretations.append({
-                        'sentences': sentences,
-                        'sentence_attention': pool_attention.tolist(),
-                        'top_sentences': top_sentences
+                        'chunks': chunks,
+                        'chunk_attention': pool_attention.tolist(),
+                        'top_chunks': top_chunks
                     })
                 else:
                     interpretations.append({
-                        'sentences': sentences,
-                        'sentence_attention': [],
-                        'top_sentences': []
+                        'chunks': chunks,
+                        'chunk_attention': [],
+                        'top_chunks': []
                     })
 
         return interpretations
@@ -453,7 +470,7 @@ class HierarchicalTransformerExtractor(nn.Module):
         Returns:
             Dictionary with interpretations and model metadata
         """
-        interpretations = self.interpret_attention(texts, top_k=self._max_sentences)
+        interpretations = self.interpret_attention(texts, top_k=self._max_chunks)
         return {
             'interpretations': interpretations,
             'num_layers': self._num_layers,

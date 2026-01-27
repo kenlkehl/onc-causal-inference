@@ -46,7 +46,7 @@ class MatchingAnalysisConfig:
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder",
-    "hierarchical_transformer", or "gated_mil_hierarchical".
+    "hierarchical_transformer", "gated_mil_hierarchical", "gru_transformer_mil", or "gru_pool".
 
     This handles variants like "modernbert" which should be treated as "bert".
 
@@ -55,12 +55,20 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 
     Returns:
         Normalized type: "cnn", "bert", "gru", "confounder", "hierarchical_transformer",
-        or "gated_mil_hierarchical"
+        "gated_mil_hierarchical", "gru_transformer_mil", or "gru_pool"
     """
     if feature_type is None:
         return "cnn"
 
     feature_type_lower = feature_type.lower()
+
+    # Check for GRU-Pool extractor (BiGRU + transformer + gated attention pooling)
+    if feature_type_lower in ("gru_pool", "gru_pool_transformer"):
+        return "gru_pool"
+
+    # Check for GRU-Transformer-MIL extractor
+    if feature_type_lower in ("gru_mil", "gru_transformer_mil", "gru_mil_hierarchical"):
+        return "gru_transformer_mil"
 
     # Check for gated MIL hierarchical extractor
     if feature_type_lower in ("gated_mil", "gated_mil_hierarchical", "mil", "gated_mil_hier"):
@@ -148,8 +156,10 @@ class ModelArchitectureConfig:
     confounder_explicit_texts: Optional[List[str]] = None  # Explicit confounder phrases (e.g., ["metastatic sites", "performance status"])
     confounder_value_dim: int = 128  # Dimension per confounder (and output dimension)
     confounder_sentence_model: str = "all-MiniLM-L6-v2"  # Sentence transformer model for chunk encoding
-    confounder_freeze_encoder: bool = True  # Whether to freeze sentence encoder
-    confounder_max_sentences: int = 100  # Maximum sentences per document
+    confounder_freeze_encoder: bool = True  # Whether to freeze encoder
+    confounder_max_chunks: int = 100  # Maximum chunks per document
+    confounder_chunk_size: int = 128  # Tokens per chunk
+    confounder_chunk_overlap: int = 32  # Overlapping tokens between chunks
     confounder_num_heads: int = 4  # Number of attention heads
     confounder_num_iterations: int = 2  # Number of iterative refinement passes
     confounder_use_self_attention: bool = True  # Whether latents attend to each other
@@ -160,17 +170,16 @@ class ModelArchitectureConfig:
     confounder_dropout: float = 0.1  # Dropout rate
 
     # Hierarchical confounder extractor (token-level attention)
-    # When enabled, uses per-sentence BERT encoding + token-level cross-attention
-    # This preserves fine-grained token signal that sentence embeddings may lose
+    # When enabled, uses per-chunk BERT encoding + token-level cross-attention
+    # This preserves fine-grained token signal that chunk embeddings may lose
     confounder_hierarchical: bool = False  # Enable hierarchical token-level attention
     confounder_token_encoder: str = "distilbert-base-uncased"  # Token encoder for hierarchical mode
     confounder_freeze_token_encoder: bool = True  # Whether to freeze token encoder
-    confounder_max_sentence_tokens: int = 128  # Max tokens per sentence in hierarchical mode
 
     # GRU-based hierarchical confounder extractor (learns from scratch)
-    # When enabled, uses BiGRU instead of pretrained BERT for sentence encoding
+    # When enabled, uses BiGRU instead of pretrained BERT for chunk encoding
     # All parameters (embeddings, GRU, attention) learn together via causal loss
-    confounder_use_gru: bool = False  # Use GRU instead of BERT for sentence encoding
+    confounder_use_gru: bool = False  # Use GRU instead of BERT for chunk encoding
     confounder_gru_embedding_dim: int = 128  # Word embedding dimension
     confounder_gru_hidden_dim: int = 128  # GRU hidden state dimension per direction
     confounder_gru_num_layers: int = 1  # Number of stacked GRU layers
@@ -178,14 +187,16 @@ class ModelArchitectureConfig:
     confounder_gru_dropout: float = 0.1  # Dropout rate
     confounder_gru_max_vocab: int = 50000  # Maximum vocabulary size
     confounder_gru_min_word_freq: int = 2  # Minimum word frequency for vocabulary
-    confounder_gru_max_sentence_length: int = 128  # Maximum tokens per sentence
+    confounder_gru_chunk_size: int = 128  # Tokens per chunk for GRU mode
+    confounder_gru_chunk_overlap: int = 32  # Overlapping tokens between chunks
 
     # Hierarchical Transformer extractor (used when feature_extractor_type="hierarchical_transformer")
-    # Simple hierarchical approach: sentence-level BERT encoding + transformer pooling
-    hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder model
-    hier_transformer_freeze_sentence_encoder: bool = True  # Whether to freeze sentence encoder
-    hier_transformer_max_sentences: int = 100  # Maximum sentences per document
-    hier_transformer_max_sentence_length: int = 128  # Maximum tokens per sentence
+    # Simple hierarchical approach: chunk-level BERT encoding + transformer pooling
+    hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Chunk encoder model
+    hier_transformer_freeze_sentence_encoder: bool = True  # Whether to freeze encoder
+    hier_transformer_max_chunks: int = 100  # Maximum chunks per document
+    hier_transformer_chunk_size: int = 128  # Tokens per chunk
+    hier_transformer_chunk_overlap: int = 32  # Overlapping tokens between chunks
     hier_transformer_num_layers: int = 2  # Number of transformer layers for pooling
     hier_transformer_num_heads: int = 4  # Number of attention heads
     hier_transformer_dim: int = 256  # Hidden dimension for transformer layers
@@ -195,10 +206,11 @@ class ModelArchitectureConfig:
     # Gated MIL Hierarchical extractor (used when feature_extractor_type="gated_mil_hierarchical")
     # Uses gated MIL attention (tanh * sigmoid gating) with K confounder queries
     # Task-specific weighting of shared confounders for propensity, tau, outcome
-    gated_mil_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder model
-    gated_mil_freeze_sentence_encoder: bool = True  # Whether to freeze sentence encoder
-    gated_mil_max_sentences: int = 100  # Maximum sentences per document
-    gated_mil_max_sentence_length: int = 128  # Maximum tokens per sentence
+    gated_mil_sentence_model: str = "prajjwal1/bert-tiny"  # Chunk encoder model
+    gated_mil_freeze_sentence_encoder: bool = True  # Whether to freeze encoder
+    gated_mil_max_chunks: int = 100  # Maximum chunks per document
+    gated_mil_chunk_size: int = 128  # Tokens per chunk
+    gated_mil_chunk_overlap: int = 32  # Overlapping tokens between chunks
     gated_mil_hidden_dim: int = 128  # Hidden dimension for gated attention
     gated_mil_num_confounders: int = 4  # Number of confounder queries (K)
     gated_mil_dropout: float = 0.1  # Dropout rate
@@ -207,7 +219,47 @@ class ModelArchitectureConfig:
     gated_mil_hierarchical: bool = False  # Enable token-level gated pooling
     gated_mil_token_hidden_dim: int = 64  # Hidden dimension for token-level gating
     # Mean pooling option (use mean over tokens instead of [CLS] token)
-    gated_mil_use_mean_pooling: bool = False  # Use mean pooling instead of [CLS] for sentence embeddings
+    gated_mil_use_mean_pooling: bool = False  # Use mean pooling instead of [CLS] for chunk embeddings
+
+    # GRU-Transformer-MIL extractor (used when feature_extractor_type="gru_transformer_mil")
+    # Combines learned BiGRU chunk encoding + transformer cross-chunk + gated MIL attention
+    # Learns entirely from scratch (no pretrained encoder) - requires fit_tokenizer()
+    gru_mil_embedding_dim: int = 128  # Word embedding dimension
+    gru_mil_gru_hidden_dim: int = 128  # GRU hidden state dimension per direction
+    gru_mil_gru_num_layers: int = 1  # Number of stacked GRU layers
+    gru_mil_gru_bidirectional: bool = True  # Use bidirectional GRU
+    gru_mil_gru_dropout: float = 0.1  # Dropout rate for GRU
+    gru_mil_max_chunks: int = 100  # Maximum chunks per document
+    gru_mil_chunk_size: int = 128  # Tokens per chunk
+    gru_mil_chunk_overlap: int = 32  # Overlapping tokens between chunks
+    gru_mil_transformer_layers: int = 2  # Number of transformer layers for cross-chunk processing
+    gru_mil_transformer_heads: int = 4  # Number of attention heads in transformer
+    gru_mil_transformer_dim: int = 256  # Hidden dimension for transformer layers
+    gru_mil_num_confounders: int = 4  # Number of confounder queries (K)
+    gru_mil_mil_hidden_dim: int = 128  # Hidden dimension for gated MIL attention
+    gru_mil_projection_dim: int = 128  # Final output dimension
+    gru_mil_max_vocab: int = 50000  # Maximum vocabulary size
+    gru_mil_min_word_freq: int = 2  # Minimum word frequency for vocabulary
+
+    # GRU-Pool extractor (used when feature_extractor_type="gru_pool")
+    # Combines BiGRU chunk encoding + transformer cross-chunk + gated attention pooling
+    # Learns entirely from scratch (no pretrained encoder) - requires fit_tokenizer()
+    # Produces single feature vector (no task-specific weighting)
+    gru_pool_embedding_dim: int = 128  # Word embedding dimension
+    gru_pool_gru_hidden_dim: int = 128  # GRU hidden state dimension per direction
+    gru_pool_gru_num_layers: int = 1  # Number of stacked GRU layers
+    gru_pool_gru_bidirectional: bool = True  # Use bidirectional GRU
+    gru_pool_gru_dropout: float = 0.1  # Dropout rate for GRU
+    gru_pool_max_chunks: int = 100  # Maximum chunks per document
+    gru_pool_chunk_size: int = 128  # Tokens per chunk
+    gru_pool_chunk_overlap: int = 32  # Overlapping tokens between chunks
+    gru_pool_transformer_layers: int = 2  # Number of transformer layers for cross-chunk processing
+    gru_pool_transformer_heads: int = 4  # Number of attention heads in transformer
+    gru_pool_transformer_dim: int = 256  # Hidden dimension for transformer layers
+    gru_pool_gated_attention_dim: int = 128  # Hidden dimension for gated attention pooling
+    gru_pool_projection_dim: int = 128  # Final output dimension
+    gru_pool_max_vocab: int = 50000  # Maximum vocabulary size
+    gru_pool_min_word_freq: int = 2  # Minimum word frequency for vocabulary
 
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128

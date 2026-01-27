@@ -4,7 +4,7 @@
   "device": "cuda:0",
   "num_workers": 4,
 
-  "_comment_overview": "HierarchicalTransformerExtractor uses a simple hierarchical approach: split text into sentences, encode each with tiny BERT, then use transformer layers with a learnable [POOL] token to aggregate into a final representation. This is simpler than ConfounderExtractor - no latent confounders or sparse attention, just straightforward sentence encoding with transformer pooling.",
+  "_comment_overview": "HierarchicalTransformerExtractor uses a simple hierarchical approach: split text into overlapping token chunks, encode each with tiny BERT, then use transformer layers with a learnable [POOL] token to aggregate into a final representation. This is simpler than ConfounderExtractor - no latent confounders or sparse attention, just straightforward chunk encoding with transformer pooling.",
 
   "applied_inference": {
     "dataset_path": "./data/clinical_notes.parquet",
@@ -18,19 +18,22 @@
       "model_type": "rlearner",
       "feature_extractor_type": "hierarchical_transformer",
 
-      "_comment_sentence_encoder": "Sentence encoder model from HuggingFace. prajjwal1/bert-tiny is very fast (4.4M params). For better quality, try distilbert-base-uncased or prajjwal1/bert-small.",
+      "_comment_chunk_encoder": "Chunk encoder model from HuggingFace. prajjwal1/bert-tiny is very fast (4.4M params). For better quality, try distilbert-base-uncased or prajjwal1/bert-small.",
       "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
 
-      "_comment_freeze": "Whether to freeze the sentence encoder weights. True is faster and uses less memory; False allows fine-tuning.",
+      "_comment_freeze": "Whether to freeze the chunk encoder weights. True is faster and uses less memory; False allows fine-tuning.",
       "hier_transformer_freeze_sentence_encoder": true,
 
-      "_comment_max_sentences": "Maximum sentences per document. Documents with more sentences will have later sentences truncated.",
-      "hier_transformer_max_sentences": 100,
+      "_comment_max_chunks": "Maximum chunks per document. Documents with more chunks will have later chunks truncated.",
+      "hier_transformer_max_chunks": 100,
 
-      "_comment_max_sentence_length": "Maximum tokens per sentence for BERT encoding. Sentences longer than this are truncated.",
-      "hier_transformer_max_sentence_length": 128,
+      "_comment_chunk_size": "Number of tokens per chunk. Each chunk is encoded by BERT.",
+      "hier_transformer_chunk_size": 128,
 
-      "_comment_transformer_layers": "Number of transformer layers for pooling sentence embeddings. More layers = more expressiveness but slower.",
+      "_comment_chunk_overlap": "Number of overlapping tokens between adjacent chunks. Provides context continuity.",
+      "hier_transformer_chunk_overlap": 32,
+
+      "_comment_transformer_layers": "Number of transformer layers for pooling chunk embeddings. More layers = more expressiveness but slower.",
       "hier_transformer_num_layers": 2,
 
       "_comment_attention_heads": "Number of attention heads in transformer layers.",
@@ -88,8 +91,9 @@
       "feature_extractor_type": "hierarchical_transformer",
       "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
       "hier_transformer_freeze_sentence_encoder": true,
-      "hier_transformer_max_sentences": 100,
-      "hier_transformer_max_sentence_length": 128,
+      "hier_transformer_max_chunks": 100,
+      "hier_transformer_chunk_size": 128,
+      "hier_transformer_chunk_overlap": 32,
       "hier_transformer_num_layers": 2,
       "hier_transformer_num_heads": 4,
       "hier_transformer_dim": 256,
@@ -111,8 +115,9 @@
       "feature_extractor_type": "hierarchical_transformer",
       "hier_transformer_sentence_model": "prajjwal1/bert-tiny",
       "hier_transformer_freeze_sentence_encoder": true,
-      "hier_transformer_max_sentences": 100,
-      "hier_transformer_max_sentence_length": 128,
+      "hier_transformer_max_chunks": 100,
+      "hier_transformer_chunk_size": 128,
+      "hier_transformer_chunk_overlap": 32,
       "hier_transformer_num_layers": 2,
       "hier_transformer_num_heads": 4,
       "hier_transformer_dim": 256,

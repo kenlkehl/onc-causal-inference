@@ -414,8 +414,9 @@ def _train_single_model(
         # Hierarchical Transformer args
         hier_transformer_sentence_model=getattr(arch_config, 'hier_transformer_sentence_model', 'prajjwal1/bert-tiny'),
         hier_transformer_freeze_sentence_encoder=getattr(arch_config, 'hier_transformer_freeze_sentence_encoder', True),
-        hier_transformer_max_sentences=getattr(arch_config, 'hier_transformer_max_sentences', 100),
-        hier_transformer_max_sentence_length=getattr(arch_config, 'hier_transformer_max_sentence_length', 128),
+        hier_transformer_max_chunks=getattr(arch_config, 'hier_transformer_max_chunks', 100),
+        hier_transformer_chunk_size=getattr(arch_config, 'hier_transformer_chunk_size', 128),
+        hier_transformer_chunk_overlap=getattr(arch_config, 'hier_transformer_chunk_overlap', 32),
         hier_transformer_num_layers=getattr(arch_config, 'hier_transformer_num_layers', 2),
         hier_transformer_num_heads=getattr(arch_config, 'hier_transformer_num_heads', 4),
         hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
@@ -424,8 +425,9 @@ def _train_single_model(
         # Gated MIL Hierarchical args
         gated_mil_sentence_model=getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny'),
         gated_mil_freeze_sentence_encoder=getattr(arch_config, 'gated_mil_freeze_sentence_encoder', True),
-        gated_mil_max_sentences=getattr(arch_config, 'gated_mil_max_sentences', 100),
-        gated_mil_max_sentence_length=getattr(arch_config, 'gated_mil_max_sentence_length', 128),
+        gated_mil_max_chunks=getattr(arch_config, 'gated_mil_max_chunks', 100),
+        gated_mil_chunk_size=getattr(arch_config, 'gated_mil_chunk_size', 128),
+        gated_mil_chunk_overlap=getattr(arch_config, 'gated_mil_chunk_overlap', 32),
         gated_mil_hidden_dim=getattr(arch_config, 'gated_mil_hidden_dim', 128),
         gated_mil_num_confounders=getattr(arch_config, 'gated_mil_num_confounders', 4),
         gated_mil_dropout=getattr(arch_config, 'gated_mil_dropout', 0.1),
@@ -433,6 +435,22 @@ def _train_single_model(
         gated_mil_hierarchical=getattr(arch_config, 'gated_mil_hierarchical', False),
         gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
         gated_mil_use_mean_pooling=getattr(arch_config, 'gated_mil_use_mean_pooling', False),
+        # GRU-Pool args
+        gru_pool_embedding_dim=getattr(arch_config, 'gru_pool_embedding_dim', 128),
+        gru_pool_gru_hidden_dim=getattr(arch_config, 'gru_pool_gru_hidden_dim', 128),
+        gru_pool_gru_num_layers=getattr(arch_config, 'gru_pool_gru_num_layers', 1),
+        gru_pool_gru_bidirectional=getattr(arch_config, 'gru_pool_gru_bidirectional', True),
+        gru_pool_gru_dropout=getattr(arch_config, 'gru_pool_gru_dropout', 0.1),
+        gru_pool_max_chunks=getattr(arch_config, 'gru_pool_max_chunks', 100),
+        gru_pool_chunk_size=getattr(arch_config, 'gru_pool_chunk_size', 128),
+        gru_pool_chunk_overlap=getattr(arch_config, 'gru_pool_chunk_overlap', 32),
+        gru_pool_transformer_layers=getattr(arch_config, 'gru_pool_transformer_layers', 2),
+        gru_pool_transformer_heads=getattr(arch_config, 'gru_pool_transformer_heads', 4),
+        gru_pool_transformer_dim=getattr(arch_config, 'gru_pool_transformer_dim', 256),
+        gru_pool_gated_attention_dim=getattr(arch_config, 'gru_pool_gated_attention_dim', 128),
+        gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
+        gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
+        gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -497,6 +515,16 @@ def _train_single_model(
         model.fit_tokenizer(train_texts)  # No-op, triggers init
         logger.info(f"Using Gated MIL Hierarchical feature extractor: {getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny')}, "
                    f"{getattr(arch_config, 'gated_mil_num_confounders', 4)} confounders")
+    elif feature_extractor_type == "gru_transformer_mil":
+        # GRU-Transformer-MIL: requires fit_tokenizer
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Using GRU-Transformer-MIL feature extractor")
+    elif feature_extractor_type == "gru_pool":
+        # GRU-Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Using GRU-Pool feature extractor: "
+                   f"GRU {getattr(arch_config, 'gru_pool_gru_hidden_dim', 128)}x{2 if getattr(arch_config, 'gru_pool_gru_bidirectional', True) else 1}, "
+                   f"{getattr(arch_config, 'gru_pool_transformer_layers', 2)} transformer layers")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")

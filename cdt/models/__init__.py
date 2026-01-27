@@ -12,6 +12,8 @@ from .gru_extractor import GRUFeatureExtractor, AttentionPooling
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
+from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
+from .gru_pool_extractor import GRUPoolExtractor, GatedAttentionPooling
 from .gated_mil_attention import GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling
 from .sparse_attention import (
     sparse_softmax,
@@ -39,6 +41,9 @@ __all__ = [
     'GRUHierarchicalConfounderExtractor',
     'HierarchicalTransformerExtractor',
     'GatedMILHierarchicalExtractor',
+    'GRUTransformerMILExtractor',
+    'GRUPoolExtractor',
+    'GatedAttentionPooling',
     'GatedMILAttention',
     'TaskSpecificConfounderWeighting',
     'TokenLevelGatedPooling',

@@ -13,6 +13,8 @@ from .gru_extractor import GRUFeatureExtractor
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
+from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
+from .gru_pool_extractor import GRUPoolExtractor
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
@@ -116,8 +118,9 @@ class CausalText(nn.Module):
         # Hierarchical Transformer args
         hier_transformer_sentence_model: str = "prajjwal1/bert-tiny",
         hier_transformer_freeze_sentence_encoder: bool = True,
-        hier_transformer_max_sentences: int = 100,
-        hier_transformer_max_sentence_length: int = 128,
+        hier_transformer_max_chunks: int = 100,
+        hier_transformer_chunk_size: int = 128,
+        hier_transformer_chunk_overlap: int = 32,
         hier_transformer_num_layers: int = 2,
         hier_transformer_num_heads: int = 4,
         hier_transformer_dim: int = 256,
@@ -126,8 +129,9 @@ class CausalText(nn.Module):
         # Gated MIL Hierarchical args
         gated_mil_sentence_model: str = "prajjwal1/bert-tiny",
         gated_mil_freeze_sentence_encoder: bool = True,
-        gated_mil_max_sentences: int = 100,
-        gated_mil_max_sentence_length: int = 128,
+        gated_mil_max_chunks: int = 100,
+        gated_mil_chunk_size: int = 128,
+        gated_mil_chunk_overlap: int = 32,
         gated_mil_hidden_dim: int = 128,
         gated_mil_num_confounders: int = 4,
         gated_mil_dropout: float = 0.1,
@@ -135,6 +139,39 @@ class CausalText(nn.Module):
         gated_mil_hierarchical: bool = False,
         gated_mil_token_hidden_dim: int = 64,
         gated_mil_use_mean_pooling: bool = False,
+        # GRU-Transformer-MIL args
+        gru_mil_embedding_dim: int = 128,
+        gru_mil_gru_hidden_dim: int = 128,
+        gru_mil_gru_num_layers: int = 1,
+        gru_mil_gru_bidirectional: bool = True,
+        gru_mil_gru_dropout: float = 0.1,
+        gru_mil_max_chunks: int = 100,
+        gru_mil_chunk_size: int = 128,
+        gru_mil_chunk_overlap: int = 32,
+        gru_mil_transformer_layers: int = 2,
+        gru_mil_transformer_heads: int = 4,
+        gru_mil_transformer_dim: int = 256,
+        gru_mil_num_confounders: int = 4,
+        gru_mil_mil_hidden_dim: int = 128,
+        gru_mil_projection_dim: int = 128,
+        gru_mil_max_vocab: int = 50000,
+        gru_mil_min_word_freq: int = 2,
+        # GRU-Pool args
+        gru_pool_embedding_dim: int = 128,
+        gru_pool_gru_hidden_dim: int = 128,
+        gru_pool_gru_num_layers: int = 1,
+        gru_pool_gru_bidirectional: bool = True,
+        gru_pool_gru_dropout: float = 0.1,
+        gru_pool_max_chunks: int = 100,
+        gru_pool_chunk_size: int = 128,
+        gru_pool_chunk_overlap: int = 32,
+        gru_pool_transformer_layers: int = 2,
+        gru_pool_transformer_heads: int = 4,
+        gru_pool_transformer_dim: int = 256,
+        gru_pool_gated_attention_dim: int = 128,
+        gru_pool_projection_dim: int = 128,
+        gru_pool_max_vocab: int = 50000,
+        gru_pool_min_word_freq: int = 2,
         # DragonNet args
         dragonnet_representation_dim: int = 128,
         dragonnet_hidden_outcome_dim: int = 64,
@@ -239,8 +276,9 @@ class CausalText(nn.Module):
             'confounder_gru_max_sentence_length': confounder_gru_max_sentence_length,
             'hier_transformer_sentence_model': hier_transformer_sentence_model,
             'hier_transformer_freeze_sentence_encoder': hier_transformer_freeze_sentence_encoder,
-            'hier_transformer_max_sentences': hier_transformer_max_sentences,
-            'hier_transformer_max_sentence_length': hier_transformer_max_sentence_length,
+            'hier_transformer_max_chunks': hier_transformer_max_chunks,
+            'hier_transformer_chunk_size': hier_transformer_chunk_size,
+            'hier_transformer_chunk_overlap': hier_transformer_chunk_overlap,
             'hier_transformer_num_layers': hier_transformer_num_layers,
             'hier_transformer_num_heads': hier_transformer_num_heads,
             'hier_transformer_dim': hier_transformer_dim,
@@ -248,8 +286,9 @@ class CausalText(nn.Module):
             'hier_transformer_projection_dim': hier_transformer_projection_dim,
             'gated_mil_sentence_model': gated_mil_sentence_model,
             'gated_mil_freeze_sentence_encoder': gated_mil_freeze_sentence_encoder,
-            'gated_mil_max_sentences': gated_mil_max_sentences,
-            'gated_mil_max_sentence_length': gated_mil_max_sentence_length,
+            'gated_mil_max_chunks': gated_mil_max_chunks,
+            'gated_mil_chunk_size': gated_mil_chunk_size,
+            'gated_mil_chunk_overlap': gated_mil_chunk_overlap,
             'gated_mil_hidden_dim': gated_mil_hidden_dim,
             'gated_mil_num_confounders': gated_mil_num_confounders,
             'gated_mil_dropout': gated_mil_dropout,
@@ -257,6 +296,37 @@ class CausalText(nn.Module):
             'gated_mil_hierarchical': gated_mil_hierarchical,
             'gated_mil_token_hidden_dim': gated_mil_token_hidden_dim,
             'gated_mil_use_mean_pooling': gated_mil_use_mean_pooling,
+            'gru_mil_embedding_dim': gru_mil_embedding_dim,
+            'gru_mil_gru_hidden_dim': gru_mil_gru_hidden_dim,
+            'gru_mil_gru_num_layers': gru_mil_gru_num_layers,
+            'gru_mil_gru_bidirectional': gru_mil_gru_bidirectional,
+            'gru_mil_gru_dropout': gru_mil_gru_dropout,
+            'gru_mil_max_chunks': gru_mil_max_chunks,
+            'gru_mil_chunk_size': gru_mil_chunk_size,
+            'gru_mil_chunk_overlap': gru_mil_chunk_overlap,
+            'gru_mil_transformer_layers': gru_mil_transformer_layers,
+            'gru_mil_transformer_heads': gru_mil_transformer_heads,
+            'gru_mil_transformer_dim': gru_mil_transformer_dim,
+            'gru_mil_num_confounders': gru_mil_num_confounders,
+            'gru_mil_mil_hidden_dim': gru_mil_mil_hidden_dim,
+            'gru_mil_projection_dim': gru_mil_projection_dim,
+            'gru_mil_max_vocab': gru_mil_max_vocab,
+            'gru_mil_min_word_freq': gru_mil_min_word_freq,
+            'gru_pool_embedding_dim': gru_pool_embedding_dim,
+            'gru_pool_gru_hidden_dim': gru_pool_gru_hidden_dim,
+            'gru_pool_gru_num_layers': gru_pool_gru_num_layers,
+            'gru_pool_gru_bidirectional': gru_pool_gru_bidirectional,
+            'gru_pool_gru_dropout': gru_pool_gru_dropout,
+            'gru_pool_max_chunks': gru_pool_max_chunks,
+            'gru_pool_chunk_size': gru_pool_chunk_size,
+            'gru_pool_chunk_overlap': gru_pool_chunk_overlap,
+            'gru_pool_transformer_layers': gru_pool_transformer_layers,
+            'gru_pool_transformer_heads': gru_pool_transformer_heads,
+            'gru_pool_transformer_dim': gru_pool_transformer_dim,
+            'gru_pool_gated_attention_dim': gru_pool_gated_attention_dim,
+            'gru_pool_projection_dim': gru_pool_projection_dim,
+            'gru_pool_max_vocab': gru_pool_max_vocab,
+            'gru_pool_min_word_freq': gru_pool_min_word_freq,
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
@@ -365,12 +435,13 @@ class CausalText(nn.Module):
                 logger.info(f"Using Confounder feature extractor: {confounder_num_latents} latents, "
                            f"{confounder_num_iterations} iterations, sparse={confounder_sparse_attention}")
         elif self.feature_extractor_type == "hierarchical_transformer":
-            # Hierarchical Transformer: sentence BERT + transformer pooling
+            # Hierarchical Transformer: chunk BERT + transformer pooling
             self.feature_extractor = HierarchicalTransformerExtractor(
                 sentence_encoder_model=hier_transformer_sentence_model,
                 freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
-                max_sentences=hier_transformer_max_sentences,
-                max_sentence_length=hier_transformer_max_sentence_length,
+                max_chunks=hier_transformer_max_chunks,
+                chunk_size=hier_transformer_chunk_size,
+                chunk_overlap=hier_transformer_chunk_overlap,
                 num_transformer_layers=hier_transformer_num_layers,
                 num_attention_heads=hier_transformer_num_heads,
                 transformer_dim=hier_transformer_dim,
@@ -379,14 +450,16 @@ class CausalText(nn.Module):
                 device=self._device
             )
             logger.info(f"Using Hierarchical Transformer feature extractor: {hier_transformer_sentence_model}, "
-                       f"{hier_transformer_num_layers} layers, projection_dim={hier_transformer_projection_dim}")
+                       f"{hier_transformer_num_layers} layers, chunk_size={hier_transformer_chunk_size}, "
+                       f"projection_dim={hier_transformer_projection_dim}")
         elif self.feature_extractor_type == "gated_mil_hierarchical":
-            # Gated MIL Hierarchical: sentence BERT + gated MIL attention with task-specific weighting
+            # Gated MIL Hierarchical: chunk BERT + gated MIL attention with task-specific weighting
             self.feature_extractor = GatedMILHierarchicalExtractor(
                 sentence_encoder_model=gated_mil_sentence_model,
                 freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
-                max_sentences=gated_mil_max_sentences,
-                max_sentence_length=gated_mil_max_sentence_length,
+                max_chunks=gated_mil_max_chunks,
+                chunk_size=gated_mil_chunk_size,
+                chunk_overlap=gated_mil_chunk_overlap,
                 mil_hidden_dim=gated_mil_hidden_dim,
                 num_confounders=gated_mil_num_confounders,
                 model_type=model_type,
@@ -400,6 +473,56 @@ class CausalText(nn.Module):
             logger.info(f"Using Gated MIL Hierarchical feature extractor: {gated_mil_sentence_model}, "
                        f"{gated_mil_num_confounders} confounders, projection_dim={gated_mil_projection_dim}, "
                        f"hierarchical={gated_mil_hierarchical}, mean_pooling={gated_mil_use_mean_pooling}")
+        elif self.feature_extractor_type == "gru_transformer_mil":
+            # GRU-Transformer-MIL: learned BiGRU + transformer + gated MIL attention
+            self.feature_extractor = GRUTransformerMILExtractor(
+                embedding_dim=gru_mil_embedding_dim,
+                gru_hidden_dim=gru_mil_gru_hidden_dim,
+                gru_num_layers=gru_mil_gru_num_layers,
+                gru_bidirectional=gru_mil_gru_bidirectional,
+                gru_dropout=gru_mil_gru_dropout,
+                max_chunks=gru_mil_max_chunks,
+                chunk_size=gru_mil_chunk_size,
+                chunk_overlap=gru_mil_chunk_overlap,
+                transformer_layers=gru_mil_transformer_layers,
+                transformer_heads=gru_mil_transformer_heads,
+                transformer_dim=gru_mil_transformer_dim,
+                num_confounders=gru_mil_num_confounders,
+                mil_hidden_dim=gru_mil_mil_hidden_dim,
+                projection_dim=gru_mil_projection_dim,
+                max_vocab_size=gru_mil_max_vocab,
+                min_word_freq=gru_mil_min_word_freq,
+                model_type=model_type,
+                device=self._device
+            )
+            logger.info(f"Using GRU-Transformer-MIL feature extractor: "
+                       f"GRU {gru_mil_gru_hidden_dim}x{2 if gru_mil_gru_bidirectional else 1}, "
+                       f"{gru_mil_transformer_layers} transformer layers, "
+                       f"{gru_mil_num_confounders} confounders, projection_dim={gru_mil_projection_dim}")
+        elif self.feature_extractor_type == "gru_pool":
+            # GRU-Pool: learned BiGRU + transformer + gated attention pooling (no task-specific weighting)
+            self.feature_extractor = GRUPoolExtractor(
+                embedding_dim=gru_pool_embedding_dim,
+                gru_hidden_dim=gru_pool_gru_hidden_dim,
+                gru_num_layers=gru_pool_gru_num_layers,
+                gru_bidirectional=gru_pool_gru_bidirectional,
+                gru_dropout=gru_pool_gru_dropout,
+                max_chunks=gru_pool_max_chunks,
+                chunk_size=gru_pool_chunk_size,
+                chunk_overlap=gru_pool_chunk_overlap,
+                transformer_layers=gru_pool_transformer_layers,
+                transformer_heads=gru_pool_transformer_heads,
+                transformer_dim=gru_pool_transformer_dim,
+                gated_attention_dim=gru_pool_gated_attention_dim,
+                projection_dim=gru_pool_projection_dim,
+                max_vocab_size=gru_pool_max_vocab,
+                min_word_freq=gru_pool_min_word_freq,
+                device=self._device
+            )
+            logger.info(f"Using GRU-Pool feature extractor: "
+                       f"GRU {gru_pool_gru_hidden_dim}x{2 if gru_pool_gru_bidirectional else 1}, "
+                       f"{gru_pool_transformer_layers} transformer layers, "
+                       f"gated_attention_dim={gru_pool_gated_attention_dim}, projection_dim={gru_pool_projection_dim}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(

@@ -1,961 +1,281 @@
 # CLAUDE.md - CDT (Causal DragonNet Text)
 
-## Project Overview
+## Overview
 
-CDT is a framework for **clinical causal inference using electronic health record (EHR) text**. It estimates treatment effects from unstructured clinical narratives by combining text feature extraction with DragonNet causal inference heads.
-
-**Key purpose**: Extract confounders from clinical text to estimate individual treatment effects (ITEs) and average treatment effects (ATEs) in observational studies where critical confounders exist only in unstructured notes.
+CDT estimates treatment effects from clinical text by combining text feature extraction with DragonNet causal inference heads. It extracts confounders from unstructured EHR narratives to estimate individual (ITE) and average (ATE) treatment effects.
 
 ## Repository Structure
 
 ```
-cdt/                          # Main package
-├── cli.py                    # CLI entry point (`cdt init`, `cdt run`)
-├── config.py                 # Dataclass configurations (ExperimentConfig, ModelArchitectureConfig, etc.)
-├── data/
-│   └── dataset.py            # ClinicalTextDataset, data loading/validation
-├── experiments/
-│   └── runner.py             # ExperimentRunner - orchestrates applied inference & plasmode
-├── inference/
-│   └── applied.py            # Run applied causal inference (CV or fixed split)
+cdt/
+├── cli.py                 # CLI: `cdt init`, `cdt run`
+├── config.py              # Dataclass configs
+├── data/dataset.py        # ClinicalTextDataset
+├── experiments/runner.py  # Orchestrates inference & plasmode
+├── inference/applied.py   # Applied inference (CV or fixed split)
 ├── models/
-│   ├── causal_text.py        # CausalText - main model combining extractor + DragonNet
-│   ├── cnn_extractor.py      # CNNFeatureExtractor - 1D CNN with semantic filter init
-│   ├── bert_extractor.py     # BertFeatureExtractor - HuggingFace transformer CLS token
-│   ├── gru_extractor.py      # GRUFeatureExtractor - BiGRU with attention pooling
-│   ├── confounder_extractor.py # ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
-│   ├── hierarchical_transformer_extractor.py # HierarchicalTransformerExtractor - sentence BERT + transformer pooling
-│   ├── gated_mil_hierarchical_extractor.py # GatedMILHierarchicalExtractor - gated MIL with task-specific weighting
-│   ├── gated_mil_attention.py # GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling
-│   ├── dragonnet.py          # DragonNet head (propensity + potential outcomes)
-│   ├── uplift.py             # UpliftNet head (alternative parametrization)
-│   ├── rlearner.py           # RLearnerNet head (direct tau optimization)
-│   ├── outcome_heads.py      # Outcome prediction heads
-│   └── propensity_model.py   # Standalone propensity model
-├── training/
-│   ├── plasmode.py           # Plasmode simulation experiments
-│   ├── propensity_trimming.py# Propensity-based dataset trimming
-│   └── outcome_training.py   # Standalone outcome model training
-├── matching/                 # Propensity score matching
-│   ├── propensity_matcher.py # PropensityMatcher, MatchResult, balance utilities
-│   └── __init__.py           # Exports matching classes and functions
-├── analysis/                 # Statistical analysis for causal inference
-│   ├── statistical_analysis.py # ATT/ATE estimation, McNemar's test, Rosenbaum bounds
-│   ├── psm_analysis.py       # run_psm_analysis() - main PSM workflow
-│   └── __init__.py           # Exports analysis functions
-└── utils/                    # Utilities (io, system, etc.)
+│   ├── causal_text.py     # Main model (extractor + causal head)
+│   ├── cnn_extractor.py, bert_extractor.py, gru_extractor.py
+│   ├── chunking.py                       # Token-based text chunking utilities
+│   ├── confounder_extractor.py           # Perceiver-style sparse attention
+│   ├── hierarchical_transformer_extractor.py
+│   ├── gated_mil_hierarchical_extractor.py
+│   ├── gru_transformer_mil_extractor.py
+│   ├── gru_pool_extractor.py
+│   ├── dragonnet.py, uplift.py, rlearner.py  # Causal heads
+│   └── sparse_attention.py               # entmax, top-k attention
+├── training/plasmode.py   # Plasmode simulation
+├── matching/              # PropensityMatcher, balance utilities
+└── analysis/              # ATT/ATE estimation, PSM analysis
 
-synthetic_data/               # LLM-based synthetic data generation
-├── generator.py              # Main pipeline for generating synthetic datasets
-├── config.py                 # SyntheticDataConfig
-├── prompts.py                # Clinical prompts for LLM
-├── llm_client.py             # OpenAI API client
-└── vllm_batch_client.py      # vLLM batch inference client
-
-examples/                     # Example config files
-├── semantic_cnn_config.json  # CNN with explicit clinical concepts
-├── bert_config.json          # BERT feature extractor config
-├── modernbert_config.json    # ModernBERT config
-├── rlearner_config.json      # R-Learner with direct tau optimization
-├── confounder_config.json    # Confounder extractor with sparse cross-attention
-├── gru_confounder_config.json # GRU-based confounder extractor (learns from scratch)
-├── hierarchical_transformer_config.json # Hierarchical transformer (sentence BERT + pooling)
-└── gated_mil_config.json     # Gated MIL hierarchical extractor
+examples/                  # Config files for each extractor type
+synthetic_data/            # LLM-based synthetic data generation
 ```
 
 ## Architecture
 
-### Core Model: CausalText (`cdt/models/causal_text.py`)
+### Feature Extractors
 
-The main model combines:
-1. **Feature Extractor** (one of six types):
-   - `cnn`: 1D CNN with word-level tokenization (default, fastest)
-   - `bert`: HuggingFace transformer (Bio_ClinicalBERT, ModernBERT, etc.)
-   - `gru`: Bidirectional GRU with attention (O(N) for long sequences)
-   - `confounder`: Perceiver-style cross-attention with sparse attention for long documents
-   - `hierarchical_transformer`: Sentence-level BERT + transformer pooling (simple, effective for long docs)
-   - `gated_mil_hierarchical`: Gated MIL attention with K confounder queries + task-specific weighting
+| Type | Description | Long docs | fit_tokenizer |
+|------|-------------|-----------|---------------|
+| `cnn` | 1D CNN, semantic filter init, fastest | No (truncates) | Required |
+| `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
+| `gru` | BiGRU + attention, O(N) | Yes | Required |
+| `confounder` | Perceiver-style sparse cross-attention, K latent confounders | Yes | GRU mode only |
+| `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
+| `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
+| `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
+| `gru_pool` | Chunk BiGRU + transformer + gated attention pooling (single vector) | Yes | Required |
 
-2. **Causal Inference Head** (one of three types):
-   - `dragonnet`: Classic DragonNet (propensity + Y0/Y1 potential outcomes)
-   - `uplift`: UpliftNet (base outcome + treatment effect parametrization)
-   - `rlearner`: R-Learner (direct tau optimization with detached nuisance functions)
+**Note**: Hierarchical extractors use overlapping token-based chunking (`chunk_size`, `chunk_overlap`) instead of sentence splitting for more consistent context windows.
 
-### CNN Feature Extractor (`cdt/models/cnn_extractor.py`)
+### Causal Heads
 
-Key features:
-- **Semantic filter initialization**: CNN filters can be initialized from explicit clinical concepts (e.g., "stage iv cancer", "performance status poor")
-- **K-means filter initialization**: Additional filters derived from clustering training n-grams
-- **BERT embedding initialization**: Word embeddings initialized from Bio_ClinicalBERT
-- **Filter interpretability**: `interpret_filters()` method shows which n-grams activate each filter
+| Type | Description | Key output |
+|------|-------------|------------|
+| `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
+| `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
+| `rlearner` | Direct τ(X) optimization, detached nuisance functions | τ directly predicts ITE |
 
-**Important**: Call `fit_tokenizer(texts)` before training with CNN/GRU extractors.
+**R-Learner advantage**: Nuisance functions (e, m) are detached in R-loss, providing stronger gradient signal for treatment effect modifiers.
 
-### DragonNet (`cdt/models/dragonnet.py`)
-
-Outputs:
-- `y0_logit`: Predicted outcome under control (T=0)
-- `y1_logit`: Predicted outcome under treatment (T=1)
-- `t_logit`: Treatment propensity logit
-- Individual Treatment Effect (ITE) = sigmoid(y1_logit) - sigmoid(y0_logit)
-
-Loss function components:
-- Outcome loss (factual only)
-- Propensity loss (binary cross-entropy)
-- Targeted regularization (R-loss)
-
-### RLearnerNet (`cdt/models/rlearner.py`)
-
-R-Learner architecture for direct treatment effect optimization. Uses three heads:
-- `e(X)`: Propensity head - P(T=1|X)
-- `m(X)`: Marginal outcome head - E[Y|X]
-- `tau(X)`: Treatment effect head - E[Y(1)-Y(0)|X] (unbounded, can be negative)
-
-**Key advantage**: The nuisance functions (e, m) are **detached** in the R-loss, so gradients flow directly through tau(X). This provides stronger gradient signal for learning treatment effect modifiers from text.
-
-Loss function:
-```
-L = L_outcome(m) + alpha * L_propensity(e) + gamma * L_rlearner(tau)
-
-L_rlearner = E[((Y - m(X)) - tau(X) * (T - e(X)))^2]  # e, m detached
-```
-
-Outputs (predict method):
-- `tau_pred`: Direct treatment effect tau(X)
-- `m_prob`: Marginal outcome probability E[Y|X]
-- `y0_prob`, `y1_prob`: Derived for backward compatibility
-
-Reference: Nie & Wager (2021). Quasi-oracle estimation of heterogeneous treatment effects. Biometrika.
-
-### ConfounderExtractor (`cdt/models/confounder_extractor.py`)
-
-Perceiver-style feature extractor designed for extracting confounder signals from long clinical text. Uses sentence-level processing with sparse cross-attention.
-
-**Standard Architecture (sentence-level):**
-```
-Long Clinical Text
-        ↓
-Split into Sentences (S sentences)
-        ↓
-Sentence Encoder (SentenceTransformer, e.g., all-MiniLM-L6-v2)
-        ↓
-Sentence Embeddings (S × d)
-        ↓
-Latent Queries (K learnable confounder vectors)
-        ↓
-Sparse Cross-Attention (entmax/top-k) with Iterative Refinement
-        ↓
-K Latent Representations (K × d)
-        ↓
-MLP Projection → Causal Head (DragonNet/RLearner)
-```
-
-**Hierarchical Architecture (token-level):**
-With `confounder_hierarchical=True`, preserves fine-grained token signal:
-```
-Long Clinical Text
-        ↓
-Split into Sentences (S sentences)
-        ↓
-Encode EACH sentence with BERT → S × (L_s tokens × 768)
-        ↓
-Mean-pool each sentence → Sentence Embeddings (S × 768)
-        ↓
-Sentence-Level Sparse Attention (entmax) → Sentence Weights (K × S)
-        ↓
-Token-Level Cross-Attention (within each sentence, gated by sentence weights)
-        ↓
-K Confounder Representations (K × D)
-        ↓
-Task-Specific Multi-Head Aggregation (3-way):
-  - Propensity Query → weighted sum → propensity_repr (D,)
-  - For DragonNet:
-    - Y0 Query → weighted sum → y0_repr (D,)
-    - Y1 Query → weighted sum → y1_repr (D,)
-  - For R-Learner:
-    - Outcome Query → weighted sum → outcome_repr (D,)
-    - Tau Query → weighted sum → tau_repr (D,)
-        ↓
-Concatenate: (3*D,) → MLP → Causal Head
-```
-
-**Key features:**
-- **Sparse attention** via entmax (forces exact zeros on irrelevant sentences)
-- **Iterative refinement**: Multiple cross-attention passes for progressive focusing
-- **Explicit confounder initialization**: Optional concept phrases (e.g., "metastatic sites")
-- **Self-attention between latents**: Allows confounders to share information
-- **Attention visualization**: `interpret_attention()` method shows top-attended sentences
-- **Hierarchical mode**: Preserves token-level distinctions (e.g., "ECOG PS 0" vs "ECOG PS 2")
-- **3-way task-specific aggregation**: Different learnable queries for each prediction head (propensity + Y0/Y1 for DragonNet, propensity + outcome/tau for R-Learner) allow distinct confounder weighting per task
-
-**Key configuration:**
-```python
-confounder_num_latents: int = 4        # Learnable latent vectors
-confounder_explicit_texts: List[str]   # Explicit concept phrases
-confounder_num_iterations: int = 2     # Refinement passes
-confounder_sparse_attention: bool = True
-confounder_sparse_alpha: float = 1.5   # 1.5=entmax15, 2.0=sparsemax
-confounder_sparse_method: str = "entmax"  # "entmax", "topk", "softmax"
-
-# Hierarchical mode (BERT-based token-level attention)
-confounder_hierarchical: bool = False   # Enable token-level attention
-confounder_token_encoder: str = "distilbert-base-uncased"  # BERT for token encoding
-confounder_freeze_token_encoder: bool = True
-confounder_max_sentence_tokens: int = 128
-
-# GRU-based mode (learns from scratch)
-confounder_use_gru: bool = False          # Enable GRU-based extraction
-confounder_gru_embedding_dim: int = 128   # Word embedding dimension
-confounder_gru_hidden_dim: int = 128      # GRU hidden state per direction
-confounder_gru_num_layers: int = 1        # Stacked GRU layers
-confounder_gru_bidirectional: bool = True # Bidirectional GRU
-confounder_gru_dropout: float = 0.1
-confounder_gru_max_vocab: int = 50000
-confounder_gru_min_word_freq: int = 2
-confounder_gru_max_sentence_length: int = 128
-```
-
-**GRU-based Hierarchical Architecture (learns from scratch):**
-With `confounder_use_gru=True`, all parameters learn together via the causal objective:
-```
-Long Clinical Text
-        ↓
-Split into Sentences (S sentences)
-        ↓
-Tokenize each sentence (word-level vocabulary)
-        ↓
-Embed tokens with learnable embeddings
-        ↓
-Encode each sentence with BiGRU + attention pooling → (S × encoder_dim)
-        ↓
-Latent Queries (K learnable confounder vectors)
-        ↓
-Sentence-Level Sparse Attention (entmax) → Sentence Weights (K × S)
-        ↓
-Token-Level Cross-Attention (within each sentence, gated by sentence weights)
-        ↓
-K Confounder Representations (K × D)
-        ↓
-Task-Specific Multi-Head Aggregation (3-way):
-  - Propensity Query → weighted sum → propensity_repr (D,)
-  - For DragonNet:
-    - Y0 Query → weighted sum → y0_repr (D,)
-    - Y1 Query → weighted sum → y1_repr (D,)
-  - For R-Learner:
-    - Outcome Query → weighted sum → outcome_repr (D,)
-    - Tau Query → weighted sum → tau_repr (D,)
-        ↓
-Concatenate: (3*D,) → MLP → Causal Head
-```
-
-**Key advantages of GRU mode:**
-- All parameters (embeddings, GRU, attention, latent confounders, task queries) optimized together
-- No domain mismatch from pretrained encoder
-- Lighter weight than BERT-based approaches
-- Better adaptation to specific clinical vocabulary
-- 3-way task-specific aggregation reduces dimensionality from K*D to 3*D (e.g., 8*256=2048 → 768)
-- DragonNet can learn different confounder weights for Y0 vs Y1 (treatment effect modifiers)
-- R-Learner can learn which confounders are prognostic (m) vs effect-modifying (τ)
-- **Important**: Requires `fit_tokenizer(texts)` before training (like CNN/GRU extractors)
-
-**Why this helps for long documents:**
-- Sentence-level attention reduces search space from 2048 tokens to ~50-100 sentences
-- Sparse attention forces each latent to focus on few relevant sentences
-- Iterative refinement allows progressive "zooming in" on confounder mentions
-- Hierarchical mode preserves fine-grained signal that sentence embeddings may lose
-- Works with standard causal loss - no concept labels needed
-
-### HierarchicalTransformerExtractor (`cdt/models/hierarchical_transformer_extractor.py`)
-
-Simple hierarchical feature extractor using sentence-level BERT encoding + transformer pooling.
-
-**Architecture:**
-```
-Long Clinical Text
-        ↓
-Split into Sentences (S sentences)
-        ↓
-Tiny BERT per Sentence → [CLS] token (S × hidden_dim)
-        ↓
-Transformer Layer(s) with learnable [POOL] token
-        ↓
-Final Representation (D,) → DragonNet/RLearner
-```
-
-**Key features:**
-- **Simple design**: No latent confounders or sparse attention - just straightforward hierarchical encoding
-- **Sentence encoder**: Uses lightweight BERT models (e.g., `prajjwal1/bert-tiny` with 4.4M params)
-- **Transformer pooling**: Learnable [POOL] token aggregates sentence embeddings via self-attention
-- **Interpretability**: `interpret_attention()` method shows which sentences the [POOL] token attends to
-- **No fit_tokenizer needed**: Uses pretrained BERT tokenizer
-
-**Key configuration:**
-```python
-hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
-hier_transformer_freeze_sentence_encoder: bool = True  # Freeze encoder weights
-hier_transformer_max_sentences: int = 100  # Max sentences per document
-hier_transformer_max_sentence_length: int = 128  # Max tokens per sentence
-hier_transformer_num_layers: int = 2  # Transformer pooling layers
-hier_transformer_num_heads: int = 4  # Attention heads
-hier_transformer_dim: int = 256  # Transformer hidden dimension
-hier_transformer_dropout: float = 0.1
-hier_transformer_projection_dim: int = 128  # Final output dimension
-```
-
-**When to use:**
-- Long documents where sentence-level processing is appropriate
-- When you want a simpler alternative to ConfounderExtractor
-- When interpretability via sentence attention is desired
-- When you don't need explicit confounder queries
-
-### GatedMILHierarchicalExtractor (`cdt/models/gated_mil_hierarchical_extractor.py`)
-
-Gated MIL (Multiple Instance Learning) attention extractor with task-specific confounder weighting. Uses gated attention (tanh × sigmoid gating from pathology AI) with K learnable confounder queries.
-
-**Sentence-level Architecture (default, `gated_mil_hierarchical=False`):**
-```
-Long Clinical Text
-        ↓
-Split into Sentences (S sentences)
-        ↓
-Tiny BERT per Sentence → [CLS] token (S × D)
-        ↓
-Gated MIL Attention: h = tanh(V·sent) ⊙ sigmoid(U·sent)
-  For each confounder k: a_k = softmax(q_k · W · h)
-        ↓
-K Confounder Representations (K × D)
-        ↓
-Task-Specific Weighting (propensity, tau/y0, outcome/y1)
-        ↓
-Concatenate: [prop_repr || task2_repr || task3_repr] (3 × D)
-        ↓
-MLP Projection → Final Representation
-```
-
-**Token-level Architecture (`gated_mil_hierarchical=True`):**
-```
-Long Clinical Text
-        ↓
-Split into Sentences (S sentences)
-        ↓
-Tiny BERT per Sentence → ALL tokens (S × L × D)
-        ↓
-Token-Level Gated Pooling: Each confounder query attends to tokens
-  Creates K confounder-specific sentence embeddings per sentence
-        ↓
-S × K × D confounder-specific sentence embeddings
-        ↓
-Sentence-Level Gated MIL Attention (per confounder view)
-        ↓
-K Confounder Representations (K × D)
-        ↓
-Task-Specific Weighting → (3 × D)
-        ↓
-MLP Projection → Final Representation
-```
-
-Token-level mode preserves fine-grained distinctions that [CLS] embeddings may lose, such as "ECOG PS 0" vs "ECOG PS 2" or "no metastatic disease" vs "metastatic disease".
-
-**Key features:**
-- **Gated attention**: tanh × sigmoid gating suppresses irrelevant sentences
-- **K confounder queries**: Each learns to extract one type of confounder signal
-- **Task-specific weighting**: Same K confounders, but weighted differently per task
-- **Token-level option**: Preserves fine-grained signal when `gated_mil_hierarchical=True`
-- **Interpretability**: `interpret_attention()` shows top-attended sentences per confounder
-- **No fit_tokenizer needed**: Uses pretrained BERT tokenizer
-
-**Key configuration:**
-```python
-gated_mil_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
-gated_mil_freeze_sentence_encoder: bool = True  # Freeze encoder weights
-gated_mil_max_sentences: int = 100  # Max sentences per document
-gated_mil_max_sentence_length: int = 128  # Max tokens per sentence
-gated_mil_hidden_dim: int = 128  # Hidden dim for gated attention
-gated_mil_num_confounders: int = 4  # Number of confounder queries (K)
-gated_mil_dropout: float = 0.1
-gated_mil_projection_dim: int = 128  # Final output dimension
-# Token-level mode
-gated_mil_hierarchical: bool = False  # Enable token-level gated pooling
-gated_mil_token_hidden_dim: int = 64  # Hidden dim for token-level gating
-```
-
-**When to use:**
-- Long documents with multiple confounders mentioned in different sentences
-- When you want explicit K confounder queries with task-specific weighting
-- When interpretability (which sentences each confounder attends to) is important
-- Use `gated_mil_hierarchical=True` when fine-grained token distinctions matter
-
-### Sparse Attention Utilities (`cdt/models/sparse_attention.py`)
-
-Provides sparse attention mechanisms that produce exact zeros for irrelevant positions:
-- `sparse_softmax()`: Unified interface for entmax/sparsemax with fallback implementations
-- `top_k_attention()`: Hard top-k selection with straight-through gradients
-- `SparseCrossAttention`: Multi-head cross-attention with configurable sparsity
-
-## Key Commands
+## CLI
 
 ```bash
-# Initialize default config
 cdt init --output config.json
-
-# Run experiment
-cdt run --config config.json --device cuda:0 --workers 4
-
-# CLI options
-cdt run --config config.json \
-    --device cuda:1 \
-    --workers 4 \
-    --output-dir ./results \
-    --skip-plasmode \
-    --verbose
-```
-
-## Configuration (`cdt/config.py`)
-
-Main config classes:
-- `ExperimentConfig`: Top-level config
-- `AppliedInferenceConfig`: Dataset paths, column names, CV folds
-- `ModelArchitectureConfig`: Feature extractor type, CNN/BERT/GRU params, DragonNet dims
-- `TrainingConfig`: Learning rate, epochs, batch size, loss weights (alpha_propensity, beta_targreg, gamma_rlearner)
-- `PropensityTrimmingConfig`: Pre-trimming by propensity scores
-- `MatchingAnalysisConfig`: Post-hoc PSM analysis using DragonNet's propensity scores
-- `PlasmodeConfig`: Plasmode simulation parameters
-
-Key architecture settings:
-```python
-# Feature extractor type
-feature_extractor_type: str = "cnn"  # "cnn", "bert", or "gru"
-
-# CNN-specific
-cnn_embedding_dim: int = 128
-cnn_kernel_sizes: List[int] = [3, 4, 5, 7]
-cnn_explicit_filter_concepts: Dict[str, List[str]]  # kernel_size -> concepts
-cnn_num_kmeans_filters: int = 64
-cnn_init_embeddings_from: str = "emilyalsentzer/Bio_ClinicalBERT"
-
-# BERT-specific
-bert_model_name: str = "bert-base-uncased"
-bert_max_length: int = 512
-bert_freeze_encoder: bool = False
-
-# GRU-specific
-gru_hidden_dim: int = 256
-gru_num_layers: int = 2
-gru_max_length: int = 8192  # Efficient for long sequences
+cdt run --config config.json --device cuda:0 --workers 4 [--skip-plasmode] [--verbose]
 ```
 
 ## Dataset Format
 
-Expected columns in Parquet/CSV:
 | Column | Type | Description |
 |--------|------|-------------|
-| `clinical_text` | string | Clinical narrative text |
-| `treatment_indicator` | int/float | Binary treatment (0 or 1) |
-| `outcome_indicator` | int/float | Binary outcome (0 or 1) |
-| `split` | string | Optional: "train", "val", "test" |
+| `clinical_text` | string | Clinical narrative |
+| `treatment_indicator` | int | Binary (0/1) |
+| `outcome_indicator` | int | Binary (0/1) |
+| `split` | string | Optional: "train"/"val"/"test" |
 
-## Workflow Modes
+## Training Pattern
 
-### 1. Applied Inference
-Estimates treatment effects on real data:
-- K-fold cross-validation (default: 5 folds)
-- Fixed train/val/test splits
-- Outputs: `predictions.parquet` with `pred_ite_prob`, `pred_propensity_prob`, etc.
+All extractors follow the same pattern:
 
-### 2. Plasmode Simulation
-Generates synthetic outcomes with known ground truth for method validation:
-1. Train "generator" model on real data
-2. Generate synthetic outcomes with known ATE
-3. Train "evaluator" on synthetic data
-4. Compare estimated vs. true treatment effects
-
-### 3. Propensity Score Matching Analysis
-Post-hoc traditional PSM analysis using DragonNet's learned propensity scores:
-- ATT estimation from matched pairs with bootstrap CIs
-- ATE via IPW (inverse probability weighting)
-- ATE via stratification (propensity subclassification)
-- Balance diagnostics (SMD before/after matching)
-- Rosenbaum sensitivity analysis for hidden bias
-
-## Matching Module (`cdt/matching/`)
-
-**PropensityMatcher** - Main matching class:
-```python
-from cdt.matching import PropensityMatcher, assess_overlap
-
-matcher = PropensityMatcher(
-    method='nearest',      # 'nearest', 'optimal', or 'caliper'
-    caliper=0.2,           # Max distance for valid match
-    caliper_scale='std',   # 'propensity', 'logit', or 'std'
-    ratio=1,               # 1:k matching
-    replacement=False
-)
-
-match_result = matcher.match(propensity_scores, treatment)
-# match_result.matched_pairs: (n_matches, 2) array of indices
-# match_result.distances: distance for each pair
-```
-
-**Helper functions**:
-- `compute_balance_statistics(covariates, treatment, match_result)` - SMD before/after
-- `assess_overlap(propensity_scores, treatment)` - Overlap coefficient, common support
-
-## Analysis Module (`cdt/analysis/`)
-
-**Treatment effect estimation**:
-```python
-from cdt.analysis import (
-    estimate_att_matched,    # ATT from matched pairs
-    estimate_ate_ipw,        # ATE via inverse probability weighting
-    estimate_ate_stratified, # ATE via propensity stratification
-    run_psm_analysis         # Full PSM analysis workflow
-)
-
-# Run full PSM analysis
-from cdt.config import MatchingAnalysisConfig
-results = run_psm_analysis(
-    predictions_df,          # Must have propensity_pred, treatment, outcome columns
-    config=MatchingAnalysisConfig(),
-    output_dir=Path('./psm_results')
-)
-# Returns: match_result, overlap, balance_stats, att_matched, ate_ipw, etc.
-```
-
-**Statistical tests**:
-- `mcnemars_test(outcomes, match_result)` - For binary outcomes
-- `paired_t_test(outcomes, match_result)` - For continuous outcomes
-- `sensitivity_analysis_rosenbaum(outcomes, match_result)` - Rosenbaum bounds
-
-## Synthetic Data Generation (`synthetic_data/`)
-
-LLM-based pipeline for generating synthetic clinical datasets:
-1. Generate confounders from clinical question
-2. Generate treatment/outcome regression equations
-3. Generate summary statistics
-4. Sample patient characteristics and generate clinical histories
-
-Supports both OpenAI API and local vLLM batch inference.
-
-## Key Files for Development
-
-- **Main model**: `cdt/models/causal_text.py` (CausalText)
-- **Causal heads**: `cdt/models/dragonnet.py`, `cdt/models/uplift.py`, `cdt/models/rlearner.py`
-- **Feature extractors**: `cdt/models/cnn_extractor.py`, `cdt/models/bert_extractor.py`, `cdt/models/gru_extractor.py`, `cdt/models/confounder_extractor.py` (ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor), `cdt/models/hierarchical_transformer_extractor.py` (HierarchicalTransformerExtractor), `cdt/models/gated_mil_hierarchical_extractor.py` (GatedMILHierarchicalExtractor)
-- **Gated MIL attention**: `cdt/models/gated_mil_attention.py` (GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling)
-- **Sparse attention**: `cdt/models/sparse_attention.py` (entmax, top-k, SparseCrossAttention)
-- **Training loop**: `cdt/inference/applied.py` (_train_single_model, _train_epoch)
-- **Plasmode**: `cdt/training/plasmode.py` (plasmode simulation experiments)
-- **Config**: `cdt/config.py`
-- **CLI**: `cdt/cli.py`
-- **Dataset**: `cdt/data/dataset.py`
-- **PSM Analysis**: `cdt/analysis/psm_analysis.py` (run_psm_analysis)
-- **Matching**: `cdt/matching/propensity_matcher.py` (PropensityMatcher, MatchResult)
-- **Statistical Tests**: `cdt/analysis/statistical_analysis.py` (ATT, ATE, McNemar's, Rosenbaum)
-
-## Common Patterns
-
-### Training a model manually
 ```python
 from cdt.models import CausalText
 
 model = CausalText(
-    feature_extractor_type="cnn",
-    embedding_dim=128,
-    kernel_sizes=[3, 4, 5, 7],
-    num_kmeans_filters=64,
-    device="cuda:0"
+    feature_extractor_type="gated_mil_hierarchical",  # or cnn, bert, gru, confounder, hierarchical_transformer
+    model_type="rlearner",  # or dragonnet, uplift
+    device="cuda:0",
+    # ... extractor-specific params (see examples/ configs)
 )
 
-# IMPORTANT: Fit tokenizer before training
+# Required for cnn, gru, confounder (GRU mode only)
 model.fit_tokenizer(train_texts)
-
-# Optional: Initialize embeddings from BERT
-model.feature_extractor.init_embeddings_from_bert("emilyalsentzer/Bio_ClinicalBERT")
-
-# Optional: Initialize semantic filters
-model.feature_extractor.init_filters(train_texts)
-
-# Training loop
-for batch in dataloader:
-    losses = model.train_step(batch, alpha_propensity=1.0, beta_targreg=0.1)
-    losses['loss'].backward()
-    optimizer.step()
-```
-
-### Training with R-Learner
-```python
-from cdt.models import CausalText
-
-# Create model with R-Learner architecture
-model = CausalText(
-    feature_extractor_type="cnn",
-    model_type="rlearner",  # Use R-Learner instead of DragonNet
-    embedding_dim=128,
-    kernel_sizes=[3, 4, 5, 7],
-    num_kmeans_filters=64,
-    device="cuda:0"
-)
-
-model.fit_tokenizer(train_texts)
-
-# Training loop with gamma_rlearner
-for batch in dataloader:
-    losses = model.train_step(
-        batch,
-        alpha_propensity=1.0,
-        gamma_rlearner=1.0  # Weight for R-learner loss
-    )
-    losses['loss'].backward()
-    optimizer.step()
-
-# R-learner returns additional loss component
-print(f"R-loss: {losses['r_loss']}")
-```
-
-### Training with ConfounderExtractor
-```python
-from cdt.models import CausalText
-
-# Create model with ConfounderExtractor for long documents
-model = CausalText(
-    feature_extractor_type="confounder",
-    model_type="rlearner",
-    # Confounder extractor settings
-    confounder_num_latents=4,
-    confounder_explicit_texts=[
-        "metastatic disease",
-        "performance status",
-        "prior treatment"
-    ],
-    confounder_value_dim=128,
-    confounder_num_iterations=2,
-    confounder_sparse_attention=True,
-    confounder_sparse_alpha=1.5,  # entmax15
-    device="cuda:0"
-)
-
-# No fit_tokenizer needed - uses pretrained sentence encoder
-model.fit_tokenizer(train_texts)  # No-op for confounder extractor
 
 # Training loop
 for batch in dataloader:
     losses = model.train_step(
         batch,
         alpha_propensity=1.0,
-        gamma_rlearner=1.0
+        gamma_rlearner=1.0,  # R-learner weight
+        beta_targreg=0.1,    # DragonNet targeted regularization
+        stop_grad_propensity=False,  # Prevent propensity dominating features
+        attention_entropy_weight=0.0  # Encourage focused attention
     )
     losses['loss'].backward()
     optimizer.step()
 
-# Interpret attention weights (which sentences each confounder attends to)
-interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
-for doc_idx, doc_interp in enumerate(interpretations):
-    print(f"Document {doc_idx}:")
-    for conf_name, attended in doc_interp.items():
-        print(f"  {conf_name}: {[a['sentence'][:50] for a in attended]}")
-```
-
-### Training with Hierarchical ConfounderExtractor
-```python
-from cdt.models import CausalText
-
-# Hierarchical mode preserves token-level signal (e.g., "PS 0" vs "PS 2")
-model = CausalText(
-    feature_extractor_type="confounder",
-    model_type="rlearner",
-    # Enable hierarchical mode
-    confounder_hierarchical=True,
-    confounder_token_encoder="distilbert-base-uncased",  # or "emilyalsentzer/Bio_ClinicalBERT"
-    confounder_freeze_token_encoder=True,
-    confounder_max_sentence_tokens=128,
-    # Other settings
-    confounder_num_latents=4,
-    confounder_explicit_texts=["metastatic disease", "performance status"],
-    confounder_value_dim=128,
-    confounder_sparse_attention=True,
-    confounder_sparse_alpha=1.5,
-    device="cuda:0"
-)
-
-# Training is the same
-model.fit_tokenizer(train_texts)  # No-op
-for batch in dataloader:
-    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
-    losses['loss'].backward()
-    optimizer.step()
-```
-
-### Training with GRU Hierarchical ConfounderExtractor
-```python
-from cdt.models import CausalText
-
-# GRU mode: learns entirely from scratch via causal objective
-model = CausalText(
-    feature_extractor_type="confounder",
-    model_type="rlearner",
-    # Enable GRU-based mode (learns from scratch)
-    confounder_use_gru=True,
-    confounder_gru_embedding_dim=128,
-    confounder_gru_hidden_dim=128,
-    confounder_gru_num_layers=1,
-    confounder_gru_bidirectional=True,
-    confounder_gru_min_word_freq=2,
-    confounder_gru_max_sentence_length=128,
-    # Confounder architecture
-    confounder_num_latents=8,
-    confounder_value_dim=128,
-    confounder_max_sentences=100,
-    confounder_num_heads=4,
-    # Sparse attention
-    confounder_sparse_attention=True,
-    confounder_sparse_method="entmax",
-    confounder_sparse_alpha=1.5,
-    device="cuda:0"
-)
-
-# IMPORTANT: GRU mode requires tokenizer fitting (like CNN/GRU extractors)
-model.fit_tokenizer(train_texts)
-
-# Training loop
-for batch in dataloader:
-    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
-    losses['loss'].backward()
-    optimizer.step()
-
-# Interpret attention weights
-interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
-for doc_idx, doc_interp in enumerate(interpretations):
-    print(f"Document {doc_idx}:")
-    for conf_name, attended in doc_interp.items():
-        print(f"  {conf_name}: {[a['sentence'][:50] for a in attended]}")
-```
-
-### Training with HierarchicalTransformerExtractor
-```python
-from cdt.models import CausalText
-
-# Simple hierarchical approach: sentence BERT + transformer pooling
-model = CausalText(
-    feature_extractor_type="hierarchical_transformer",
-    model_type="rlearner",
-    # Sentence encoder (prajjwal1/bert-tiny is fast and lightweight)
-    hier_transformer_sentence_model="prajjwal1/bert-tiny",
-    hier_transformer_freeze_sentence_encoder=True,
-    # Transformer pooling
-    hier_transformer_num_layers=2,
-    hier_transformer_num_heads=4,
-    hier_transformer_dim=256,
-    hier_transformer_dropout=0.1,
-    hier_transformer_projection_dim=128,
-    # Document limits
-    hier_transformer_max_sentences=100,
-    hier_transformer_max_sentence_length=128,
-    device="cuda:0"
-)
-
-# No fit_tokenizer needed - uses pretrained BERT tokenizer
-model.fit_tokenizer(train_texts)  # Triggers lazy initialization
-
-# Training loop
-for batch in dataloader:
-    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
-    losses['loss'].backward()
-    optimizer.step()
-
-# Interpret attention weights (which sentences the [POOL] token attends to)
-interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
-for doc_idx, interp in enumerate(interpretations):
-    print(f"Document {doc_idx}:")
-    for sent_info in interp['top_sentences']:
-        print(f"  [{sent_info['attention']:.3f}] {sent_info['sentence'][:60]}...")
-```
-
-### Training with GatedMILHierarchicalExtractor
-```python
-from cdt.models import CausalText
-
-# Gated MIL with K confounder queries and task-specific weighting
-model = CausalText(
-    feature_extractor_type="gated_mil_hierarchical",
-    model_type="rlearner",
-    # Sentence encoder
-    gated_mil_sentence_model="prajjwal1/bert-tiny",
-    gated_mil_freeze_sentence_encoder=True,
-    # Gated MIL attention
-    gated_mil_num_confounders=4,  # K confounder queries
-    gated_mil_hidden_dim=128,
-    gated_mil_projection_dim=128,
-    # Document limits
-    gated_mil_max_sentences=100,
-    gated_mil_max_sentence_length=128,
-    # Optional: token-level mode for fine-grained signal
-    gated_mil_hierarchical=False,  # Set True to enable token-level pooling
-    gated_mil_token_hidden_dim=64,  # Only used when hierarchical=True
-    device="cuda:0"
-)
-
-# No fit_tokenizer needed - uses pretrained BERT tokenizer
-model.fit_tokenizer(train_texts)  # Triggers lazy initialization
-
-# Training loop
-for batch in dataloader:
-    losses = model.train_step(batch, alpha_propensity=1.0, gamma_rlearner=1.0)
-    losses['loss'].backward()
-    optimizer.step()
-
-# Interpret attention weights (which sentences each confounder attends to)
-interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
-for doc_idx, interp in enumerate(interpretations):
-    print(f"Document {doc_idx}:")
-    for conf_name, top_sents in interp['top_sentences_per_confounder'].items():
-        print(f"  {conf_name}:")
-        for sent_info in top_sents[:3]:
-            print(f"    [{sent_info['attention']:.3f}] {sent_info['sentence'][:50]}...")
-
-# Get task-specific confounder weights
-task_weights = model.feature_extractor.get_task_weights()
-print(f"Propensity weights: {task_weights['propensity']}")
-print(f"Tau weights: {task_weights['tau']}")
-```
-
-### Getting predictions
-```python
+# Predictions
 preds = model.predict(texts)
-# preds contains: y0_prob, y1_prob, propensity, y0_logit, y1_logit, t_logit
-
-# Individual treatment effect (probability scale)
 ite = preds['y1_prob'] - preds['y0_prob']
 ```
 
-### Advanced Training Options for Improving Tau Learning
+See `examples/` for complete config files for each extractor type.
 
-When training with the Gated MIL Hierarchical extractor and R-Learner, several options help improve treatment effect (τ) learning:
+## Extractor-Specific Notes
 
-**1. Stop Gradient from Propensity (`stop_grad_propensity=True`)**
+### CNN (`cnn_extractor.py`)
+- Semantic filter init from explicit clinical concepts
+- K-means filter init from training n-grams
+- `interpret_filters()` for filter interpretability
 
-Prevents propensity loss from affecting the feature extractor. Since propensity is easier to learn than treatment effects, it can dominate representation learning. This forces the representation to optimize for tau/outcome:
+### Confounder (`confounder_extractor.py`)
+Perceiver-style with K learnable latent queries and sparse attention (entmax).
+
+| Mode | Flag | Encoder | Notes |
+|------|------|---------|-------|
+| Sentence-level | default | SentenceTransformer | Fast, pools sentences |
+| Hierarchical | `confounder_hierarchical=True` | BERT per sentence | Token-level attention |
+| GRU | `confounder_use_gru=True` | Learnable BiGRU | Learns from scratch, needs fit_tokenizer |
+
+Key params: `confounder_num_latents`, `confounder_sparse_alpha` (1.5=entmax15), `confounder_explicit_texts`
+
+### Gated MIL (`gated_mil_hierarchical_extractor.py`)
+Gated attention (tanh × sigmoid) with K confounder queries and task-specific weighting.
+
+| Mode | Flag | Notes |
+|------|------|-------|
+| Chunk-level | default | [CLS] per chunk |
+| Token-level | `gated_mil_hierarchical=True` | Token-level gated pooling |
+| Mean pooling | `gated_mil_use_mean_pooling=True` | Mean pool vs [CLS] |
+
+Key params: `gated_mil_max_chunks`, `gated_mil_chunk_size`, `gated_mil_chunk_overlap`, `gated_mil_num_confounders`
+
+Interpretability: `interpret_attention()`, `get_task_weights()`
+
+### Hierarchical Transformer (`hierarchical_transformer_extractor.py`)
+Simple: chunk BERT → transformer layers → [POOL] token aggregation.
+
+Key params: `hier_transformer_max_chunks`, `hier_transformer_chunk_size`, `hier_transformer_chunk_overlap`
+
+### GRU-Transformer-MIL (`gru_transformer_mil_extractor.py`)
+Combines BiGRU chunk encoding (learns from scratch) with transformer cross-chunk processing
+and gated MIL attention with K confounder queries.
+
+| Stage | Component | Description |
+|-------|-----------|-------------|
+| Chunk encoding | BiGRU + attention | Shared GRU pools tokens within each chunk |
+| Cross-chunk | Transformer | Adds positional info and cross-chunk context |
+| Aggregation | Gated MIL | K confounder queries with task-specific weighting |
+
+Key params: `gru_mil_embedding_dim`, `gru_mil_gru_hidden_dim`, `gru_mil_transformer_layers`,
+`gru_mil_num_confounders`, `gru_mil_chunk_size`
+
+Requires `fit_tokenizer()` since it learns vocabulary from scratch.
+
+Interpretability: `interpret_attention()`, `get_task_weights()`
+
+### GRU-Pool (`gru_pool_extractor.py`)
+Simpler variant of GRU-Transformer-MIL: BiGRU chunk encoding + transformer cross-chunk context
++ gated attention pooling for final aggregation. Produces a single feature vector (no task-specific
+K confounder queries).
+
+| Stage | Component | Description |
+|-------|-----------|-------------|
+| Chunk encoding | BiGRU + attention | Shared GRU pools tokens within each chunk |
+| Cross-chunk | Transformer | Adds positional info and cross-chunk context |
+| Aggregation | Gated attention pooling | Single document vector via tanh×sigmoid gating |
+
+Key params: `gru_pool_embedding_dim`, `gru_pool_gru_hidden_dim`, `gru_pool_transformer_layers`,
+`gru_pool_gated_attention_dim`, `gru_pool_chunk_size`
+
+Requires `fit_tokenizer()` since it learns vocabulary from scratch.
+
+Interpretability: `interpret_attention()`, `get_attention_weights()`
+
+## Training Options for τ Learning
+
+| Option | Effect |
+|--------|--------|
+| `stop_grad_propensity=True` | Prevents propensity from dominating representation |
+| `attention_entropy_weight>0` | Encourages focused attention (low entropy) |
+| `gamma_rlearner>1.0` | Stronger treatment effect signal |
+
+## Matching & Analysis
 
 ```python
-losses = model.train_step(
-    batch,
-    alpha_propensity=1.0,
-    gamma_rlearner=1.0,
-    stop_grad_propensity=True  # Feature extractor ignores propensity gradient
-)
+from cdt.matching import PropensityMatcher
+from cdt.analysis import run_psm_analysis, estimate_att_matched, estimate_ate_ipw
+
+# Matching
+matcher = PropensityMatcher(method='nearest', caliper=0.2)
+match_result = matcher.match(propensity_scores, treatment)
+
+# Full PSM analysis
+results = run_psm_analysis(predictions_df, config, output_dir)
 ```
 
-**2. Attention Entropy Regularization (`attention_entropy_weight > 0`)**
+## Workflow Modes
 
-Penalizes diffuse attention distributions to encourage focused attention on specific sentences. Low entropy = focused attention (good for needle-in-haystack). Only applies to Gated MIL Hierarchical extractor:
-
-```python
-losses = model.train_step(
-    batch,
-    alpha_propensity=1.0,
-    gamma_rlearner=1.0,
-    attention_entropy_weight=0.1  # Encourage focused attention
-)
-# losses['entropy_loss'] contains the entropy loss component
-```
-
-**3. Stronger R-Loss Weighting (`gamma_rlearner > 1.0`)**
-
-Increases the weight of the R-learner loss relative to propensity and outcome losses, shifting optimization focus toward treatment effect:
-
-```python
-losses = model.train_step(
-    batch,
-    alpha_propensity=1.0,
-    gamma_rlearner=5.0  # Stronger tau signal (default 1.0)
-)
-```
-
-**4. Mean Pooling Instead of [CLS] (`gated_mil_use_mean_pooling=True`)**
-
-Uses mean pooling over all tokens instead of [CLS] token for sentence embeddings. May provide more robust representations that capture the full sentence content:
-
-```python
-model = CausalText(
-    feature_extractor_type="gated_mil_hierarchical",
-    model_type="rlearner",
-    gated_mil_use_mean_pooling=True,  # Mean pool instead of [CLS]
-    # ... other options
-)
-```
-
-**Command-line usage:**
-
-```bash
-python oracle_experiment_scripts/run_gated_mil_token_level_experiment_rlearner.py \
-    --dataset ../data.parquet \
-    --output-dir ./results \
-    --gamma-rlearner 5.0 \
-    --stop-grad-propensity \
-    --attention-entropy-weight 0.1 \
-    --use-mean-pooling \
-    --save-attention \
-    --epochs 25
-```
-
-**Interpreting attention entropy:**
-
-When `--save-attention` is enabled, the output includes entropy metrics:
-
-```python
-interpretations = model.feature_extractor.interpret_attention(texts, top_k=5)
-for doc in interpretations:
-    for conf_name, entropy_info in doc['attention_entropy'].items():
-        print(f"{conf_name}:")
-        print(f"  Sentence entropy: {entropy_info['sentence_entropy']:.3f}")  # Lower = more focused
-        if 'token_entropy_mean' in entropy_info:
-            print(f"  Token entropy: {entropy_info['token_entropy_mean']:.3f}")
-```
-
-## Dependencies
-
-Core: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow
-Optional:
-- openai (for synthetic data generation)
-- sentence-transformers (for ConfounderExtractor)
-- entmax (for sparse attention; fallback implementations provided if not installed)
+1. **Applied Inference**: K-fold CV or fixed splits → `predictions.parquet`
+2. **Plasmode Simulation**: Synthetic outcomes with known ATE for validation
+3. **PSM Analysis**: Post-hoc matching with ATT/ATE estimation, Rosenbaum bounds
 
 ## Output Files
 
 ```
 output_dir/
-├── config.json                 # Experiment configuration
+├── config.json
 ├── applied_inference/
-│   ├── predictions.parquet     # Per-sample predictions
-│   ├── training_log.csv        # Training metrics
-│   ├── filter_interpretations.json          # If save_filter_interpretations=true (CNN only)
-│   ├── filter_interpretations_summary.txt   # Human-readable filter summary
-│   ├── confounder_interpretations.json      # If save_confounder_interpretations=true
-│   ├── confounder_interpretations_summary.txt  # Human-readable confounder summary
-│   ├── confounder_task_weights.json         # Task-specific confounder weights (propensity vs outcome)
-│   └── psm_analysis/           # If matching_analysis.enabled=true
-│       ├── matched_pairs.csv   # Matched treated-control pairs
-│       ├── balance_statistics.csv # SMD before/after matching
-│       ├── sensitivity_analysis.csv # Rosenbaum bounds
-│       └── psm_summary.json    # Treatment effect estimates
+│   ├── predictions.parquet
+│   ├── training_log.csv
+│   ├── *_interpretations.json  # Filter/confounder attention
+│   └── psm_analysis/           # If enabled
 └── plasmode_experiments/       # If enabled
-    └── results.csv             # Plasmode results
 ```
 
-## Notes for Development
+## Key Files
 
-1. **Feature extractor type**: CNN is fastest, BERT is most expressive, GRU is efficient for long sequences, Confounder is best for extracting specific signals from long documents, Hierarchical Transformer is simple and effective for long documents
-2. **Tokenizer fitting**: CNN/GRU require `fit_tokenizer()` before use; BERT/Confounder (pretrained)/Hierarchical Transformer use pretrained tokenizers; GRU Confounder (`confounder_use_gru=True`) requires `fit_tokenizer()`
-3. **Filter initialization**: Semantic filters improve interpretability; k-means captures data patterns
-4. **Propensity trimming**: Optional preprocessing to enforce positivity assumption
-5. **All predictions are on probability scale**: ITE = P(Y=1|T=1,X) - P(Y=1|T=0,X)
-6. **PSM analysis**: Post-hoc analysis using `cdt.analysis.run_psm_analysis()` - validates DragonNet estimates with traditional methods
-7. **Matching module**: `cdt.matching.PropensityMatcher` supports nearest neighbor, optimal (Hungarian), and caliper matching
-8. **R-Learner vs DragonNet**: R-Learner provides stronger gradient signal for tau(X) by detaching nuisance functions; use when treatment effect heterogeneity is the primary focus
-9. **Confounder extractor**: Use for long documents (2048+ tokens) where confounders are mentioned in specific sentences. Sparse attention (entmax) forces focus on relevant sentences. Use `interpret_attention()` to visualize what each latent confounder attends to.
-10. **Hierarchical confounder mode**: Enable with `confounder_hierarchical=True` when fine-grained token distinctions matter (e.g., "ECOG PS 0" vs "ECOG PS 2"). Uses sentence-level sparse attention to focus on relevant sentences, then token-level attention to preserve specific values.
-11. **GRU confounder mode**: Enable with `confounder_use_gru=True` for learning confounder extraction from scratch. All parameters (embeddings, GRU, attention, latent confounders) are optimized together via the causal loss. Requires `fit_tokenizer()` before training. Best when pretrained encoders may have domain mismatch or when you want the model to learn clinical-specific representations.
-12. **Hierarchical Transformer extractor**: Use `feature_extractor_type="hierarchical_transformer"` for a simple sentence-level encoding approach. Uses lightweight BERT (e.g., `prajjwal1/bert-tiny`) to encode each sentence, then transformer layers with a learnable [POOL] token to aggregate. Simpler than ConfounderExtractor but still effective for long documents. Use `interpret_attention()` to see which sentences contribute most to the representation.
-13. **Gated MIL Hierarchical extractor**: Use `feature_extractor_type="gated_mil_hierarchical"` for gated MIL attention with K confounder queries and task-specific weighting. Uses tanh × sigmoid gating (from pathology AI) to suppress irrelevant sentences. K confounders are shared across tasks but weighted differently for propensity vs tau vs outcome. Enable `gated_mil_hierarchical=True` for token-level gated pooling when fine-grained distinctions matter. Use `interpret_attention()` to see which sentences each confounder attends to, and `get_task_weights()` to see how confounders are weighted per task.
-14. **Stop gradient from propensity**: Enable `stop_grad_propensity=True` in `train_step()` to prevent propensity loss from dominating feature extraction. This forces the representation to optimize for tau/outcome prediction, which can improve treatment effect learning.
-15. **Attention entropy regularization**: Use `attention_entropy_weight > 0` in `train_step()` to penalize diffuse attention. This encourages the model to focus on specific sentences rather than spreading attention uniformly, which helps with "needle in a haystack" confounder extraction.
-16. **Mean pooling option**: Use `gated_mil_use_mean_pooling=True` to use mean pooling over all tokens instead of [CLS] token. This may provide more robust sentence representations that capture the full sentence content.
+| Purpose | Files |
+|---------|-------|
+| Main model | `cdt/models/causal_text.py` |
+| Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py` |
+| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py` |
+| Text chunking | `cdt/models/chunking.py` |
+| Training | `cdt/inference/applied.py` |
+| Config | `cdt/config.py` |
+| PSM | `cdt/analysis/psm_analysis.py`, `cdt/matching/propensity_matcher.py` |
+
+## Dependencies
+
+**Core**: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow
+
+**Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided)
+
+## Adding a New Feature Extractor
+
+When adding a new feature extractor type, update ALL of the following files:
+
+| File | What to Update |
+|------|----------------|
+| `cdt/models/new_extractor.py` | Create the new extractor module |
+| `cdt/models/__init__.py` | Add exports for new classes |
+| `cdt/config.py` | Add `normalize_feature_extractor_type()` entry and config options |
+| `cdt/models/causal_text.py` | Add import, `__init__` params, config storage, instantiation case |
+| `cdt/inference/applied.py` | Add CausalText params and initialization path |
+| `cdt/training/plasmode.py` | Add CausalText params and initialization path |
+| `cdt/models/propensity_model.py` | Add import, `__init__` params, config, instantiation, `create_propensity_model_from_config()` |
+| `cdt/training/propensity_trimming.py` | Add initialization path in `_train_propensity_model()` |
+| `examples/new_config.json` | Create example configuration file |
+| `CLAUDE.md` | Update Feature Extractors table, architecture docs, file lists |
+| `README.md` | Update documentation if significant user-facing changes |
+
+**Checklist for new extractor:**
+1. Create extractor module with `forward()`, `fit_tokenizer()` (if needed), `interpret_attention()`, `get_state()`
+2. Add to `__init__.py` exports
+3. Add normalization alias in `config.py` (e.g., `"gru_pool"` -> `"gru_pool"`)
+4. Add all config options to `ModelArchitectureConfig` dataclass
+5. Add instantiation in `CausalText.__init__()` with logging
+6. Add params to `CausalText` constructor and config dict
+7. Mirror changes to `applied.py`, `plasmode.py`, `propensity_model.py`, `propensity_trimming.py`
+8. Create example config JSON
+9. Update this file's documentation tables
+10. Test with unit tests and integration tests
+
+## Quick Reference
+
+- **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale)
+- **Tokenizer**: Required for `cnn`, `gru`, `confounder` with GRU mode, `gru_transformer_mil`, `gru_pool`
+- **Long docs**: Use `confounder`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, or `gru_pool`
+- **Interpretability**: `interpret_filters()` (CNN), `interpret_attention()` (others)
+- **R-Learner vs DragonNet**: R-Learner for heterogeneous treatment effects; DragonNet for general use

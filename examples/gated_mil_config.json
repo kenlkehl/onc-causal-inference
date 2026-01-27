@@ -6,7 +6,7 @@
   "save_confounder_interpretations": true,
   "confounder_interpretation_top_k": 5,
 
-  "_comment_overview": "GatedMILHierarchicalExtractor uses gated MIL (Multiple Instance Learning) attention with K learnable confounder queries. It splits text into sentences, encodes each with tiny BERT, then applies gated attention (tanh * sigmoid gating) to extract K confounder representations. Each task (propensity, tau, outcome) learns to weight these confounders differently. This is causally coherent: confounders affect both treatment and outcome, but tasks may weight them differently.",
+  "_comment_overview": "GatedMILHierarchicalExtractor uses gated MIL (Multiple Instance Learning) attention with K learnable confounder queries. It splits text into overlapping token chunks, encodes each with tiny BERT, then applies gated attention (tanh * sigmoid gating) to extract K confounder representations. Each task (propensity, tau, outcome) learns to weight these confounders differently. This is causally coherent: confounders affect both treatment and outcome, but tasks may weight them differently.",
 
   "applied_inference": {
     "dataset_path": "./data/clinical_notes.parquet",
@@ -20,17 +20,20 @@
       "model_type": "rlearner",
       "feature_extractor_type": "gated_mil_hierarchical",
 
-      "_comment_sentence_encoder": "Sentence encoder model from HuggingFace. prajjwal1/bert-tiny is very fast (4.4M params). For better quality, try distilbert-base-uncased or prajjwal1/bert-small.",
+      "_comment_chunk_encoder": "Chunk encoder model from HuggingFace. prajjwal1/bert-tiny is very fast (4.4M params). For better quality, try distilbert-base-uncased or prajjwal1/bert-small.",
       "gated_mil_sentence_model": "prajjwal1/bert-tiny",
 
-      "_comment_freeze": "Whether to freeze the sentence encoder weights. True is faster and uses less memory; False allows fine-tuning.",
+      "_comment_freeze": "Whether to freeze the chunk encoder weights. True is faster and uses less memory; False allows fine-tuning.",
       "gated_mil_freeze_sentence_encoder": true,
 
-      "_comment_max_sentences": "Maximum sentences per document. Documents with more sentences will have later sentences truncated.",
-      "gated_mil_max_sentences": 100,
+      "_comment_max_chunks": "Maximum chunks per document. Documents with more chunks will have later chunks truncated.",
+      "gated_mil_max_chunks": 100,
 
-      "_comment_max_sentence_length": "Maximum tokens per sentence for BERT encoding. Sentences longer than this are truncated.",
-      "gated_mil_max_sentence_length": 128,
+      "_comment_chunk_size": "Number of tokens per chunk. Each chunk is encoded by BERT.",
+      "gated_mil_chunk_size": 128,
+
+      "_comment_chunk_overlap": "Number of overlapping tokens between adjacent chunks. Provides context continuity.",
+      "gated_mil_chunk_overlap": 32,
 
       "_comment_hidden_dim": "Hidden dimension for gated MIL attention layers (V, U, W projections).",
       "gated_mil_hidden_dim": 128,
@@ -44,7 +47,7 @@
       "_comment_projection_dim": "Final output dimension of the feature extractor. This feeds into DragonNet/RLearner.",
       "gated_mil_projection_dim": 128,
 
-      "_comment_hierarchical": "Token-level hierarchical mode. When true, applies token-level gated attention to create K confounder-specific sentence representations. Preserves fine-grained distinctions like 'ECOG PS 0' vs 'ECOG PS 2'.",
+      "_comment_hierarchical": "Token-level hierarchical mode. When true, applies token-level gated attention to create K confounder-specific chunk representations. Preserves fine-grained distinctions like 'ECOG PS 0' vs 'ECOG PS 2'.",
       "gated_mil_hierarchical": false,
 
       "_comment_token_hidden_dim": "Hidden dimension for token-level gated attention. Only used when gated_mil_hierarchical=true.",
@@ -93,8 +96,9 @@
       "feature_extractor_type": "gated_mil_hierarchical",
       "gated_mil_sentence_model": "prajjwal1/bert-tiny",
       "gated_mil_freeze_sentence_encoder": true,
-      "gated_mil_max_sentences": 100,
-      "gated_mil_max_sentence_length": 128,
+      "gated_mil_max_chunks": 100,
+      "gated_mil_chunk_size": 128,
+      "gated_mil_chunk_overlap": 32,
       "gated_mil_hidden_dim": 128,
       "gated_mil_num_confounders": 4,
       "gated_mil_dropout": 0.1,
@@ -117,8 +121,9 @@
       "feature_extractor_type": "gated_mil_hierarchical",
       "gated_mil_sentence_model": "prajjwal1/bert-tiny",
       "gated_mil_freeze_sentence_encoder": true,
-      "gated_mil_max_sentences": 100,
-      "gated_mil_max_sentence_length": 128,
+      "gated_mil_max_chunks": 100,
+      "gated_mil_chunk_size": 128,
+      "gated_mil_chunk_overlap": 32,
       "gated_mil_hidden_dim": 128,
       "gated_mil_num_confounders": 4,
       "gated_mil_dropout": 0.1,
