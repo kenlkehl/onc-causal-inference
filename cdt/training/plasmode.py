@@ -400,6 +400,10 @@ def _train_cnn_model(
         gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
         gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # CLAM instance-level loss args
+        clam_enabled=getattr(arch_config, 'clam_enabled', False),
+        clam_num_instances=getattr(arch_config, 'clam_num_instances', 5),
+        clam_instance_hidden_dim=getattr(arch_config, 'clam_instance_hidden_dim', 64),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -515,6 +519,7 @@ def _train_cnn_model(
     gamma_rlearner = getattr(train_config, 'gamma_rlearner', 1.0)
     stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(train_config, 'attention_entropy_weight', 0.0)
+    clam_instance_weight = getattr(train_config, 'clam_instance_weight', 0.5)
 
     for epoch in range(train_config.epochs):
         model.train()
@@ -531,7 +536,8 @@ def _train_cnn_model(
                 beta_targreg=train_config.beta_targreg,
                 gamma_rlearner=gamma_rlearner,
                 stop_grad_propensity=stop_grad_propensity,
-                attention_entropy_weight=attention_entropy_weight
+                attention_entropy_weight=attention_entropy_weight,
+                clam_instance_weight=clam_instance_weight
             )
             losses['loss'].backward()
             optimizer.step()
@@ -552,7 +558,8 @@ def _train_cnn_model(
                     beta_targreg=train_config.beta_targreg,
                     gamma_rlearner=gamma_rlearner,
                     stop_grad_propensity=stop_grad_propensity,
-                    attention_entropy_weight=attention_entropy_weight
+                    attention_entropy_weight=attention_entropy_weight,
+                    clam_instance_weight=clam_instance_weight
                 )
                 val_loss += losses['loss'].item()
 

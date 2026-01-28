@@ -172,6 +172,10 @@ class CausalText(nn.Module):
         gru_pool_projection_dim: int = 128,
         gru_pool_max_vocab: int = 50000,
         gru_pool_min_word_freq: int = 2,
+        # CLAM instance-level loss args (for GRU-Pool extractor)
+        clam_enabled: bool = False,
+        clam_num_instances: int = 5,
+        clam_instance_hidden_dim: int = 64,
         # DragonNet args
         dragonnet_representation_dim: int = 128,
         dragonnet_hidden_outcome_dim: int = 64,
@@ -327,6 +331,9 @@ class CausalText(nn.Module):
             'gru_pool_projection_dim': gru_pool_projection_dim,
             'gru_pool_max_vocab': gru_pool_max_vocab,
             'gru_pool_min_word_freq': gru_pool_min_word_freq,
+            'clam_enabled': clam_enabled,
+            'clam_num_instances': clam_num_instances,
+            'clam_instance_hidden_dim': clam_instance_hidden_dim,
             'dragonnet_representation_dim': dragonnet_representation_dim,
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
@@ -586,6 +593,46 @@ class CausalText(nn.Module):
         # Alias for backward compatibility
         self.dragonnet = self.net
 
+        # CLAM instance-level loss head (for GRU-Pool extractor)
+        # Creates a separate, lightweight causal head for top-attended chunks
+        self.clam_enabled = clam_enabled
+        self.clam_num_instances = clam_num_instances
+        self.clam_instance_hidden_dim = clam_instance_hidden_dim
+        self.instance_head = None
+
+        if clam_enabled:
+            if self.feature_extractor_type != "gru_pool":
+                logger.warning("CLAM instance loss is only supported for gru_pool extractor. Disabling CLAM.")
+                self.clam_enabled = False
+            else:
+                # Instance head operates on transformer_dim (chunk embedding dimension)
+                instance_input_dim = gru_pool_transformer_dim
+
+                # Use the same causal head type as the main model
+                if model_type == "rlearner":
+                    self.instance_head = RLearnerNet(
+                        input_dim=instance_input_dim,
+                        representation_dim=clam_instance_hidden_dim,
+                        hidden_outcome_dim=clam_instance_hidden_dim // 2,
+                        dropout=dragonnet_dropout
+                    )
+                elif model_type == "uplift":
+                    self.instance_head = UpliftNet(
+                        input_dim=instance_input_dim,
+                        representation_dim=clam_instance_hidden_dim,
+                        hidden_outcome_dim=clam_instance_hidden_dim // 2,
+                        dropout=dragonnet_dropout
+                    )
+                else:
+                    self.instance_head = DragonNet(
+                        input_dim=instance_input_dim,
+                        representation_dim=clam_instance_hidden_dim,
+                        hidden_outcome_dim=clam_instance_hidden_dim // 2,
+                        dropout=dragonnet_dropout
+                    )
+                logger.info(f"CLAM instance-level loss enabled: {clam_num_instances} top chunks, "
+                           f"instance_head_dim={clam_instance_hidden_dim}")
+
         # Move to device
         self.to(self._device)
 
@@ -646,7 +693,8 @@ class CausalText(nn.Module):
         gamma_rlearner: float = 1.0,
         label_smoothing: float = 0.0,
         stop_grad_propensity: bool = False,
-        attention_entropy_weight: float = 0.0
+        attention_entropy_weight: float = 0.0,
+        clam_instance_weight: float = 0.5
     ) -> Dict[str, torch.Tensor]:
         """
         Perform single training step.
@@ -664,6 +712,8 @@ class CausalText(nn.Module):
             attention_entropy_weight: Weight for attention entropy regularization.
                 Higher = stronger penalty on diffuse attention. Only applies to
                 gated_mil_hierarchical extractor.
+            clam_instance_weight: Weight for CLAM instance-level loss. Only applies
+                when clam_enabled=True and using gru_pool extractor.
 
         Returns:
             Dictionary with loss components and detached predictions
@@ -672,7 +722,7 @@ class CausalText(nn.Module):
         if self.model_type == "rlearner":
             return self._train_step_rlearner(
                 batch, alpha_propensity, gamma_rlearner, label_smoothing,
-                stop_grad_propensity, attention_entropy_weight
+                stop_grad_propensity, attention_entropy_weight, clam_instance_weight
             )
 
         texts = batch['texts']
@@ -722,14 +772,59 @@ class CausalText(nn.Module):
         else:
             targreg_loss = torch.tensor(0.0, device=self._device)
 
+        # CLAM instance-level loss (if enabled)
+        instance_loss = torch.tensor(0.0, device=self._device)
+        if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
+            # Get chunk embeddings and attention weights
+            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+
+            all_top_chunks = []
+            expanded_treatments = []
+            expanded_outcomes = []
+
+            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                if chunk_embs.size(0) == 0:
+                    continue
+                B = min(self.clam_num_instances, chunk_embs.size(0))
+                top_indices = torch.topk(attn_weights, B).indices
+                top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
+
+                all_top_chunks.append(top_chunks)
+                expanded_treatments.extend([treatments[i]] * B)
+                expanded_outcomes.extend([outcomes[i]] * B)
+
+            if all_top_chunks:
+                stacked_chunks = torch.cat(all_top_chunks, dim=0)
+                exp_treatments = torch.stack(expanded_treatments)
+                exp_outcomes = torch.stack(expanded_outcomes)
+
+                # Forward through instance head (DragonNet)
+                inst_y0, inst_y1, inst_t, _ = self.instance_head(stacked_chunks)
+
+                # Instance propensity loss
+                instance_propensity_loss = F.binary_cross_entropy_with_logits(
+                    inst_t.squeeze(-1), exp_treatments
+                )
+
+                # Instance outcome loss (factual only)
+                inst_factual = torch.where(
+                    exp_treatments.unsqueeze(1) > 0.5, inst_y1, inst_y0
+                )
+                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                    inst_factual.squeeze(-1), exp_outcomes
+                )
+
+                instance_loss = instance_outcome_loss + alpha_propensity * instance_propensity_loss
+
         # Total loss
         total_loss = (
             outcome_loss +
             alpha_propensity * propensity_loss +
-            beta_targreg * targreg_loss
+            beta_targreg * targreg_loss +
+            clam_instance_weight * instance_loss
         )
 
-        return {
+        result = {
             'loss': total_loss,
             'outcome_loss': outcome_loss.detach(),
             'propensity_loss': propensity_loss.detach(),
@@ -739,6 +834,11 @@ class CausalText(nn.Module):
             't_logit': t_logit.detach()
         }
 
+        if self.clam_enabled:
+            result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
+
+        return result
+
     def _train_step_rlearner(
         self,
         batch: Dict[str, Any],
@@ -746,7 +846,8 @@ class CausalText(nn.Module):
         gamma_rlearner: float,
         label_smoothing: float,
         stop_grad_propensity: bool = False,
-        attention_entropy_weight: float = 0.0
+        attention_entropy_weight: float = 0.0,
+        clam_instance_weight: float = 0.5
     ) -> Dict[str, torch.Tensor]:
         """
         Perform R-learner training step with three-headed loss.
@@ -856,12 +957,66 @@ class CausalText(nn.Module):
         # R-loss: E[((Y - m(X)) - tau(X) * (T - e(X)))^2]
         r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
 
+        # CLAM instance-level loss (if enabled)
+        instance_loss = torch.tensor(0.0, device=self._device)
+        if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
+            # Get chunk embeddings and attention weights
+            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+
+            all_top_chunks = []
+            expanded_treatments = []
+            expanded_outcomes = []
+
+            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                if chunk_embs.size(0) == 0:
+                    continue
+                B = min(self.clam_num_instances, chunk_embs.size(0))
+                top_indices = torch.topk(attn_weights, B).indices
+                top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
+
+                all_top_chunks.append(top_chunks)
+                expanded_treatments.extend([treatments[i]] * B)
+                expanded_outcomes.extend([outcomes[i]] * B)
+
+            if all_top_chunks:
+                stacked_chunks = torch.cat(all_top_chunks, dim=0)
+                exp_treatments = torch.stack(expanded_treatments)
+                exp_outcomes = torch.stack(expanded_outcomes)
+
+                # Forward through instance head (R-Learner)
+                # RLearnerNet returns: m_logit, tau, t_logit, phi
+                inst_m, inst_tau, inst_t, _ = self.instance_head(stacked_chunks)
+
+                # Instance propensity loss
+                instance_propensity_loss = F.binary_cross_entropy_with_logits(
+                    inst_t.squeeze(-1), exp_treatments
+                )
+
+                # Instance marginal outcome loss
+                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                    inst_m.squeeze(-1), exp_outcomes
+                )
+
+                # Instance R-loss (with detached nuisance functions)
+                inst_e = torch.sigmoid(inst_t).detach().clamp(0.01, 0.99)
+                inst_m_prob = torch.sigmoid(inst_m).detach()
+                inst_Y_residual = exp_outcomes - inst_m_prob.squeeze(-1)
+                inst_T_residual = exp_treatments - inst_e.squeeze(-1)
+                instance_r_loss = ((inst_Y_residual - inst_tau.squeeze(-1) * inst_T_residual) ** 2).mean()
+
+                instance_loss = (
+                    instance_outcome_loss +
+                    alpha_propensity * instance_propensity_loss +
+                    gamma_rlearner * instance_r_loss
+                )
+
         # Total loss
         total_loss = (
             outcome_loss +
             alpha_propensity * propensity_loss +
             gamma_rlearner * r_loss +
-            attention_entropy_weight * entropy_loss
+            attention_entropy_weight * entropy_loss +
+            clam_instance_weight * instance_loss
         )
 
         # Derive y0/y1 for backward-compatible metrics
@@ -891,6 +1046,10 @@ class CausalText(nn.Module):
         # Add entropy loss if computed
         if attention_entropy_weight > 0:
             result['entropy_loss'] = entropy_loss.detach() if isinstance(entropy_loss, torch.Tensor) else entropy_loss
+
+        # Add instance loss if CLAM enabled
+        if self.clam_enabled:
+            result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
 
         return result
 

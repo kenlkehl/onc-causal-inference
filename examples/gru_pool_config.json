@@ -32,6 +32,10 @@
       "gru_pool_max_vocab": 50000,
       "gru_pool_min_word_freq": 2,
 
+      "clam_enabled": false,
+      "clam_num_instances": 5,
+      "clam_instance_hidden_dim": 64,
+
       "dragonnet_representation_dim": 128,
       "dragonnet_hidden_outcome_dim": 64,
       "dragonnet_dropout": 0.2
@@ -48,7 +52,8 @@
       "weight_decay": 0.01,
       "gradient_clip_norm": 1.0,
       "stop_grad_propensity": false,
-      "attention_entropy_weight": 0.0
+      "attention_entropy_weight": 0.0,
+      "clam_instance_weight": 0.5
     },
     "propensity_trimming": {
       "enabled": false,

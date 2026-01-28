@@ -183,6 +183,20 @@ Requires `fit_tokenizer()` since it learns vocabulary from scratch.
 
 Interpretability: `interpret_attention()`, `get_attention_weights()`
 
+**CLAM Instance-Level Loss** (optional): GRU-Pool supports CLAM-style (Lu et al., Nature BME 2021)
+instance-level supervision to improve ITE correlation. When enabled, a separate lightweight causal
+head supervises the top-B attended chunks with document-level labels.
+
+| CLAM Param | Description | Default |
+|------------|-------------|---------|
+| `clam_enabled` | Enable CLAM instance-level loss | `False` |
+| `clam_num_instances` | Number of top-attended chunks to supervise (B) | `5` |
+| `clam_instance_hidden_dim` | Hidden dimension for instance causal head | `64` |
+| `clam_instance_weight` | Weight for instance-level loss (training config) | `0.5` |
+
+The instance head is completely independent from the document head (no weight sharing).
+Works with both DragonNet and R-Learner causal heads.
+
 ## Training Options for τ Learning
 
 | Option | Effect |
@@ -190,6 +204,8 @@ Interpretability: `interpret_attention()`, `get_attention_weights()`
 | `stop_grad_propensity=True` | Prevents propensity from dominating representation |
 | `attention_entropy_weight>0` | Encourages focused attention (low entropy) |
 | `gamma_rlearner>1.0` | Stronger treatment effect signal |
+| `clam_enabled=True` | Enables CLAM instance-level loss (GRU-Pool only) |
+| `clam_instance_weight>0` | Weight for instance-level loss on top-attended chunks |
 
 ## Matching & Analysis
 

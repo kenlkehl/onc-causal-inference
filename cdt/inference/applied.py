@@ -451,6 +451,10 @@ def _train_single_model(
         gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
         gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # CLAM instance-level loss args
+        clam_enabled=getattr(arch_config, 'clam_enabled', False),
+        clam_num_instances=getattr(arch_config, 'clam_num_instances', 5),
+        clam_instance_hidden_dim=getattr(arch_config, 'clam_instance_hidden_dim', 64),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -671,6 +675,7 @@ def _train_epoch(
     gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
+    clam_instance_weight = getattr(config, 'clam_instance_weight', 0.5)
 
     for batch in tqdm(loader, desc="Training", leave=False):
         # Move tensors to device
@@ -687,7 +692,8 @@ def _train_epoch(
             gamma_rlearner=gamma_rlearner,
             label_smoothing=label_smoothing,
             stop_grad_propensity=stop_grad_propensity,
-            attention_entropy_weight=attention_entropy_weight
+            attention_entropy_weight=attention_entropy_weight,
+            clam_instance_weight=clam_instance_weight
         )
 
         losses['loss'].backward()
@@ -730,6 +736,7 @@ def _eval_epoch(
     gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
+    clam_instance_weight = getattr(config, 'clam_instance_weight', 0.5)
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Validation", leave=False):
@@ -742,7 +749,8 @@ def _eval_epoch(
                 beta_targreg=config.beta_targreg,
                 gamma_rlearner=gamma_rlearner,
                 stop_grad_propensity=stop_grad_propensity,
-                attention_entropy_weight=attention_entropy_weight
+                attention_entropy_weight=attention_entropy_weight,
+                clam_instance_weight=clam_instance_weight
             )
 
             epoch_loss += losses['loss'].item()

@@ -302,6 +302,11 @@ class GRUPoolExtractor(nn.Module):
         return self._projection_dim
 
     @property
+    def transformer_dim(self) -> int:
+        """Return the transformer hidden dimension (chunk embedding dimension)."""
+        return self._transformer_dim
+
+    @property
     def vocab_size(self) -> int:
         """Return vocabulary size."""
         return self._tokenizer.vocab_size
@@ -452,6 +457,90 @@ class GRUPoolExtractor(nn.Module):
 
         # Stack batch
         return torch.stack(batch_outputs)  # (B, projection_dim)
+
+    def forward_with_instances(
+        self,
+        texts: List[str]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        This method returns transformer-processed chunk embeddings (before gated pooling)
+        and their gated attention weights, enabling instance-level supervision on
+        top-attended chunks.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        """
+        if not self._initialized or self._embedding is None:
+            raise RuntimeError("Must call fit_tokenizer() before forward_with_instances()")
+
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        for text in texts:
+            # 1. Split text into overlapping token chunks
+            chunks = split_into_chunks_vocab(
+                text,
+                word_to_idx=self._tokenizer.word_to_id,
+                tokenize_fn=self._tokenize_fn,
+                chunk_size=self._chunk_size,
+                chunk_overlap=self._chunk_overlap,
+                max_chunks=self._max_chunks
+            )
+
+            # 2. Encode chunks with BiGRU + attention
+            chunk_embeddings, _ = self._encode_chunks_batch(chunks)  # (C, gru_output_dim)
+
+            if chunk_embeddings.size(0) == 0:
+                # Fallback for empty text
+                batch_outputs.append(
+                    torch.zeros(self._projection_dim, device=self._device)
+                )
+                chunk_embeddings_list.append(
+                    torch.zeros(0, self._transformer_dim, device=self._device)
+                )
+                attention_weights_list.append(
+                    torch.zeros(0, device=self._device)
+                )
+                continue
+
+            # 3. Project to transformer dim
+            chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, transformer_dim)
+
+            # 4. Add positional encoding
+            num_chunks = chunk_embeddings.size(0)
+            chunk_embeddings = chunk_embeddings + self._positional_encoding[:num_chunks].to(self._device)
+
+            # 5. Run through transformer layers
+            sequence = chunk_embeddings.unsqueeze(0)  # (1, C, transformer_dim)
+            for layer in self._transformer_layer_modules:
+                sequence, _ = layer(sequence, return_attention=False)
+
+            # Extract transformer-processed chunk embeddings (before pooling)
+            transformer_chunk_embs = sequence.squeeze(0)  # (C, transformer_dim)
+
+            # 6. Apply gated attention pooling
+            pooled, attn_weights = self._gated_pooling(transformer_chunk_embs)  # (transformer_dim,), (C,)
+
+            # 7. Output projection
+            output = self._output_projection(pooled)  # (projection_dim,)
+            batch_outputs.append(output)
+
+            # Store chunk-level info for instance loss
+            chunk_embeddings_list.append(transformer_chunk_embs)
+            attention_weights_list.append(attn_weights)
+
+        # Stack batch
+        doc_features = torch.stack(batch_outputs)  # (B, projection_dim)
+
+        return doc_features, chunk_embeddings_list, attention_weights_list
 
     def get_state(self) -> Dict[str, Any]:
         """

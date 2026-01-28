@@ -261,6 +261,13 @@ class ModelArchitectureConfig:
     gru_pool_max_vocab: int = 50000  # Maximum vocabulary size
     gru_pool_min_word_freq: int = 2  # Minimum word frequency for vocabulary
 
+    # CLAM-style instance-level loss config (for GRU-Pool extractor)
+    # CLAM (Lu et al., Nature BME 2021) supervises top-attended chunks with document labels
+    # This forces top-attended chunks to be predictive of treatment/outcome
+    clam_enabled: bool = False  # Master switch for CLAM instance-level loss
+    clam_num_instances: int = 5  # B: number of top-attended chunks to supervise
+    clam_instance_hidden_dim: int = 64  # Hidden dimension for instance causal head (smaller than doc head)
+
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128
     dragonnet_hidden_outcome_dim: int = 64
@@ -298,6 +305,8 @@ class TrainingConfig:
     # Advanced training options for improving tau learning
     stop_grad_propensity: bool = False  # Detach features before propensity loss (prevents propensity from dominating representation)
     attention_entropy_weight: float = 0.0  # Weight for attention entropy regularization (encourages focused attention)
+    # CLAM instance-level loss weight (only used when clam_enabled=True in architecture config)
+    clam_instance_weight: float = 0.5  # Weight for CLAM instance-level loss
 
 
 @dataclass
