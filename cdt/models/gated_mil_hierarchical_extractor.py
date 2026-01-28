@@ -824,6 +824,193 @@ class GatedMILHierarchicalExtractor(nn.Module):
         self._ensure_initialized()
         return self._task_weighting.get_weights()
 
+    def forward_with_instances(
+        self,
+        texts: List[str]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        This method returns chunk embeddings and tau-weighted aggregated attention weights
+        across K confounders, enabling instance-level supervision on top-attended chunks.
+
+        The tau-weighted aggregation uses the task-specific weights for tau (treatment effect)
+        to prioritize confounders most relevant to treatment effect modification. This aligns
+        CLAM supervision with the causal objective.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, sentence_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - tau-weighted attention per doc
+        """
+        self._ensure_initialized()
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        # Get tau weights for aggregating attention across K confounders
+        # For R-Learner: use 'tau' weights (treatment effect modifiers)
+        # For DragonNet: use average of 'y0' and 'y1' weights (potential outcomes)
+        task_weights = self._task_weighting.get_weights()
+        if 'tau' in task_weights:
+            tau_weights = torch.tensor(task_weights['tau'], device=self._device, dtype=torch.float32)
+        else:
+            # DragonNet: average of y0 and y1 weights as proxy for treatment effect importance
+            y0_weights = torch.tensor(task_weights['y0'], device=self._device, dtype=torch.float32)
+            y1_weights = torch.tensor(task_weights['y1'], device=self._device, dtype=torch.float32)
+            tau_weights = (y0_weights + y1_weights) / 2
+        tau_weights = F.softmax(tau_weights, dim=0)  # Normalize to sum to 1
+
+        for text in texts:
+            # 1. Split into overlapping token chunks
+            chunks = split_into_chunks_hf(
+                text,
+                self._tokenizer,
+                chunk_size=self._chunk_size,
+                chunk_overlap=self._chunk_overlap,
+                max_chunks=self._max_chunks
+            )
+            if not chunks:
+                chunks = [text[:500]]  # Fallback for short/malformed text
+
+            if self._hierarchical:
+                # Hierarchical (token-level) mode
+                combined, chunk_embs, attn_weights = self._forward_hierarchical_with_instances(
+                    chunks, tau_weights
+                )
+            else:
+                # Standard chunk-level mode
+                combined, chunk_embs, attn_weights = self._forward_chunk_level_with_instances(
+                    chunks, tau_weights
+                )
+
+            batch_outputs.append(combined)
+            chunk_embeddings_list.append(chunk_embs)
+            attention_weights_list.append(attn_weights)
+
+        # Stack batch
+        batch_outputs = torch.stack(batch_outputs)  # (B, 3 * sentence_dim)
+
+        # Project to output dimension
+        features = self._output_projection(batch_outputs)  # (B, projection_dim)
+
+        return features, chunk_embeddings_list, attention_weights_list
+
+    def _forward_chunk_level_with_instances(
+        self,
+        chunks: List[str],
+        tau_weights: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Standard chunk-level forward pass returning chunk embeddings and attention.
+
+        Args:
+            chunks: List of chunk strings
+            tau_weights: (K,) normalized tau weights for attention aggregation
+
+        Returns:
+            combined: (3 * sentence_dim,) combined task representations
+            chunk_embeddings: (C, sentence_dim) chunk embeddings
+            aggregated_attention: (C,) tau-weighted attention across K confounders
+        """
+        # Encode chunks with BERT [CLS]
+        chunk_embeddings = self._encode_chunks_batch(chunks)  # (C, sentence_dim)
+
+        if chunk_embeddings.size(0) == 0:
+            return (
+                torch.zeros(3 * self._sentence_dim, device=self._device),
+                torch.zeros(0, self._sentence_dim, device=self._device),
+                torch.zeros(0, device=self._device)
+            )
+
+        # Apply gated MIL attention to get K confounders with attention weights
+        confounders, attention_weights = self._gated_mil_attention(
+            chunk_embeddings, return_attention=True
+        )  # confounders: (K, sentence_dim), attention_weights: (K, C)
+
+        # Aggregate attention using tau weights: (K,) @ (K, C) -> (C,)
+        # This gives higher weight to confounders important for treatment effect
+        aggregated_attention = (tau_weights.unsqueeze(1) * attention_weights).sum(dim=0)
+
+        # Apply task-specific weighting
+        prop_repr, task2_repr, task3_repr = self._task_weighting(confounders)
+        # Each is (sentence_dim,)
+
+        # Concatenate task representations
+        combined = torch.cat([prop_repr, task2_repr, task3_repr], dim=0)  # (3 * sentence_dim,)
+
+        return combined, chunk_embeddings, aggregated_attention
+
+    def _forward_hierarchical_with_instances(
+        self,
+        chunks: List[str],
+        tau_weights: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Hierarchical forward pass with token-level pooling, returning chunk embeddings and attention.
+
+        Args:
+            chunks: List of chunk strings
+            tau_weights: (K,) normalized tau weights for attention aggregation
+
+        Returns:
+            combined: (3 * sentence_dim,) combined task representations
+            chunk_embeddings: (C, sentence_dim) chunk embeddings (from token-level pooling)
+            aggregated_attention: (C,) tau-weighted attention across K confounders
+        """
+        C = len(chunks)
+        K = self._num_confounders
+
+        # 1. Encode all chunks with BERT (full token embeddings)
+        token_embeddings, attention_mask = self._encode_chunk_tokens_batch(chunks)
+        # token_embeddings: (C, L, D)
+        # attention_mask: (C, L) boolean
+
+        if token_embeddings.size(0) == 0:
+            return (
+                torch.zeros(3 * self._sentence_dim, device=self._device),
+                torch.zeros(0, self._sentence_dim, device=self._device),
+                torch.zeros(0, device=self._device)
+            )
+
+        # 2. Apply token-level gated pooling to each chunk
+        # Result: (C, K, D) - K confounder-specific representations per chunk
+        confounder_chunk_embeddings, _ = self._token_level_pooling.forward_batch(
+            token_embeddings, attention_mask
+        )
+
+        # Get mean chunk embeddings for CLAM instance supervision
+        # Average across confounder dimension for chunk representation
+        chunk_embeddings = confounder_chunk_embeddings.mean(dim=1)  # (C, D)
+
+        # 3. For each confounder k, apply chunk-level gated MIL attention
+        confounder_views = confounder_chunk_embeddings.permute(1, 0, 2)  # (K, C, D)
+
+        all_confounders = []
+        all_chunk_attentions = []
+        for k in range(K):
+            view_k = confounder_views[k]  # (C, D)
+            conf_k, chunk_attn_k = self._gated_mil_attention(view_k, return_attention=True)
+            all_confounders.append(conf_k.mean(dim=0))  # (D,)
+            all_chunk_attentions.append(chunk_attn_k.mean(dim=0))  # (C,)
+
+        confounders = torch.stack(all_confounders, dim=0)  # (K, D)
+        chunk_attentions = torch.stack(all_chunk_attentions, dim=0)  # (K, C)
+
+        # Aggregate attention using tau weights: (K,) @ (K, C) -> (C,)
+        aggregated_attention = (tau_weights.unsqueeze(1) * chunk_attentions).sum(dim=0)
+
+        # 4. Apply task-specific weighting
+        prop_repr, task2_repr, task3_repr = self._task_weighting(confounders)
+
+        # 5. Concatenate task representations
+        combined = torch.cat([prop_repr, task2_repr, task3_repr], dim=0)  # (3 * sentence_dim,)
+
+        return combined, chunk_embeddings, aggregated_attention
+
     def forward_with_attention(
         self,
         texts: List[str]

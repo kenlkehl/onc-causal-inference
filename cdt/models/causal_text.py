@@ -593,20 +593,44 @@ class CausalText(nn.Module):
         # Alias for backward compatibility
         self.dragonnet = self.net
 
-        # CLAM instance-level loss head (for GRU-Pool extractor)
+        # CLAM instance-level loss head (for hierarchical extractors)
         # Creates a separate, lightweight causal head for top-attended chunks
+        # Supported extractors: gru_pool, hierarchical_transformer, gated_mil_hierarchical, gru_transformer_mil
         self.clam_enabled = clam_enabled
         self.clam_num_instances = clam_num_instances
         self.clam_instance_hidden_dim = clam_instance_hidden_dim
         self.instance_head = None
 
+        # Define which extractors support CLAM and their instance input dimensions
+        clam_supported_extractors = {
+            "gru_pool": gru_pool_transformer_dim,
+            "hierarchical_transformer": hier_transformer_dim,
+            "gated_mil_hierarchical": None,  # Needs lazy initialization (sentence_dim from BERT)
+            "gru_transformer_mil": gru_mil_transformer_dim,
+        }
+
         if clam_enabled:
-            if self.feature_extractor_type != "gru_pool":
-                logger.warning("CLAM instance loss is only supported for gru_pool extractor. Disabling CLAM.")
+            if self.feature_extractor_type not in clam_supported_extractors:
+                logger.warning(f"CLAM instance loss is not supported for {self.feature_extractor_type} extractor. "
+                              f"Supported extractors: {list(clam_supported_extractors.keys())}. Disabling CLAM.")
                 self.clam_enabled = False
             else:
-                # Instance head operates on transformer_dim (chunk embedding dimension)
-                instance_input_dim = gru_pool_transformer_dim
+                # Get instance input dimension based on extractor type
+                instance_input_dim = clam_supported_extractors[self.feature_extractor_type]
+
+                # For gated_mil_hierarchical, we need to get sentence_dim after lazy init
+                # Store the dimension source for lazy initialization
+                if instance_input_dim is None:
+                    # Will be set during first forward pass when feature_extractor is initialized
+                    # For now, use a typical BERT-tiny hidden size as placeholder
+                    # The actual dimension is the sentence encoder's hidden size
+                    self._clam_instance_dim_source = "gated_mil_sentence_dim"
+                    # bert-tiny has hidden_size=128, we'll verify this during training
+                    instance_input_dim = 128  # Default for bert-tiny
+                    logger.info(f"CLAM: Using estimated sentence_dim={instance_input_dim} for gated_mil_hierarchical. "
+                               f"Will be verified during initialization.")
+                else:
+                    self._clam_instance_dim_source = None
 
                 # Use the same causal head type as the main model
                 if model_type == "rlearner":
@@ -631,7 +655,7 @@ class CausalText(nn.Module):
                         dropout=dragonnet_dropout
                     )
                 logger.info(f"CLAM instance-level loss enabled: {clam_num_instances} top chunks, "
-                           f"instance_head_dim={clam_instance_hidden_dim}")
+                           f"instance_input_dim={instance_input_dim}, instance_head_dim={clam_instance_hidden_dim}")
 
         # Move to device
         self.to(self._device)
@@ -1166,6 +1190,43 @@ class CausalText(nn.Module):
         if hasattr(self.feature_extractor, 'fit_tokenizer'):
             self.feature_extractor.fit_tokenizer(texts)
         # BERT uses pretrained tokenizer, no fitting needed
+
+        # After feature extractor initialization, verify/update CLAM instance head dimensions
+        # for gated_mil_hierarchical which has lazy initialization
+        if (self.clam_enabled and
+            hasattr(self, '_clam_instance_dim_source') and
+            self._clam_instance_dim_source == "gated_mil_sentence_dim"):
+            # Get the actual sentence_dim from the initialized feature extractor
+            if hasattr(self.feature_extractor, '_sentence_dim') and self.feature_extractor._sentence_dim is not None:
+                actual_dim = self.feature_extractor._sentence_dim
+                # Check if we need to reinitialize the instance head
+                current_input_dim = self.instance_head.shared_layers[0].in_features if hasattr(self.instance_head, 'shared_layers') else None
+                if current_input_dim != actual_dim:
+                    logger.info(f"CLAM: Reinitializing instance head with actual sentence_dim={actual_dim}")
+                    # Reinitialize instance head with correct dimension
+                    if self.model_type == "rlearner":
+                        self.instance_head = RLearnerNet(
+                            input_dim=actual_dim,
+                            representation_dim=self.clam_instance_hidden_dim,
+                            hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
+                            dropout=self.config['dragonnet_dropout']
+                        )
+                    elif self.model_type == "uplift":
+                        self.instance_head = UpliftNet(
+                            input_dim=actual_dim,
+                            representation_dim=self.clam_instance_hidden_dim,
+                            hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
+                            dropout=self.config['dragonnet_dropout']
+                        )
+                    else:
+                        self.instance_head = DragonNet(
+                            input_dim=actual_dim,
+                            representation_dim=self.clam_instance_hidden_dim,
+                            hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
+                            dropout=self.config['dragonnet_dropout']
+                        )
+                    self.instance_head.to(self._device)
+
         return self
 
     def fit_tokenizer(self, texts: List[str]) -> 'CausalText':

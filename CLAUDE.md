@@ -183,9 +183,27 @@ Requires `fit_tokenizer()` since it learns vocabulary from scratch.
 
 Interpretability: `interpret_attention()`, `get_attention_weights()`
 
-**CLAM Instance-Level Loss** (optional): GRU-Pool supports CLAM-style (Lu et al., Nature BME 2021)
-instance-level supervision to improve ITE correlation. When enabled, a separate lightweight causal
-head supervises the top-B attended chunks with document-level labels.
+## CLAM Instance-Level Loss
+
+CLAM-style (Lu et al., Nature BME 2021) instance-level supervision is available for all hierarchical
+extractors to improve ITE correlation. When enabled, a separate lightweight causal head supervises
+the top-B attended chunks with document-level labels.
+
+### Supported Extractors
+
+| Extractor | Instance Embedding Dim | Attention Aggregation |
+|-----------|----------------------|----------------------|
+| `gru_pool` | `transformer_dim` (256) | Gated attention weights |
+| `hierarchical_transformer` | `transformer_dim` (256) | [POOL] token attention to chunks |
+| `gated_mil_hierarchical` | `sentence_dim` (128 for bert-tiny) | Tau-weighted aggregation across K confounders |
+| `gru_transformer_mil` | `transformer_dim` (256) | Tau-weighted aggregation across K confounders |
+
+**Tau-Weighted Aggregation**: For extractors with K confounder queries (gated_mil_hierarchical,
+gru_transformer_mil), attention is aggregated using the task-specific tau weights. This prioritizes
+confounders most relevant to treatment effect modification, aligning CLAM supervision with the
+causal objective.
+
+### CLAM Parameters
 
 | CLAM Param | Description | Default |
 |------------|-------------|---------|
@@ -195,7 +213,7 @@ head supervises the top-B attended chunks with document-level labels.
 | `clam_instance_weight` | Weight for instance-level loss (training config) | `0.5` |
 
 The instance head is completely independent from the document head (no weight sharing).
-Works with both DragonNet and R-Learner causal heads.
+Works with DragonNet, UpliftNet, and R-Learner causal heads.
 
 ## Training Options for τ Learning
 
@@ -204,7 +222,7 @@ Works with both DragonNet and R-Learner causal heads.
 | `stop_grad_propensity=True` | Prevents propensity from dominating representation |
 | `attention_entropy_weight>0` | Encourages focused attention (low entropy) |
 | `gamma_rlearner>1.0` | Stronger treatment effect signal |
-| `clam_enabled=True` | Enables CLAM instance-level loss (GRU-Pool only) |
+| `clam_enabled=True` | Enables CLAM instance-level loss (hierarchical extractors) |
 | `clam_instance_weight>0` | Weight for instance-level loss on top-attended chunks |
 
 ## Matching & Analysis

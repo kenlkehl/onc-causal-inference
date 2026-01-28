@@ -316,6 +316,105 @@ class HierarchicalTransformerExtractor(nn.Module):
 
         return features
 
+    def forward_with_instances(
+        self,
+        texts: List[str]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        This method returns transformer-processed chunk embeddings (before output projection)
+        and the [POOL] token attention weights to chunks, enabling instance-level supervision
+        on top-attended chunks.
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - [POOL] attention weights per doc
+        """
+        self._ensure_initialized()
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        for text in texts:
+            # 1. Split into overlapping token chunks
+            chunks = split_into_chunks_hf(
+                text,
+                self._tokenizer,
+                chunk_size=self._chunk_size,
+                chunk_overlap=self._chunk_overlap,
+                max_chunks=self._max_chunks
+            )
+            if not chunks:
+                chunks = [text[:500]]  # Fallback for short/malformed text
+
+            # 2. Encode chunks with BERT
+            chunk_embeddings = self._encode_chunks_batch(chunks)  # (C, sentence_dim)
+
+            if chunk_embeddings.size(0) == 0:
+                # Fallback for empty text
+                batch_outputs.append(
+                    torch.zeros(self._projection_dim, device=self._device)
+                )
+                chunk_embeddings_list.append(
+                    torch.zeros(0, self._transformer_dim, device=self._device)
+                )
+                attention_weights_list.append(
+                    torch.zeros(0, device=self._device)
+                )
+                continue
+
+            # 3. Project to transformer dim
+            chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, transformer_dim)
+
+            # 4. Prepend [POOL] token
+            sequence = torch.cat([self._pool_token, chunk_embeddings], dim=0)  # (C+1, transformer_dim)
+
+            # 5. Add positional encoding
+            seq_len = sequence.size(0)
+            sequence = sequence + self._positional_encoding[:seq_len].to(self._device)
+
+            # 6. Run through transformer layers, collecting attention from last layer
+            sequence = sequence.unsqueeze(0)  # (1, C+1, transformer_dim)
+            attn_weights = None
+            for layer in self._transformer_layers:
+                sequence, attn_weights = layer(sequence, return_attention=True)
+
+            # 7. Extract [POOL] output (position 0)
+            pool_output = sequence[0, 0, :]  # (transformer_dim,)
+
+            # 8. Extract chunk embeddings (positions 1:) after transformer
+            transformer_chunk_embs = sequence[0, 1:, :]  # (C, transformer_dim)
+
+            # 9. Extract [POOL] attention to chunks (from last layer)
+            # attn_weights shape: (1, seq_len, seq_len)
+            # We want attention FROM [POOL] (position 0) TO all chunks (positions 1:)
+            if attn_weights is not None:
+                pool_attention = attn_weights[0, 0, 1:]  # (C,)
+                # Normalize to sum to 1
+                pool_attention = pool_attention / (pool_attention.sum() + 1e-9)
+            else:
+                # Fallback: uniform attention
+                num_chunks = transformer_chunk_embs.size(0)
+                pool_attention = torch.ones(num_chunks, device=self._device) / num_chunks
+
+            # Output projection for pool token
+            output = self._output_projection(pool_output.unsqueeze(0)).squeeze(0)  # (projection_dim,)
+            batch_outputs.append(output)
+
+            # Store chunk-level info for instance loss
+            chunk_embeddings_list.append(transformer_chunk_embs)
+            attention_weights_list.append(pool_attention)
+
+        # Stack batch
+        doc_features = torch.stack(batch_outputs)  # (B, projection_dim)
+
+        return doc_features, chunk_embeddings_list, attention_weights_list
+
     def init_extractor(self, texts: List[str]) -> 'HierarchicalTransformerExtractor':
         """
         Initialize the feature extractor (triggers lazy initialization).
