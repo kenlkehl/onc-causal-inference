@@ -27,6 +27,10 @@ from .prompts import (
     validate_clinical_text,
 )
 
+# Type hints for vLLM imports (imported at runtime)
+if False:  # TYPE_CHECKING
+    from .vllm_batch_client import VLLMBatchClient, VLLMConfig
+
 
 logger = logging.getLogger(__name__)
 
@@ -1113,24 +1117,252 @@ def _generate_all_patients(
     return patient_data
 
 
+def _generate_clinical_texts_worker(
+    worker_id: int,
+    device_ids: List[int],
+    vllm_config_dict: Dict[str, Any],
+    patient_indices: List[int],
+    history_prompts: List[str],
+    reasoning_marker: Optional[str],
+    result_queue,
+):
+    """
+    Worker process for multi-GPU clinical text generation.
+
+    Each worker:
+    1. Sets CUDA_VISIBLE_DEVICES to its assigned GPUs
+    2. Initializes its own VLLMBatchClient
+    3. Generates clinical texts for its patient subset
+    4. Returns results via multiprocessing Queue
+
+    Args:
+        worker_id: Unique identifier for this worker
+        device_ids: GPU device IDs for this worker (e.g., [0, 1])
+        vllm_config_dict: VLLMConfig parameters as dict (for pickling)
+        patient_indices: List of patient indices this worker handles
+        history_prompts: List of prompts for clinical history generation
+        reasoning_marker: Marker to strip from model outputs
+        result_queue: Multiprocessing Queue to return results
+    """
+    import os
+
+    # Set CUDA_VISIBLE_DEVICES for this worker BEFORE any CUDA initialization
+    device_str = ",".join(str(d) for d in device_ids)
+    os.environ["CUDA_VISIBLE_DEVICES"] = device_str
+
+    # Now import vLLM (which initializes CUDA)
+    from .vllm_batch_client import VLLMBatchClient, VLLMConfig
+
+    worker_logger = logging.getLogger(f"{__name__}.worker_{worker_id}")
+    worker_logger.info(f"Worker {worker_id}: Starting on GPUs {device_ids} (CUDA_VISIBLE_DEVICES={device_str})")
+    worker_logger.info(f"Worker {worker_id}: Processing {len(patient_indices)} patients")
+
+    try:
+        # Create VLLMConfig for this worker (device_ids not needed since we set env var)
+        worker_config = VLLMConfig(
+            model_name=vllm_config_dict["model_name"],
+            tensor_parallel_size=vllm_config_dict["tensor_parallel_size"],
+            gpu_memory_utilization=vllm_config_dict.get("gpu_memory_utilization", 0.90),
+            max_model_len=vllm_config_dict.get("max_model_len"),
+            temperature=vllm_config_dict["temperature"],
+            max_tokens=vllm_config_dict["max_tokens"],
+            download_dir=vllm_config_dict.get("download_dir", "./"),
+            reasoning_marker=reasoning_marker,
+            device_ids=None,  # Already set via env var
+        )
+
+        # Initialize vLLM client
+        client = VLLMBatchClient(worker_config)
+
+        # Generate clinical texts in batch
+        worker_logger.info(f"Worker {worker_id}: Generating {len(history_prompts)} clinical texts...")
+        clinical_texts = client.generate_batch(
+            prompts=history_prompts,
+            system_prompt=CLINICAL_SYSTEM_PROMPT,
+            temperature=0.4,
+            max_tokens=worker_config.max_tokens,
+        )
+
+        # Strip reasoning prefix from each text
+        cleaned_texts = []
+        for text in clinical_texts:
+            cleaned = VLLMBatchClient.strip_reasoning_prefix(
+                text if text else "",
+                reasoning_marker
+            )
+            cleaned_texts.append(cleaned)
+
+        worker_logger.info(f"Worker {worker_id}: Completed {len(cleaned_texts)} clinical texts")
+
+        # Return results via queue
+        result_queue.put({
+            "worker_id": worker_id,
+            "patient_indices": patient_indices,
+            "clinical_texts": cleaned_texts,
+            "error": None,
+        })
+
+    except Exception as e:
+        worker_logger.error(f"Worker {worker_id}: Failed with error: {e}")
+        result_queue.put({
+            "worker_id": worker_id,
+            "patient_indices": patient_indices,
+            "clinical_texts": None,
+            "error": str(e),
+        })
+
+
+def _run_parallel_vllm_workers(
+    gpu_device_ids: List[int],
+    tensor_parallel_size: int,
+    vllm_config_dict: Dict[str, Any],
+    patient_indices: List[int],
+    history_prompts: List[str],
+    reasoning_marker: Optional[str],
+) -> List[str]:
+    """
+    Orchestrate multi-GPU parallel clinical text generation.
+
+    Splits patient records across multiple worker processes, each running
+    its own vLLM instance on a subset of GPUs.
+
+    Args:
+        gpu_device_ids: All GPU device IDs to use (e.g., [0, 1, 2, 3])
+        tensor_parallel_size: GPUs per vLLM instance
+        vllm_config_dict: VLLMConfig parameters as dict
+        patient_indices: All patient indices to process
+        history_prompts: All prompts for clinical history generation
+        reasoning_marker: Marker to strip from model outputs
+
+    Returns:
+        List of clinical texts in patient_id order
+    """
+    import multiprocessing as mp
+
+    # Calculate number of workers
+    num_workers = len(gpu_device_ids) // tensor_parallel_size
+    logger.info(f"Parallel vLLM: {num_workers} workers, {tensor_parallel_size} GPUs each")
+
+    # Split GPUs into groups
+    gpu_groups = []
+    for i in range(num_workers):
+        start_idx = i * tensor_parallel_size
+        end_idx = start_idx + tensor_parallel_size
+        gpu_groups.append(gpu_device_ids[start_idx:end_idx])
+
+    logger.info(f"GPU groups: {gpu_groups}")
+
+    # Split patients across workers (as evenly as possible)
+    patients_per_worker = len(patient_indices) // num_workers
+    remainder = len(patient_indices) % num_workers
+
+    patient_splits = []
+    prompt_splits = []
+    start = 0
+    for i in range(num_workers):
+        # Workers with lower index get one extra patient if there's remainder
+        n = patients_per_worker + (1 if i < remainder else 0)
+        end = start + n
+        patient_splits.append(patient_indices[start:end])
+        prompt_splits.append(history_prompts[start:end])
+        start = end
+
+    logger.info(f"Patient distribution: {[len(s) for s in patient_splits]}")
+
+    # Create result queue
+    # Use spawn context to avoid CUDA context issues
+    ctx = mp.get_context("spawn")
+    result_queue = ctx.Queue()
+
+    # Spawn worker processes
+    processes = []
+    for worker_id in range(num_workers):
+        p = ctx.Process(
+            target=_generate_clinical_texts_worker,
+            args=(
+                worker_id,
+                gpu_groups[worker_id],
+                vllm_config_dict,
+                patient_splits[worker_id],
+                prompt_splits[worker_id],
+                reasoning_marker,
+                result_queue,
+            ),
+        )
+        processes.append(p)
+        p.start()
+        logger.info(f"Started worker {worker_id} (PID: {p.pid})")
+
+    # Collect results from all workers
+    results_by_worker = {}
+    errors = []
+
+    for _ in range(num_workers):
+        result = result_queue.get()  # Blocks until result available
+        worker_id = result["worker_id"]
+        if result["error"]:
+            errors.append(f"Worker {worker_id}: {result['error']}")
+        else:
+            results_by_worker[worker_id] = result
+        logger.info(f"Received results from worker {worker_id}")
+
+    # Wait for all processes to finish
+    for p in processes:
+        p.join()
+        logger.info(f"Worker process {p.pid} completed")
+
+    # Check for errors
+    if errors:
+        raise RuntimeError(f"Multi-GPU generation failed:\n" + "\n".join(errors))
+
+    # Merge results in patient_id order
+    # Build mapping from patient_id to clinical_text
+    patient_to_text = {}
+    for worker_id, result in results_by_worker.items():
+        for idx, patient_id in enumerate(result["patient_indices"]):
+            patient_to_text[patient_id] = result["clinical_texts"][idx]
+
+    # Return texts in original patient_indices order
+    clinical_texts = [patient_to_text[pid] for pid in patient_indices]
+
+    logger.info(f"Merged {len(clinical_texts)} clinical texts from {num_workers} workers")
+    return clinical_texts
+
+
 def generate_synthetic_dataset_batch(
     config: SyntheticDataConfig,
     vllm_config: 'VLLMConfig',
     show_progress: bool = True,
+    gpu_device_ids: Optional[List[int]] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Generate a synthetic clinical dataset using direct vLLM batch inference.
-    
+
     This is much faster than the HTTP API approach because:
     1. No HTTP overhead
     2. vLLM handles batching optimally
     3. All clinical histories generated in one batch
-    
+
+    Multi-GPU Parallelization:
+    When gpu_device_ids is provided with more GPUs than tensor_parallel_size,
+    the function spawns multiple parallel vLLM workers:
+    - Initialization (confounders, equations, stats) runs on first GPU group only
+    - Patient clinical text generation is split across all workers
+    - Results are merged into a single output dataset
+
+    Example:
+        gpu_device_ids=[0,1,2,3], tensor_parallel_size=2 -> 2 parallel workers
+        Worker 0: GPUs 0,1 -> patients 0..N/2
+        Worker 1: GPUs 2,3 -> patients N/2..N
+
     Args:
         config: Configuration for generation
         vllm_config: vLLM configuration (model, tensor_parallel_size, etc.)
         show_progress: Whether to show progress bar
-        
+        gpu_device_ids: Optional list of GPU device IDs for multi-GPU parallelization.
+            If None, uses single instance (original behavior).
+            If provided, len(gpu_device_ids) must be divisible by tensor_parallel_size.
+
     Returns:
         Tuple of (dataset DataFrame, metadata dictionary)
     """
@@ -1154,9 +1386,36 @@ def generate_synthetic_dataset_batch(
     else:
         logger.info("Positivity enforcement disabled (realistic observational data)")
 
-    # Initialize vLLM client for all LLM operations (no HTTP server needed)
+    # Determine if multi-GPU mode is enabled
+    use_multi_gpu = (
+        gpu_device_ids is not None
+        and len(gpu_device_ids) > vllm_config.tensor_parallel_size
+    )
+    num_workers = 1
+    if use_multi_gpu:
+        num_workers = len(gpu_device_ids) // vllm_config.tensor_parallel_size
+        logger.info(f"Multi-GPU mode: {len(gpu_device_ids)} GPUs -> {num_workers} parallel workers")
+
+    # Initialize vLLM client for initialization steps (confounders, equations, stats)
+    # In multi-GPU mode, use only the first GPU group for these fast operations
     logger.info("Initializing vLLM for offline batch inference...")
-    vllm_client = VLLMBatchClient(vllm_config)
+    if use_multi_gpu:
+        first_gpu_group = gpu_device_ids[:vllm_config.tensor_parallel_size]
+        logger.info(f"Using first GPU group {first_gpu_group} for initialization steps")
+        init_config = VLLMConfig(
+            model_name=vllm_config.model_name,
+            tensor_parallel_size=vllm_config.tensor_parallel_size,
+            gpu_memory_utilization=vllm_config.gpu_memory_utilization,
+            max_model_len=vllm_config.max_model_len,
+            temperature=vllm_config.temperature,
+            max_tokens=vllm_config.max_tokens,
+            download_dir=vllm_config.download_dir,
+            reasoning_marker=vllm_config.reasoning_marker,
+            device_ids=first_gpu_group,
+        )
+        vllm_client = VLLMBatchClient(init_config)
+    else:
+        vllm_client = VLLMBatchClient(vllm_config)
     
     # Step 1: Generate confounders using vLLM
     logger.info("Step 1/6: Generating confounders...")
@@ -1280,23 +1539,62 @@ def generate_synthetic_dataset_batch(
     
     # Step 6: Batch generate all clinical histories using vLLM
     logger.info(f"Step 6/6: Batch generating {len(history_prompts)} clinical histories with vLLM...")
-    
-    # Generate all clinical histories in one batch
-    clinical_texts = vllm_client.generate_batch(
-        prompts=history_prompts,
-        system_prompt=CLINICAL_SYSTEM_PROMPT,
-        temperature=0.4,  # Lower temperature for more faithful confounder representation
-        max_tokens=vllm_config.max_tokens,
-    )
-    
-    # Merge clinical texts with patient records, stripping reasoning prefix
+
+    if use_multi_gpu:
+        # Multi-GPU mode: unload initialization model and spawn parallel workers
+        logger.info("Unloading initialization model to free GPU memory for parallel workers...")
+        del vllm_client
+        import gc
+        gc.collect()
+        try:
+            import torch
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
+
+        # Build vllm config dict for workers (dataclasses aren't picklable with complex defaults)
+        vllm_config_dict = {
+            "model_name": vllm_config.model_name,
+            "tensor_parallel_size": vllm_config.tensor_parallel_size,
+            "gpu_memory_utilization": vllm_config.gpu_memory_utilization,
+            "max_model_len": vllm_config.max_model_len,
+            "temperature": vllm_config.temperature,
+            "max_tokens": vllm_config.max_tokens,
+            "download_dir": vllm_config.download_dir,
+        }
+
+        # Run parallel workers
+        patient_indices = list(range(len(patient_records)))
+        clinical_texts = _run_parallel_vllm_workers(
+            gpu_device_ids=gpu_device_ids,
+            tensor_parallel_size=vllm_config.tensor_parallel_size,
+            vllm_config_dict=vllm_config_dict,
+            patient_indices=patient_indices,
+            history_prompts=history_prompts,
+            reasoning_marker=vllm_config.reasoning_marker,
+        )
+    else:
+        # Single-GPU mode: generate all clinical histories in one batch
+        clinical_texts = vllm_client.generate_batch(
+            prompts=history_prompts,
+            system_prompt=CLINICAL_SYSTEM_PROMPT,
+            temperature=0.4,  # Lower temperature for more faithful confounder representation
+            max_tokens=vllm_config.max_tokens,
+        )
+
+        # Strip reasoning prefix in single-GPU mode
+        clinical_texts = [
+            VLLMBatchClient.strip_reasoning_prefix(
+                text if text else "",
+                vllm_config.reasoning_marker
+            )
+            for text in clinical_texts
+        ]
+
+    # Merge clinical texts with patient records
     # Also validate that texts don't contain literal category codes
     validation_issues = 0
-    for i, text in enumerate(clinical_texts):
-        cleaned_text = VLLMBatchClient.strip_reasoning_prefix(
-            text if text else "",
-            vllm_config.reasoning_marker
-        )
+    for i, cleaned_text in enumerate(clinical_texts):
         patient_records[i]["clinical_text"] = cleaned_text
 
         # Check for underscore-connected phrases (likely category codes that weren't naturalized)

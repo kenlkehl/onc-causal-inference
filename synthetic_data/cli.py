@@ -29,6 +29,18 @@ Examples:
 
   # Custom clinical question with positivity enforcement
   python -m synthetic_data.cli --clinical-question "Compare pembrolizumab with nivolumab for NSCLC" --enforce-positivity
+
+    # Single GPU (original behavior)                                                                                                                           
+  python -m synthetic_data.cli --use-vllm-batch --tensor-parallel-size 2                                                                                     
+                                                                                                                                                             
+  # Multi-GPU with 2 parallel workers (4 GPUs, 2 per worker)                                                                                                 
+  python -m synthetic_data.cli --use-vllm-batch \                                                                                                            
+    --gpu-devices 0,1,2,3 --tensor-parallel-size 2 \                                                                                                         
+    --dataset-size 100 --output-dir ./test_multi_gpu                                                                                                         
+                                                                                                                                                             
+  # Multi-GPU with 4 parallel workers (8 GPUs, 2 per worker)                                                                                                 
+  python -m synthetic_data.cli --use-vllm-batch \                                                                                                            
+    --gpu-devices 0,1,2,3,4,5,6,7 --tensor-parallel-size 2   
         """,
     )
 
@@ -175,6 +187,15 @@ Examples:
         help="Tensor parallel size for vLLM (default: 2)",
     )
     parser.add_argument(
+        "--gpu-devices",
+        type=str,
+        default=None,
+        help="Comma-separated GPU device IDs for multi-GPU parallelization (e.g., '0,1,2,3'). "
+             "When specified with --use-vllm-batch, spawns multiple parallel workers. "
+             "Number of workers = len(gpu_devices) / tensor_parallel_size. "
+             "If not specified, uses CUDA_VISIBLE_DEVICES or all available GPUs.",
+    )
+    parser.add_argument(
         "--reasoning-marker",
         type=str,
         default="assistantfinal",
@@ -293,18 +314,41 @@ Examples:
         if args.use_vllm_batch:
             # Use direct vLLM batch inference (faster)
             from .vllm_batch_client import VLLMConfig
+
+            # Parse GPU devices if specified
+            gpu_device_ids = None
+            if args.gpu_devices:
+                try:
+                    gpu_device_ids = [int(d.strip()) for d in args.gpu_devices.split(",")]
+                except ValueError:
+                    logging.error(f"Invalid --gpu-devices format: {args.gpu_devices}. Expected comma-separated integers.")
+                    sys.exit(1)
+
+                # Validate: number of GPUs must be divisible by tensor_parallel_size
+                if len(gpu_device_ids) % args.tensor_parallel_size != 0:
+                    logging.error(
+                        f"Number of GPU devices ({len(gpu_device_ids)}) must be divisible by "
+                        f"tensor_parallel_size ({args.tensor_parallel_size})"
+                    )
+                    sys.exit(1)
+
+                num_workers = len(gpu_device_ids) // args.tensor_parallel_size
+                logging.info(f"Multi-GPU mode: {len(gpu_device_ids)} GPUs -> {num_workers} parallel workers "
+                            f"(tensor_parallel_size={args.tensor_parallel_size})")
+
             vllm_config = VLLMConfig(
                 model_name=args.model,
                 tensor_parallel_size=args.tensor_parallel_size,
                 temperature=args.temperature,
                 max_tokens=args.max_tokens,
-                download_dir = args.vllm_download_dir,
+                download_dir=args.vllm_download_dir,
                 reasoning_marker=args.reasoning_marker if args.reasoning_marker else None,
             )
             df, metadata = generate_synthetic_dataset_batch(
                 config=config,
                 vllm_config=vllm_config,
                 show_progress=True,
+                gpu_device_ids=gpu_device_ids,
             )
         else:
             df, metadata = generate_synthetic_dataset(

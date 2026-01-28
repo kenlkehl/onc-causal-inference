@@ -39,9 +39,6 @@ cdt/models/propensity_model.py
 cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/uplift.py
-cdt/models/.ipynb_checkpoints/confounder_extractor-checkpoint.py
-cdt/models/.ipynb_checkpoints/gated_mil_hierarchical_extractor-checkpoint.py
-cdt/models/.ipynb_checkpoints/gru_extractor-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py
@@ -67,7 +64,6 @@ examples/hierarchical_transformer_config.json
 examples/modernbert_config.json
 examples/rlearner_config.json
 examples/semantic_cnn_config.json
-examples/.ipynb_checkpoints/gru_transformer_mil_config-checkpoint.json
 synthetic_data/__init__.py
 synthetic_data/cli.py
 synthetic_data/config.py
