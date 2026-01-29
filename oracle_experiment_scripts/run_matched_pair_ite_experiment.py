@@ -48,6 +48,33 @@ To run a quick test:
         --output-dir ../pcori_experiments/matched_pair_test \
         --gpu-ids 0 \
         --quick-test
+
+Oracle experiment (compare patient_prompt vs clinical_text):
+    python oracle_experiment_scripts/run_matched_pair_ite_experiment.py \
+        --dataset example_synthetic_data_one_confounder/dataset.parquet \
+        --output-dir ../pcori_experiments/oracle_experiment \
+        --gpu-ids 0 \
+        --oracle \
+        --quick-test
+
+GRU chunk encoder (overlapping token chunks with BiGRU attention):
+    python oracle_experiment_scripts/run_matched_pair_ite_experiment.py \
+        --dataset example_synthetic_data_one_confounder/dataset.parquet \
+        --output-dir ../pcori_experiments/gru_chunk_encoder_test \
+        --gpu-ids 0 \
+        --quick-test \
+        --chunk-encoder gru \
+        --chunk-size 128 \
+        --chunk-overlap 32
+
+Oracle + GRU encoder (full oracle comparison with GRU chunks):
+    python oracle_experiment_scripts/run_matched_pair_ite_experiment.py \
+        --dataset example_synthetic_data_one_confounder/dataset.parquet \
+        --output-dir ../pcori_experiments/oracle_gru_experiment \
+        --gpu-ids 0 \
+        --oracle \
+        --chunk-encoder gru \
+        --quick-test
 """
 
 import argparse
@@ -77,7 +104,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from cdt.models.matched_pair_ite import (
     PropensityMatchingModel,
     MatchedPairOutcomeModel,
-    EndToEndMatchedPairModel
+    EndToEndMatchedPairModel,
+    EndToEndMatchedPairModelGRU
 )
 from cdt.training.matched_pair_training import (
     train_propensity_model,
@@ -144,13 +172,27 @@ class ExperimentCondition:
     e2e_initial_matching: str = "propensity"
     e2e_lr_schedule: str = "linear"
     e2e_early_stopping_patience: int = 20
+    # Chunk encoder options (GRU vs BERT)
+    chunk_encoder: str = "bert"  # "bert" or "gru"
+    chunk_size: int = 128
+    chunk_overlap: int = 32
+    gru_embedding_dim: int = 128
+    gru_hidden_dim: int = 128
+    gru_num_layers: int = 2
 
 
 def generate_experiment_grid(
     quick_test: bool = False,
     caliper: Optional[float] = None,
     caliper_scale: Optional[str] = None,
-    match_with_replacement: Optional[bool] = None
+    match_with_replacement: Optional[bool] = None,
+    chunk_encoder: str = "bert",
+    chunk_size: int = 128,
+    chunk_overlap: int = 32,
+    gru_embedding_dim: int = 128,
+    gru_hidden_dim: int = 128,
+    gru_num_layers: int = 2,
+    text_columns: Optional[List[str]] = None
 ) -> List[ExperimentCondition]:
     """Generate grid of experimental conditions.
 
@@ -168,12 +210,21 @@ def generate_experiment_grid(
     - Caliper: maximum distance for valid match
     - Caliper scale: 'propensity', 'logit', or 'std'
     - Match with replacement: whether controls can be reused
+    - Chunk encoder: 'bert' (sentence-level) or 'gru' (overlapping token chunks)
+    - Text columns: which text columns to run experiments on (for oracle comparison)
 
     Args:
         quick_test: If True, run minimal test configuration
         caliper: Override caliper value for all conditions (default: 0.2)
         caliper_scale: Override caliper scale for all conditions (default: 'std')
         match_with_replacement: Override replacement setting for all conditions (default: False)
+        chunk_encoder: Encoder type - 'bert' (default) or 'gru'
+        chunk_size: Token chunk size for GRU encoder (default: 128)
+        chunk_overlap: Overlap between chunks for GRU encoder (default: 32)
+        gru_embedding_dim: Word embedding dim for GRU encoder (default: 128)
+        gru_hidden_dim: GRU hidden dim (default: 128)
+        gru_num_layers: Number of GRU layers (default: 2)
+        text_columns: List of text columns to run experiments on (default: ['clinical_text'])
     """
     conditions = []
 
@@ -181,6 +232,7 @@ def generate_experiment_grid(
     default_caliper = caliper if caliper is not None else 0.2
     default_caliper_scale = caliper_scale if caliper_scale is not None else "std"
     default_replacement = match_with_replacement if match_with_replacement is not None else False
+    default_text_columns = text_columns if text_columns is not None else ["clinical_text"]
 
     if quick_test:
         # Minimal test configuration
@@ -192,7 +244,7 @@ def generate_experiment_grid(
         joint_outcome_options = [False]
         freeze_repr_options = [True]
         cross_encoder_options = [False]
-        e2e_training_options = [False]  # Quick test: 3-stage only
+        e2e_training_options = [True]  # Quick test: E2E mode
         e2e_epochs_list = [10]
     else:
         # Full grid
@@ -216,29 +268,39 @@ def generate_experiment_grid(
     for e2e_mode in e2e_training_options:
         if e2e_mode:
             # End-to-end training conditions (simpler grid)
-            for matching_method in matching_methods:
-                for matching_algorithm in matching_algorithms:
-                    for lr in lrs:
-                        for e2e_epochs in e2e_epochs_list:
-                            idx += 1
-                            repl_str = "_repl" if default_replacement else ""
-                            name = (f"{idx:02d}_e2e_{matching_method}_{matching_algorithm}_"
-                                   f"lr{lr}_ep{e2e_epochs}_cal{default_caliper}_{default_caliper_scale}{repl_str}")
-                            conditions.append(ExperimentCondition(
-                                name=name,
-                                matching_method=matching_method,
-                                matching_algorithm=matching_algorithm,
-                                propensity_lr=lr,
-                                outcome_lr=lr,
-                                propensity_epochs=0,  # Not used in E2E
-                                outcome_epochs=0,     # Not used in E2E
-                                caliper=default_caliper,
-                                caliper_scale=default_caliper_scale,
-                                match_with_replacement=default_replacement,
-                                end_to_end_training=True,
-                                e2e_epochs=e2e_epochs,
-                                e2e_lr=lr,
-                            ))
+            for text_col in default_text_columns:
+                for matching_method in matching_methods:
+                    for matching_algorithm in matching_algorithms:
+                        for lr in lrs:
+                            for e2e_epochs in e2e_epochs_list:
+                                idx += 1
+                                repl_str = "_repl" if default_replacement else ""
+                                enc_str = f"_{chunk_encoder}" if chunk_encoder != "bert" else ""
+                                text_col_short = "oracle" if text_col == "patient_prompt" else "clinical"
+                                name = (f"{idx:02d}_e2e_{text_col_short}_{matching_method}_{matching_algorithm}_"
+                                       f"lr{lr}_ep{e2e_epochs}_cal{default_caliper}_{default_caliper_scale}{repl_str}{enc_str}")
+                                conditions.append(ExperimentCondition(
+                                    name=name,
+                                    matching_method=matching_method,
+                                    matching_algorithm=matching_algorithm,
+                                    propensity_lr=lr,
+                                    outcome_lr=lr,
+                                    propensity_epochs=0,  # Not used in E2E
+                                    outcome_epochs=0,     # Not used in E2E
+                                    caliper=default_caliper,
+                                    caliper_scale=default_caliper_scale,
+                                    match_with_replacement=default_replacement,
+                                    end_to_end_training=True,
+                                    e2e_epochs=e2e_epochs,
+                                    e2e_lr=lr,
+                                    text_column=text_col,
+                                    chunk_encoder=chunk_encoder,
+                                    chunk_size=chunk_size,
+                                    chunk_overlap=chunk_overlap,
+                                    gru_embedding_dim=gru_embedding_dim,
+                                    gru_hidden_dim=gru_hidden_dim,
+                                    gru_num_layers=gru_num_layers,
+                                ))
         else:
             # 3-stage conditions (original)
             for matching_method in matching_methods:
@@ -471,7 +533,7 @@ def run_single_fold(
 
     # Branch: End-to-end or 3-stage
     if condition.end_to_end_training:
-        return _run_single_fold_e2e(fold, train_df, test_df, text_col, mp_config, device)
+        return _run_single_fold_e2e(fold, train_df, test_df, text_col, mp_config, device, condition)
 
     # 3-Stage Approach
     # Stage 1: Train propensity model
@@ -637,27 +699,50 @@ def _run_single_fold_e2e(
     test_df: pd.DataFrame,
     text_col: str,
     mp_config: MatchedPairConfig,
-    device: torch.device
+    device: torch.device,
+    condition: Optional[ExperimentCondition] = None
 ) -> Tuple[pd.DataFrame, Dict[str, Any], Dict[str, Any]]:
     """Run a single fold with end-to-end training."""
-    logger.info(f"  Fold {fold + 1}: Using end-to-end training mode")
+    # Determine chunk encoder type
+    chunk_encoder = getattr(condition, 'chunk_encoder', 'bert') if condition else 'bert'
+    logger.info(f"  Fold {fold + 1}: Using end-to-end training mode with {chunk_encoder} encoder")
 
-    # Create unified model
-    model = EndToEndMatchedPairModel(
-        sentence_model=mp_config.hier_transformer_sentence_model,
-        freeze_sentence_encoder=mp_config.hier_transformer_freeze_sentence_encoder,
-        max_sentences=mp_config.hier_transformer_max_sentences,
-        max_sentence_length=mp_config.hier_transformer_max_sentence_length,
-        transformer_dim=mp_config.hier_transformer_dim,
-        num_transformer_layers=mp_config.hier_transformer_num_layers,
-        num_attention_heads=mp_config.hier_transformer_num_heads,
-        representation_dim=mp_config.representation_dim,
-        hidden_outcome_dim=mp_config.hidden_outcome_dim,
-        dropout=mp_config.dropout,
-        device=str(device)
-    ).to(device)
+    # Create unified model based on encoder type
+    if chunk_encoder == "gru":
+        # GRU chunk encoder
+        model = EndToEndMatchedPairModelGRU(
+            chunk_size=getattr(condition, 'chunk_size', 128),
+            chunk_overlap=getattr(condition, 'chunk_overlap', 32),
+            max_chunks=100,
+            gru_embedding_dim=getattr(condition, 'gru_embedding_dim', 128),
+            gru_hidden_dim=getattr(condition, 'gru_hidden_dim', 128),
+            gru_num_layers=getattr(condition, 'gru_num_layers', 2),
+            chunk_dim=mp_config.hier_transformer_dim,
+            num_transformer_layers=mp_config.hier_transformer_num_layers,
+            num_attention_heads=mp_config.hier_transformer_num_heads,
+            transformer_dropout=0.1,
+            representation_dim=mp_config.representation_dim,
+            hidden_outcome_dim=mp_config.hidden_outcome_dim,
+            dropout=mp_config.dropout,
+            device=str(device)
+        ).to(device)
+    else:
+        # Default: BERT sentence encoder
+        model = EndToEndMatchedPairModel(
+            sentence_model=mp_config.hier_transformer_sentence_model,
+            freeze_sentence_encoder=mp_config.hier_transformer_freeze_sentence_encoder,
+            max_sentences=mp_config.hier_transformer_max_sentences,
+            max_sentence_length=mp_config.hier_transformer_max_sentence_length,
+            transformer_dim=mp_config.hier_transformer_dim,
+            num_transformer_layers=mp_config.hier_transformer_num_layers,
+            num_attention_heads=mp_config.hier_transformer_num_heads,
+            representation_dim=mp_config.representation_dim,
+            hidden_outcome_dim=mp_config.hidden_outcome_dim,
+            dropout=mp_config.dropout,
+            device=str(device)
+        ).to(device)
 
-    # Initialize feature extractor
+    # Initialize feature extractor / tokenizer
     model.fit_tokenizer(train_df[text_col].tolist())
 
     # Train end-to-end (no validation split for fixed epochs)
@@ -715,11 +800,13 @@ def _run_single_fold_e2e(
     )
     metrics['fold'] = fold + 1
     metrics['training_mode'] = 'end_to_end'
+    metrics['chunk_encoder'] = chunk_encoder
+    metrics['text_column'] = text_col
     metrics['n_epochs'] = len(history)
     if history:
         metrics['final_n_matched_pairs'] = history[-1].get('n_matched_pairs', 0)
 
-    logger.info(f"  Fold {fold + 1} (E2E): ITE corr={metrics['ite_corr']:.4f}, ATE bias={metrics['ate_bias']:.4f}")
+    logger.info(f"  Fold {fold + 1} (E2E, {chunk_encoder}): ITE corr={metrics['ite_corr']:.4f}, ATE bias={metrics['ate_bias']:.4f}")
 
     # Cleanup
     model.cpu()
@@ -797,6 +884,9 @@ def run_experiment_condition(
         'caliper': condition.caliper,
         'caliper_scale': condition.caliper_scale,
         'match_with_replacement': condition.match_with_replacement,
+        'chunk_encoder': condition.chunk_encoder,
+        'text_column': condition.text_column,
+        'end_to_end_training': condition.end_to_end_training,
     }
 
     for col in ['ite_mse', 'ite_mae', 'ite_corr', 'ate_bias', 'propensity_auroc',
@@ -815,7 +905,8 @@ def run_experiment_condition(
     logger.info(f"\nCondition {condition.name} complete:")
     logger.info(f"  ITE corr: {summary['ite_corr_mean']:.4f} +/- {summary['ite_corr_std']:.4f}")
     logger.info(f"  ATE bias: {summary['ate_bias_mean']:.4f} +/- {summary['ate_bias_std']:.4f}")
-    logger.info(f"  Match rate: {summary['match_rate_mean']:.1%} +/- {summary['match_rate_std']:.1%}")
+    if 'match_rate_mean' in summary and not np.isnan(summary.get('match_rate_mean', np.nan)):
+        logger.info(f"  Match rate: {summary['match_rate_mean']:.1%} +/- {summary['match_rate_std']:.1%}")
 
     return summary
 
@@ -898,6 +989,57 @@ def main():
         action='store_true',
         help='Match without replacement (default behavior, each control matched at most once)'
     )
+    # Chunk encoder options
+    parser.add_argument(
+        '--chunk-encoder',
+        type=str,
+        choices=['bert', 'gru'],
+        default='bert',
+        help='Encoder type: "bert" (sentence-level BERT) or "gru" (overlapping token chunks with BiGRU). Default: bert'
+    )
+    parser.add_argument(
+        '--chunk-size',
+        type=int,
+        default=128,
+        help='Token chunk size for GRU encoder (default: 128)'
+    )
+    parser.add_argument(
+        '--chunk-overlap',
+        type=int,
+        default=32,
+        help='Overlap between chunks for GRU encoder (default: 32)'
+    )
+    parser.add_argument(
+        '--gru-embedding-dim',
+        type=int,
+        default=128,
+        help='Word embedding dimension for GRU encoder (default: 128)'
+    )
+    parser.add_argument(
+        '--gru-hidden-dim',
+        type=int,
+        default=128,
+        help='GRU hidden dimension (default: 128)'
+    )
+    parser.add_argument(
+        '--gru-num-layers',
+        type=int,
+        default=2,
+        help='Number of GRU layers (default: 2)'
+    )
+    # Text column options for oracle experiments
+    parser.add_argument(
+        '--text-columns',
+        type=str,
+        nargs='+',
+        default=['clinical_text'],
+        help='Text columns to run experiments on. Use "patient_prompt" for oracle baseline. Default: clinical_text'
+    )
+    parser.add_argument(
+        '--oracle',
+        action='store_true',
+        help='Run oracle experiment with both patient_prompt and clinical_text columns'
+    )
 
     args = parser.parse_args()
 
@@ -911,6 +1053,12 @@ def main():
     else:
         args.replacement = None  # Use grid default
 
+    # Handle oracle flag - run both patient_prompt and clinical_text
+    if args.oracle:
+        text_columns = ["patient_prompt", "clinical_text"]
+    else:
+        text_columns = args.text_columns
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -919,9 +1067,21 @@ def main():
         quick_test=args.quick_test,
         caliper=args.caliper,
         caliper_scale=args.caliper_scale,
-        match_with_replacement=args.replacement
+        match_with_replacement=args.replacement,
+        chunk_encoder=args.chunk_encoder,
+        chunk_size=args.chunk_size,
+        chunk_overlap=args.chunk_overlap,
+        gru_embedding_dim=args.gru_embedding_dim,
+        gru_hidden_dim=args.gru_hidden_dim,
+        gru_num_layers=args.gru_num_layers,
+        text_columns=text_columns
     )
     logger.info(f"Generated {len(conditions)} experimental conditions")
+    logger.info(f"  Chunk encoder: {args.chunk_encoder}")
+    if args.chunk_encoder == "gru":
+        logger.info(f"  Chunk size: {args.chunk_size}, overlap: {args.chunk_overlap}")
+        logger.info(f"  GRU: embedding_dim={args.gru_embedding_dim}, hidden_dim={args.gru_hidden_dim}, layers={args.gru_num_layers}")
+    logger.info(f"  Text columns: {text_columns}")
     if args.caliper is not None:
         logger.info(f"  Caliper: {args.caliper}")
     if args.caliper_scale is not None:
@@ -939,6 +1099,14 @@ def main():
             'caliper_override': args.caliper,
             'caliper_scale_override': args.caliper_scale,
             'replacement_override': args.replacement,
+            'chunk_encoder': args.chunk_encoder,
+            'chunk_size': args.chunk_size,
+            'chunk_overlap': args.chunk_overlap,
+            'gru_embedding_dim': args.gru_embedding_dim,
+            'gru_hidden_dim': args.gru_hidden_dim,
+            'gru_num_layers': args.gru_num_layers,
+            'text_columns': text_columns,
+            'oracle_mode': args.oracle,
             'n_conditions': len(conditions),
             'conditions': [asdict(c) for c in conditions]
         }, f, indent=2)
@@ -1002,14 +1170,21 @@ def main():
         # Sort by ITE correlation (higher is better)
         leaderboard = summary_df.sort_values('ite_corr_mean', ascending=False)
 
+        # Dynamically select columns that exist
+        base_cols = ['condition', 'matching_method', 'matching_algorithm',
+                     'ite_corr_mean', 'ite_corr_std', 'ate_bias_mean']
+        if 'text_column' in leaderboard.columns:
+            base_cols.insert(1, 'text_column')
+        if 'chunk_encoder' in leaderboard.columns:
+            base_cols.insert(2, 'chunk_encoder')
+        display_cols = [c for c in base_cols if c in leaderboard.columns]
+
         print("\nTop conditions by ITE correlation:")
-        print(leaderboard[['condition', 'matching_method', 'matching_algorithm',
-                          'ite_corr_mean', 'ite_corr_std', 'ate_bias_mean', 'match_rate_mean']].head(10).to_string())
+        print(leaderboard[display_cols].head(10).to_string())
 
         print("\n\nTop conditions by ATE bias (lower is better):")
         leaderboard_ate = summary_df.sort_values('ate_bias_mean', ascending=True)
-        print(leaderboard_ate[['condition', 'matching_method', 'matching_algorithm',
-                               'ate_bias_mean', 'ate_bias_std', 'ite_corr_mean']].head(10).to_string())
+        print(leaderboard_ate[display_cols].head(10).to_string())
 
     logger.info(f"\nResults saved to: {output_dir}")
 

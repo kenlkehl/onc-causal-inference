@@ -70,6 +70,17 @@ class DragonNet(nn.Module):
 
         return y0_logit, y1_logit, t_logit, final_common_layer
 
+    def get_representation(self, features):
+        """Compute shared representation from input features."""
+        h = F.relu(self.representation_fc1(features))
+        h = self.rep_dropout(h)
+        final_common_layer = F.elu(self.representation_fc6(h))
+        final_common_layer = self.rep_dropout(final_common_layer)
+        return final_common_layer
+
+    def propensity_from_representation(self, phi):
+        """Compute propensity logit from shared representation."""
+        return self.propensity_fc1(phi)
 
     def load_pretrained_representation(self, pretrained_state_dict):
         """

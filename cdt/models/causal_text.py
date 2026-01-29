@@ -565,12 +565,42 @@ class CausalText(nn.Module):
             treatments_smooth = treatments
             outcomes_smooth = outcomes
 
-        # Forward pass
-        y0_logit, y1_logit, t_logit, phi = self.forward(texts, auxiliary_features)
+        # Extract features
+        features = self.feature_extractor(texts)
 
-        # Propensity loss
+        # Concatenate auxiliary features if provided
+        if self.auxiliary_projection is not None and auxiliary_features is not None:
+            aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+            features = torch.cat([features, aux_projected], dim=1)
+
+        # For DragonNet/UpliftNet: handle stop_grad_propensity
+        if stop_grad_propensity:
+            # Detach features for propensity computation to prevent propensity
+            # from dominating the representation learning
+            features_detached = features.detach()
+
+            # Compute representation with detached features for propensity
+            phi_detached = self.net.get_representation(features_detached)
+            t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+
+            # Compute full forward pass with regular features for outcome heads
+            if self.model_type == "uplift":
+                y0_logit, tau_logit, t_logit, phi = self.net(features)
+                y1_logit = y0_logit + tau_logit
+            else:  # dragonnet
+                y0_logit, y1_logit, t_logit, phi = self.net(features)
+        else:
+            # Standard forward pass
+            if self.model_type == "uplift":
+                y0_logit, tau_logit, t_logit, phi = self.net(features)
+                y1_logit = y0_logit + tau_logit
+            else:  # dragonnet
+                y0_logit, y1_logit, t_logit, phi = self.net(features)
+            t_logit_for_loss = t_logit
+
+        # Propensity loss - use t_logit_for_loss (detached features if stop_grad)
         propensity_loss = F.binary_cross_entropy_with_logits(
-            t_logit.squeeze(-1),
+            t_logit_for_loss.squeeze(-1),
             treatments_smooth
         )
 
@@ -680,31 +710,20 @@ class CausalText(nn.Module):
         if stop_grad_propensity:
             # CRITICAL: Detach features for propensity to prevent propensity
             # from dominating the representation learning
-            # Create two forward paths: one for propensity (detached), one for outcome/tau
-            features_for_propensity = features.detach()
+            features_detached = features.detach()
 
-            # Forward pass through R-Learner heads with split features
-            # We need to run the propensity head separately with detached features
+            # Forward pass with regular features for outcome/tau
             m_logit, tau, t_logit, phi = self.net(features)
 
-            # Re-compute propensity with detached features
-            # We need direct access to the propensity head
-            if hasattr(self.net, 'propensity_fc'):
-                # Get shared representation
-                shared_rep_detached = self.net.shared_layers(features_for_propensity)
-                t_logit_detached = self.net.propensity_fc(shared_rep_detached)
+            # Re-compute propensity with detached features using helper methods
+            phi_detached = self.net.get_representation(features_detached)
+            t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
 
-                # Loss 1: Propensity loss with DETACHED features
-                propensity_loss = F.binary_cross_entropy_with_logits(
-                    t_logit_detached.squeeze(-1),
-                    treatments_smooth
-                )
-            else:
-                # Fallback: use detached t_logit
-                propensity_loss = F.binary_cross_entropy_with_logits(
-                    t_logit.detach().squeeze(-1),
-                    treatments_smooth
-                )
+            # Loss 1: Propensity loss with DETACHED features
+            propensity_loss = F.binary_cross_entropy_with_logits(
+                t_logit_for_loss.squeeze(-1),
+                treatments_smooth
+            )
         else:
             # Standard forward pass
             m_logit, tau, t_logit, phi = self.net(features)

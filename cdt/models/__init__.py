@@ -11,6 +11,7 @@ from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor, AttentionPooling
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
+from .hierarchical_gru_transformer_extractor import HierarchicalGRUTransformerExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gated_mil_attention import GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling
 from .sparse_attention import (
@@ -26,7 +27,8 @@ from .matched_pair_ite import (
     MatchedPairOutcomeModel,
     EnhancedMatchedPairOutcomeModel,
     CombinedMatchedPairModel,
-    EndToEndMatchedPairModel
+    EndToEndMatchedPairModel,
+    EndToEndMatchedPairModelGRU
 )
 from .residual_cross_encoder import ResidualCrossEncoder
 
@@ -46,6 +48,7 @@ __all__ = [
     'HierarchicalConfounderExtractor',
     'GRUHierarchicalConfounderExtractor',
     'HierarchicalTransformerExtractor',
+    'HierarchicalGRUTransformerExtractor',
     'GatedMILHierarchicalExtractor',
     'GatedMILAttention',
     'TaskSpecificConfounderWeighting',
@@ -64,5 +67,6 @@ __all__ = [
     'EnhancedMatchedPairOutcomeModel',
     'CombinedMatchedPairModel',
     'EndToEndMatchedPairModel',
+    'EndToEndMatchedPairModelGRU',
     'ResidualCrossEncoder',
 ]

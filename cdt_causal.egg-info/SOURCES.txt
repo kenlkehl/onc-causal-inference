@@ -30,6 +30,7 @@ cdt/models/dragonnet.py
 cdt/models/gated_mil_attention.py
 cdt/models/gated_mil_hierarchical_extractor.py
 cdt/models/gru_extractor.py
+cdt/models/hierarchical_gru_transformer_extractor.py
 cdt/models/hierarchical_transformer_extractor.py
 cdt/models/matched_pair_ite.py
 cdt/models/mlp_dragonnet.py
