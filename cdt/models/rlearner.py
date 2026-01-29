@@ -113,3 +113,15 @@ class RLearnerNet(nn.Module):
         tau_out = self.effect_fc3(tau)
 
         return m_logit, tau_out, t_logit, phi
+
+    def get_representation(self, features):
+        """Compute shared representation from input features."""
+        h = F.relu(self.representation_fc1(features))
+        h = self.rep_dropout(h)
+        phi = F.elu(self.representation_fc2(h))
+        phi = self.rep_dropout(phi)
+        return phi
+
+    def propensity_from_representation(self, phi):
+        """Compute propensity logit from shared representation."""
+        return self.propensity_fc(phi)
