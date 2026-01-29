@@ -37,22 +37,36 @@ class PropensityMatchingModel(nn.Module):
 
     Architecture:
         HierarchicalTransformerExtractor (bert-tiny -> CLS per sentence -> Transformer POOL)
+        OR HierarchicalGRUTransformerExtractor (overlapping token chunks -> BiGRU + attention)
         -> representation_layers (Linear -> ELU -> Linear)
         -> propensity_head (Linear -> sigmoid)
 
     The representation layer can be frozen after propensity training to preserve
     covariate balance when used for matching and outcome/tau training.
 
+    The chunk encoder type is selected via the `chunk_encoder` parameter:
+    - "bert" (default): Uses HierarchicalTransformerExtractor with sentence-level BERT
+    - "gru": Uses HierarchicalGRUTransformerExtractor with overlapping token chunks
+
     Args:
         sentence_model: HuggingFace model name for sentence encoding (default: prajjwal1/bert-tiny)
         freeze_sentence_encoder: Whether to freeze the sentence encoder weights
-        max_sentences: Maximum number of sentences to process per document
+        max_sentences: Maximum number of sentences/chunks to process per document
         max_sentence_length: Maximum tokens per sentence for BERT encoding
         transformer_dim: Hidden dimension for transformer pooling layers
         num_transformer_layers: Number of transformer layers for pooling
         num_attention_heads: Number of attention heads in transformer layers
         transformer_dropout: Dropout rate for transformer layers
         representation_dim: Dimension of the learned representation layer
+        joint_outcome_training: Whether to jointly train on outcome prediction
+        chunk_encoder: Encoder type - "bert" (sentence-level) or "gru" (token chunks)
+        gru_chunk_size: Tokens per chunk (GRU encoder only)
+        gru_chunk_overlap: Overlap between chunks (GRU encoder only)
+        gru_embedding_dim: Word embedding dimension (GRU encoder only)
+        gru_hidden_dim: BiGRU hidden dimension per direction (GRU encoder only)
+        gru_num_layers: Number of GRU layers (GRU encoder only)
+        gru_max_vocab_size: Maximum vocabulary size (GRU encoder only)
+        gru_min_word_freq: Minimum word frequency (GRU encoder only)
         device: PyTorch device
     """
 
@@ -68,6 +82,16 @@ class PropensityMatchingModel(nn.Module):
         transformer_dropout: float = 0.1,
         representation_dim: int = 256,
         joint_outcome_training: bool = False,
+        # Chunk encoder selection
+        chunk_encoder: str = "bert",
+        # GRU-specific parameters
+        gru_chunk_size: int = 128,
+        gru_chunk_overlap: int = 32,
+        gru_embedding_dim: int = 128,
+        gru_hidden_dim: int = 128,
+        gru_num_layers: int = 2,
+        gru_max_vocab_size: int = 50000,
+        gru_min_word_freq: int = 2,
         device: str = "cuda:0"
     ):
         super().__init__()
@@ -76,21 +100,39 @@ class PropensityMatchingModel(nn.Module):
         self._representation_dim = representation_dim
         self._representation_frozen = False
         self._joint_outcome_training = joint_outcome_training
+        self._chunk_encoder_type = chunk_encoder
 
-        # Feature extractor: HierarchicalTransformerExtractor
-        # The projection_dim from the extractor feeds into our representation layers
-        self.feature_extractor = HierarchicalTransformerExtractor(
-            sentence_encoder_model=sentence_model,
-            freeze_sentence_encoder=freeze_sentence_encoder,
-            max_sentences=max_sentences,
-            max_sentence_length=max_sentence_length,
-            num_transformer_layers=num_transformer_layers,
-            num_attention_heads=num_attention_heads,
-            transformer_dim=transformer_dim,
-            transformer_dropout=transformer_dropout,
-            projection_dim=transformer_dim,  # Use transformer_dim as intermediate
-            device=self._device
-        )
+        # Feature extractor: based on chunk_encoder type
+        if chunk_encoder == "gru":
+            self.feature_extractor = HierarchicalGRUTransformerExtractor(
+                chunk_size=gru_chunk_size,
+                chunk_overlap=gru_chunk_overlap,
+                max_chunks=max_sentences,  # Reuse max_sentences parameter
+                embedding_dim=gru_embedding_dim,
+                gru_hidden_dim=gru_hidden_dim,
+                gru_num_layers=gru_num_layers,
+                chunk_dim=transformer_dim,
+                num_transformer_layers=num_transformer_layers,
+                num_attention_heads=num_attention_heads,
+                transformer_dropout=transformer_dropout,
+                projection_dim=transformer_dim,  # Use transformer_dim as intermediate
+                max_vocab_size=gru_max_vocab_size,
+                min_word_freq=gru_min_word_freq,
+                device=self._device
+            )
+        else:  # "bert" (default)
+            self.feature_extractor = HierarchicalTransformerExtractor(
+                sentence_encoder_model=sentence_model,
+                freeze_sentence_encoder=freeze_sentence_encoder,
+                max_sentences=max_sentences,
+                max_sentence_length=max_sentence_length,
+                num_transformer_layers=num_transformer_layers,
+                num_attention_heads=num_attention_heads,
+                transformer_dim=transformer_dim,
+                transformer_dropout=transformer_dropout,
+                projection_dim=transformer_dim,  # Use transformer_dim as intermediate
+                device=self._device
+            )
 
         # Representation layers (can be frozen after propensity training)
         self.repr_fc1 = nn.Linear(transformer_dim, representation_dim)
@@ -117,7 +159,12 @@ class PropensityMatchingModel(nn.Module):
             )
 
         logger.info(f"PropensityMatchingModel initialized:")
-        logger.info(f"  Sentence encoder: {sentence_model}")
+        logger.info(f"  Chunk encoder: {chunk_encoder}")
+        if chunk_encoder == "gru":
+            logger.info(f"  GRU: chunk_size={gru_chunk_size}, overlap={gru_chunk_overlap}")
+            logger.info(f"  GRU: embedding_dim={gru_embedding_dim}, hidden_dim={gru_hidden_dim}, layers={gru_num_layers}")
+        else:
+            logger.info(f"  Sentence encoder: {sentence_model}")
         logger.info(f"  Representation dim: {representation_dim}")
         logger.info(f"  Transformer dim: {transformer_dim}")
         logger.info(f"  Joint outcome training: {joint_outcome_training}")
@@ -256,6 +303,11 @@ class PropensityMatchingModel(nn.Module):
         """Check if representation is frozen."""
         return self._representation_frozen
 
+    @property
+    def chunk_encoder_type(self) -> str:
+        """Return the chunk encoder type ('bert' or 'gru')."""
+        return self._chunk_encoder_type
+
     def fit_tokenizer(self, texts: List[str]) -> 'PropensityMatchingModel':
         """
         Initialize the feature extractor (triggers lazy initialization).
@@ -281,6 +333,7 @@ class PropensityMatchingModel(nn.Module):
             'representation_dim': self._representation_dim,
             'representation_frozen': self._representation_frozen,
             'joint_outcome_training': self._joint_outcome_training,
+            'chunk_encoder_type': self._chunk_encoder_type,
             'feature_extractor_state': self.feature_extractor.get_state()
         }
 
@@ -747,6 +800,224 @@ class CombinedMatchedPairModel(nn.Module):
     def predict(self, texts: List[str]) -> Dict[str, torch.Tensor]:
         """Alias for forward() for API consistency."""
         return self.forward(texts)
+
+
+class MeanEmbeddingITEModel(nn.Module):
+    """
+    ITE head trained on mean of matched pair embeddings.
+
+    Key design:
+    - Takes a FROZEN outcome_head from Stage 1 propensity model
+    - Only the ite_head is trainable
+    - Training uses mean(repr_T, repr_U), inference uses patient's own repr
+
+    Architecture:
+        ite_head: Linear -> ReLU -> Dropout -> Linear -> ReLU -> Dropout -> Linear
+
+    Training predictions (on matched pairs):
+        mean_repr = (repr_T + repr_U) / 2
+        Y_T_logit = frozen_outcome(mean_repr) + ite_head(mean_repr)
+        Y_U_logit = frozen_outcome(mean_repr) - ite_head(mean_repr)
+
+    Inference predictions (single patient):
+        Y1_logit = frozen_outcome(repr) + ite_head(repr)
+        Y0_logit = frozen_outcome(repr) - ite_head(repr)
+        ITE = Y1_prob - Y0_prob
+
+    Args:
+        representation_dim: Dimension of input representations
+        hidden_dim: Hidden dimension for ITE head
+        dropout: Dropout rate
+        frozen_outcome_head: nn.Module from Stage 1 (will be frozen)
+    """
+
+    def __init__(
+        self,
+        representation_dim: int = 256,
+        hidden_dim: int = 128,
+        dropout: float = 0.2,
+        frozen_outcome_head: Optional[nn.Module] = None
+    ):
+        super().__init__()
+
+        self._representation_dim = representation_dim
+        self._hidden_dim = hidden_dim
+
+        # Store frozen outcome head (not trainable)
+        if frozen_outcome_head is not None:
+            self.frozen_outcome_head = frozen_outcome_head
+            for param in self.frozen_outcome_head.parameters():
+                param.requires_grad = False
+        else:
+            # Create a placeholder if not provided (will be set later)
+            self.frozen_outcome_head = None
+
+        # Only ite_head is trainable
+        self.ite_head = nn.Sequential(
+            nn.Linear(representation_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        logger.info(f"MeanEmbeddingITEModel initialized:")
+        logger.info(f"  Representation dim: {representation_dim}")
+        logger.info(f"  Hidden dim: {hidden_dim}")
+        logger.info(f"  Dropout: {dropout}")
+        logger.info(f"  Frozen outcome head: {'provided' if frozen_outcome_head else 'None'}")
+
+    def set_frozen_outcome_head(self, outcome_head: nn.Module) -> None:
+        """
+        Set the frozen outcome head after construction.
+
+        Args:
+            outcome_head: nn.Module from Stage 1 (will be frozen)
+        """
+        self.frozen_outcome_head = outcome_head
+        for param in self.frozen_outcome_head.parameters():
+            param.requires_grad = False
+        logger.info("Frozen outcome head set")
+
+    def forward_training(
+        self,
+        repr_U: torch.Tensor,
+        repr_T: torch.Tensor,
+        external_outcome_head: Optional[nn.Module] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Training forward pass on matched pairs.
+
+        Computes predictions using mean of paired embeddings:
+            mean_repr = (repr_T + repr_U) / 2
+            base_logit = outcome_head(mean_repr)  [frozen or external/trainable]
+            ite_half = ite_head(mean_repr)        [trainable]
+            Y_U_logit = base_logit - ite_half
+            Y_T_logit = base_logit + ite_half
+
+        Args:
+            repr_U: Untreated patient representations (B, D)
+            repr_T: Treated patient representations (B, D)
+            external_outcome_head: Optional external outcome head to use instead of
+                frozen_outcome_head. When provided, this head is used WITH gradients
+                (for unfrozen training mode). When None, uses self.frozen_outcome_head
+                without gradients.
+
+        Returns:
+            Tuple of (Y_U_logit, Y_T_logit, ite_half_logit)
+        """
+        mean_repr = (repr_U + repr_T) / 2
+
+        if external_outcome_head is not None:
+            # Unfrozen mode: use external outcome head WITH gradients
+            base_logit = external_outcome_head(mean_repr)
+        else:
+            # Frozen mode: use frozen_outcome_head WITHOUT gradients
+            if self.frozen_outcome_head is None:
+                raise ValueError("No outcome head available. Either provide external_outcome_head "
+                               "or call set_frozen_outcome_head() first.")
+            with torch.no_grad():
+                base_logit = self.frozen_outcome_head(mean_repr)
+
+        ite_half = self.ite_head(mean_repr)
+
+        Y_U_logit = base_logit - ite_half
+        Y_T_logit = base_logit + ite_half
+
+        return Y_U_logit, Y_T_logit, ite_half
+
+    def forward(
+        self,
+        repr_U: torch.Tensor,
+        repr_T: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Alias for forward_training for API consistency."""
+        return self.forward_training(repr_U, repr_T)
+
+    def predict_potential_outcomes(
+        self,
+        repr: torch.Tensor
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Inference on single patient.
+
+        Computes potential outcomes using patient's own representation:
+            base_logit = frozen_outcome_head(repr)  [no gradient]
+            ite_half = ite_head(repr)               [inference mode]
+            Y0_logit = base_logit - ite_half
+            Y1_logit = base_logit + ite_half
+
+        Args:
+            repr: Patient representations of shape (B, D)
+
+        Returns:
+            Tuple of (y0_prob, y1_prob, ite_prob)
+        """
+        if self.frozen_outcome_head is None:
+            raise ValueError("Frozen outcome head not set. Call set_frozen_outcome_head() first.")
+
+        with torch.no_grad():
+            base_logit = self.frozen_outcome_head(repr)
+
+        ite_half = self.ite_head(repr)
+
+        y0_logit = base_logit - ite_half
+        y1_logit = base_logit + ite_half
+
+        y0_prob = torch.sigmoid(y0_logit)
+        y1_prob = torch.sigmoid(y1_logit)
+        ite_prob = y1_prob - y0_prob
+
+        return y0_prob, y1_prob, ite_prob
+
+    def predict_ite_logit(self, repr: torch.Tensor) -> torch.Tensor:
+        """
+        Predict ITE for single patient (logit scale = 2*ite_half).
+
+        This gives the full ITE on logit scale, not just half.
+
+        Args:
+            repr: Patient representations of shape (B, D)
+
+        Returns:
+            ITE on logit scale of shape (B, 1)
+        """
+        return 2 * self.ite_head(repr)
+
+    def predict_ite(self, repr: torch.Tensor) -> torch.Tensor:
+        """
+        Alias for predict_ite_logit for API consistency.
+
+        Args:
+            repr: Patient representations of shape (B, D)
+
+        Returns:
+            ITE on logit scale of shape (B, 1)
+        """
+        return self.predict_ite_logit(repr)
+
+    def predict_outcome(self, repr: torch.Tensor) -> torch.Tensor:
+        """
+        Predict base outcome probability for a patient.
+
+        This returns the frozen outcome head's prediction (P(Y=1|X)),
+        which represents the baseline outcome without treatment effect adjustment.
+
+        Args:
+            repr: Patient representations of shape (B, D)
+
+        Returns:
+            Outcome probability of shape (B, 1)
+        """
+        if self.frozen_outcome_head is None:
+            raise ValueError("Frozen outcome head not set. Call set_frozen_outcome_head() first.")
+
+        with torch.no_grad():
+            logit = self.frozen_outcome_head(repr)
+
+        return torch.sigmoid(logit)
 
 
 class EndToEndMatchedPairModel(nn.Module):

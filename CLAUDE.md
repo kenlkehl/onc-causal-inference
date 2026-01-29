@@ -160,6 +160,8 @@ Alternative to DragonNet using propensity matching:
 | Stage 2 | Match patients by propensity or embedding similarity |
 | Stage 3 | Train outcome/tau model on matched pairs |
 
+**Cross-validation**: When using n-fold CV (`cv_folds > 1`), training uses pure n-fold CV where 100% of the training fold is used for propensity model training (no internal validation split). The training runs for a fixed number of epochs without early stopping within each fold.
+
 Key options:
 
 | Option | Default | Purpose |
@@ -268,7 +270,143 @@ propensity = model.predict_propensity(test_texts)
 
 See `examples/matched_pair_e2e_config.json` for a complete example.
 
+### Mean-Embedding ITE Model
+
+When `use_mean_embedding_ite=True`, Stage 3 uses a symmetric ITE formulation where the ITE head is trainable and the base model can be frozen or unfrozen.
+
+**Prerequisites:**
+- Requires `joint_outcome_training=True` in Stage 1 (to have an outcome head)
+
+**Key differences from standard approach:**
+
+| Aspect | Standard (`MatchedPairOutcomeModel`) | Mean-Embedding (`MeanEmbeddingITEModel`) |
+|--------|-------------------------------------|------------------------------------------|
+| Input to ITE head | Untreated repr only (`repr_U`) | Mean of pair: `(repr_T + repr_U) / 2` |
+| Outcome head | Trained in Stage 3 | Frozen (default) or trainable |
+| Stage 3 trainable params | outcome_head + tau_head | ITE head only (frozen) or all (unfrozen) |
+| Inference | Use repr directly | Use patient's own repr directly |
+
+**Key options:**
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `use_mean_embedding_ite` | `False` | Enable mean-embedding ITE model |
+| `mean_ite_hidden_dim` | `128` | Hidden dimension for ITE head |
+| `mean_ite_dropout` | `0.2` | Dropout rate for ITE head |
+| `freeze_representation_stage2` | `True` | Freeze base model during ITE training |
+
+**Frozen mode (default, `freeze_representation_stage2=True`):**
+- Frozen components: feature extractor, propensity head, outcome head
+- Trainable: ITE head only (new 3-layer MLP)
+- Representations pre-extracted once before training
+- Training input: mean of matched pair embeddings `(repr_T + repr_U) / 2`
+
+**Unfrozen mode (`freeze_representation_stage2=False`):**
+- Trainable: ITE head + full propensity model (with lower LR 0.1x)
+- Representations computed on-the-fly each batch
+- Allows continued feature learning during Stage 3
+- After training, outcome head is frozen for inference consistency
+
+**Training formulation:**
+```
+mean_repr = (repr_T + repr_U) / 2
+base_logit = outcome_head(mean_repr)  # frozen or trainable
+ite_half = ite_head(mean_repr)        # always trainable
+
+Y_T_logit = base_logit + ite_half
+Y_U_logit = base_logit - ite_half
+
+Loss = BCE(sigmoid(Y_T_logit), y_T) + BCE(sigmoid(Y_U_logit), y_U)
+```
+
+**Inference (single patient):**
+```
+base_logit = frozen_outcome_head(repr)
+ite_half = ite_head(repr)
+
+Y0_logit = base_logit - ite_half
+Y1_logit = base_logit + ite_half
+ITE_prob = sigmoid(Y1_logit) - sigmoid(Y0_logit)
+```
+
+**Usage:**
+```python
+from cdt.models import PropensityMatchingModel, MeanEmbeddingITEModel
+from cdt.training import train_propensity_model, train_mean_embedding_ite_model
+
+# Stage 1: Train propensity model with joint outcome training
+propensity_model = PropensityMatchingModel(
+    joint_outcome_training=True,  # Required!
+    device="cuda:0"
+)
+propensity_model, _ = train_propensity_model(propensity_model, train_df, val_df, config, device)
+
+# Stage 2: Match patients (as usual)
+# ...
+
+# Stage 3: Train mean-embedding ITE model
+ite_model, history = train_mean_embedding_ite_model(
+    propensity_model, train_df, matched_pairs, config, device
+)
+
+# Inference
+repr = propensity_model.get_representation(test_texts)
+y0, y1, ite = ite_model.predict_potential_outcomes(repr)
+```
+
+**Example config:**
+```json
+{
+  "matched_pair": {
+    "joint_outcome_training": true,
+    "use_mean_embedding_ite": true,
+    "mean_ite_hidden_dim": 128,
+    "mean_ite_dropout": 0.2,
+    "cv_folds": 5
+  }
+}
+```
+
 See `examples/matched_pair_config.json` for sample configs.
+
+### Chunk Encoder Selection
+
+The `chunk_encoder` option selects the text encoding strategy for `PropensityMatchingModel`:
+
+| `chunk_encoder` | Extractor | Description |
+|-----------------|-----------|-------------|
+| `"bert"` (default) | `HierarchicalTransformerExtractor` | Sentence boundaries, BERT [CLS] per sentence |
+| `"gru"` | `HierarchicalGRUTransformerExtractor` | Overlapping token chunks, BiGRU + attention |
+
+**GRU encoder options:**
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `gru_chunk_size` | `128` | Tokens per chunk |
+| `gru_chunk_overlap` | `32` | Overlap between chunks |
+| `gru_embedding_dim` | `128` | Word embedding dimension |
+| `gru_hidden_dim` | `128` | BiGRU hidden dim per direction |
+| `gru_num_layers` | `2` | Number of GRU layers |
+| `gru_max_vocab_size` | `50000` | Maximum vocabulary size |
+| `gru_min_word_freq` | `2` | Minimum word frequency |
+
+The GRU encoder requires `fit_tokenizer()` to build vocabulary from training text. Both encoders share the same interface (`fit_tokenizer(texts)` or `init_extractor(texts)`).
+
+**Example config:**
+```json
+{
+  "matched_pair": {
+    "chunk_encoder": "gru",
+    "gru_chunk_size": 128,
+    "gru_chunk_overlap": 32,
+    "gru_embedding_dim": 128,
+    "gru_hidden_dim": 128,
+    "gru_num_layers": 2
+  }
+}
+```
+
+See `examples/matched_pair_mean_ite_config.json` for a complete example with GRU encoder.
 
 ## Key Training Options
 

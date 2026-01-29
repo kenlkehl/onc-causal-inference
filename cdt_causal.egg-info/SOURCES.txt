@@ -17,6 +17,7 @@ cdt/experiments/runner.py
 cdt/inference/__init__.py
 cdt/inference/applied.py
 cdt/inference/matched_pair_applied.py
+cdt/inference/.ipynb_checkpoints/matched_pair_applied-checkpoint.py
 cdt/matching/__init__.py
 cdt/matching/propensity_matcher.py
 cdt/models/__init__.py
@@ -41,6 +42,7 @@ cdt/models/residual_cross_encoder.py
 cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/uplift.py
+cdt/models/.ipynb_checkpoints/matched_pair_ite-checkpoint.py
 cdt/training/__init__.py
 cdt/training/matched_pair_training.py
 cdt/training/outcome_training.py
@@ -66,9 +68,11 @@ examples/matched_pair_config.json
 examples/matched_pair_cross_encoder_config.json
 examples/matched_pair_e2e_config.json
 examples/matched_pair_embedding_config.json
+examples/matched_pair_mean_ite_config.json
 examples/modernbert_config.json
 examples/rlearner_config.json
 examples/semantic_cnn_config.json
+examples/.ipynb_checkpoints/matched_pair_mean_ite_config-checkpoint.json
 synthetic_data/__init__.py
 synthetic_data/cli.py
 synthetic_data/config.py

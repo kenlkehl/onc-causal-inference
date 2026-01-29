@@ -32,7 +32,8 @@ from ..models.matched_pair_ite import (
     MatchedPairOutcomeModel,
     EnhancedMatchedPairOutcomeModel,
     CombinedMatchedPairModel,
-    EndToEndMatchedPairModel
+    EndToEndMatchedPairModel,
+    MeanEmbeddingITEModel
 )
 from ..training.matched_pair_training import (
     train_propensity_model,
@@ -41,6 +42,7 @@ from ..training.matched_pair_training import (
     extract_propensity_scores,
     train_matched_pair_outcome_model_enhanced,
     train_end_to_end_matched_pair,
+    train_mean_embedding_ite_model,
 )
 from ..matching import PropensityMatcher, match_by_cosine_similarity
 from ..data import ClinicalTextDataset, collate_batch
@@ -212,14 +214,11 @@ def _process_matched_pair_fold(
         )
 
     # 3-Stage Approach (original implementation)
-    # Split train into train/val for propensity training
-    # Use 80/20 split within training fold
-    val_size = int(0.2 * len(train_df))
-    val_df_inner = train_df.iloc[:val_size].reset_index(drop=True)
-    train_df_inner = train_df.iloc[val_size:].reset_index(drop=True)
+    # Use full training fold for propensity training (no internal validation split)
+    # This implements pure n-fold CV where 100% of training fold is used for training
 
     # Step 1: Train propensity model
-    logger.info(f"  Step 1: Training propensity model on {len(train_df_inner)} samples")
+    logger.info(f"  Step 1: Training propensity model on {len(train_df)} samples")
     propensity_model = PropensityMatchingModel(
         sentence_model=mp_config.hier_transformer_sentence_model,
         freeze_sentence_encoder=mp_config.hier_transformer_freeze_sentence_encoder,
@@ -231,14 +230,24 @@ def _process_matched_pair_fold(
         transformer_dropout=mp_config.hier_transformer_dropout,
         representation_dim=mp_config.representation_dim,
         joint_outcome_training=mp_config.joint_outcome_training,
+        # Chunk encoder selection
+        chunk_encoder=mp_config.chunk_encoder,
+        # GRU-specific parameters
+        gru_chunk_size=mp_config.gru_chunk_size,
+        gru_chunk_overlap=mp_config.gru_chunk_overlap,
+        gru_embedding_dim=mp_config.gru_embedding_dim,
+        gru_hidden_dim=mp_config.gru_hidden_dim,
+        gru_num_layers=mp_config.gru_num_layers,
+        gru_max_vocab_size=mp_config.gru_max_vocab_size,
+        gru_min_word_freq=mp_config.gru_min_word_freq,
         device=str(device)
     ).to(device)
 
     # Initialize
-    propensity_model.fit_tokenizer(train_df_inner[text_col].tolist())
+    propensity_model.fit_tokenizer(train_df[text_col].tolist())
 
     propensity_model, prop_history = train_propensity_model(
-        propensity_model, train_df_inner, val_df_inner, mp_config, device
+        propensity_model, train_df, None, mp_config, device  # val_df=None for pure CV
     )
 
     # Step 2: Extract representations and propensity scores for ALL training data
@@ -298,8 +307,15 @@ def _process_matched_pair_fold(
     logger.info(f"  Step 4: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
     # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
-    # Use enhanced training if cross-encoder is enabled
-    if mp_config.use_cross_encoder:
+    # Choose training approach based on config
+    use_mean_ite = mp_config.use_mean_embedding_ite
+    if use_mean_ite:
+        logger.info(f"    Using mean-embedding ITE model")
+        outcome_model, outcome_history = train_mean_embedding_ite_model(
+            propensity_model, train_df, match_result.matched_pairs,
+            mp_config, device
+        )
+    elif mp_config.use_cross_encoder:
         logger.info(f"    Using cross-encoder enhanced training")
         outcome_model, outcome_history = train_matched_pair_outcome_model_enhanced(
             propensity_model, train_df, match_result.matched_pairs,
@@ -536,6 +552,16 @@ def _run_matched_pair_fixed_split_inference(
         transformer_dropout=mp_config.hier_transformer_dropout,
         representation_dim=mp_config.representation_dim,
         joint_outcome_training=mp_config.joint_outcome_training,
+        # Chunk encoder selection
+        chunk_encoder=mp_config.chunk_encoder,
+        # GRU-specific parameters
+        gru_chunk_size=mp_config.gru_chunk_size,
+        gru_chunk_overlap=mp_config.gru_chunk_overlap,
+        gru_embedding_dim=mp_config.gru_embedding_dim,
+        gru_hidden_dim=mp_config.gru_hidden_dim,
+        gru_num_layers=mp_config.gru_num_layers,
+        gru_max_vocab_size=mp_config.gru_max_vocab_size,
+        gru_min_word_freq=mp_config.gru_min_word_freq,
         device=str(device)
     ).to(device)
 
@@ -596,8 +622,15 @@ def _run_matched_pair_fixed_split_inference(
     logger.info(f"Step 4: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
     # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
-    # Use enhanced training if cross-encoder is enabled
-    if mp_config.use_cross_encoder:
+    # Choose training approach based on config
+    use_mean_ite = mp_config.use_mean_embedding_ite
+    if use_mean_ite:
+        logger.info(f"  Using mean-embedding ITE model")
+        outcome_model, outcome_history = train_mean_embedding_ite_model(
+            propensity_model, train_val_df, match_result.matched_pairs,
+            mp_config, device
+        )
+    elif mp_config.use_cross_encoder:
         logger.info(f"  Using cross-encoder enhanced training")
         outcome_model, outcome_history = train_matched_pair_outcome_model_enhanced(
             propensity_model, train_val_df, match_result.matched_pairs,

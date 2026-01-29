@@ -26,7 +26,8 @@ from ..models.matched_pair_ite import (
     PropensityMatchingModel,
     MatchedPairOutcomeModel,
     EnhancedMatchedPairOutcomeModel,
-    EndToEndMatchedPairModel
+    EndToEndMatchedPairModel,
+    MeanEmbeddingITEModel
 )
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup
@@ -142,6 +143,303 @@ def matched_pair_loss(
         'tau_pred_mean': tau_pred.mean(),
         'tau_target_mean': tau_target.mean()
     }
+
+
+def mean_embedding_ite_loss(
+    Y_U_logit: torch.Tensor,
+    Y_T_logit: torch.Tensor,
+    y_U: torch.Tensor,
+    y_T: torch.Tensor
+) -> Dict[str, torch.Tensor]:
+    """
+    Loss for mean-embedding ITE model.
+
+    Simple supervised loss on both matched patients:
+        L = BCE(sigmoid(Y_U_logit), y_U) + BCE(sigmoid(Y_T_logit), y_T)
+
+    The model formulation is:
+        mean_repr = (repr_T + repr_U) / 2
+        base_logit = frozen_outcome_head(mean_repr)  [from Stage 1, frozen]
+        ite_half = ite_head(mean_repr)               [trainable]
+        Y_U_logit = base_logit - ite_half
+        Y_T_logit = base_logit + ite_half
+
+    This symmetric formulation ensures the ITE head learns the treatment effect
+    as the adjustment around the frozen baseline outcome prediction.
+
+    Args:
+        Y_U_logit: Predicted outcome logit for untreated (B, 1)
+        Y_T_logit: Predicted outcome logit for treated (B, 1)
+        y_U: Actual outcome for untreated (B,)
+        y_T: Actual outcome for treated (B,)
+
+    Returns:
+        Dictionary with loss components:
+            - loss: Total loss (loss_U + loss_T)
+            - loss_U: BCE loss for untreated patients
+            - loss_T: BCE loss for treated patients
+            - ite_half_mean: Mean predicted ite_half (implicit from logit difference)
+    """
+    loss_U = F.binary_cross_entropy_with_logits(Y_U_logit.squeeze(-1), y_U)
+    loss_T = F.binary_cross_entropy_with_logits(Y_T_logit.squeeze(-1), y_T)
+
+    total_loss = loss_U + loss_T
+
+    # Compute implicit ite_half from the output (for logging)
+    # ite_half = (Y_T_logit - Y_U_logit) / 2
+    ite_half_mean = ((Y_T_logit - Y_U_logit) / 2).mean()
+
+    return {
+        'loss': total_loss,
+        'loss_U': loss_U,
+        'loss_T': loss_T,
+        'ite_half_mean': ite_half_mean
+    }
+
+
+def train_mean_embedding_ite_model(
+    propensity_model: PropensityMatchingModel,
+    train_df: pd.DataFrame,
+    matched_pairs: np.ndarray,
+    config: 'MatchedPairConfig',
+    device: torch.device
+) -> Tuple[MeanEmbeddingITEModel, List[Dict[str, Any]]]:
+    """
+    Train mean-embedding ITE model on matched pairs.
+
+    This implements Stage 3 of the matched pair pipeline when
+    use_mean_embedding_ite=True in config.
+
+    When freeze_representation_stage2=True (default):
+    1. Freeze propensity model completely (representation + propensity head + outcome head)
+    2. Extract frozen outcome_head from propensity_model
+    3. Create MeanEmbeddingITEModel with frozen outcome_head
+    4. Pre-extract representations for all matched patients
+    5. Train only the ite_head using mean of paired representations
+
+    When freeze_representation_stage2=False:
+    1. Keep propensity model trainable (unfreeze representation)
+    2. Keep outcome_head trainable
+    3. Create MeanEmbeddingITEModel without frozen outcome_head
+    4. Compute representations on-the-fly each batch
+    5. Train ite_head + propensity_model jointly
+
+    Training loop:
+    - For each (treated, untreated) pair:
+      - mean_repr = (repr_T + repr_U) / 2
+      - Y_U_logit, Y_T_logit, _ = model.forward_training(repr_U, repr_T, ...)
+      - loss = BCE(Y_U_pred, y_U) + BCE(Y_T_pred, y_T)
+      - backprop
+
+    Prerequisites:
+    - propensity_model must have been trained with joint_outcome_training=True
+      (so that the outcome_head exists)
+
+    Args:
+        propensity_model: Trained PropensityMatchingModel with outcome_head
+        train_df: Training DataFrame (must contain all matched patient indices)
+        matched_pairs: Array of (treated_idx, control_idx) pairs
+        config: MatchedPairConfig with training settings
+        device: PyTorch device
+
+    Returns:
+        Tuple of (trained_ite_model, training_history)
+
+    Raises:
+        ValueError: If propensity_model does not have an outcome_head
+    """
+    freeze_base = config.freeze_representation_stage2
+    logger.info(f"Training mean-embedding ITE model on {len(matched_pairs)} matched pairs")
+    logger.info(f"  Hidden dim: {config.mean_ite_hidden_dim}, Dropout: {config.mean_ite_dropout}")
+    logger.info(f"  Freeze base model: {freeze_base}")
+
+    # Check that propensity model has outcome head
+    if not propensity_model.joint_outcome_training or propensity_model.outcome_head is None:
+        raise ValueError(
+            "Mean-embedding ITE model requires joint_outcome_training=True in Stage 1. "
+            "The propensity model must have an outcome_head."
+        )
+
+    if freeze_base:
+        # === FROZEN MODE ===
+        # Freeze propensity model completely
+        propensity_model.freeze_representation()
+        propensity_model.eval()
+        for param in propensity_model.propensity_head.parameters():
+            param.requires_grad = False
+        for param in propensity_model.outcome_head.parameters():
+            param.requires_grad = False
+
+        # Get all unique patient indices from matched pairs
+        all_indices = np.unique(matched_pairs.flatten())
+
+        # Extract texts and outcomes for matched patients
+        texts = train_df.iloc[all_indices][config.text_column].tolist()
+        outcomes = train_df.iloc[all_indices][config.outcome_column].values
+
+        # Extract representations (frozen)
+        logger.info(f"  Extracting representations for {len(all_indices)} patients...")
+        representations = []
+        batch_size = config.outcome_batch_size
+
+        with torch.no_grad():
+            for i in range(0, len(texts), batch_size):
+                batch_texts = texts[i:i + batch_size]
+                batch_repr = propensity_model.get_representation(batch_texts)
+                representations.append(batch_repr.cpu())
+
+        representations = torch.cat(representations, dim=0)  # (N, D)
+
+        # Create index mapping: original_idx -> representation_idx
+        idx_to_repr_idx = {orig_idx: i for i, orig_idx in enumerate(all_indices)}
+
+        # Remap matched pairs to representation indices
+        remapped_pairs = np.array([
+            [idx_to_repr_idx[t], idx_to_repr_idx[c]]
+            for t, c in matched_pairs
+        ])
+
+        # Create dataset with pre-computed representations
+        pair_dataset = MatchedPairDataset(representations, outcomes, remapped_pairs)
+        pair_loader = DataLoader(
+            pair_dataset,
+            batch_size=config.outcome_batch_size,
+            shuffle=True
+        )
+
+        # Create mean-embedding ITE model with frozen outcome head
+        frozen_outcome_head = propensity_model.outcome_head
+        ite_model = MeanEmbeddingITEModel(
+            representation_dim=config.representation_dim,
+            hidden_dim=config.mean_ite_hidden_dim,
+            dropout=config.mean_ite_dropout,
+            frozen_outcome_head=frozen_outcome_head
+        ).to(device)
+
+        # Optimizer: only ite_head parameters
+        optimizer = torch.optim.AdamW(
+            ite_model.ite_head.parameters(),
+            lr=config.outcome_lr,
+            weight_decay=0.01
+        )
+
+    else:
+        # === TRAINABLE MODE ===
+        # Keep propensity model trainable
+        propensity_model.unfreeze_representation()
+        propensity_model.train()
+        # outcome_head remains trainable (no freeze)
+
+        # Store all texts and outcomes (indexed by original dataframe position)
+        all_texts = train_df[config.text_column].tolist()
+        all_outcomes = train_df[config.outcome_column].values
+
+        # Create text-based dataset
+        pair_dataset = MatchedPairTextDataset(all_texts, all_outcomes, matched_pairs)
+        pair_loader = DataLoader(
+            pair_dataset,
+            batch_size=config.outcome_batch_size,
+            shuffle=True,
+            collate_fn=collate_text_pairs
+        )
+
+        # Create mean-embedding ITE model WITHOUT frozen outcome head
+        ite_model = MeanEmbeddingITEModel(
+            representation_dim=config.representation_dim,
+            hidden_dim=config.mean_ite_hidden_dim,
+            dropout=config.mean_ite_dropout,
+            frozen_outcome_head=None  # Will use external outcome head
+        ).to(device)
+
+        # Optimizer: ite_head + propensity_model (lower LR for base model)
+        optimizer = torch.optim.AdamW([
+            {'params': ite_model.ite_head.parameters(), 'lr': config.outcome_lr},
+            {'params': propensity_model.parameters(), 'lr': config.outcome_lr * 0.1}
+        ], weight_decay=0.01)
+
+    # Training loop
+    history = []
+    best_loss = float('inf')
+    best_model_state = None
+    best_propensity_state = None
+
+    for epoch in range(config.outcome_epochs):
+        ite_model.train()
+        if not freeze_base:
+            propensity_model.train()
+
+        epoch_losses = []
+
+        for batch in tqdm(pair_loader, desc=f"MeanITE Epoch {epoch+1}", leave=False):
+            if freeze_base:
+                # Frozen mode: use pre-extracted representations
+                repr_U = batch['repr_U'].to(device)
+                repr_T = batch['repr_T'].to(device)
+            else:
+                # Trainable mode: compute representations on-the-fly
+                repr_T = propensity_model.get_representation(batch['texts_T'])
+                repr_U = propensity_model.get_representation(batch['texts_U'])
+
+            y_U = batch['y_U'].to(device)
+            y_T = batch['y_T'].to(device)
+
+            optimizer.zero_grad()
+
+            if freeze_base:
+                # Frozen mode: use frozen outcome head (internal)
+                Y_U_logit, Y_T_logit, ite_half = ite_model.forward_training(repr_U, repr_T)
+            else:
+                # Trainable mode: use external (trainable) outcome head
+                Y_U_logit, Y_T_logit, ite_half = ite_model.forward_training(
+                    repr_U, repr_T,
+                    external_outcome_head=propensity_model.outcome_head
+                )
+
+            losses = mean_embedding_ite_loss(Y_U_logit, Y_T_logit, y_U, y_T)
+
+            losses['loss'].backward()
+            optimizer.step()
+
+            epoch_losses.append({k: v.item() for k, v in losses.items()})
+
+        # Aggregate epoch losses
+        epoch_summary = {k: np.mean([l[k] for l in epoch_losses]) for k in epoch_losses[0]}
+        epoch_summary['epoch'] = epoch + 1
+        history.append(epoch_summary)
+
+        logger.info(f"  Epoch {epoch+1}: loss={epoch_summary['loss']:.4f}, "
+                   f"loss_U={epoch_summary['loss_U']:.4f}, "
+                   f"loss_T={epoch_summary['loss_T']:.4f}, "
+                   f"ite_half_mean={epoch_summary['ite_half_mean']:.4f}")
+
+        # Track best
+        if epoch_summary['loss'] < best_loss:
+            best_loss = epoch_summary['loss']
+            best_model_state = {k: v.cpu().clone() for k, v in ite_model.state_dict().items()}
+            if not freeze_base:
+                best_propensity_state = {k: v.cpu().clone() for k, v in propensity_model.state_dict().items()}
+
+    # Restore best
+    if best_model_state is not None:
+        ite_model.load_state_dict(best_model_state)
+    if best_propensity_state is not None:
+        propensity_model.load_state_dict(best_propensity_state)
+
+    # For unfrozen mode, we need to set the outcome head on the ite_model for inference
+    if not freeze_base:
+        ite_model.set_frozen_outcome_head(propensity_model.outcome_head)
+        # Freeze it now for inference consistency
+        for param in ite_model.frozen_outcome_head.parameters():
+            param.requires_grad = False
+
+    # Cleanup
+    del pair_loader, pair_dataset
+    if freeze_base:
+        del representations
+    gc.collect()
+
+    logger.info(f"Mean-embedding ITE model training complete. Best loss: {best_loss:.4f}")
+    return ite_model, history
 
 
 def train_propensity_model(

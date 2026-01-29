@@ -358,6 +358,28 @@ L_total = α * L_outcome + β * L_tau + γ * L_disc + δ * L_consistency
 
 See `examples/matched_pair_cross_encoder_config.json` for a complete example.
 
+**Mean-Embedding ITE Model:**
+
+An alternative Stage 3 architecture where only the ITE head is trainable, with a symmetric formulation around a frozen baseline:
+
+- **Frozen components**: Feature extractor, propensity head, and outcome head (all from Stage 1)
+- **Trainable**: Only a new ITE head
+- **Training**: Uses mean of matched pair embeddings `(repr_T + repr_U) / 2`
+- **Formulation**: `Y_T = base + ite_half`, `Y_U = base - ite_half` where `base` is frozen
+
+This approach requires `joint_outcome_training=True` in Stage 1 (to provide the frozen outcome head).
+
+```json
+{
+  "matched_pair": {
+    "joint_outcome_training": true,
+    "use_mean_embedding_ite": true,
+    "mean_ite_hidden_dim": 128,
+    "mean_ite_dropout": 0.2
+  }
+}
+```
+
 **Configuration:**
 ```json
 {

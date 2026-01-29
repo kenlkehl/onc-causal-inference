@@ -28,7 +28,8 @@ from .matched_pair_ite import (
     EnhancedMatchedPairOutcomeModel,
     CombinedMatchedPairModel,
     EndToEndMatchedPairModel,
-    EndToEndMatchedPairModelGRU
+    EndToEndMatchedPairModelGRU,
+    MeanEmbeddingITEModel
 )
 from .residual_cross_encoder import ResidualCrossEncoder
 
@@ -68,5 +69,6 @@ __all__ = [
     'CombinedMatchedPairModel',
     'EndToEndMatchedPairModel',
     'EndToEndMatchedPairModelGRU',
+    'MeanEmbeddingITEModel',
     'ResidualCrossEncoder',
 ]

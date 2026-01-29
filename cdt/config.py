@@ -462,6 +462,27 @@ class MatchedPairConfig:
     # Skip flag
     skip: bool = False
 
+    # Mean-embedding ITE model configuration
+    # When enabled, Stage 3 uses a symmetric ITE formulation with only the ITE head trainable
+    # Requires joint_outcome_training=True in Stage 1 (to have a frozen outcome head)
+    use_mean_embedding_ite: bool = False  # Enable mean-embedding ITE model
+    mean_ite_hidden_dim: int = 128        # Hidden dimension for ITE head
+    mean_ite_dropout: float = 0.2         # Dropout rate for ITE head
+
+    # Chunk encoder type: "bert" or "gru"
+    # "bert" uses HierarchicalTransformerExtractor (sentence boundaries, BERT [CLS] per sentence)
+    # "gru" uses HierarchicalGRUTransformerExtractor (overlapping token chunks, BiGRU + attention)
+    chunk_encoder: str = "bert"
+
+    # GRU chunk encoder settings (only used when chunk_encoder="gru")
+    gru_chunk_size: int = 128           # Tokens per chunk
+    gru_chunk_overlap: int = 32         # Overlap between chunks
+    gru_embedding_dim: int = 128        # Word embedding dimension
+    gru_hidden_dim: int = 128           # BiGRU hidden dimension per direction
+    gru_num_layers: int = 2             # Number of GRU layers
+    gru_max_vocab_size: int = 50000     # Maximum vocabulary size
+    gru_min_word_freq: int = 2          # Minimum word frequency
+
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 

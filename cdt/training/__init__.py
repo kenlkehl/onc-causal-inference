@@ -18,6 +18,9 @@ from .matched_pair_training import (
     # End-to-end training
     end_to_end_matched_pair_loss,
     train_end_to_end_matched_pair,
+    # Mean-embedding ITE model
+    mean_embedding_ite_loss,
+    train_mean_embedding_ite_model,
 )
 
 __all__ = [
@@ -36,4 +39,7 @@ __all__ = [
     # End-to-end training
     'end_to_end_matched_pair_loss',
     'train_end_to_end_matched_pair',
+    # Mean-embedding ITE model
+    'mean_embedding_ite_loss',
+    'train_mean_embedding_ite_model',
 ]

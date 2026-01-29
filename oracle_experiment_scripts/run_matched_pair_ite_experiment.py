@@ -22,6 +22,9 @@ Experimental Conditions (grid search):
 3. Learning rate: 1e-4, 5e-5
 4. Propensity epochs: 25, 50
 5. Outcome epochs: 25, 50
+6. Stage 3 architecture: standard outcome/tau model vs mean-embedding ITE model
+   - Mean-embedding ITE: Uses mean of matched pair embeddings, only ITE head trainable
+   - Requires joint_outcome_training=True (to have frozen outcome head from Stage 1)
 
 Matching Options (CLI overrides):
 - --caliper: Maximum distance for valid match (default: 0.2)
@@ -105,7 +108,8 @@ from cdt.models.matched_pair_ite import (
     PropensityMatchingModel,
     MatchedPairOutcomeModel,
     EndToEndMatchedPairModel,
-    EndToEndMatchedPairModelGRU
+    EndToEndMatchedPairModelGRU,
+    MeanEmbeddingITEModel
 )
 from cdt.training.matched_pair_training import (
     train_propensity_model,
@@ -114,7 +118,8 @@ from cdt.training.matched_pair_training import (
     extract_all_representations,
     extract_propensity_scores,
     MatchedPairDataset,
-    train_end_to_end_matched_pair
+    train_end_to_end_matched_pair,
+    train_mean_embedding_ite_model
 )
 from cdt.matching import PropensityMatcher, match_by_cosine_similarity
 from cdt.config import MatchedPairConfig
@@ -179,6 +184,10 @@ class ExperimentCondition:
     gru_embedding_dim: int = 128
     gru_hidden_dim: int = 128
     gru_num_layers: int = 2
+    # Mean-embedding ITE model options
+    use_mean_embedding_ite: bool = False  # Use symmetric ITE formulation with frozen outcome head
+    mean_ite_hidden_dim: int = 128        # Hidden dimension for ITE head
+    mean_ite_dropout: float = 0.2         # Dropout rate for ITE head
 
 
 def generate_experiment_grid(
@@ -244,22 +253,25 @@ def generate_experiment_grid(
         joint_outcome_options = [False]
         freeze_repr_options = [True]
         cross_encoder_options = [False]
+        mean_ite_options = [False]  # Mean-embedding ITE requires joint_outcome_training
         e2e_training_options = [True]  # Quick test: E2E mode
         e2e_epochs_list = [10]
     else:
         # Full grid
-        matching_methods = ["propensity", "embedding"]
+        matching_methods = ["embedding"] # "propensity"]
         matching_algorithms = ["nearest", "optimal"]
         lrs = [5e-5]
-        #prop_epochs_list = [25, 50]
-        #outcome_epochs_list = [25, 50]
+        prop_epochs_list = [25]
+        outcome_epochs_list = [50]
         # \joint training and freeze options
-        joint_outcome_options = [False, True]  # Whether to co-train on outcome in Stage 1
-        freeze_repr_options = [True, False]    # Whether to freeze representation in Stage 2
+        joint_outcome_options = [True]  # Whether to co-train on outcome in Stage 1
+        freeze_repr_options = [True]    # Whether to freeze representation in Stage 2
         # Cross-encoder as experimental factor
-        cross_encoder_options = [False, True]  # With/without cross-encoder
+        cross_encoder_options = [False]  # With/without cross-encoder
+        # Mean-embedding ITE as experimental factor (only valid when joint_outcome_training=True)
+        mean_ite_options = [True]
         # End-to-end training mode
-        e2e_training_options = [True]  # 3-stage vs end-to-end
+        e2e_training_options = [False]  # 3-stage vs end-to-end
         e2e_epochs_list = [50]
 
     idx = 0
@@ -303,49 +315,69 @@ def generate_experiment_grid(
                                 ))
         else:
             # 3-stage conditions (original)
-            for matching_method in matching_methods:
-                for matching_algorithm in matching_algorithms:
-                    for lr in lrs:
-                        for prop_epochs in prop_epochs_list:
-                            for outcome_epochs in outcome_epochs_list:
-                                for joint_outcome in joint_outcome_options:
-                                    for freeze_repr in freeze_repr_options:
-                                        # Dynamic re-matching only makes sense when not frozen
-                                        if freeze_repr:
-                                            dynamic_rematch_options = [False]
-                                        else:
-                                            dynamic_rematch_options = [False, True] if not quick_test else [False]
+            for text_col in default_text_columns:
+                for matching_method in matching_methods:
+                    for matching_algorithm in matching_algorithms:
+                        for lr in lrs:
+                            for prop_epochs in prop_epochs_list:
+                                for outcome_epochs in outcome_epochs_list:
+                                    for joint_outcome in joint_outcome_options:
+                                        for freeze_repr in freeze_repr_options:
+                                            # Dynamic re-matching only makes sense when not frozen
+                                            if freeze_repr:
+                                                dynamic_rematch_options = [False]
+                                            else:
+                                                dynamic_rematch_options = [False, True] if not quick_test else [False]
 
-                                        for dynamic_rematch in dynamic_rematch_options:
-                                            for use_cross_encoder in cross_encoder_options:
-                                                idx += 1
-                                                # Create descriptive name
-                                                joint_str = "joint" if joint_outcome else "prop"
-                                                freeze_str = "frozen" if freeze_repr else "finetune"
-                                                rematch_str = "_rematch" if dynamic_rematch else ""
-                                                crossenc_str = "_crossenc" if use_cross_encoder else ""
-                                                repl_str = "_repl" if default_replacement else ""
-                                                name = (f"{idx:02d}_3stage_{matching_method}_{matching_algorithm}_"
-                                                       f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
-                                                       f"{joint_str}_{freeze_str}{rematch_str}{crossenc_str}"
-                                                       f"_cal{default_caliper}_{default_caliper_scale}{repl_str}")
-                                                conditions.append(ExperimentCondition(
-                                                    name=name,
-                                                    matching_method=matching_method,
-                                                    matching_algorithm=matching_algorithm,
-                                                    propensity_lr=lr,
-                                                    outcome_lr=lr,
-                                                    propensity_epochs=prop_epochs,
-                                                    outcome_epochs=outcome_epochs,
-                                                    caliper=default_caliper,
-                                                    caliper_scale=default_caliper_scale,
-                                                    match_with_replacement=default_replacement,
-                                                    joint_outcome_training=joint_outcome,
-                                                    freeze_representation_stage2=freeze_repr,
-                                                    dynamic_rematching=dynamic_rematch,
-                                                    use_cross_encoder=use_cross_encoder,
-                                                    end_to_end_training=False,
-                                                ))
+                                            for dynamic_rematch in dynamic_rematch_options:
+                                                for use_cross_encoder in cross_encoder_options:
+                                                    # Mean-embedding ITE requires joint_outcome_training=True
+                                                    # Also, it's mutually exclusive with cross_encoder
+                                                    if joint_outcome and not use_cross_encoder:
+                                                        mean_ite_loop = mean_ite_options
+                                                    else:
+                                                        mean_ite_loop = [False]
+
+                                                    for use_mean_ite in mean_ite_loop:
+                                                        idx += 1
+                                                        # Create descriptive name
+                                                        joint_str = "joint" if joint_outcome else "prop"
+                                                        freeze_str = "frozen" if freeze_repr else "finetune"
+                                                        rematch_str = "_rematch" if dynamic_rematch else ""
+                                                        crossenc_str = "_crossenc" if use_cross_encoder else ""
+                                                        mean_ite_str = "_meanite" if use_mean_ite else ""
+                                                        repl_str = "_repl" if default_replacement else ""
+                                                        enc_str = f"_{chunk_encoder}" if chunk_encoder != "bert" else ""
+                                                        text_col_short = "oracle" if text_col == "patient_prompt" else "clinical"
+                                                        name = (f"{idx:02d}_3stage_{text_col_short}_{matching_method}_{matching_algorithm}_"
+                                                               f"lr{lr}_pe{prop_epochs}_oe{outcome_epochs}_"
+                                                               f"{joint_str}_{freeze_str}{rematch_str}{crossenc_str}{mean_ite_str}"
+                                                               f"_cal{default_caliper}_{default_caliper_scale}{repl_str}{enc_str}")
+                                                        conditions.append(ExperimentCondition(
+                                                            name=name,
+                                                            matching_method=matching_method,
+                                                            matching_algorithm=matching_algorithm,
+                                                            propensity_lr=lr,
+                                                            outcome_lr=lr,
+                                                            propensity_epochs=prop_epochs,
+                                                            outcome_epochs=outcome_epochs,
+                                                            caliper=default_caliper,
+                                                            caliper_scale=default_caliper_scale,
+                                                            match_with_replacement=default_replacement,
+                                                            joint_outcome_training=joint_outcome,
+                                                            freeze_representation_stage2=freeze_repr,
+                                                            dynamic_rematching=dynamic_rematch,
+                                                            use_cross_encoder=use_cross_encoder,
+                                                            use_mean_embedding_ite=use_mean_ite,
+                                                            end_to_end_training=False,
+                                                            text_column=text_col,
+                                                            chunk_encoder=chunk_encoder,
+                                                            chunk_size=chunk_size,
+                                                            chunk_overlap=chunk_overlap,
+                                                            gru_embedding_dim=gru_embedding_dim,
+                                                            gru_hidden_dim=gru_hidden_dim,
+                                                            gru_num_layers=gru_num_layers,
+                                                        ))
 
     return conditions
 
@@ -529,6 +561,10 @@ def run_single_fold(
         e2e_initial_matching=condition.e2e_initial_matching,
         e2e_lr_schedule=condition.e2e_lr_schedule,
         e2e_early_stopping_patience=condition.e2e_early_stopping_patience,
+        # Mean-embedding ITE options
+        use_mean_embedding_ite=condition.use_mean_embedding_ite,
+        mean_ite_hidden_dim=condition.mean_ite_hidden_dim,
+        mean_ite_dropout=condition.mean_ite_dropout,
     )
 
     # Branch: End-to-end or 3-stage
@@ -537,7 +573,7 @@ def run_single_fold(
 
     # 3-Stage Approach
     # Stage 1: Train propensity model
-    logger.info(f"  Fold {fold + 1}: Training propensity model")
+    logger.info(f"  Fold {fold + 1}: Training propensity model (encoder: {condition.chunk_encoder})")
     propensity_model = PropensityMatchingModel(
         sentence_model=mp_config.hier_transformer_sentence_model,
         freeze_sentence_encoder=mp_config.hier_transformer_freeze_sentence_encoder,
@@ -548,6 +584,14 @@ def run_single_fold(
         num_attention_heads=mp_config.hier_transformer_num_heads,
         representation_dim=mp_config.representation_dim,
         joint_outcome_training=mp_config.joint_outcome_training,
+        # Chunk encoder selection
+        chunk_encoder=condition.chunk_encoder,
+        # GRU-specific parameters
+        gru_chunk_size=condition.chunk_size,
+        gru_chunk_overlap=condition.chunk_overlap,
+        gru_embedding_dim=condition.gru_embedding_dim,
+        gru_hidden_dim=condition.gru_hidden_dim,
+        gru_num_layers=condition.gru_num_layers,
         device=str(device)
     ).to(device)
 
@@ -614,8 +658,14 @@ def run_single_fold(
     logger.info(f"  Fold {fold + 1}: Training outcome/tau model on {len(match_result.matched_pairs)} pairs")
     # Note: freezing is handled by train_matched_pair_outcome_model based on config.freeze_representation_stage2
 
-    # Use enhanced training if cross-encoder is enabled
-    if condition.use_cross_encoder:
+    # Choose training approach based on config
+    if condition.use_mean_embedding_ite:
+        logger.info(f"  Fold {fold + 1}: Using mean-embedding ITE model")
+        outcome_model, outcome_history = train_mean_embedding_ite_model(
+            propensity_model, train_df, match_result.matched_pairs,
+            mp_config, device
+        )
+    elif condition.use_cross_encoder:
         logger.info(f"  Fold {fold + 1}: Using cross-encoder enhanced training")
         outcome_model, outcome_history = train_matched_pair_outcome_model_enhanced(
             propensity_model, train_df, match_result.matched_pairs,
@@ -887,6 +937,9 @@ def run_experiment_condition(
         'chunk_encoder': condition.chunk_encoder,
         'text_column': condition.text_column,
         'end_to_end_training': condition.end_to_end_training,
+        'joint_outcome_training': condition.joint_outcome_training,
+        'use_cross_encoder': condition.use_cross_encoder,
+        'use_mean_embedding_ite': condition.use_mean_embedding_ite,
     }
 
     for col in ['ite_mse', 'ite_mae', 'ite_corr', 'ate_bias', 'propensity_auroc',

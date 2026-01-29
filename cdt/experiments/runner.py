@@ -51,6 +51,10 @@ class ExperimentRunner:
         """
         Run complete experiment workflow.
 
+        Supports two inference modes:
+        1. Matched Pair ITE (if matched_pair is configured and not skipped)
+        2. DragonNet/CausalText (via applied_inference)
+
         Returns:
             Dictionary with results paths and summaries
         """
@@ -58,14 +62,28 @@ class ExperimentRunner:
 
         self._save_config()
 
-        if self.config.applied_inference.skip:
+        # Check if matched_pair is configured and should be used
+        use_matched_pair = (
+            self.config.matched_pair is not None
+            and not getattr(self.config.matched_pair, 'skip', False)
+        )
+
+        if use_matched_pair:
+            # Use matched pair pipeline
+            logger.info("\n" + "=" * 80)
+            logger.info("PHASE 1: MATCHED PAIR ITE ESTIMATION")
+            logger.info("=" * 80)
+            matched_pair_results = self._run_matched_pair_inference()
+            results['matched_pair'] = matched_pair_results
+        elif self.config.applied_inference.skip:
             logger.info("\n" + "=" * 80)
             logger.info("PHASE 1: APPLIED INFERENCE (SKIPPED)")
             logger.info("=" * 80)
             logger.info("Applied inference skipped via config.applied_inference.skip=True")
         else:
+            # Use DragonNet/CausalText pipeline
             logger.info("\n" + "=" * 80)
-            logger.info("PHASE 1: APPLIED INFERENCE")
+            logger.info("PHASE 1: APPLIED INFERENCE (DragonNet/CausalText)")
             logger.info("=" * 80)
             applied_results = self._run_applied_inference()
             results['applied_inference'] = applied_results
@@ -130,6 +148,66 @@ class ExperimentRunner:
         )
 
         logger.info(f"Applied inference complete: {predictions_path}")
+        return str(predictions_path)
+
+    def _run_matched_pair_inference(self) -> str:
+        """
+        Run matched pair ITE estimation.
+
+        Uses the matched_pair config for all settings including dataset path.
+
+        Returns:
+            Path to predictions file
+        """
+        from ..inference.matched_pair_applied import run_matched_pair_applied_inference
+        from ..config import AppliedInferenceConfig
+
+        mp_config = self.config.matched_pair
+
+        # Get dataset path from matched_pair config
+        dataset_path = mp_config.dataset_path
+        if not dataset_path:
+            raise ValueError(
+                "matched_pair.dataset_path is required. "
+                "Please specify the path to your dataset in the matched_pair section."
+            )
+
+        logger.info(f"Loading dataset: {dataset_path}")
+        df = load_dataset(dataset_path)
+
+        # Validate dataset
+        split_col_to_validate = mp_config.split_column if mp_config.cv_folds <= 1 else None
+        validate_dataset(
+            df,
+            text_column=mp_config.text_column,
+            outcome_column=mp_config.outcome_column,
+            treatment_column=mp_config.treatment_column,
+            split_column=split_col_to_validate
+        )
+
+        output_dir = ensure_dir(self.output_dir / "matched_pair")
+        predictions_path = output_dir / "predictions.parquet"
+
+        # Create minimal AppliedInferenceConfig for column names
+        applied_config = AppliedInferenceConfig(
+            text_column=mp_config.text_column,
+            outcome_column=mp_config.outcome_column,
+            treatment_column=mp_config.treatment_column,
+            split_column=mp_config.split_column,
+            cv_folds=mp_config.cv_folds
+        )
+
+        run_matched_pair_applied_inference(
+            dataset=df,
+            config=applied_config,
+            matched_pair_config=mp_config,
+            output_path=predictions_path,
+            device=self.device,
+            gpu_ids=self.config.gpu_ids,
+            num_workers=self.config.num_workers
+        )
+
+        logger.info(f"Matched pair inference complete: {predictions_path}")
         return str(predictions_path)
 
     def _run_plasmode_experiments(self) -> str:
