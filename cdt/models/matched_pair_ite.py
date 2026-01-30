@@ -26,6 +26,8 @@ import torch.nn.functional as F
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .hierarchical_gru_transformer_extractor import HierarchicalGRUTransformerExtractor
 from .residual_cross_encoder import ResidualCrossEncoder
+from .bert_gated_pool_extractor import BERTGatedPoolExtractor
+from .gru_pool_extractor import GRUPoolExtractor
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +49,8 @@ class PropensityMatchingModel(nn.Module):
     The chunk encoder type is selected via the `chunk_encoder` parameter:
     - "bert" (default): Uses HierarchicalTransformerExtractor with sentence-level BERT
     - "gru": Uses HierarchicalGRUTransformerExtractor with overlapping token chunks
+    - "bert_gated_pool": Uses BERTGatedPoolExtractor with gated attention pooling
+    - "gru_pool": Uses GRUPoolExtractor with gated attention pooling
 
     Args:
         sentence_model: HuggingFace model name for sentence encoding (default: prajjwal1/bert-tiny)
@@ -59,7 +63,7 @@ class PropensityMatchingModel(nn.Module):
         transformer_dropout: Dropout rate for transformer layers
         representation_dim: Dimension of the learned representation layer
         joint_outcome_training: Whether to jointly train on outcome prediction
-        chunk_encoder: Encoder type - "bert" (sentence-level) or "gru" (token chunks)
+        chunk_encoder: Encoder type - "bert", "gru", "bert_gated_pool", or "gru_pool"
         gru_chunk_size: Tokens per chunk (GRU encoder only)
         gru_chunk_overlap: Overlap between chunks (GRU encoder only)
         gru_embedding_dim: Word embedding dimension (GRU encoder only)
@@ -67,6 +71,19 @@ class PropensityMatchingModel(nn.Module):
         gru_num_layers: Number of GRU layers (GRU encoder only)
         gru_max_vocab_size: Maximum vocabulary size (GRU encoder only)
         gru_min_word_freq: Minimum word frequency (GRU encoder only)
+        bert_gated_pool_model: HuggingFace model for bert_gated_pool encoder
+        bert_gated_pool_freeze_encoder: Whether to freeze BERT in bert_gated_pool
+        bert_gated_pool_chunk_size: Tokens per chunk for bert_gated_pool
+        bert_gated_pool_chunk_overlap: Overlap for bert_gated_pool
+        bert_gated_pool_transformer_layers: Transformer layers for bert_gated_pool
+        bert_gated_pool_transformer_heads: Attention heads for bert_gated_pool
+        bert_gated_pool_transformer_dim: Hidden dim for bert_gated_pool
+        bert_gated_pool_gated_attention_dim: Gated attention dim for bert_gated_pool
+        bert_gated_pool_use_mean_pooling: Use mean pooling vs [CLS] for bert_gated_pool
+        gru_pool_gated_attention_dim: Gated attention dim for gru_pool
+        gru_pool_transformer_layers: Transformer layers for gru_pool
+        gru_pool_transformer_heads: Attention heads for gru_pool
+        gru_pool_transformer_dim: Hidden dim for gru_pool
         device: PyTorch device
     """
 
@@ -84,7 +101,7 @@ class PropensityMatchingModel(nn.Module):
         joint_outcome_training: bool = False,
         # Chunk encoder selection
         chunk_encoder: str = "bert",
-        # GRU-specific parameters
+        # GRU-specific parameters (for "gru" encoder)
         gru_chunk_size: int = 128,
         gru_chunk_overlap: int = 32,
         gru_embedding_dim: int = 128,
@@ -92,6 +109,21 @@ class PropensityMatchingModel(nn.Module):
         gru_num_layers: int = 2,
         gru_max_vocab_size: int = 50000,
         gru_min_word_freq: int = 2,
+        # BERT Gated Pool parameters (for "bert_gated_pool" encoder)
+        bert_gated_pool_model: str = "prajjwal1/bert-tiny",
+        bert_gated_pool_freeze_encoder: bool = True,
+        bert_gated_pool_chunk_size: int = 128,
+        bert_gated_pool_chunk_overlap: int = 32,
+        bert_gated_pool_transformer_layers: int = 2,
+        bert_gated_pool_transformer_heads: int = 4,
+        bert_gated_pool_transformer_dim: int = 256,
+        bert_gated_pool_gated_attention_dim: int = 128,
+        bert_gated_pool_use_mean_pooling: bool = False,
+        # GRU Pool parameters (for "gru_pool" encoder)
+        gru_pool_gated_attention_dim: int = 128,
+        gru_pool_transformer_layers: int = 2,
+        gru_pool_transformer_heads: int = 4,
+        gru_pool_transformer_dim: int = 256,
         device: str = "cuda:0"
     ):
         super().__init__()
@@ -103,7 +135,43 @@ class PropensityMatchingModel(nn.Module):
         self._chunk_encoder_type = chunk_encoder
 
         # Feature extractor: based on chunk_encoder type
-        if chunk_encoder == "gru":
+        if chunk_encoder == "bert_gated_pool":
+            self.feature_extractor = BERTGatedPoolExtractor(
+                bert_model=bert_gated_pool_model,
+                freeze_encoder=bert_gated_pool_freeze_encoder,
+                use_mean_pooling=bert_gated_pool_use_mean_pooling,
+                max_chunks=max_sentences,  # Reuse max_sentences parameter
+                chunk_size=bert_gated_pool_chunk_size,
+                chunk_overlap=bert_gated_pool_chunk_overlap,
+                transformer_layers=bert_gated_pool_transformer_layers,
+                transformer_heads=bert_gated_pool_transformer_heads,
+                transformer_dim=bert_gated_pool_transformer_dim,
+                transformer_dropout=transformer_dropout,
+                gated_attention_dim=bert_gated_pool_gated_attention_dim,
+                projection_dim=transformer_dim,  # Use transformer_dim as intermediate
+                device=self._device
+            )
+        elif chunk_encoder == "gru_pool":
+            self.feature_extractor = GRUPoolExtractor(
+                embedding_dim=gru_embedding_dim,
+                gru_hidden_dim=gru_hidden_dim,
+                gru_num_layers=gru_num_layers,
+                gru_bidirectional=True,
+                gru_dropout=transformer_dropout,
+                max_chunks=max_sentences,  # Reuse max_sentences parameter
+                chunk_size=gru_chunk_size,
+                chunk_overlap=gru_chunk_overlap,
+                transformer_layers=gru_pool_transformer_layers,
+                transformer_heads=gru_pool_transformer_heads,
+                transformer_dim=gru_pool_transformer_dim,
+                transformer_dropout=transformer_dropout,
+                gated_attention_dim=gru_pool_gated_attention_dim,
+                projection_dim=transformer_dim,  # Use transformer_dim as intermediate
+                max_vocab_size=gru_max_vocab_size,
+                min_word_freq=gru_min_word_freq,
+                device=self._device
+            )
+        elif chunk_encoder == "gru":
             self.feature_extractor = HierarchicalGRUTransformerExtractor(
                 chunk_size=gru_chunk_size,
                 chunk_overlap=gru_chunk_overlap,
@@ -160,7 +228,15 @@ class PropensityMatchingModel(nn.Module):
 
         logger.info(f"PropensityMatchingModel initialized:")
         logger.info(f"  Chunk encoder: {chunk_encoder}")
-        if chunk_encoder == "gru":
+        if chunk_encoder == "bert_gated_pool":
+            logger.info(f"  BERT model: {bert_gated_pool_model}")
+            logger.info(f"  Chunk size: {bert_gated_pool_chunk_size}, overlap: {bert_gated_pool_chunk_overlap}")
+            logger.info(f"  Gated attention dim: {bert_gated_pool_gated_attention_dim}")
+        elif chunk_encoder == "gru_pool":
+            logger.info(f"  GRU: chunk_size={gru_chunk_size}, overlap={gru_chunk_overlap}")
+            logger.info(f"  GRU: embedding_dim={gru_embedding_dim}, hidden_dim={gru_hidden_dim}, layers={gru_num_layers}")
+            logger.info(f"  Gated attention dim: {gru_pool_gated_attention_dim}")
+        elif chunk_encoder == "gru":
             logger.info(f"  GRU: chunk_size={gru_chunk_size}, overlap={gru_chunk_overlap}")
             logger.info(f"  GRU: embedding_dim={gru_embedding_dim}, hidden_dim={gru_hidden_dim}, layers={gru_num_layers}")
         else:
@@ -261,6 +337,44 @@ class PropensityMatchingModel(nn.Module):
         """Check if joint outcome training is enabled."""
         return self._joint_outcome_training
 
+    def forward_with_instances(
+        self,
+        texts: List[str]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning representations AND chunk-level info for CLAM supervision.
+
+        This method is only available when using gated pool extractors
+        (chunk_encoder="bert_gated_pool" or "gru_pool").
+
+        Args:
+            texts: List of document texts
+
+        Returns:
+            repr: (B, representation_dim) - document-level representations
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+
+        Raises:
+            RuntimeError: If the feature extractor does not support forward_with_instances
+        """
+        if not hasattr(self.feature_extractor, 'forward_with_instances'):
+            raise RuntimeError(
+                "forward_with_instances is only supported with gated pool extractors "
+                "(chunk_encoder='bert_gated_pool' or 'gru_pool')"
+            )
+
+        # Get features and instance info from extractor
+        features, chunk_embeddings_list, attention_weights_list = \
+            self.feature_extractor.forward_with_instances(texts)  # (B, transformer_dim)
+
+        # Apply representation layers
+        h = F.relu(self.repr_fc1(features))
+        h = F.elu(self.repr_fc2(h))
+        repr = self.repr_norm(h)
+
+        return repr, chunk_embeddings_list, attention_weights_list
+
     def freeze_representation(self) -> None:
         """
         Freeze feature extractor and representation layers.
@@ -336,6 +450,61 @@ class PropensityMatchingModel(nn.Module):
             'chunk_encoder_type': self._chunk_encoder_type,
             'feature_extractor_state': self.feature_extractor.get_state()
         }
+
+
+class InstanceCausalHead(nn.Module):
+    """
+    Lightweight causal head for CLAM instance-level supervision.
+
+    Supervises top-B attended chunks with document-level labels.
+    Separate from document-level head (no weight sharing).
+
+    This enables instance-level learning where individual chunks
+    are encouraged to predict both treatment and outcome, forcing
+    the model to attend to causally relevant text.
+
+    Args:
+        input_dim: Dimension of chunk embeddings (transformer_dim)
+        hidden_dim: Hidden dimension for the heads
+        dropout: Dropout rate
+    """
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 64,
+        dropout: float = 0.2
+    ):
+        super().__init__()
+
+        self.propensity_head = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1)
+        )
+
+        self.outcome_head = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, 1)
+        )
+
+    def forward(self, chunk_embeddings: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Predict propensity and outcome for chunk embeddings.
+
+        Args:
+            chunk_embeddings: (N, input_dim) - embeddings of top-attended chunks
+
+        Returns:
+            t_logit: (N, 1) - propensity logits for each chunk
+            y_logit: (N, 1) - outcome logits for each chunk
+        """
+        t_logit = self.propensity_head(chunk_embeddings)
+        y_logit = self.outcome_head(chunk_embeddings)
+        return t_logit, y_logit
 
 
 class MatchedPairOutcomeModel(nn.Module):

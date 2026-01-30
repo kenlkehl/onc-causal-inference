@@ -29,9 +29,20 @@ from .matched_pair_ite import (
     CombinedMatchedPairModel,
     EndToEndMatchedPairModel,
     EndToEndMatchedPairModelGRU,
-    MeanEmbeddingITEModel
+    MeanEmbeddingITEModel,
+    InstanceCausalHead
 )
 from .residual_cross_encoder import ResidualCrossEncoder
+
+# Chunking utilities
+from .chunking import split_into_chunks_hf, split_into_chunks_vocab, get_chunk_boundaries
+
+# Gated attention pooling
+from .gated_attention import GatedAttentionPooling
+
+# Gated pool extractors
+from .bert_gated_pool_extractor import BERTGatedPoolExtractor
+from .gru_pool_extractor import GRUPoolExtractor
 
 __all__ = [
     'CrossAttentionAggregator',
@@ -70,5 +81,15 @@ __all__ = [
     'EndToEndMatchedPairModel',
     'EndToEndMatchedPairModelGRU',
     'MeanEmbeddingITEModel',
+    'InstanceCausalHead',
     'ResidualCrossEncoder',
+    # Chunking utilities
+    'split_into_chunks_hf',
+    'split_into_chunks_vocab',
+    'get_chunk_boundaries',
+    # Gated attention pooling
+    'GatedAttentionPooling',
+    # Gated pool extractors
+    'BERTGatedPoolExtractor',
+    'GRUPoolExtractor',
 ]

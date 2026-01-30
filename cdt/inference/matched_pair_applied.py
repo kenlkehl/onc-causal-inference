@@ -246,7 +246,7 @@ def _process_matched_pair_fold(
     # Initialize
     propensity_model.fit_tokenizer(train_df[text_col].tolist())
 
-    propensity_model, prop_history = train_propensity_model(
+    propensity_model, prop_history, instance_head = train_propensity_model(
         propensity_model, train_df, None, mp_config, device  # val_df=None for pure CV
     )
 
@@ -313,7 +313,7 @@ def _process_matched_pair_fold(
         logger.info(f"    Using mean-embedding ITE model")
         outcome_model, outcome_history = train_mean_embedding_ite_model(
             propensity_model, train_df, match_result.matched_pairs,
-            mp_config, device
+            mp_config, device, instance_head=instance_head
         )
     elif mp_config.use_cross_encoder:
         logger.info(f"    Using cross-encoder enhanced training")
@@ -568,7 +568,7 @@ def _run_matched_pair_fixed_split_inference(
     # Initialize
     propensity_model.fit_tokenizer(train_df[text_col].tolist())
 
-    propensity_model, prop_history = train_propensity_model(
+    propensity_model, prop_history, instance_head = train_propensity_model(
         propensity_model, train_df, val_df, mp_config, device
     )
 
@@ -628,7 +628,7 @@ def _run_matched_pair_fixed_split_inference(
         logger.info(f"  Using mean-embedding ITE model")
         outcome_model, outcome_history = train_mean_embedding_ite_model(
             propensity_model, train_val_df, match_result.matched_pairs,
-            mp_config, device
+            mp_config, device, instance_head=instance_head
         )
     elif mp_config.use_cross_encoder:
         logger.info(f"  Using cross-encoder enhanced training")

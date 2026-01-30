@@ -469,12 +469,14 @@ class MatchedPairConfig:
     mean_ite_hidden_dim: int = 128        # Hidden dimension for ITE head
     mean_ite_dropout: float = 0.2         # Dropout rate for ITE head
 
-    # Chunk encoder type: "bert" or "gru"
+    # Chunk encoder type: "bert", "gru", "bert_gated_pool", or "gru_pool"
     # "bert" uses HierarchicalTransformerExtractor (sentence boundaries, BERT [CLS] per sentence)
     # "gru" uses HierarchicalGRUTransformerExtractor (overlapping token chunks, BiGRU + attention)
+    # "bert_gated_pool" uses BERTGatedPoolExtractor (BERT + transformer + gated attention pooling)
+    # "gru_pool" uses GRUPoolExtractor (BiGRU + transformer + gated attention pooling)
     chunk_encoder: str = "bert"
 
-    # GRU chunk encoder settings (only used when chunk_encoder="gru")
+    # GRU chunk encoder settings (used for chunk_encoder="gru" or "gru_pool")
     gru_chunk_size: int = 128           # Tokens per chunk
     gru_chunk_overlap: int = 32         # Overlap between chunks
     gru_embedding_dim: int = 128        # Word embedding dimension
@@ -482,6 +484,32 @@ class MatchedPairConfig:
     gru_num_layers: int = 2             # Number of GRU layers
     gru_max_vocab_size: int = 50000     # Maximum vocabulary size
     gru_min_word_freq: int = 2          # Minimum word frequency
+
+    # BERT Gated Pool settings (used when chunk_encoder="bert_gated_pool")
+    bert_gated_pool_model: str = "prajjwal1/bert-tiny"  # HuggingFace model for BERT encoder
+    bert_gated_pool_freeze_encoder: bool = True         # Whether to freeze BERT weights
+    bert_gated_pool_chunk_size: int = 128               # Tokens per chunk
+    bert_gated_pool_chunk_overlap: int = 32             # Overlap between chunks
+    bert_gated_pool_transformer_layers: int = 2         # Transformer layers for cross-chunk attention
+    bert_gated_pool_transformer_heads: int = 4          # Attention heads in transformer
+    bert_gated_pool_transformer_dim: int = 256          # Hidden dimension for transformer
+    bert_gated_pool_gated_attention_dim: int = 128      # Hidden dimension for gated attention
+    bert_gated_pool_use_mean_pooling: bool = False      # Use mean pooling vs [CLS] token
+
+    # GRU Pool settings (used when chunk_encoder="gru_pool")
+    gru_pool_transformer_layers: int = 2         # Transformer layers for cross-chunk attention
+    gru_pool_transformer_heads: int = 4          # Attention heads in transformer
+    gru_pool_transformer_dim: int = 256          # Hidden dimension for transformer
+    gru_pool_gated_attention_dim: int = 128      # Hidden dimension for gated attention
+
+    # CLAM instance-level supervision settings
+    # When enabled, supervises top-attended chunks with document-level labels
+    # Available when chunk_encoder="bert_gated_pool" or "gru_pool"
+    clam_enabled: bool = False           # Enable CLAM instance supervision
+    clam_num_instances: int = 5          # Number of top-attended chunks to supervise
+    clam_instance_hidden_dim: int = 64   # Hidden dimension for instance head
+    clam_instance_weight_stage1: float = 0.5  # Weight for CLAM loss in Stage 1
+    clam_instance_weight_stage3: float = 0.5  # Weight for CLAM loss in Stage 3
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)

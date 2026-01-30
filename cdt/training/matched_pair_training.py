@@ -27,7 +27,8 @@ from ..models.matched_pair_ite import (
     MatchedPairOutcomeModel,
     EnhancedMatchedPairOutcomeModel,
     EndToEndMatchedPairModel,
-    MeanEmbeddingITEModel
+    MeanEmbeddingITEModel,
+    InstanceCausalHead
 )
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup
@@ -197,12 +198,84 @@ def mean_embedding_ite_loss(
     }
 
 
+def compute_clam_loss(
+    chunk_embeddings_list: List[torch.Tensor],
+    attention_weights_list: List[torch.Tensor],
+    treatments: torch.Tensor,
+    outcomes: torch.Tensor,
+    instance_head: InstanceCausalHead,
+    num_instances: int = 5
+) -> Dict[str, torch.Tensor]:
+    """
+    Compute CLAM instance-level loss on top-B attended chunks.
+
+    This supervises the top-attended chunks with document-level labels,
+    encouraging the model to attend to causally relevant text.
+
+    Args:
+        chunk_embeddings_list: List of (C_i, D) tensors - chunk embeddings per doc
+        attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        treatments: (B,) - document-level treatment labels
+        outcomes: (B,) - document-level outcome labels
+        instance_head: InstanceCausalHead for predicting T and Y from chunks
+        num_instances: Number of top-attended chunks to supervise per document
+
+    Returns:
+        Dictionary with:
+            - clam_loss: Combined CLAM loss
+            - clam_propensity_loss: Average propensity loss across instances
+            - clam_outcome_loss: Average outcome loss across instances
+    """
+    total_t_loss = 0.0
+    total_y_loss = 0.0
+    n_docs = len(chunk_embeddings_list)
+    n_valid = 0
+
+    for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embeddings_list, attention_weights_list)):
+        # Skip empty documents
+        if chunk_embs.size(0) == 0:
+            continue
+
+        # Get top-B attended chunks
+        B = min(num_instances, len(attn_weights))
+        _, top_indices = torch.topk(attn_weights, B)
+        top_chunks = chunk_embs[top_indices]  # (B, D)
+
+        # Predict T and Y for top chunks
+        t_logit, y_logit = instance_head(top_chunks)  # (B, 1), (B, 1)
+
+        # Expand document-level labels to match chunk count
+        t_label = treatments[i].expand(B)
+        y_label = outcomes[i].expand(B)
+
+        # Compute losses
+        total_t_loss += F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), t_label)
+        total_y_loss += F.binary_cross_entropy_with_logits(y_logit.squeeze(-1), y_label)
+        n_valid += 1
+
+    # Average over valid documents
+    if n_valid > 0:
+        avg_t_loss = total_t_loss / n_valid
+        avg_y_loss = total_y_loss / n_valid
+    else:
+        device = treatments.device
+        avg_t_loss = torch.tensor(0.0, device=device)
+        avg_y_loss = torch.tensor(0.0, device=device)
+
+    return {
+        'clam_loss': avg_t_loss + avg_y_loss,
+        'clam_propensity_loss': avg_t_loss,
+        'clam_outcome_loss': avg_y_loss
+    }
+
+
 def train_mean_embedding_ite_model(
     propensity_model: PropensityMatchingModel,
     train_df: pd.DataFrame,
     matched_pairs: np.ndarray,
     config: 'MatchedPairConfig',
-    device: torch.device
+    device: torch.device,
+    instance_head: Optional[InstanceCausalHead] = None
 ) -> Tuple[MeanEmbeddingITEModel, List[Dict[str, Any]]]:
     """
     Train mean-embedding ITE model on matched pairs.
@@ -223,6 +296,7 @@ def train_mean_embedding_ite_model(
     3. Create MeanEmbeddingITEModel without frozen outcome_head
     4. Compute representations on-the-fly each batch
     5. Train ite_head + propensity_model jointly
+    6. Optionally add CLAM instance-level supervision
 
     Training loop:
     - For each (treated, untreated) pair:
@@ -241,6 +315,7 @@ def train_mean_embedding_ite_model(
         matched_pairs: Array of (treated_idx, control_idx) pairs
         config: MatchedPairConfig with training settings
         device: PyTorch device
+        instance_head: Optional InstanceCausalHead from Stage 1 (for CLAM)
 
     Returns:
         Tuple of (trained_ite_model, training_history)
@@ -249,9 +324,18 @@ def train_mean_embedding_ite_model(
         ValueError: If propensity_model does not have an outcome_head
     """
     freeze_base = config.freeze_representation_stage2
+
+    # Check if CLAM is enabled for Stage 3 (only when representation is trainable)
+    clam_enabled = (config.clam_enabled and
+                    not freeze_base and
+                    config.chunk_encoder in ('bert_gated_pool', 'gru_pool') and
+                    instance_head is not None)
+
     logger.info(f"Training mean-embedding ITE model on {len(matched_pairs)} matched pairs")
     logger.info(f"  Hidden dim: {config.mean_ite_hidden_dim}, Dropout: {config.mean_ite_dropout}")
     logger.info(f"  Freeze base model: {freeze_base}")
+    if clam_enabled:
+        logger.info(f"  CLAM instance supervision: enabled (weight={config.clam_instance_weight_stage3})")
 
     # Check that propensity model has outcome head
     if not propensity_model.joint_outcome_training or propensity_model.outcome_head is None:
@@ -352,10 +436,14 @@ def train_mean_embedding_ite_model(
         ).to(device)
 
         # Optimizer: ite_head + propensity_model (lower LR for base model)
-        optimizer = torch.optim.AdamW([
+        # Include instance_head if CLAM is enabled
+        param_groups = [
             {'params': ite_model.ite_head.parameters(), 'lr': config.outcome_lr},
             {'params': propensity_model.parameters(), 'lr': config.outcome_lr * 0.1}
-        ], weight_decay=0.01)
+        ]
+        if clam_enabled and instance_head is not None:
+            param_groups.append({'params': instance_head.parameters(), 'lr': config.outcome_lr})
+        optimizer = torch.optim.AdamW(param_groups, weight_decay=0.01)
 
     # Training loop
     history = []
@@ -367,18 +455,34 @@ def train_mean_embedding_ite_model(
         ite_model.train()
         if not freeze_base:
             propensity_model.train()
+            if clam_enabled and instance_head is not None:
+                instance_head.train()
 
         epoch_losses = []
+        epoch_clam_losses = []
 
         for batch in tqdm(pair_loader, desc=f"MeanITE Epoch {epoch+1}", leave=False):
             if freeze_base:
                 # Frozen mode: use pre-extracted representations
                 repr_U = batch['repr_U'].to(device)
                 repr_T = batch['repr_T'].to(device)
+                chunk_embs_T = None
+                chunk_embs_U = None
+                attn_weights_T = None
+                attn_weights_U = None
             else:
                 # Trainable mode: compute representations on-the-fly
-                repr_T = propensity_model.get_representation(batch['texts_T'])
-                repr_U = propensity_model.get_representation(batch['texts_U'])
+                if clam_enabled:
+                    # Get representations with instance info for CLAM
+                    repr_T, chunk_embs_T, attn_weights_T = propensity_model.forward_with_instances(batch['texts_T'])
+                    repr_U, chunk_embs_U, attn_weights_U = propensity_model.forward_with_instances(batch['texts_U'])
+                else:
+                    repr_T = propensity_model.get_representation(batch['texts_T'])
+                    repr_U = propensity_model.get_representation(batch['texts_U'])
+                    chunk_embs_T = None
+                    chunk_embs_U = None
+                    attn_weights_T = None
+                    attn_weights_U = None
 
             y_U = batch['y_U'].to(device)
             y_T = batch['y_T'].to(device)
@@ -397,7 +501,26 @@ def train_mean_embedding_ite_model(
 
             losses = mean_embedding_ite_loss(Y_U_logit, Y_T_logit, y_U, y_T)
 
-            losses['loss'].backward()
+            # Add CLAM loss if enabled (trainable mode only)
+            if clam_enabled and instance_head is not None and chunk_embs_T is not None:
+                # Combine treated and untreated chunks for CLAM
+                all_chunk_embs = chunk_embs_T + chunk_embs_U
+                all_attn_weights = attn_weights_T + attn_weights_U
+                treatments = torch.cat([torch.ones_like(y_T), torch.zeros_like(y_U)])
+                outcomes = torch.cat([y_T, y_U])
+
+                clam_losses = compute_clam_loss(
+                    all_chunk_embs, all_attn_weights,
+                    treatments, outcomes,
+                    instance_head,
+                    num_instances=config.clam_num_instances
+                )
+                total_loss = losses['loss'] + config.clam_instance_weight_stage3 * clam_losses['clam_loss']
+                epoch_clam_losses.append(clam_losses['clam_loss'].item())
+            else:
+                total_loss = losses['loss']
+
+            total_loss.backward()
             optimizer.step()
 
             epoch_losses.append({k: v.item() for k, v in losses.items()})
@@ -405,12 +528,15 @@ def train_mean_embedding_ite_model(
         # Aggregate epoch losses
         epoch_summary = {k: np.mean([l[k] for l in epoch_losses]) for k in epoch_losses[0]}
         epoch_summary['epoch'] = epoch + 1
+        if epoch_clam_losses:
+            epoch_summary['clam_loss'] = np.mean(epoch_clam_losses)
         history.append(epoch_summary)
 
+        clam_str = f", clam_loss={epoch_summary['clam_loss']:.4f}" if 'clam_loss' in epoch_summary else ""
         logger.info(f"  Epoch {epoch+1}: loss={epoch_summary['loss']:.4f}, "
                    f"loss_U={epoch_summary['loss_U']:.4f}, "
                    f"loss_T={epoch_summary['loss_T']:.4f}, "
-                   f"ite_half_mean={epoch_summary['ite_half_mean']:.4f}")
+                   f"ite_half_mean={epoch_summary['ite_half_mean']:.4f}{clam_str}")
 
         # Track best
         if epoch_summary['loss'] < best_loss:
@@ -447,8 +573,9 @@ def train_propensity_model(
     train_df: pd.DataFrame,
     val_df: Optional[pd.DataFrame],
     config: MatchedPairConfig,
-    device: torch.device
-) -> Tuple[PropensityMatchingModel, List[Dict[str, Any]]]:
+    device: torch.device,
+    instance_head: Optional[InstanceCausalHead] = None
+) -> Tuple[PropensityMatchingModel, List[Dict[str, Any]], Optional[InstanceCausalHead]]:
     """
     Train propensity model to convergence.
 
@@ -459,6 +586,9 @@ def train_propensity_model(
     prediction to learn features that are true confounders (predictive of
     both treatment and outcome).
 
+    When clam_enabled is True and using gated pool extractors, adds CLAM
+    instance-level supervision on top-attended chunks.
+
     Args:
         model: PropensityMatchingModel to train
         train_df: Training DataFrame
@@ -466,19 +596,42 @@ def train_propensity_model(
             without early stopping.
         config: MatchedPairConfig with training settings
         device: PyTorch device
+        instance_head: Optional InstanceCausalHead for CLAM (created if None and clam_enabled)
 
     Returns:
-        Tuple of (trained_model, training_history)
+        Tuple of (trained_model, training_history, instance_head)
     """
     joint_training = config.joint_outcome_training and model.joint_outcome_training
+
+    # Check if CLAM is enabled and model supports it
+    clam_enabled = config.clam_enabled and config.chunk_encoder in ('bert_gated_pool', 'gru_pool')
+    if config.clam_enabled and config.chunk_encoder not in ('bert_gated_pool', 'gru_pool'):
+        logger.warning("CLAM is only supported with chunk_encoder='bert_gated_pool' or 'gru_pool'. Disabling CLAM.")
+        clam_enabled = False
+
     logger.info(f"Training propensity model on {len(train_df)} samples")
     logger.info(f"  Epochs: {config.propensity_epochs}, LR: {config.propensity_lr}")
     logger.info(f"  Joint outcome training: {joint_training}")
+    logger.info(f"  CLAM instance supervision: {clam_enabled}")
     if joint_training:
         logger.info(f"    alpha_propensity={config.alpha_propensity_stage1}, "
                    f"alpha_outcome={config.alpha_outcome_stage1}")
+    if clam_enabled:
+        logger.info(f"    clam_num_instances={config.clam_num_instances}, "
+                   f"clam_weight={config.clam_instance_weight_stage1}")
     if val_df is None:
         logger.info("  No validation set - training for fixed epochs")
+
+    # Create CLAM instance head if needed
+    if clam_enabled and instance_head is None:
+        # Get transformer_dim from the feature extractor
+        transformer_dim = model.feature_extractor.transformer_dim
+        instance_head = InstanceCausalHead(
+            input_dim=transformer_dim,
+            hidden_dim=config.clam_instance_hidden_dim,
+            dropout=config.dropout
+        ).to(device)
+        logger.info(f"  Created InstanceCausalHead with input_dim={transformer_dim}")
 
     # Create datasets
     train_dataset = ClinicalTextDataset(
@@ -510,25 +663,37 @@ def train_propensity_model(
             collate_fn=collate_batch
         )
 
-    # Optimizer
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=config.propensity_lr,
-        weight_decay=0.01
-    )
+    # Optimizer - include instance_head if CLAM is enabled
+    if clam_enabled and instance_head is not None:
+        optimizer = torch.optim.AdamW(
+            list(model.parameters()) + list(instance_head.parameters()),
+            lr=config.propensity_lr,
+            weight_decay=0.01
+        )
+    else:
+        optimizer = torch.optim.AdamW(
+            model.parameters(),
+            lr=config.propensity_lr,
+            weight_decay=0.01
+        )
 
     # Training loop
     best_val_loss = float('inf')
     best_model_state = None
+    best_instance_head_state = None
     patience_counter = 0
     history = []
 
     for epoch in range(config.propensity_epochs):
         # Train
         model.train()
+        if clam_enabled and instance_head is not None:
+            instance_head.train()
+
         train_loss = 0.0
         train_propensity_loss = 0.0
         train_outcome_loss = 0.0
+        train_clam_loss = 0.0
         train_prop_preds, train_prop_targets = [], []
         train_out_preds, train_out_targets = [], []
 
@@ -539,27 +704,45 @@ def train_propensity_model(
 
             optimizer.zero_grad()
 
-            if joint_training:
+            # Use forward_with_instances if CLAM is enabled
+            if clam_enabled:
+                repr, chunk_embs_list, attn_weights_list = model.forward_with_instances(texts)
+                t_logit = model.propensity_head(repr)
+                y_logit = model.outcome_head(repr) if joint_training else None
+            elif joint_training:
                 # Joint training: propensity + outcome
                 t_logit, y_logit = model.forward_joint(texts)
-                propensity_loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), treatment)
-                outcome_loss = F.binary_cross_entropy_with_logits(y_logit.squeeze(-1), outcome)
-                loss = (config.alpha_propensity_stage1 * propensity_loss +
-                        config.alpha_outcome_stage1 * outcome_loss)
-
-                train_propensity_loss += propensity_loss.item()
-                train_outcome_loss += outcome_loss.item()
-                train_out_preds.append(torch.sigmoid(y_logit).detach().cpu())
-                train_out_targets.append(outcome.detach().cpu())
-                train_prop_preds.append(torch.sigmoid(t_logit).detach().cpu())
             else:
                 # Propensity only
                 t_logit = model(texts)
-                loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), treatment)
-                train_propensity_loss += loss.item()
-                train_prop_preds.append(torch.sigmoid(t_logit).detach().cpu())
+                y_logit = None
 
+            # Compute main losses
+            propensity_loss = F.binary_cross_entropy_with_logits(t_logit.squeeze(-1), treatment)
+            if joint_training:
+                outcome_loss = F.binary_cross_entropy_with_logits(y_logit.squeeze(-1), outcome)
+                loss = (config.alpha_propensity_stage1 * propensity_loss +
+                        config.alpha_outcome_stage1 * outcome_loss)
+                train_outcome_loss += outcome_loss.item()
+                train_out_preds.append(torch.sigmoid(y_logit).detach().cpu())
+                train_out_targets.append(outcome.detach().cpu())
+            else:
+                loss = propensity_loss
+
+            train_propensity_loss += propensity_loss.item()
+            train_prop_preds.append(torch.sigmoid(t_logit).detach().cpu())
             train_prop_targets.append(treatment.detach().cpu())
+
+            # Add CLAM loss if enabled
+            if clam_enabled and instance_head is not None:
+                clam_losses = compute_clam_loss(
+                    chunk_embs_list, attn_weights_list,
+                    treatment, outcome,
+                    instance_head,
+                    num_instances=config.clam_num_instances
+                )
+                loss = loss + config.clam_instance_weight_stage1 * clam_losses['clam_loss']
+                train_clam_loss += clam_losses['clam_loss'].item()
 
             loss.backward()
             optimizer.step()
@@ -571,6 +754,7 @@ def train_propensity_model(
         train_loss_avg = train_loss / n_batches
         train_propensity_loss_avg = train_propensity_loss / n_batches
         train_outcome_loss_avg = train_outcome_loss / n_batches if joint_training else None
+        train_clam_loss_avg = train_clam_loss / n_batches if clam_enabled else None
 
         train_prop_preds_cat = torch.cat(train_prop_preds).numpy()
         train_prop_targets_cat = torch.cat(train_prop_targets).numpy()
@@ -646,6 +830,7 @@ def train_propensity_model(
             'train_loss': train_loss_avg,
             'train_propensity_loss': train_propensity_loss_avg,
             'train_outcome_loss': train_outcome_loss_avg,
+            'train_clam_loss': train_clam_loss_avg,
             'train_propensity_auroc': train_propensity_auroc,
             'train_outcome_auroc': train_outcome_auroc,
             'val_loss': val_loss_avg,
@@ -656,19 +841,22 @@ def train_propensity_model(
         })
 
         if val_loss_avg is not None:
+            clam_str = f", clam_loss={train_clam_loss_avg:.4f}" if clam_enabled else ""
             if joint_training:
                 logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
                            f"val_loss={val_loss_avg:.4f}, "
                            f"val_prop_auroc={val_propensity_auroc:.4f}, "
-                           f"val_out_auroc={val_outcome_auroc:.4f}")
+                           f"val_out_auroc={val_outcome_auroc:.4f}{clam_str}")
             else:
                 logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
-                           f"val_loss={val_loss_avg:.4f}, val_auroc={val_propensity_auroc:.4f}")
+                           f"val_loss={val_loss_avg:.4f}, val_auroc={val_propensity_auroc:.4f}{clam_str}")
 
             # Early stopping (only when validation is available)
             if val_loss_avg < best_val_loss:
                 best_val_loss = val_loss_avg
                 best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+                if clam_enabled and instance_head is not None:
+                    best_instance_head_state = {k: v.cpu().clone() for k, v in instance_head.state_dict().items()}
                 patience_counter = 0
             else:
                 patience_counter += 1
@@ -676,17 +864,20 @@ def train_propensity_model(
                     logger.info(f"  Early stopping at epoch {epoch+1}")
                     break
         else:
+            clam_str = f", clam_loss={train_clam_loss_avg:.4f}" if clam_enabled else ""
             if joint_training:
                 logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
                            f"prop_auroc={train_propensity_auroc:.4f}, "
-                           f"out_auroc={train_outcome_auroc:.4f}")
+                           f"out_auroc={train_outcome_auroc:.4f}{clam_str}")
             else:
                 logger.info(f"  Epoch {epoch+1}: train_loss={train_loss_avg:.4f}, "
-                           f"train_auroc={train_propensity_auroc:.4f}")
+                           f"train_auroc={train_propensity_auroc:.4f}{clam_str}")
 
     # Restore best model (only if we had validation-based early stopping)
     if best_model_state is not None:
         model.load_state_dict(best_model_state)
+    if best_instance_head_state is not None and instance_head is not None:
+        instance_head.load_state_dict(best_instance_head_state)
 
     # Cleanup
     del train_loader
@@ -695,7 +886,7 @@ def train_propensity_model(
     del train_dataset
     gc.collect()
 
-    return model, history
+    return model, history, instance_head
 
 
 class MatchedPairTextDataset(Dataset):

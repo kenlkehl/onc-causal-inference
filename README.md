@@ -358,6 +358,34 @@ This approach requires `joint_outcome_training=True` in Stage 1 (to provide the 
 
 See `examples/matched_pair_config.json` for a complete configuration example.
 
+**Gated Pool Extractors:**
+
+For long documents, `bert_gated_pool` and `gru_pool` chunk encoders provide hierarchical processing with gated attention pooling (tanh × sigmoid):
+
+```
+Text → Chunks → [BERT or BiGRU] → Transformer → Gated Pooling → Representation
+```
+
+The gated attention mechanism learns to suppress irrelevant chunks while focusing on predictive content. Both extractors expose `forward_with_instances()` for CLAM integration.
+
+**CLAM Instance-Level Supervision:**
+
+CLAM (Clustering-constrained Attention MIL) adds instance-level supervision to guide attention. When enabled with gated pool extractors, top-attended chunks are supervised with document-level labels:
+
+```json
+{
+  "matched_pair": {
+    "chunk_encoder": "gru_pool",
+    "clam_enabled": true,
+    "clam_num_instances": 5,
+    "clam_instance_weight_stage1": 0.5,
+    "clam_instance_weight_stage3": 0.5
+  }
+}
+```
+
+See `examples/matched_pair_gru_pool_clam_config.json` for a complete example combining GRU pool encoding, CLAM supervision, joint outcome training, and mean-embedding ITE.
+
 ## Installation
 
 ### Prerequisites

@@ -1,0 +1,60 @@
+{
+  "output_dir": "../pcori_experiments/matched_embedding_ite_gru_pool_clam_ten_confounders",
+  "seed": 42,
+  "device": "cuda:1",
+  "num_workers": 5,
+
+  "matched_pair": {
+    "dataset_path": "./example_synthetic_data_ten_confounders/dataset.parquet",
+    "text_column": "clinical_text",
+    "treatment_column": "treatment_indicator",
+    "outcome_column": "outcome_indicator",
+
+    "chunk_encoder": "gru_pool",
+
+    "gru_chunk_size": 128,
+    "gru_chunk_overlap": 32,
+    "gru_embedding_dim": 128,
+    "gru_hidden_dim": 128,
+    "gru_num_layers": 2,
+
+    "gru_pool_transformer_layers": 2,
+    "gru_pool_transformer_heads": 4,
+    "gru_pool_transformer_dim": 256,
+    "gru_pool_gated_attention_dim": 128,
+
+    "clam_enabled": true,
+    "clam_num_instances": 5,
+    "clam_instance_hidden_dim": 64,
+    "clam_instance_weight_stage1": 0.5,
+    "clam_instance_weight_stage3": 0.5,
+
+    "joint_outcome_training": true,
+    "alpha_propensity_stage1": 1.0,
+    "alpha_outcome_stage1": 1.0,
+    "propensity_epochs": 20,
+    "propensity_lr": 1e-4,
+    "propensity_batch_size": 32,
+
+    "matching_method": "propensity",
+    "matching_algorithm": "optimal",
+    "caliper": 0.2,
+
+    "use_mean_embedding_ite": true,
+    "freeze_representation_stage2": false,
+    "mean_ite_hidden_dim": 128,
+    "mean_ite_dropout": 0.2,
+    "outcome_epochs": 50,
+    "outcome_lr": 1e-4,
+
+    "cv_folds": 5
+  },
+
+  "applied_inference": {
+    "skip": true
+  },
+
+  "plasmode_experiments": {
+    "enabled": false
+  }
+}

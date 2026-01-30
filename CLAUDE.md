@@ -339,7 +339,7 @@ propensity_model = PropensityMatchingModel(
     joint_outcome_training=True,  # Required!
     device="cuda:0"
 )
-propensity_model, _ = train_propensity_model(propensity_model, train_df, val_df, config, device)
+propensity_model, _, instance_head = train_propensity_model(propensity_model, train_df, val_df, config, device)
 
 # Stage 2: Match patients (as usual)
 # ...
@@ -407,6 +407,90 @@ The GRU encoder requires `fit_tokenizer()` to build vocabulary from training tex
 ```
 
 See `examples/matched_pair_mean_ite_config.json` for a complete example with GRU encoder.
+
+### Gated Pool Extractors
+
+The `bert_gated_pool` and `gru_pool` chunk encoders provide hierarchical text processing with gated attention pooling (tanh × sigmoid) for final document aggregation:
+
+| `chunk_encoder` | Description |
+|-----------------|-------------|
+| `"bert_gated_pool"` | BERT [CLS] per chunk → Transformer → Gated Attention Pooling |
+| `"gru_pool"` | BiGRU + attention per chunk → Transformer → Gated Attention Pooling |
+
+**Architecture:**
+```
+Long Clinical Text
+        ↓
+Split into Overlapping Token Chunks (C chunks)
+        ↓
+[Per Chunk Encoding]
+  bert_gated_pool: BERT → [CLS] or mean pool
+  gru_pool: Word embeddings → BiGRU → Attention pooling
+        ↓
+Project to transformer_dim (C × transformer_dim)
+        ↓
+Positional Encoding + Transformer Layer(s)
+  (chunks attend to each other for cross-chunk context)
+        ↓
+Gated Attention Pooling: h = tanh(V·x) ⊙ sigmoid(U·x)
+        ↓
+Output Projection → Final Representation
+```
+
+**Gated attention pooling** (from pathology AI) uses element-wise gating to suppress irrelevant chunks. The tanh branch captures content features while the sigmoid branch learns which chunks to attend to.
+
+**`forward_with_instances()` method**: Both extractors expose chunk-level embeddings and attention weights for CLAM instance-level supervision (see below).
+
+**GRU pool options:**
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `gru_pool_transformer_layers` | `2` | Transformer layers for cross-chunk context |
+| `gru_pool_transformer_heads` | `4` | Attention heads in transformer |
+| `gru_pool_transformer_dim` | `256` | Transformer hidden dimension |
+| `gru_pool_gated_attention_dim` | `128` | Hidden dimension for gated pooling |
+
+See `examples/matched_pair_gru_pool_clam_config.json` for a complete example.
+
+### CLAM Instance-Level Supervision
+
+CLAM (Clustering-constrained Attention Multiple Instance Learning) adds instance-level supervision to guide attention toward predictive chunks. When enabled with `bert_gated_pool` or `gru_pool` extractors, the model supervises top-attended chunks with document-level labels.
+
+**How it works:**
+1. Extract chunk embeddings and gated attention weights via `forward_with_instances()`
+2. Select top-K chunks by attention weight for each document
+3. Apply small instance classifier head to each selected chunk
+4. Supervise with document-level labels (propensity in Stage 1, outcome in Stage 3)
+
+**Key options:**
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `clam_enabled` | `False` | Enable CLAM instance supervision |
+| `clam_num_instances` | `5` | Number of top-attended chunks to supervise |
+| `clam_instance_hidden_dim` | `64` | Hidden dimension for instance classifier |
+| `clam_instance_weight_stage1` | `0.5` | Weight for CLAM loss in Stage 1 (propensity) |
+| `clam_instance_weight_stage3` | `0.5` | Weight for CLAM loss in Stage 3 (outcome) |
+
+**Integration:**
+- **Stage 1**: CLAM loss encourages attention on chunks predictive of treatment
+- **Stage 3**: CLAM loss encourages attention on chunks predictive of outcome
+
+**Example config:**
+```json
+{
+  "matched_pair": {
+    "chunk_encoder": "gru_pool",
+    "clam_enabled": true,
+    "clam_num_instances": 5,
+    "clam_instance_hidden_dim": 64,
+    "clam_instance_weight_stage1": 0.5,
+    "clam_instance_weight_stage3": 0.5
+  }
+}
+```
+
+See `examples/matched_pair_gru_pool_clam_config.json` for a complete example.
 
 ## Key Training Options
 

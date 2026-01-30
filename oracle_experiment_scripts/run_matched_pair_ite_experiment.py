@@ -598,7 +598,7 @@ def run_single_fold(
     propensity_model.fit_tokenizer(train_df[text_col].tolist())
 
     # Train on full training fold (no validation split, fixed epochs)
-    propensity_model, prop_history = train_propensity_model(
+    propensity_model, prop_history, instance_head = train_propensity_model(
         propensity_model, train_df, None, mp_config, device
     )
 
@@ -663,7 +663,7 @@ def run_single_fold(
         logger.info(f"  Fold {fold + 1}: Using mean-embedding ITE model")
         outcome_model, outcome_history = train_mean_embedding_ite_model(
             propensity_model, train_df, match_result.matched_pairs,
-            mp_config, device
+            mp_config, device, instance_head=instance_head
         )
     elif condition.use_cross_encoder:
         logger.info(f"  Fold {fold + 1}: Using cross-encoder enhanced training")
