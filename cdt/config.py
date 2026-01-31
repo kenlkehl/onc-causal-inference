@@ -74,6 +74,14 @@ class CausalForestConfig:
     # Enable inference for confidence intervals
     inference: bool = True
 
+    # R-learner representation training: adds a τ head and R-loss to Stage 1
+    # When True, Stage 1 trains with propensity + outcome + R-learner losses
+    # to encourage embeddings to capture treatment effect heterogeneity
+    use_rlearner_representation: bool = False
+
+    # Weight for R-learner loss during representation training
+    gamma_rlearner: float = 1.0
+
 
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """

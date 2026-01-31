@@ -245,7 +245,8 @@ with econml's CausalForestDML for treatment effect estimation.
 Stage 1: Representation Learning (Neural Network)
 ├── Feature Extractor (any supported type: gru_pool, bert, etc.)
 ├── Propensity Head: P(T=1|X) → BCE loss
-└── Outcome Head: E[Y|X] → BCE loss
+├── Outcome Head: E[Y|X] → BCE loss
+└── [Optional] Effect Head: τ(X) → R-loss (when use_rlearner_representation=True)
 
 Stage 2: Effect Estimation (Causal Forest)
 ├── Extract learned representations from Stage 1
@@ -263,15 +264,44 @@ Stage 2: Effect Estimation (Causal Forest)
 | `max_features` | Feature subset strategy for splitting | `"sqrt"` |
 | `honest` | Use honest estimation (sample splitting within trees) | `True` |
 | `inference` | Enable confidence intervals | `True` |
+| `use_rlearner_representation` | Add τ head and R-loss to Stage 1 training | `False` |
+| `gamma_rlearner` | Weight for R-learner loss during representation training | `1.0` |
 
 **Note**: Nuisance functions (propensity and outcome) are estimated using sklearn random forests
 on the neural network's learned features. The neural network's key contribution is the
 learned text representation that captures confounders.
 
+### R-Learner Representation Training
+
+When `use_rlearner_representation=True`, Stage 1 adds a treatment effect head (τ) and trains
+with the R-learner loss in addition to propensity and outcome losses. This encourages the
+neural network to learn representations that capture treatment effect heterogeneity, not just
+confounders.
+
+**R-loss formula**: `E[((Y - m(X)) - τ(X)(T - e(X)))²]`
+
+**Key insight**: Nuisance functions (e, m) are **DETACHED** during R-loss computation, so gradients
+flow only through the τ head. This provides direct signal for learning treatment effect modifiers
+from text without interference from nuisance estimation.
+
 ### Usage
 
 ```python
-# Config with causal forest
+# Config with causal forest (basic)
+config = {
+    "architecture": {
+        "model_type": "causal_forest",
+        "feature_extractor_type": "gru_pool",
+        "causal_forest": {
+            "n_estimators": 200,
+            "min_samples_leaf": 10,
+            "honest": True,
+            "inference": True
+        }
+    }
+}
+
+# Config with R-learner representation training
 config = {
     "architecture": {
         "model_type": "causal_forest",
@@ -281,7 +311,8 @@ config = {
             "min_samples_leaf": 10,
             "honest": True,
             "inference": True,
-            "use_neural_nuisance": True
+            "use_rlearner_representation": True,
+            "gamma_rlearner": 1.0
         }
     }
 }

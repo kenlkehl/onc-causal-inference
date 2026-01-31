@@ -5,7 +5,7 @@ This script extracts confounder values from clinical text using an LLM (vLLM or 
 For the concept-aware experiment, it extracts the number of metastatic sites.
 
 Usage:
-    python scripts/extract_confounders_llm.py \
+    python synthetic_data/extract_confounders_llm.py \
         --input example_synthetic_data_one_confounder/dataset.parquet \
         --output example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
         --vllm-url http://localhost:8000/v1 \

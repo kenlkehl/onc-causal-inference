@@ -43,7 +43,9 @@
         "min_samples_leaf": 10,
         "max_features": "sqrt",
         "honest": true,
-        "inference": true
+        "inference": true,
+        "use_rlearner_representation": false,
+        "gamma_rlearner": 1.0
       }
     },
 

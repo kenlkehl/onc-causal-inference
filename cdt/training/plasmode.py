@@ -7,7 +7,7 @@ import json
 import gc
 from pathlib import Path
 from dataclasses import asdict
-from typing import Optional, List, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict, Any, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -21,6 +21,7 @@ from joblib import Parallel, delayed
 
 from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig, normalize_feature_extractor_type
 from ..models.causal_text import CausalText
+from ..models.causal_text_forest import CausalTextForest
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup, get_memory_info, set_seed
 
@@ -331,8 +332,17 @@ def _train_cnn_model(
     arch_config,
     train_config,
     device: torch.device
-) -> Tuple[CausalText, List[Dict[str, Any]]]:
-    """Train a model with CNN or BERT feature extractor."""
+) -> Tuple[Union[CausalText, CausalTextForest], List[Dict[str, Any]]]:
+    """Train a model with CNN, BERT, or Causal Forest.
+
+    Dispatches to _train_causal_forest_model for model_type="causal_forest".
+    """
+    # Check for causal forest model type
+    model_type = getattr(arch_config, 'model_type', 'dragonnet')
+    if model_type == "causal_forest":
+        return _train_causal_forest_model(
+            train_df, val_df, applied_config, arch_config, train_config, device
+        )
 
     # Get feature extractor type (default to "cnn" for backward compatibility)
     # Normalize type (e.g., "modernbert" -> "bert")
@@ -581,9 +591,234 @@ def _train_cnn_model(
     return model, history
 
 
+def _train_causal_forest_model(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    applied_config: AppliedInferenceConfig,
+    arch_config,
+    train_config,
+    device: torch.device
+) -> Tuple[CausalTextForest, List[Dict[str, Any]]]:
+    """Train a CausalTextForest model for plasmode experiments.
+
+    Two-stage approach:
+        1. Train neural feature extractor with propensity + outcome losses
+           (optionally with R-learner loss for representation training)
+        2. Train causal forest on extracted features
+    """
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'gru_pool')
+    )
+
+    # Get causal forest config
+    cf_config = getattr(arch_config, 'causal_forest', None)
+    if cf_config is None:
+        cf_n_estimators = 100
+        cf_max_depth = None
+        cf_min_samples_leaf = 5
+        cf_max_features = "sqrt"
+        cf_honest = True
+        cf_inference = True
+        cf_use_rlearner_representation = False
+        cf_gamma_rlearner = 1.0
+    else:
+        cf_n_estimators = getattr(cf_config, 'n_estimators', 100)
+        cf_max_depth = getattr(cf_config, 'max_depth', None)
+        cf_min_samples_leaf = getattr(cf_config, 'min_samples_leaf', 5)
+        cf_max_features = getattr(cf_config, 'max_features', "sqrt")
+        cf_honest = getattr(cf_config, 'honest', True)
+        cf_inference = getattr(cf_config, 'inference', True)
+        cf_use_rlearner_representation = getattr(cf_config, 'use_rlearner_representation', False)
+        cf_gamma_rlearner = getattr(cf_config, 'gamma_rlearner', 1.0)
+
+    model = CausalTextForest(
+        feature_extractor_type=feature_extractor_type,
+        # GRU-Pool args (most common for causal forest)
+        gru_pool_embedding_dim=getattr(arch_config, 'gru_pool_embedding_dim', 128),
+        gru_pool_gru_hidden_dim=getattr(arch_config, 'gru_pool_gru_hidden_dim', 128),
+        gru_pool_gru_num_layers=getattr(arch_config, 'gru_pool_gru_num_layers', 1),
+        gru_pool_gru_bidirectional=getattr(arch_config, 'gru_pool_gru_bidirectional', True),
+        gru_pool_gru_dropout=getattr(arch_config, 'gru_pool_gru_dropout', 0.1),
+        gru_pool_max_chunks=getattr(arch_config, 'gru_pool_max_chunks', 100),
+        gru_pool_chunk_size=getattr(arch_config, 'gru_pool_chunk_size', 128),
+        gru_pool_chunk_overlap=getattr(arch_config, 'gru_pool_chunk_overlap', 32),
+        gru_pool_transformer_layers=getattr(arch_config, 'gru_pool_transformer_layers', 2),
+        gru_pool_transformer_heads=getattr(arch_config, 'gru_pool_transformer_heads', 4),
+        gru_pool_transformer_dim=getattr(arch_config, 'gru_pool_transformer_dim', 256),
+        gru_pool_gated_attention_dim=getattr(arch_config, 'gru_pool_gated_attention_dim', 128),
+        gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
+        gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
+        gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # BERT args (if using BERT extractor)
+        bert_model_name=getattr(arch_config, 'bert_model_name', 'bert-base-uncased'),
+        bert_max_length=getattr(arch_config, 'bert_max_length', 512),
+        bert_projection_dim=getattr(arch_config, 'bert_projection_dim', 128),
+        bert_dropout=getattr(arch_config, 'bert_dropout', 0.1),
+        bert_freeze_encoder=getattr(arch_config, 'bert_freeze_encoder', False),
+        bert_gradient_checkpointing=getattr(arch_config, 'bert_gradient_checkpointing', False),
+        # Hierarchical Transformer args
+        hier_transformer_sentence_model=getattr(arch_config, 'hier_transformer_sentence_model', 'prajjwal1/bert-tiny'),
+        hier_transformer_freeze_sentence_encoder=getattr(arch_config, 'hier_transformer_freeze_sentence_encoder', True),
+        hier_transformer_max_chunks=getattr(arch_config, 'hier_transformer_max_chunks', 100),
+        hier_transformer_chunk_size=getattr(arch_config, 'hier_transformer_chunk_size', 128),
+        hier_transformer_chunk_overlap=getattr(arch_config, 'hier_transformer_chunk_overlap', 32),
+        hier_transformer_num_layers=getattr(arch_config, 'hier_transformer_num_layers', 2),
+        hier_transformer_num_heads=getattr(arch_config, 'hier_transformer_num_heads', 4),
+        hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
+        hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
+        hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
+        # Gated MIL Hierarchical args
+        gated_mil_sentence_model=getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny'),
+        gated_mil_freeze_sentence_encoder=getattr(arch_config, 'gated_mil_freeze_sentence_encoder', True),
+        gated_mil_max_chunks=getattr(arch_config, 'gated_mil_max_chunks', 100),
+        gated_mil_chunk_size=getattr(arch_config, 'gated_mil_chunk_size', 128),
+        gated_mil_chunk_overlap=getattr(arch_config, 'gated_mil_chunk_overlap', 32),
+        gated_mil_hidden_dim=getattr(arch_config, 'gated_mil_hidden_dim', 128),
+        gated_mil_num_confounders=getattr(arch_config, 'gated_mil_num_confounders', 4),
+        gated_mil_dropout=getattr(arch_config, 'gated_mil_dropout', 0.1),
+        gated_mil_projection_dim=getattr(arch_config, 'gated_mil_projection_dim', 128),
+        gated_mil_hierarchical=getattr(arch_config, 'gated_mil_hierarchical', False),
+        gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
+        gated_mil_use_mean_pooling=getattr(arch_config, 'gated_mil_use_mean_pooling', False),
+        # Head args
+        representation_dim=getattr(arch_config, 'dragonnet_representation_dim', 128),
+        hidden_dim=getattr(arch_config, 'dragonnet_hidden_outcome_dim', 64),
+        dropout=getattr(arch_config, 'dragonnet_dropout', 0.2),
+        # Causal forest args
+        cf_n_estimators=cf_n_estimators,
+        cf_max_depth=cf_max_depth,
+        cf_min_samples_leaf=cf_min_samples_leaf,
+        cf_max_features=cf_max_features,
+        cf_honest=cf_honest,
+        cf_inference=cf_inference,
+        cf_use_rlearner_representation=cf_use_rlearner_representation,
+        cf_gamma_rlearner=cf_gamma_rlearner,
+        device=str(device)
+    )
+
+    train_texts = train_df[applied_config.text_column].tolist()
+    model.fit_tokenizer(train_texts)
+    logger.info(f"Using CausalTextForest with {feature_extractor_type.upper()} extractor")
+
+    # Create datasets
+    train_dataset = ClinicalTextDataset(
+        data=train_df,
+        text_column=applied_config.text_column,
+        outcome_column=applied_config.outcome_column,
+        treatment_column=applied_config.treatment_column
+    )
+
+    val_dataset = ClinicalTextDataset(
+        data=val_df,
+        text_column=applied_config.text_column,
+        outcome_column=applied_config.outcome_column,
+        treatment_column=applied_config.treatment_column
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=True,
+        collate_fn=collate_batch
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_batch
+    )
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=train_config.learning_rate,
+        weight_decay=getattr(train_config, 'weight_decay', 0.01)
+    )
+
+    history = []
+    best_val_loss = float('inf')
+    best_model_state = None
+
+    # Training options
+    alpha_propensity = train_config.alpha_propensity
+    stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
+    label_smoothing = getattr(train_config, 'label_smoothing', 0.0)
+    gamma_rlearner = cf_gamma_rlearner if model.use_rlearner_representation else 0.0
+
+    # Stage 1: Train representation
+    for epoch in range(train_config.epochs):
+        model.train()
+        epoch_loss = 0.0
+        train_r_loss = 0.0
+
+        for batch in train_loader:
+            batch['outcome'] = batch['outcome'].to(device)
+            batch['treatment'] = batch['treatment'].to(device)
+
+            optimizer.zero_grad()
+            losses = model.train_representation_step(
+                batch,
+                alpha_propensity=alpha_propensity,
+                gamma_rlearner=gamma_rlearner,
+                label_smoothing=label_smoothing,
+                stop_grad_propensity=stop_grad_propensity
+            )
+            losses['loss'].backward()
+            optimizer.step()
+            epoch_loss += losses['loss'].item()
+            train_r_loss += losses.get('r_loss', torch.tensor(0.0)).item()
+
+        train_loss = epoch_loss / len(train_loader)
+        train_r_loss = train_r_loss / len(train_loader)
+
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                batch['outcome'] = batch['outcome'].to(device)
+                batch['treatment'] = batch['treatment'].to(device)
+                losses = model.train_representation_step(
+                    batch,
+                    alpha_propensity=alpha_propensity,
+                    gamma_rlearner=gamma_rlearner,
+                    stop_grad_propensity=stop_grad_propensity
+                )
+                val_loss += losses['loss'].item()
+
+        val_loss = val_loss / len(val_loader)
+
+        epoch_log = {
+            'epoch': epoch + 1,
+            'train_loss': train_loss,
+            'val_loss': val_loss,
+        }
+        if model.use_rlearner_representation:
+            epoch_log['train_r_loss'] = train_r_loss
+        history.append(epoch_log)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+    # Restore best model state
+    if best_model_state:
+        model.load_state_dict(best_model_state)
+        model.to(device)
+
+    # Stage 2: Train causal forest on extracted features
+    combined_df = pd.concat([train_df, val_df])
+    combined_texts = combined_df[applied_config.text_column].tolist()
+    combined_T = combined_df[applied_config.treatment_column].values
+    combined_Y = combined_df[applied_config.outcome_column].values
+    model.train_causal_forest(combined_texts, combined_T, combined_Y)
+
+    return model, history
+
+
 def _generate_plasmode_data(
     df: pd.DataFrame,
-    generator: CausalText,
+    generator: Union[CausalText, CausalTextForest],
     scenario: PlasmodeConfig,
     applied_config: AppliedInferenceConfig,
     device: torch.device
@@ -662,13 +897,25 @@ def _generate_plasmode_data(
 
 
 def _predict_cnn_model(
-    model: CausalText,
+    model: Union[CausalText, CausalTextForest],
     df: pd.DataFrame,
     applied_config: AppliedInferenceConfig,
     device: torch.device
 ) -> dict:
-    """Generate predictions."""
+    """Generate predictions from CausalText or CausalTextForest model."""
 
+    # Handle CausalTextForest separately (uses different prediction API)
+    if isinstance(model, CausalTextForest):
+        texts = df[applied_config.text_column].tolist()
+        preds = model.predict(texts, return_ci=False)
+        return {
+            'y0_prob': preds['pred_y0_prob'],
+            'y1_prob': preds['pred_y1_prob'],
+            'propensity_prob': preds['pred_propensity_prob'],
+            'ite_prob': preds['pred_ite_prob']
+        }
+
+    # CausalText prediction path
     dataset = ClinicalTextDataset(
         data=df,
         text_column=applied_config.text_column,

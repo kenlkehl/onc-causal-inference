@@ -284,6 +284,10 @@ def _create_causal_forest_model(
         cf_honest = getattr(cf_config, 'honest', True)
         cf_inference = getattr(cf_config, 'inference', True)
 
+    # R-learner representation training options
+    cf_use_rlearner_representation = getattr(cf_config, 'use_rlearner_representation', False) if cf_config else False
+    cf_gamma_rlearner = getattr(cf_config, 'gamma_rlearner', 1.0) if cf_config else 1.0
+
     model = CausalTextForest(
         feature_extractor_type=feature_extractor_type,
         # CNN args
@@ -361,6 +365,9 @@ def _create_causal_forest_model(
         cf_max_features=cf_max_features,
         cf_honest=cf_honest,
         cf_inference=cf_inference,
+        # R-learner representation training
+        cf_use_rlearner_representation=cf_use_rlearner_representation,
+        cf_gamma_rlearner=cf_gamma_rlearner,
         # Device
         device=str(device)
     )
@@ -434,12 +441,16 @@ def _train_representation(
     stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
     gradient_clip_norm = getattr(train_config, 'gradient_clip_norm', 0.0)
 
+    # R-learner representation training: get gamma from model config
+    gamma_rlearner = model.cf_gamma_rlearner if model.use_rlearner_representation else 0.0
+
     for epoch in range(train_config.epochs):
         # Train
         model.train()
         train_loss = 0.0
         train_prop_loss = 0.0
         train_outcome_loss = 0.0
+        train_r_loss = 0.0
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}", leave=False, disable=not verbose):
             batch['outcome'] = batch['outcome'].to(device)
@@ -450,6 +461,7 @@ def _train_representation(
             losses = model.train_representation_step(
                 batch,
                 alpha_propensity=alpha_propensity,
+                gamma_rlearner=gamma_rlearner,
                 label_smoothing=label_smoothing,
                 stop_grad_propensity=stop_grad_propensity
             )
@@ -467,16 +479,19 @@ def _train_representation(
             train_loss += losses['loss'].item()
             train_prop_loss += losses['propensity_loss'].item()
             train_outcome_loss += losses['outcome_loss'].item()
+            train_r_loss += losses.get('r_loss', torch.tensor(0.0)).item()
 
         train_loss /= len(train_loader)
         train_prop_loss /= len(train_loader)
         train_outcome_loss /= len(train_loader)
+        train_r_loss /= len(train_loader)
 
         # Validate
         model.eval()
         val_loss = 0.0
         val_prop_loss = 0.0
         val_outcome_loss = 0.0
+        val_r_loss = 0.0
         all_prop_logits = []
         all_outcome_logits = []
         all_treatments = []
@@ -490,12 +505,14 @@ def _train_representation(
                 losses = model.train_representation_step(
                     batch,
                     alpha_propensity=alpha_propensity,
+                    gamma_rlearner=gamma_rlearner,
                     stop_grad_propensity=stop_grad_propensity
                 )
 
                 val_loss += losses['loss'].item()
                 val_prop_loss += losses['propensity_loss'].item()
                 val_outcome_loss += losses['outcome_loss'].item()
+                val_r_loss += losses.get('r_loss', torch.tensor(0.0)).item()
 
                 all_prop_logits.append(losses['propensity_logit'].cpu())
                 all_outcome_logits.append(losses['outcome_logit'].cpu())
@@ -505,6 +522,7 @@ def _train_representation(
         val_loss /= len(val_loader)
         val_prop_loss /= len(val_loader)
         val_outcome_loss /= len(val_loader)
+        val_r_loss /= len(val_loader)
 
         # Compute AUROCs
         prop_scores = torch.sigmoid(torch.cat(all_prop_logits)).numpy().flatten()
@@ -527,18 +545,21 @@ def _train_representation(
             'train_loss': train_loss,
             'train_propensity_loss': train_prop_loss,
             'train_outcome_loss': train_outcome_loss,
+            'train_r_loss': train_r_loss,
             'val_loss': val_loss,
             'val_propensity_loss': val_prop_loss,
             'val_outcome_loss': val_outcome_loss,
+            'val_r_loss': val_r_loss,
             'val_auroc_prop': val_auroc_prop,
             'val_auroc_outcome': val_auroc_outcome,
         }
         history.append(epoch_log)
 
         if verbose:
+            r_loss_str = f" | R-Loss: {train_r_loss:.4f}" if model.use_rlearner_representation else ""
             logger.info(
                 f"Epoch {epoch+1}/{train_config.epochs} | "
-                f"Train Loss: {train_loss:.4f} | "
+                f"Train Loss: {train_loss:.4f}{r_loss_str} | "
                 f"Val Loss: {val_loss:.4f} | "
                 f"Val AUROC Prop: {val_auroc_prop:.4f if val_auroc_prop else 'N/A'} | "
                 f"Val AUROC Outcome: {val_auroc_outcome:.4f if val_auroc_outcome else 'N/A'}"

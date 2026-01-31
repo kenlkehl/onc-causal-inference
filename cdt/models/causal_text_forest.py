@@ -137,6 +137,9 @@ class CausalTextForest(nn.Module):
         cf_honest: bool = True,
         cf_inference: bool = True,
         cf_random_state: int = 42,
+        # R-learner representation training args
+        cf_use_rlearner_representation: bool = False,
+        cf_gamma_rlearner: float = 1.0,
         # Device
         device: str = "cuda:0"
     ):
@@ -156,6 +159,8 @@ class CausalTextForest(nn.Module):
             cf_honest: Use honest estimation
             cf_inference: Enable confidence intervals
             cf_random_state: Random seed
+            cf_use_rlearner_representation: Add τ head and R-loss to representation training
+            cf_gamma_rlearner: Weight for R-learner loss
             device: PyTorch device
         """
         super().__init__()
@@ -241,6 +246,8 @@ class CausalTextForest(nn.Module):
             'cf_honest': cf_honest,
             'cf_inference': cf_inference,
             'cf_random_state': cf_random_state,
+            'cf_use_rlearner_representation': cf_use_rlearner_representation,
+            'cf_gamma_rlearner': cf_gamma_rlearner,
         }
 
         # Initialize feature extractor (reuse existing implementations)
@@ -361,6 +368,24 @@ class CausalTextForest(nn.Module):
             nn.Linear(hidden_dim, 1)
         )
 
+        # Optional: Treatment effect head for R-learner representation training
+        # When enabled, adds R-loss to encourage embeddings to capture τ heterogeneity
+        self.use_rlearner_representation = cf_use_rlearner_representation
+        self.cf_gamma_rlearner = cf_gamma_rlearner
+        if cf_use_rlearner_representation:
+            self.effect_head = nn.Sequential(
+                nn.Linear(input_dim, representation_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(representation_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(hidden_dim, 1)  # No activation - τ can be negative
+            )
+            logger.info("  R-learner representation training: ENABLED")
+        else:
+            self.effect_head = None
+
         # Causal forest (non-neural, trained separately)
         self.causal_forest = CausalForestHead(
             n_estimators=cf_n_estimators,
@@ -401,6 +426,7 @@ class CausalTextForest(nn.Module):
         self,
         batch: Dict[str, Any],
         alpha_propensity: float = 1.0,
+        gamma_rlearner: float = 1.0,
         label_smoothing: float = 0.0,
         stop_grad_propensity: bool = False
     ) -> Dict[str, torch.Tensor]:
@@ -408,11 +434,13 @@ class CausalTextForest(nn.Module):
         Perform single representation training step.
 
         This stage learns to extract confounders from text by training
-        propensity and outcome prediction heads.
+        propensity and outcome prediction heads. Optionally includes R-learner
+        loss to encourage embeddings to capture treatment effect heterogeneity.
 
         Args:
             batch: Dictionary with 'texts', 'treatment', 'outcome' keys
             alpha_propensity: Weight for propensity loss
+            gamma_rlearner: Weight for R-learner loss (only used if use_rlearner_representation=True)
             label_smoothing: Label smoothing factor
             stop_grad_propensity: If True, detach features before propensity
 
@@ -454,12 +482,31 @@ class CausalTextForest(nn.Module):
             outcomes_smooth
         )
 
-        total_loss = outcome_loss + alpha_propensity * propensity_loss
+        # R-learner loss (optional): encourages features to capture τ heterogeneity
+        # R-loss: E[((Y - m(X)) - τ(X)(T - e(X)))²]
+        # CRITICAL: Nuisance functions (e, m) are DETACHED so gradients flow only through τ
+        r_loss = torch.tensor(0.0, device=self._device)
+        if self.use_rlearner_representation and self.effect_head is not None:
+            # Compute τ(X) from the effect head
+            tau = self.effect_head(features)
+
+            # Detach nuisance functions - this is the key to R-learner
+            # Gradients only flow through τ, not through e or m estimates
+            e_X = torch.sigmoid(propensity_logit).detach().clamp(0.01, 0.99)
+            m_X = torch.sigmoid(outcome_logit).detach()
+
+            # R-loss: pseudo-outcome regression
+            Y_residual = outcomes - m_X.squeeze(-1)
+            T_residual = treatments - e_X.squeeze(-1)
+            r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
+
+        total_loss = outcome_loss + alpha_propensity * propensity_loss + gamma_rlearner * r_loss
 
         return {
             'loss': total_loss,
             'outcome_loss': outcome_loss.detach(),
             'propensity_loss': propensity_loss.detach(),
+            'r_loss': r_loss.detach() if isinstance(r_loss, torch.Tensor) else torch.tensor(r_loss),
             'propensity_logit': propensity_logit.detach(),
             'outcome_logit': outcome_logit.detach()
         }

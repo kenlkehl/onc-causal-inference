@@ -17,13 +17,22 @@ Experimental Conditions:
 3. LLM-Extracted (llm_structured_text) - LLM extracted confounders as text
 
 Usage:
+    # Basic usage
     python oracle_experiment_scripts/run_causal_forest_experiment.py \
-        --dataset ../pcori_experiments/explicit_confounder_experiments_1-19-26/dataset_with_extraction.parquet \
+        --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
         --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest \
         --device cuda:0 \
         --n-folds 5 \
         --cf-n-estimators 100 \
         --epochs 20
+
+    # With R-learner representation training (adds τ head and R-loss to Stage 1)
+    python oracle_experiment_scripts/run_causal_forest_experiment.py \
+        --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
+        --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest_rlearner \
+        --device cuda:0 \
+        --rlearner \
+        --gamma-rlearner 1.0
 
 
 
@@ -219,7 +228,9 @@ def train_causal_forest_model(
     epochs: int,
     batch_size: int,
     learning_rate: float,
-    stop_grad_propensity: bool = False
+    stop_grad_propensity: bool = False,
+    use_rlearner_representation: bool = False,
+    gamma_rlearner: float = 1.0
 ) -> Tuple[CausalTextForest, List[Dict]]:
     """Train a CausalTextForest model for one fold."""
     text_column = config.text_column
@@ -252,6 +263,9 @@ def train_causal_forest_model(
         cf_min_samples_leaf=config.cf_min_samples_leaf,
         cf_honest=config.cf_honest,
         cf_inference=True,
+        # R-learner representation training
+        cf_use_rlearner_representation=use_rlearner_representation,
+        cf_gamma_rlearner=gamma_rlearner,
         device=str(device)
     )
 
@@ -294,12 +308,16 @@ def train_causal_forest_model(
     best_state = None
     history = []
 
+    # Compute effective gamma for R-learner loss
+    effective_gamma = gamma_rlearner if use_rlearner_representation else 0.0
+
     for epoch in range(epochs):
         # Train
         model.train()
         train_loss = 0.0
         train_prop_loss = 0.0
         train_outcome_loss = 0.0
+        train_r_loss = 0.0
 
         for batch in train_loader:
             batch['treatment'] = batch['treatment'].to(device)
@@ -310,6 +328,7 @@ def train_causal_forest_model(
             losses = model.train_representation_step(
                 batch,
                 alpha_propensity=1.0,
+                gamma_rlearner=effective_gamma,
                 stop_grad_propensity=stop_grad_propensity
             )
 
@@ -320,6 +339,7 @@ def train_causal_forest_model(
             train_loss += losses['loss'].item()
             train_prop_loss += losses['propensity_loss'].item()
             train_outcome_loss += losses['outcome_loss'].item()
+            train_r_loss += losses.get('r_loss', torch.tensor(0.0)).item()
 
         scheduler.step()
 
@@ -328,6 +348,7 @@ def train_causal_forest_model(
         val_loss = 0.0
         val_prop_loss = 0.0
         val_outcome_loss = 0.0
+        val_r_loss = 0.0
 
         with torch.no_grad():
             for batch in val_loader:
@@ -337,12 +358,14 @@ def train_causal_forest_model(
                 losses = model.train_representation_step(
                     batch,
                     alpha_propensity=1.0,
+                    gamma_rlearner=effective_gamma,
                     stop_grad_propensity=stop_grad_propensity
                 )
 
                 val_loss += losses['loss'].item()
                 val_prop_loss += losses['propensity_loss'].item()
                 val_outcome_loss += losses['outcome_loss'].item()
+                val_r_loss += losses.get('r_loss', torch.tensor(0.0)).item()
 
         train_loss /= len(train_loader)
         val_loss /= len(val_loader)
@@ -350,8 +373,10 @@ def train_causal_forest_model(
         val_prop_loss /= len(val_loader)
         train_outcome_loss /= len(train_loader)
         val_outcome_loss /= len(val_loader)
+        train_r_loss /= len(train_loader)
+        val_r_loss /= len(val_loader)
 
-        history.append({
+        epoch_log = {
             'epoch': epoch + 1,
             'train_loss': train_loss,
             'val_loss': val_loss,
@@ -360,11 +385,16 @@ def train_causal_forest_model(
             'train_outcome_loss': train_outcome_loss,
             'val_outcome_loss': val_outcome_loss,
             'lr': scheduler.get_last_lr()[0]
-        })
+        }
+        if use_rlearner_representation:
+            epoch_log['train_r_loss'] = train_r_loss
+            epoch_log['val_r_loss'] = val_r_loss
+        history.append(epoch_log)
 
         if (epoch + 1) % 10 == 0:
+            r_loss_str = f", r_loss={train_r_loss:.4f}" if use_rlearner_representation else ""
             logger.info(f"    Epoch {epoch+1}/{epochs}: train_loss={train_loss:.4f}, "
-                       f"val_loss={val_loss:.4f}")
+                       f"val_loss={val_loss:.4f}{r_loss_str}")
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -418,7 +448,9 @@ def run_condition(
     batch_size: int,
     learning_rate: float,
     output_dir: Optional[Path] = None,
-    stop_grad_propensity: bool = False
+    stop_grad_propensity: bool = False,
+    use_rlearner_representation: bool = False,
+    gamma_rlearner: float = 1.0
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Run cross-validation for one experimental condition."""
     logger.info(f"\n{'='*60}")
@@ -427,6 +459,9 @@ def run_condition(
     logger.info(f"  Causal forest: {config.cf_n_estimators} trees, honest={config.cf_honest}")
     logger.info(f"  GRU-Pool: embed={config.embedding_dim}, hidden={config.gru_hidden_dim}")
     logger.info(f"  Stop grad propensity: {stop_grad_propensity}")
+    logger.info(f"  R-learner representation: {use_rlearner_representation}")
+    if use_rlearner_representation:
+        logger.info(f"  gamma_rlearner: {gamma_rlearner}")
     logger.info(f"{'='*60}")
 
     # Check if text column exists
@@ -450,7 +485,9 @@ def run_condition(
         model, history = train_causal_forest_model(
             train_df, test_df, config, device,
             epochs, batch_size, learning_rate,
-            stop_grad_propensity=stop_grad_propensity
+            stop_grad_propensity=stop_grad_propensity,
+            use_rlearner_representation=use_rlearner_representation,
+            gamma_rlearner=gamma_rlearner
         )
 
         preds = predict_model(model, test_df, config.text_column, batch_size)
@@ -639,6 +676,17 @@ def main():
         action="store_true",
         help="Detach features before propensity loss"
     )
+    parser.add_argument(
+        "--rlearner",
+        action="store_true",
+        help="Enable R-learner representation training (adds τ head and R-loss to Stage 1)"
+    )
+    parser.add_argument(
+        "--gamma-rlearner",
+        type=float,
+        default=1.0,
+        help="Weight for R-learner loss (only used when --rlearner is set)"
+    )
 
     args = parser.parse_args()
 
@@ -660,6 +708,9 @@ def main():
     logger.info(f"  Transformer dim: {args.transformer_dim}")
     logger.info(f"  Causal forest: {args.cf_n_estimators} trees")
     logger.info(f"  stop_grad_propensity: {args.stop_grad_propensity}")
+    logger.info(f"  R-learner representation: {args.rlearner}")
+    if args.rlearner:
+        logger.info(f"  gamma_rlearner: {args.gamma_rlearner}")
 
     # Load dataset
     df = pd.read_parquet(args.dataset)
@@ -724,7 +775,9 @@ def main():
                 batch_size=args.batch_size,
                 learning_rate=args.learning_rate,
                 output_dir=output_dir,
-                stop_grad_propensity=args.stop_grad_propensity
+                stop_grad_propensity=args.stop_grad_propensity,
+                use_rlearner_representation=args.rlearner,
+                gamma_rlearner=args.gamma_rlearner
             )
 
             if metrics:
@@ -773,6 +826,8 @@ def main():
         'batch_size': args.batch_size,
         'learning_rate': args.learning_rate,
         'stop_grad_propensity': args.stop_grad_propensity,
+        'use_rlearner_representation': args.rlearner,
+        'gamma_rlearner': args.gamma_rlearner,
         'n_folds': args.n_folds,
         'device': str(device),
         'conditions_run': [c.name for c in conditions if c.name in all_metrics]
