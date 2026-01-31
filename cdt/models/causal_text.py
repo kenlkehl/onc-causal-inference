@@ -18,6 +18,7 @@ from .gru_pool_extractor import GRUPoolExtractor
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
+from .traditional_logreg import TraditionalLogRegNet
 from ..config import normalize_feature_extractor_type
 
 
@@ -581,6 +582,14 @@ class CausalText(nn.Module):
                 dropout=dragonnet_dropout
             )
             logger.info("Using R-Learner architecture (direct tau optimization)")
+        elif model_type == "traditional_logreg":
+            self.net = TraditionalLogRegNet(
+                input_dim=input_dim,
+                representation_dim=dragonnet_representation_dim,
+                hidden_outcome_dim=dragonnet_hidden_outcome_dim,
+                dropout=dragonnet_dropout
+            )
+            logger.info("Using Traditional LogReg architecture (treatment as feature)")
         else:
             self.net = DragonNet(
                 input_dim=input_dim,
@@ -647,6 +656,13 @@ class CausalText(nn.Module):
                         hidden_outcome_dim=clam_instance_hidden_dim // 2,
                         dropout=dragonnet_dropout
                     )
+                elif model_type == "traditional_logreg":
+                    self.instance_head = TraditionalLogRegNet(
+                        input_dim=instance_input_dim,
+                        representation_dim=clam_instance_hidden_dim,
+                        hidden_outcome_dim=clam_instance_hidden_dim // 2,
+                        dropout=dragonnet_dropout
+                    )
                 else:
                     self.instance_head = DragonNet(
                         input_dim=instance_input_dim,
@@ -703,6 +719,9 @@ class CausalText(nn.Module):
             # For forward() compatibility, return in same tuple format
             # But these are semantically different: m_logit is marginal, tau is effect
             return m_logit, tau, t_logit, final_common_layer
+        elif self.model_type == "traditional_logreg":
+            # TraditionalLogRegNet in counterfactual mode returns: y0_logit, y1_logit, t_logit, phi
+            y0_logit, y1_logit, t_logit, final_common_layer = self.net(features, treatment=None)
         else:
             # DragonNet returns: y0_logit, y1_logit, t_logit, final_common_layer
             y0_logit, y1_logit, t_logit, final_common_layer = self.net(features)
@@ -746,6 +765,13 @@ class CausalText(nn.Module):
         if self.model_type == "rlearner":
             return self._train_step_rlearner(
                 batch, alpha_propensity, gamma_rlearner, label_smoothing,
+                stop_grad_propensity, attention_entropy_weight, clam_instance_weight
+            )
+
+        # Dispatch to specialized training step for traditional_logreg
+        if self.model_type == "traditional_logreg":
+            return self._train_step_traditional_logreg(
+                batch, alpha_propensity, label_smoothing,
                 stop_grad_propensity, attention_entropy_weight, clam_instance_weight
             )
 
@@ -1096,6 +1122,159 @@ class CausalText(nn.Module):
 
         return result
 
+    def _train_step_traditional_logreg(
+        self,
+        batch: Dict[str, Any],
+        alpha_propensity: float,
+        label_smoothing: float,
+        stop_grad_propensity: bool = False,
+        attention_entropy_weight: float = 0.0,
+        clam_instance_weight: float = 0.5
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Perform training step for traditional logistic regression head.
+
+        Traditional approach:
+        1. Propensity loss: BCE for P(T|X)
+        2. Outcome loss: BCE for P(Y|X, T_observed) - treatment is concatenated as feature
+
+        This is simpler than DragonNet since we only predict the factual outcome
+        conditioned on observed treatment, not counterfactuals.
+
+        Args:
+            batch: Dictionary with 'texts', 'treatment', 'outcome' keys
+            alpha_propensity: Weight for propensity loss
+            label_smoothing: Label smoothing factor
+            stop_grad_propensity: If True, detach features before propensity loss
+            attention_entropy_weight: Weight for attention entropy regularization
+            clam_instance_weight: Weight for CLAM instance-level loss
+
+        Returns:
+            Dictionary with loss components and predictions
+        """
+        texts = batch['texts']
+        treatments = batch['treatment']  # (batch,)
+        outcomes = batch['outcome']  # (batch,)
+        auxiliary_features = batch.get('auxiliary_features', None)
+
+        # Apply label smoothing if enabled
+        if label_smoothing > 0:
+            treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
+            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+        else:
+            treatments_smooth = treatments
+            outcomes_smooth = outcomes
+
+        # Extract features
+        features = self.feature_extractor(texts)
+
+        # Compute attention entropy loss if enabled and extractor supports it
+        entropy_loss = torch.tensor(0.0, device=self._device)
+        if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
+            _, attention_info = self.feature_extractor.forward_with_attention(texts)
+            entropy_loss = attention_info['attention_entropy']
+
+        # Concatenate auxiliary features if provided
+        if self.auxiliary_projection is not None and auxiliary_features is not None:
+            aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+            features = torch.cat([features, aux_projected], dim=1)
+
+        if stop_grad_propensity:
+            # Detach features for propensity to prevent propensity from dominating
+            features_detached = features.detach()
+            phi_detached = self.net.get_representation(features_detached)
+            t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+
+            # Forward pass with regular features for outcome
+            y_logit, t_logit, phi = self.net(features, treatment=treatments)
+        else:
+            # Standard forward pass with observed treatment
+            y_logit, t_logit, phi = self.net(features, treatment=treatments)
+            t_logit_for_loss = t_logit
+
+        # Propensity loss
+        propensity_loss = F.binary_cross_entropy_with_logits(
+            t_logit_for_loss.squeeze(-1),
+            treatments_smooth
+        )
+
+        # Outcome loss - factual outcome conditioned on observed treatment
+        outcome_loss = F.binary_cross_entropy_with_logits(
+            y_logit.squeeze(-1),
+            outcomes_smooth
+        )
+
+        # Get counterfactual predictions for logging/metrics
+        with torch.no_grad():
+            y0_logit, y1_logit, _, _ = self.net(features, treatment=None)
+
+        # CLAM instance-level loss (if enabled)
+        instance_loss = torch.tensor(0.0, device=self._device)
+        if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
+            # Get chunk embeddings and attention weights
+            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+
+            all_top_chunks = []
+            expanded_treatments = []
+            expanded_outcomes = []
+
+            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                if chunk_embs.size(0) == 0:
+                    continue
+                B = min(self.clam_num_instances, chunk_embs.size(0))
+                top_indices = torch.topk(attn_weights, B).indices
+                top_chunks = chunk_embs[top_indices]
+
+                all_top_chunks.append(top_chunks)
+                expanded_treatments.extend([treatments[i]] * B)
+                expanded_outcomes.extend([outcomes[i]] * B)
+
+            if all_top_chunks:
+                stacked_chunks = torch.cat(all_top_chunks, dim=0)
+                exp_treatments = torch.stack(expanded_treatments)
+                exp_outcomes = torch.stack(expanded_outcomes)
+
+                # Forward through instance head with observed treatment
+                inst_y, inst_t, _ = self.instance_head(stacked_chunks, treatment=exp_treatments)
+
+                # Instance propensity loss
+                instance_propensity_loss = F.binary_cross_entropy_with_logits(
+                    inst_t.squeeze(-1), exp_treatments
+                )
+
+                # Instance outcome loss
+                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                    inst_y.squeeze(-1), exp_outcomes
+                )
+
+                instance_loss = instance_outcome_loss + alpha_propensity * instance_propensity_loss
+
+        # Total loss (no targeted regularization for traditional approach)
+        total_loss = (
+            outcome_loss +
+            alpha_propensity * propensity_loss +
+            attention_entropy_weight * entropy_loss +
+            clam_instance_weight * instance_loss
+        )
+
+        result = {
+            'loss': total_loss,
+            'outcome_loss': outcome_loss.detach(),
+            'propensity_loss': propensity_loss.detach(),
+            'targreg_loss': torch.tensor(0.0, device=self._device),  # No targreg for traditional
+            'y0_logit': y0_logit.detach(),
+            'y1_logit': y1_logit.detach(),
+            't_logit': t_logit.detach()
+        }
+
+        if attention_entropy_weight > 0:
+            result['entropy_loss'] = entropy_loss.detach() if isinstance(entropy_loss, torch.Tensor) else entropy_loss
+
+        if self.clam_enabled:
+            result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
+
+        return result
+
     def predict(
         self,
         texts: List[str],
@@ -1150,6 +1329,10 @@ class CausalText(nn.Module):
                     'y0_logit': torch.logit(y0_prob.clamp(1e-6, 1 - 1e-6)),
                     'y1_logit': torch.logit(y1_prob.clamp(1e-6, 1 - 1e-6)),
                 }
+            elif self.model_type == "traditional_logreg":
+                # TraditionalLogRegNet in counterfactual mode returns: y0_logit, y1_logit, t_logit, phi
+                y0_logit, y1_logit, t_logit, final_common_layer = self.net(features, treatment=None)
+                tau_pred = (y1_logit - y0_logit).squeeze(-1)
             else:
                 y0_logit, y1_logit, t_logit, final_common_layer = self.net(features)
                 tau_pred = (y1_logit - y0_logit).squeeze(-1)
@@ -1232,6 +1415,13 @@ class CausalText(nn.Module):
                         )
                     elif self.model_type == "uplift":
                         self.instance_head = UpliftNet(
+                            input_dim=actual_dim,
+                            representation_dim=self.clam_instance_hidden_dim,
+                            hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
+                            dropout=self.config['dragonnet_dropout']
+                        )
+                    elif self.model_type == "traditional_logreg":
+                        self.instance_head = TraditionalLogRegNet(
                             input_dim=actual_dim,
                             representation_dim=self.clam_instance_hidden_dim,
                             hidden_outcome_dim=self.clam_instance_hidden_dim // 2,

@@ -5,6 +5,7 @@ from .components import CrossAttentionAggregator
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
+from .traditional_logreg import TraditionalLogRegNet
 from .outcome_heads import OutcomeHeadsOnly, UpliftHeadsOnly
 from .cnn_extractor import CNNFeatureExtractor, WordTokenizer
 from .bert_extractor import BertFeatureExtractor
@@ -29,6 +30,7 @@ __all__ = [
     'DragonNet',
     'UpliftNet',
     'RLearnerNet',
+    'TraditionalLogRegNet',
     'OutcomeHeadsOnly',
     'UpliftHeadsOnly',
     'CNNFeatureExtractor',

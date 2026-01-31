@@ -38,7 +38,9 @@ cdt/models/outcome_model.py
 cdt/models/propensity_model.py
 cdt/models/rlearner.py
 cdt/models/sparse_attention.py
+cdt/models/traditional_logreg.py
 cdt/models/uplift.py
+cdt/models/.ipynb_checkpoints/traditional_logreg-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py
@@ -71,3 +73,5 @@ synthetic_data/generator.py
 synthetic_data/llm_client.py
 synthetic_data/prompts.py
 synthetic_data/vllm_batch_client.py
+tests/__init__.py
+tests/test_traditional_logreg.py

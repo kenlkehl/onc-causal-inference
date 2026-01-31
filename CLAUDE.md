@@ -22,7 +22,7 @@ cdt/
 │   ├── gated_mil_hierarchical_extractor.py
 │   ├── gru_transformer_mil_extractor.py
 │   ├── gru_pool_extractor.py
-│   ├── dragonnet.py, uplift.py, rlearner.py  # Causal heads
+│   ├── dragonnet.py, uplift.py, rlearner.py, traditional_logreg.py  # Causal heads
 │   └── sparse_attention.py               # entmax, top-k attention
 ├── training/plasmode.py   # Plasmode simulation
 ├── matching/              # PropensityMatcher, balance utilities
@@ -56,8 +56,11 @@ synthetic_data/            # LLM-based synthetic data generation
 | `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
 | `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
 | `rlearner` | Direct τ(X) optimization, detached nuisance functions | τ directly predicts ITE |
+| `traditional_logreg` | Traditional logistic regression with treatment as feature | ITE = σ(y\|T=1) - σ(y\|T=0) |
 
 **R-Learner advantage**: Nuisance functions (e, m) are detached in R-loss, providing stronger gradient signal for treatment effect modifiers.
+
+**Traditional LogReg approach**: Models P(Y|X, T) directly with treatment concatenated as a feature input to the outcome head. At inference, computes counterfactuals by running the outcome head twice with T=0 and T=1. Simpler loss function (outcome + propensity, no targeted regularization needed). Supports `stop_grad_propensity` but off by default.
 
 ## CLI
 
@@ -84,7 +87,7 @@ from cdt.models import CausalText
 
 model = CausalText(
     feature_extractor_type="gated_mil_hierarchical",  # or cnn, bert, gru, confounder, hierarchical_transformer
-    model_type="rlearner",  # or dragonnet, uplift
+    model_type="rlearner",  # or dragonnet, uplift, traditional_logreg
     device="cuda:0",
     # ... extractor-specific params (see examples/ configs)
 )
@@ -213,7 +216,7 @@ causal objective.
 | `clam_instance_weight` | Weight for instance-level loss (training config) | `0.5` |
 
 The instance head is completely independent from the document head (no weight sharing).
-Works with DragonNet, UpliftNet, and R-Learner causal heads.
+Works with DragonNet, UpliftNet, R-Learner, and TraditionalLogReg causal heads.
 
 ## Training Options for τ Learning
 
@@ -263,7 +266,7 @@ output_dir/
 | Purpose | Files |
 |---------|-------|
 | Main model | `cdt/models/causal_text.py` |
-| Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py` |
+| Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
 | Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py` |
 | Text chunking | `cdt/models/chunking.py` |
 | Training | `cdt/inference/applied.py` |

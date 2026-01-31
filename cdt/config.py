@@ -101,7 +101,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 @dataclass
 class ModelArchitectureConfig:
     """Configuration for model architecture."""
-    model_type: str = "dragonnet"  # "dragonnet", "uplift", or "rlearner"
+    model_type: str = "dragonnet"  # "dragonnet", "uplift", "rlearner", or "traditional_logreg"
 
     # Feature extractor type: "cnn", "bert", or "gru"
     feature_extractor_type: str = "cnn"
