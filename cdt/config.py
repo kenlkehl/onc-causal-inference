@@ -43,6 +43,38 @@ class MatchingAnalysisConfig:
     ci_level: float = 0.95
 
 
+# =============================================================================
+# CAUSAL FOREST CONFIGURATION
+# =============================================================================
+
+@dataclass
+class CausalForestConfig:
+    """Configuration for causal forest head (used with model_type="causal_forest").
+
+    Note: Nuisance functions (propensity, outcome) are estimated using sklearn
+    random forests on the neural network's learned features. The neural network's
+    key contribution is the learned text representation that captures confounders.
+    """
+
+    # Number of trees in the causal forest (must be divisible by 4 for econml)
+    n_estimators: int = 100
+
+    # Maximum depth of trees (None = unlimited)
+    max_depth: Optional[int] = None
+
+    # Minimum samples per leaf
+    min_samples_leaf: int = 5
+
+    # Feature subset strategy for splitting
+    max_features: str = "sqrt"
+
+    # Use honest estimation (sample splitting within trees)
+    honest: bool = True
+
+    # Enable inference for confidence intervals
+    inference: bool = True
+
+
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder",
@@ -101,7 +133,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 @dataclass
 class ModelArchitectureConfig:
     """Configuration for model architecture."""
-    model_type: str = "dragonnet"  # "dragonnet", "uplift", "rlearner", or "traditional_logreg"
+    model_type: str = "dragonnet"  # "dragonnet", "uplift", "rlearner", "traditional_logreg", or "causal_forest"
 
     # Feature extractor type: "cnn", "bert", or "gru"
     feature_extractor_type: str = "cnn"
@@ -273,6 +305,9 @@ class ModelArchitectureConfig:
     dragonnet_hidden_outcome_dim: int = 64
     dragonnet_dropout: float = 0.2  # Dropout in DragonNet representation and outcome layers
 
+    # Causal Forest config (used when model_type="causal_forest")
+    causal_forest: CausalForestConfig = field(default_factory=CausalForestConfig)
+
     def get_num_filters_per_kernel(self) -> int:
         """
         Compute total number of filters per kernel size.
@@ -434,8 +469,16 @@ class ExperimentConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ExperimentConfig':
         """Create config from dictionary."""
+
+        def parse_architecture_config(arch_data: Dict[str, Any]) -> ModelArchitectureConfig:
+            """Parse architecture config, handling nested causal_forest."""
+            if 'causal_forest' in arch_data and isinstance(arch_data['causal_forest'], dict):
+                arch_data = arch_data.copy()
+                arch_data['causal_forest'] = CausalForestConfig(**arch_data['causal_forest'])
+            return ModelArchitectureConfig(**arch_data)
+
         applied = AppliedInferenceConfig(
-            **{k: ModelArchitectureConfig(**v) if k == 'architecture'
+            **{k: parse_architecture_config(v) if k == 'architecture'
                else TrainingConfig(**v) if k == 'training'
                else PropensityTrimmingConfig(**v) if k == 'propensity_trimming'
                else OutcomeModelConfig(**v) if k == 'outcome_model'
@@ -450,9 +493,9 @@ class ExperimentConfig:
             num_repeats=plasmode_data.get('num_repeats', 1),
             save_datasets=plasmode_data.get('save_datasets', False),
             train_fraction=plasmode_data.get('train_fraction', 0.8),
-            generator_architecture=ModelArchitectureConfig(**plasmode_data.get('generator_architecture', {})),
+            generator_architecture=parse_architecture_config(plasmode_data.get('generator_architecture', {})),
             generator_training=TrainingConfig(**plasmode_data.get('generator_training', {})),
-            evaluator_architecture=ModelArchitectureConfig(**plasmode_data.get('evaluator_architecture', {})),
+            evaluator_architecture=parse_architecture_config(plasmode_data.get('evaluator_architecture', {})),
             evaluator_training=TrainingConfig(**plasmode_data.get('evaluator_training', {})),
             plasmode_scenarios=[PlasmodeConfig(**s) for s in plasmode_data.get('plasmode_scenarios', [])],
             propensity_trimming=PropensityTrimmingConfig(**plasmode_data.get('propensity_trimming', {})),

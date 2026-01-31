@@ -15,12 +15,15 @@ cdt/experiments/__init__.py
 cdt/experiments/runner.py
 cdt/inference/__init__.py
 cdt/inference/applied.py
+cdt/inference/applied_forest.py
 cdt/matching/__init__.py
 cdt/matching/propensity_matcher.py
 cdt/models/__init__.py
 cdt/models/bert_extractor.py
 cdt/models/causal_cnn.py
+cdt/models/causal_forest_head.py
 cdt/models/causal_text.py
+cdt/models/causal_text_forest.py
 cdt/models/chunking.py
 cdt/models/cnn_extractor.py
 cdt/models/components.py
@@ -40,7 +43,7 @@ cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/traditional_logreg.py
 cdt/models/uplift.py
-cdt/models/.ipynb_checkpoints/traditional_logreg-checkpoint.py
+cdt/models/.ipynb_checkpoints/causal_forest_head-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py
@@ -55,6 +58,7 @@ cdt_causal.egg-info/entry_points.txt
 cdt_causal.egg-info/requires.txt
 cdt_causal.egg-info/top_level.txt
 examples/bert_config.json
+examples/causal_forest_config.json
 examples/concept_aware_metastatic_sites.json
 examples/confounder_config.json
 examples/gated_mil_config.json

@@ -12,9 +12,13 @@ cdt/
 ├── config.py              # Dataclass configs
 ├── data/dataset.py        # ClinicalTextDataset
 ├── experiments/runner.py  # Orchestrates inference & plasmode
-├── inference/applied.py   # Applied inference (CV or fixed split)
+├── inference/
+│   ├── applied.py         # Applied inference (CV or fixed split)
+│   └── applied_forest.py  # Causal forest inference pipeline
 ├── models/
 │   ├── causal_text.py     # Main model (extractor + causal head)
+│   ├── causal_text_forest.py  # Two-stage neural + causal forest model
+│   ├── causal_forest_head.py  # CausalForestDML wrapper
 │   ├── cnn_extractor.py, bert_extractor.py, gru_extractor.py
 │   ├── chunking.py                       # Token-based text chunking utilities
 │   ├── confounder_extractor.py           # Perceiver-style sparse attention
@@ -57,10 +61,22 @@ synthetic_data/            # LLM-based synthetic data generation
 | `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
 | `rlearner` | Direct τ(X) optimization, detached nuisance functions | τ directly predicts ITE |
 | `traditional_logreg` | Traditional logistic regression with treatment as feature | ITE = σ(y\|T=1) - σ(y\|T=0) |
+| `causal_forest` | Two-stage: neural features + econml CausalForestDML | τ with confidence intervals |
 
 **R-Learner advantage**: Nuisance functions (e, m) are detached in R-loss, providing stronger gradient signal for treatment effect modifiers.
 
 **Traditional LogReg approach**: Models P(Y|X, T) directly with treatment concatenated as a feature input to the outcome head. At inference, computes counterfactuals by running the outcome head twice with T=0 and T=1. Simpler loss function (outcome + propensity, no targeted regularization needed). Supports `stop_grad_propensity` but off by default.
+
+**Causal Forest approach**: Two-stage method combining neural network feature extraction with econml's CausalForestDML:
+1. **Stage 1**: Train neural feature extractor with propensity + outcome BCE losses to learn confounder representations
+2. **Stage 2**: Train CausalForestDML on extracted features to estimate τ(X) directly
+
+Advantages:
+- Doubly-robust estimation (robust to misspecification of either nuisance model)
+- Honest trees for unbiased effect estimates
+- Built-in confidence intervals for treatment effects
+- No gradient competition between representation learning and effect estimation
+- Theoretical guarantees from the causal forest literature
 
 ## CLI
 
@@ -218,6 +234,79 @@ causal objective.
 The instance head is completely independent from the document head (no weight sharing).
 Works with DragonNet, UpliftNet, R-Learner, and TraditionalLogReg causal heads.
 
+## Causal Forest Mode
+
+When `model_type="causal_forest"`, CDT uses a two-stage approach combining neural feature extraction
+with econml's CausalForestDML for treatment effect estimation.
+
+### Architecture
+
+```
+Stage 1: Representation Learning (Neural Network)
+├── Feature Extractor (any supported type: gru_pool, bert, etc.)
+├── Propensity Head: P(T=1|X) → BCE loss
+└── Outcome Head: E[Y|X] → BCE loss
+
+Stage 2: Effect Estimation (Causal Forest)
+├── Extract learned representations from Stage 1
+├── Fit CausalForestDML on extracted features
+└── Estimate τ(X) = E[Y(1)-Y(0)|X] with confidence intervals
+```
+
+### Causal Forest Parameters
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `n_estimators` | Number of trees in the forest (must be divisible by 4) | `100` |
+| `max_depth` | Maximum depth of trees (None = unlimited) | `None` |
+| `min_samples_leaf` | Minimum samples per leaf | `5` |
+| `max_features` | Feature subset strategy for splitting | `"sqrt"` |
+| `honest` | Use honest estimation (sample splitting within trees) | `True` |
+| `inference` | Enable confidence intervals | `True` |
+
+**Note**: Nuisance functions (propensity and outcome) are estimated using sklearn random forests
+on the neural network's learned features. The neural network's key contribution is the
+learned text representation that captures confounders.
+
+### Usage
+
+```python
+# Config with causal forest
+config = {
+    "architecture": {
+        "model_type": "causal_forest",
+        "feature_extractor_type": "gru_pool",
+        "causal_forest": {
+            "n_estimators": 200,
+            "min_samples_leaf": 10,
+            "honest": True,
+            "inference": True,
+            "use_neural_nuisance": True
+        }
+    }
+}
+
+# Predictions include confidence intervals
+preds = model.predict(texts)
+# preds['tau_pred'] - point estimates
+# preds['tau_lower'], preds['tau_upper'] - 95% CIs
+```
+
+### Advantages
+
+1. **Doubly-robust estimation**: Robust to misspecification of either propensity or outcome model
+2. **Honest trees**: Unbiased effect estimates via sample splitting within trees
+3. **Confidence intervals**: Built-in uncertainty quantification
+4. **No gradient interference**: Representation learning is complete before effect estimation
+5. **Theoretical guarantees**: Asymptotic normality and coverage guarantees
+
+### Dependencies
+
+Requires `econml>=0.14.0`:
+```bash
+pip install econml
+```
+
 ## Training Options for τ Learning
 
 | Option | Effect |
@@ -266,10 +355,11 @@ output_dir/
 | Purpose | Files |
 |---------|-------|
 | Main model | `cdt/models/causal_text.py` |
+| Causal forest model | `cdt/models/causal_text_forest.py`, `cdt/models/causal_forest_head.py` |
 | Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
 | Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py` |
 | Text chunking | `cdt/models/chunking.py` |
-| Training | `cdt/inference/applied.py` |
+| Training | `cdt/inference/applied.py`, `cdt/inference/applied_forest.py` |
 | Config | `cdt/config.py` |
 | PSM | `cdt/analysis/psm_analysis.py`, `cdt/matching/propensity_matcher.py` |
 
@@ -277,7 +367,7 @@ output_dir/
 
 **Core**: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow
 
-**Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided)
+**Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided), econml (causal forest)
 
 ## Adding a New Feature Extractor
 

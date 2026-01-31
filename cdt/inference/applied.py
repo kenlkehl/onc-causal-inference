@@ -24,6 +24,11 @@ from ..data import (
 )
 from ..utils import cuda_cleanup, get_memory_info
 
+# Import forest inference (lazy to avoid import errors if econml not installed)
+def _get_forest_inference():
+    from .applied_forest import run_applied_inference_forest
+    return run_applied_inference_forest
+
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +64,19 @@ def run_applied_inference(
         save_confounder_interpretations: Whether to save confounder attention analysis
         confounder_interpretation_top_k: Number of top-attended sentences per confounder
     """
+    # Route to causal forest inference if model_type is "causal_forest"
+    if hasattr(config, 'architecture') and config.architecture.model_type == "causal_forest":
+        logger.info("Routing to Causal Forest inference pipeline")
+        run_forest_inference = _get_forest_inference()
+        run_forest_inference(
+            dataset=dataset,
+            config=config,
+            output_path=output_path,
+            device=device,
+            num_workers=num_workers
+        )
+        return
+
     logger.info("=" * 80)
     logger.info("APPLIED CAUSAL INFERENCE (CNN)")
     logger.info("=" * 80)

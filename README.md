@@ -1,6 +1,6 @@
 # Causal DragonNet Text (CDT)
 
-A framework for clinical causal inference using electronic health record (EHR) text as the primary input. CDT estimates treatment effects from unstructured clinical narratives using semantically-initialized CNNs with DragonNet causal inference heads.
+A framework for clinical causal inference using electronic health record (EHR) text as the primary input. CDT estimates treatment effects from unstructured clinical narratives using neural network feature extractors (CNN, BERT, GRU, hierarchical transformers) combined with causal inference heads (DragonNet, R-Learner, Causal Forests).
 
 ## Clinical Research Objective
 
@@ -28,10 +28,11 @@ CDT processes clinical text through a CNN-based pipeline:
    - **Explicit clinical concepts**: User-specified phrases like "stage iv cancer", "performance status poor"
    - **Latent patterns**: Data-driven filters learned via k-means clustering of training n-grams
 
-4. **DragonNet Causal Inference**: The CNN features feed into a DragonNet that jointly predicts:
-   - Treatment propensity P(T=1|X)
-   - Potential outcomes E[Y|T=0,X] and E[Y|T=1,X]
-   - Individual treatment effects (ITE) as the difference in potential outcomes
+4. **Causal Inference Head**: The extracted features feed into one of several causal inference architectures:
+   - **DragonNet**: Jointly predicts propensity P(T=1|X) and potential outcomes E[Y|T=0,X], E[Y|T=1,X]
+   - **R-Learner**: Direct τ(X) optimization with detached nuisance functions for stronger treatment effect signal
+   - **Causal Forest**: Two-stage approach with neural features + econml's CausalForestDML for doubly-robust estimation with confidence intervals
+   - **Traditional LogReg**: Models P(Y|X,T) directly with treatment as a feature
 
 ### Semantic Filter Initialization
 
@@ -184,6 +185,75 @@ gated_mil_token_hidden_dim: int = 64  # Hidden dim for token-level gating
 
 See `examples/gated_mil_config.json` for a complete configuration example.
 
+### Causal Forest Mode
+
+CDT offers a **two-stage causal forest approach** that combines neural network feature extraction with econml's CausalForestDML for treatment effect estimation. This provides doubly-robust estimation with built-in confidence intervals.
+
+**Architecture:**
+
+```
+Stage 1: Representation Learning (Neural Network)
+├── Feature Extractor (any type: GRU-Pool, BERT, CNN, etc.)
+├── Propensity Head: P(T=1|X) → BCE loss
+└── Outcome Head: E[Y|X] → BCE loss
+
+Stage 2: Effect Estimation (Causal Forest)
+├── Extract learned representations from Stage 1
+├── Fit CausalForestDML on extracted features
+└── Estimate τ(X) = E[Y(1)-Y(0)|X] with confidence intervals
+```
+
+**Key advantages:**
+- **Doubly-robust estimation**: Robust to misspecification of either propensity or outcome model
+- **Honest trees**: Unbiased effect estimates via sample splitting within trees
+- **Confidence intervals**: Built-in uncertainty quantification for treatment effects
+- **No gradient competition**: Representation learning is complete before effect estimation
+- **Theoretical guarantees**: Asymptotic normality and coverage guarantees from causal forest literature
+
+**Configuration:**
+
+```json
+{
+  "architecture": {
+    "model_type": "causal_forest",
+    "feature_extractor_type": "gru_pool",
+
+    "gru_pool_embedding_dim": 128,
+    "gru_pool_gru_hidden_dim": 128,
+    "gru_pool_transformer_layers": 2,
+    "gru_pool_projection_dim": 128,
+
+    "causal_forest": {
+      "n_estimators": 200,
+      "max_depth": null,
+      "min_samples_leaf": 10,
+      "honest": true,
+      "inference": true
+    }
+  }
+}
+```
+
+**Causal forest parameters:**
+- `n_estimators`: Number of trees in the forest (must be divisible by 4)
+- `max_depth`: Maximum tree depth (null = unlimited)
+- `min_samples_leaf`: Minimum samples per leaf
+- `honest`: Use honest estimation (sample splitting within trees)
+- `inference`: Enable confidence intervals
+
+**When to use:**
+- When you want confidence intervals on treatment effect estimates
+- When doubly-robust estimation is important for your application
+- When you want theoretical guarantees on effect estimation
+- For heterogeneous treatment effect estimation
+
+**Requirements:**
+```bash
+pip install econml>=0.14.0
+```
+
+See `examples/causal_forest_config.json` for a complete configuration example.
+
 ### Workflow Modes
 
 #### Applied Inference
@@ -329,7 +399,7 @@ A configuration file controls all aspects of the experiment:
     "cv_folds": 5,
 
     "architecture": {
-      "model_type": "dragonnet",
+      "model_type": "dragonnet",  // Options: "dragonnet", "rlearner", "causal_forest", "traditional_logreg"
       "cnn_embedding_dim": 128,
       "cnn_num_filters": 256,
       "cnn_kernel_sizes": [3, 4, 5, 7],
@@ -474,6 +544,8 @@ The `predictions.parquet` file contains:
 - `pred_ite_prob`: Predicted individual treatment effect on probability scale (pred_y1_prob - pred_y0_prob)
 - `pred_propensity_prob`: Predicted treatment propensity (probability)
 - `cv_fold`: Which cross-validation fold (if using CV)
+- `pred_ite_lower`: Lower bound of 95% CI for ITE (causal forest only)
+- `pred_ite_upper`: Upper bound of 95% CI for ITE (causal forest only)
 
 ## Example: Semantic CNN for Oncology
 
