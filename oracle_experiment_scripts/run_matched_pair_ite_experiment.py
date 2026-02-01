@@ -127,6 +127,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _get_device(device_str: str) -> torch.device:
+    """Get device with MPS/CUDA/CPU fallback."""
+    if device_str == "mps":
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if device_str.startswith("cuda"):
+        if torch.cuda.is_available():
+            return torch.device(device_str)
+        return torch.device("cpu")
+    return torch.device(device_str)
+
+
 @dataclass
 class ExperimentCondition:
     """Configuration for a single experimental condition."""
@@ -679,8 +692,10 @@ def run_single_fold(
     outcome_model.cpu()
     del propensity_model, outcome_model, train_repr, test_repr
     gc.collect()
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.empty_cache()
+    elif device.type == "mps":
+        torch.mps.empty_cache()
 
     # Return training history summary (using train metrics since no validation split)
     history_summary = {
@@ -812,8 +827,10 @@ def _run_single_fold_e2e(
     model.cpu()
     del model
     gc.collect()
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.empty_cache()
+    elif device.type == "mps":
+        torch.mps.empty_cache()
 
     # History summary
     history_summary = {
@@ -915,9 +932,12 @@ def run_condition_worker(args):
     """Worker function for parallel execution."""
     condition, dataset_path, output_dir, gpu_id, n_folds = args
 
-    # Set CUDA device for this worker
-    os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
-    device = torch.device('cuda:0')
+    # Set CUDA device for this worker (gpu_id can be "mps" or an integer)
+    if gpu_id == "mps":
+        device = _get_device("mps")
+    else:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+        device = _get_device("cuda:0")
 
     # Load dataset in worker
     dataset = pd.read_parquet(dataset_path)
@@ -1120,7 +1140,7 @@ def main():
 
     if args.sequential or len(args.gpu_ids) == 1:
         # Sequential execution
-        device = torch.device(f'cuda:{args.gpu_ids[0]}')
+        device = _get_device(f'cuda:{args.gpu_ids[0]}' if args.gpu_ids[0] != "mps" else "mps")
         for condition in tqdm(conditions, desc="Conditions"):
             summary = run_experiment_condition(
                 condition, dataset, output_dir, device, args.n_folds

@@ -83,7 +83,18 @@ Advantages:
 ```bash
 cdt init --output config.json
 cdt run --config config.json --device cuda:0 --workers 4 [--skip-plasmode] [--verbose]
+
+# Apple Silicon (MPS)
+cdt run --config config.json --device mps --workers 1
+
+# CPU fallback
+cdt run --config config.json --device cpu --workers 1
 ```
+
+**Device options:**
+- `cuda:N` - NVIDIA GPU (N = device index)
+- `mps` - Apple Silicon GPU (M1/M2/M3)
+- `cpu` - CPU fallback
 
 ## Dataset Format
 
@@ -392,6 +403,8 @@ output_dir/
 **Core**: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow, econml
 
 **Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided)
+
+**Device support**: CUDA (NVIDIA GPUs), MPS (Apple Silicon M1/M2/M3), CPU
 
 ## Adding a New Feature Extractor
 

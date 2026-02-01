@@ -186,8 +186,10 @@ def _process_fold_forest(
     model.cpu()
     del model
     gc.collect()
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.empty_cache()
+    elif device.type == "mps":
+        torch.mps.empty_cache()
 
     return preds_df, history
 

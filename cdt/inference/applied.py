@@ -190,9 +190,10 @@ def _run_cv_inference(
     splits = list(kf.split(dataset))
 
     # Determine devices to use
-    if gpu_ids:
+    if gpu_ids and device.type == "cuda":
         devices = [torch.device(f"cuda:{i}") for i in gpu_ids]
     else:
+        # MPS and CPU are single-device; ignore gpu_ids
         devices = [device]
 
     if num_workers > 1:
@@ -256,6 +257,8 @@ def _run_cv_inference(
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            torch.mps.empty_cache()
 
 
 def _process_fold(
@@ -304,10 +307,13 @@ def _process_fold(
 
     gc.collect()
 
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.synchronize(device)
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
 
     gc.collect()
     cuda_cleanup()

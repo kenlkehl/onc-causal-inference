@@ -55,6 +55,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _get_device(device_str: str) -> torch.device:
+    """Get device with MPS/CUDA/CPU fallback."""
+    if device_str == "mps":
+        if torch.backends.mps.is_available():
+            return torch.device("mps")
+        return torch.device("cpu")
+    if device_str.startswith("cuda"):
+        if torch.cuda.is_available():
+            return torch.device(device_str)
+        return torch.device("cpu")
+    return torch.device(device_str)
+
+
 # Number of latent confounders to learn
 NUM_LATENT_CONFOUNDERS = 8
 
@@ -659,8 +672,10 @@ def run_condition(
         # Cleanup
         del model
         gc.collect()
-        if torch.cuda.is_available():
+        if device.type == "cuda":
             torch.cuda.empty_cache()
+        elif device.type == "mps":
+            torch.mps.empty_cache()
 
     # Combine predictions
     results_df = pd.concat(all_predictions).sort_index()
@@ -786,7 +801,7 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    device = _get_device(args.device)
     logger.info(f"Using device: {device}")
     logger.info(f"GRU embedding dim: {args.gru_embedding_dim}")
     logger.info(f"GRU hidden dim: {args.gru_hidden_dim}")

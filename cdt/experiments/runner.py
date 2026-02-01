@@ -37,7 +37,11 @@ class ExperimentRunner:
             self.device = get_device(config.device)
         elif config.gpu_ids:
             import torch
-            self.device = torch.device(f"cuda:{config.gpu_ids[0]}")
+            # gpu_ids only apply to CUDA devices
+            if torch.cuda.is_available():
+                self.device = torch.device(f"cuda:{config.gpu_ids[0]}")
+            else:
+                self.device = get_device("cuda:0")  # Will fall back to CPU
         else:
             self.device = get_device("cuda:0")
 

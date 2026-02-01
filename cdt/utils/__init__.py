@@ -6,6 +6,7 @@ from .system import (
     limit_threads,
     set_seed,
     cuda_cleanup,
+    device_cleanup,
     get_memory_info,
     setup_logging,
     get_device
@@ -22,6 +23,7 @@ __all__ = [
     'limit_threads',
     'set_seed',
     'cuda_cleanup',
+    'device_cleanup',
     'get_memory_info',
     'setup_logging',
     'get_device',

@@ -47,7 +47,7 @@ Examples:
     )
     run_parser.add_argument(
         '--device',
-        help='Override device from config (e.g., cuda:0, cpu)'
+        help='Override device from config (e.g., cuda:0, mps, cpu)'
     )
     run_parser.add_argument(
         '--workers',

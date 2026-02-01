@@ -65,9 +65,10 @@ def train_outcome_model_cv(
     outcome_scores = np.zeros(len(dataset))
 
     # Determine devices to use
-    if gpu_ids:
+    if gpu_ids and device.type == "cuda":
         devices = [torch.device(f"cuda:{i}") for i in gpu_ids]
     else:
+        # MPS and CPU are single-device; ignore gpu_ids
         devices = [device]
 
     if num_workers > 1:
@@ -175,10 +176,13 @@ def _process_outcome_fold(
     del model
     gc.collect()
 
-    if torch.cuda.is_available():
+    if device.type == "cuda":
         torch.cuda.synchronize(device)
         torch.cuda.empty_cache()
         torch.cuda.ipc_collect()
+    elif device.type == "mps":
+        torch.mps.synchronize()
+        torch.mps.empty_cache()
 
     gc.collect()
     cuda_cleanup()

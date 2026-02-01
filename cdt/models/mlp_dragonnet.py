@@ -158,11 +158,11 @@ class MLPDragonNet(nn.Module):
         outcomes = batch['outcome']  # (batch,)
 
         # Move to device if needed
-        if not features.is_cuda and self._device.type == 'cuda':
+        if features.device != self._device:
             features = features.to(self._device)
-        if not treatments.is_cuda and self._device.type == 'cuda':
+        if treatments.device != self._device:
             treatments = treatments.to(self._device)
-        if not outcomes.is_cuda and self._device.type == 'cuda':
+        if outcomes.device != self._device:
             outcomes = outcomes.to(self._device)
 
         # Apply label smoothing if enabled
@@ -238,7 +238,7 @@ class MLPDragonNet(nn.Module):
             Dictionary with prediction outputs
         """
         # Move to device if needed
-        if not features.is_cuda and self._device.type == 'cuda':
+        if features.device != self._device:
             features = features.to(self._device)
 
         with torch.no_grad():

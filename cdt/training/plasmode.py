@@ -110,11 +110,12 @@ def run_plasmode_experiments(
         logger.info(f"{'=' * 80}")
 
         for repeat_idx in range(num_repeats):
-            if gpu_ids:
+            if gpu_ids and device.type == "cuda":
                 task_global_idx = len(tasks)
                 device_id = gpu_ids[task_global_idx % len(gpu_ids)]
                 task_device = torch.device(f"cuda:{device_id}")
             else:
+                # MPS and CPU are single-device; ignore gpu_ids
                 task_device = device
 
             tasks.append({
