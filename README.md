@@ -19,7 +19,7 @@ pip install uv
 ```bash
 git clone https://github.com/kenlkehl/causal-dragonnet-text.git
 cd causal-dragonnet-text
-uv venv --python 3.10
+uv venv --python 3.12
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 uv pip install -e .
 ```
