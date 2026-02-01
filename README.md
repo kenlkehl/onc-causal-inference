@@ -263,6 +263,3 @@ The `predictions.parquet` contains:
 
 MIT License - see [LICENSE](LICENSE) for details.
 
-## Contact
-
-Ken Kehl - kenneth_kehl@dfci.harvard.edu
