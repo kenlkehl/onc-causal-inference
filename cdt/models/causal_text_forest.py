@@ -16,6 +16,7 @@ from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
+from .llm_extractor import LLMFeatureExtractor
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
 from ..config import normalize_feature_extractor_type
 
@@ -125,6 +126,12 @@ class CausalTextForest(nn.Module):
         gru_pool_projection_dim: int = 128,
         gru_pool_max_vocab: int = 50000,
         gru_pool_min_word_freq: int = 2,
+        # LLM args (decoder-only with random init)
+        llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
+        llm_max_length: int = 8192,
+        llm_projection_dim: Optional[int] = 128,
+        llm_dropout: float = 0.1,
+        llm_gradient_checkpointing: bool = True,
         # Simple heads args
         representation_dim: int = 128,
         hidden_dim: int = 64,
@@ -236,6 +243,11 @@ class CausalTextForest(nn.Module):
             'gru_pool_projection_dim': gru_pool_projection_dim,
             'gru_pool_max_vocab': gru_pool_max_vocab,
             'gru_pool_min_word_freq': gru_pool_min_word_freq,
+            'llm_model_name': llm_model_name,
+            'llm_max_length': llm_max_length,
+            'llm_projection_dim': llm_projection_dim,
+            'llm_dropout': llm_dropout,
+            'llm_gradient_checkpointing': llm_gradient_checkpointing,
             'representation_dim': representation_dim,
             'hidden_dim': hidden_dim,
             'dropout': dropout,
@@ -324,6 +336,15 @@ class CausalTextForest(nn.Module):
                 projection_dim=gru_pool_projection_dim,
                 max_vocab_size=gru_pool_max_vocab,
                 min_word_freq=gru_pool_min_word_freq,
+                device=self._device
+            )
+        elif self.feature_extractor_type == "llm":
+            self.feature_extractor = LLMFeatureExtractor(
+                model_name=llm_model_name,
+                max_length=llm_max_length,
+                projection_dim=llm_projection_dim,
+                dropout=llm_dropout,
+                gradient_checkpointing=llm_gradient_checkpointing,
                 device=self._device
             )
         elif self.feature_extractor_type == "cnn":

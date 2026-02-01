@@ -20,6 +20,7 @@ cdt/
 │   ├── causal_text_forest.py  # Two-stage neural + causal forest model
 │   ├── causal_forest_head.py  # CausalForestDML wrapper
 │   ├── cnn_extractor.py, bert_extractor.py, gru_extractor.py
+│   ├── llm_extractor.py                  # Decoder-only LLM with random init
 │   ├── chunking.py                       # Token-based text chunking utilities
 │   ├── confounder_extractor.py           # Perceiver-style sparse attention
 │   ├── hierarchical_transformer_extractor.py
@@ -50,6 +51,7 @@ synthetic_data/            # LLM-based synthetic data generation
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling (single vector) | Yes | Required |
+| `llm` | Decoder-only LLM (Qwen3) with last token embedding, random init | Yes (32K) | No |
 
 **Note**: Hierarchical extractors use overlapping token-based chunking (`chunk_size`, `chunk_overlap`) instead of sentence splitting for more consistent context windows.
 
@@ -212,6 +214,30 @@ Key params: `gru_pool_embedding_dim`, `gru_pool_gru_hidden_dim`, `gru_pool_trans
 Requires `fit_tokenizer()` since it learns vocabulary from scratch.
 
 Interpretability: `interpret_attention()`, `get_attention_weights()`
+
+### LLM (`llm_extractor.py`)
+Decoder-only LLM (e.g., Qwen3-0.6B-Base) with **random weight initialization** and last token embedding.
+Uses the architecture from a pretrained model but trains entirely from scratch via the supervised causal objective.
+
+| Component | Description |
+|-----------|-------------|
+| Architecture | Qwen3-0.6B (28 layers, GQA, RoPE, SwiGLU) |
+| Tokenizer | Pretrained BBPE tokenizer (151K vocab) |
+| Embedding | Last token hidden state (GPT-style, left-padded) |
+| Projection | 2-layer MLP with LayerNorm |
+
+Key params: `llm_model_name`, `llm_max_length`, `llm_projection_dim`, `llm_gradient_checkpointing`
+
+No `fit_tokenizer()` required - uses pretrained tokenizer from HuggingFace.
+
+**Memory Considerations:**
+| Context Length | Recommended Batch Size | Notes |
+|----------------|------------------------|-------|
+| 32K | 1-2 | Requires gradient checkpointing |
+| 8K | 4-8 | Good balance for most use cases |
+| 2K | 16-32 | Fast iteration |
+
+Gradient checkpointing is enabled by default for memory efficiency.
 
 ## CLAM Instance-Level Loss
 
@@ -392,7 +418,7 @@ output_dir/
 | Main model | `cdt/models/causal_text.py` |
 | Causal forest model | `cdt/models/causal_text_forest.py`, `cdt/models/causal_forest_head.py` |
 | Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
-| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py` |
+| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `llm_extractor.py` |
 | Text chunking | `cdt/models/chunking.py` |
 | Training | `cdt/inference/applied.py`, `cdt/inference/applied_forest.py` |
 | Config | `cdt/config.py` |
@@ -440,6 +466,7 @@ When adding a new feature extractor type, update ALL of the following files:
 
 - **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale)
 - **Tokenizer**: Required for `cnn`, `gru`, `confounder` with GRU mode, `gru_transformer_mil`, `gru_pool`
-- **Long docs**: Use `confounder`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, or `gru_pool`
+- **Long docs**: Use `confounder`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, or `llm`
 - **Interpretability**: `interpret_filters()` (CNN), `interpret_attention()` (others)
 - **R-Learner vs DragonNet**: R-Learner for heterogeneous treatment effects; DragonNet for general use
+- **LLM extractor**: Random init, pretrained tokenizer, up to 32K context, use small batch sizes

@@ -86,7 +86,7 @@ class CausalForestConfig:
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder",
-    "hierarchical_transformer", "gated_mil_hierarchical", "gru_transformer_mil", or "gru_pool".
+    "hierarchical_transformer", "gated_mil_hierarchical", "gru_transformer_mil", "gru_pool", or "llm".
 
     This handles variants like "modernbert" which should be treated as "bert".
 
@@ -95,12 +95,16 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 
     Returns:
         Normalized type: "cnn", "bert", "gru", "confounder", "hierarchical_transformer",
-        "gated_mil_hierarchical", "gru_transformer_mil", or "gru_pool"
+        "gated_mil_hierarchical", "gru_transformer_mil", "gru_pool", or "llm"
     """
     if feature_type is None:
         return "cnn"
 
     feature_type_lower = feature_type.lower()
+
+    # Check for LLM extractor (decoder-only with last token embedding)
+    if feature_type_lower in ("llm", "gpt", "qwen", "llama", "decoder"):
+        return "llm"
 
     # Check for GRU-Pool extractor (BiGRU + transformer + gated attention pooling)
     if feature_type_lower in ("gru_pool", "gru_pool_transformer"):
@@ -307,6 +311,15 @@ class ModelArchitectureConfig:
     clam_enabled: bool = False  # Master switch for CLAM instance-level loss
     clam_num_instances: int = 5  # B: number of top-attended chunks to supervise
     clam_instance_hidden_dim: int = 64  # Hidden dimension for instance causal head (smaller than doc head)
+
+    # LLM Feature Extractor (decoder-only with last token embedding)
+    # Uses architecture from a pretrained model but RANDOM weight initialization
+    # Pretrained tokenizer is used; trained entirely from scratch via causal objective
+    llm_model_name: str = "Qwen/Qwen3-0.6B-Base"  # HuggingFace model name for architecture/tokenizer
+    llm_max_length: int = 8192  # Max sequence length (up to 32768 for Qwen3)
+    llm_projection_dim: Optional[int] = 128  # Output projection dim (None = use raw hidden size)
+    llm_dropout: float = 0.1  # Dropout rate for projection layers
+    llm_gradient_checkpointing: bool = True  # Enable gradient checkpointing for memory efficiency
 
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128

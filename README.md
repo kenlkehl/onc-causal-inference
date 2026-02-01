@@ -76,6 +76,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
+| `llm` | Decoder-only LLM (Qwen3) with random init, last token embedding | Yes (32K) | No |
 | `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
 | `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
 | `gru` | BiGRU + attention | Yes | Required |
@@ -194,6 +195,28 @@ Key parameters: `hier_transformer_num_layers`, `hier_transformer_chunk_size`
 1D CNN with optional semantic filter initialization from clinical concepts. Filters can be initialized from explicit phrases or learned via k-means clustering.
 
 Key parameters: `cnn_kernel_sizes`, `cnn_explicit_filter_concepts`, `cnn_num_latent_filters`
+
+### LLM (Decoder-Only with Random Init)
+
+Uses a decoder-only LLM architecture (e.g., Qwen3-0.6B) initialized with **random weights** and trained entirely from scratch via the supervised causal objective. Extracts features using the last token embedding (GPT-style).
+
+```
+Clinical Text → Pretrained BBPE Tokenizer (left-padded)
+    → Randomly-initialized Decoder-only LLM
+    → Last Token Hidden State → Projection MLP
+    → Document Vector → Causal Head
+```
+
+Key parameters: `llm_model_name`, `llm_max_length`, `llm_projection_dim`, `llm_gradient_checkpointing`
+
+**Memory considerations:**
+| Context Length | Recommended Batch Size | Notes |
+|----------------|------------------------|-------|
+| 32K | 1-2 | Requires gradient checkpointing |
+| 8K | 4-8 | Good balance for most use cases |
+| 2K | 16-32 | Fast iteration |
+
+See `example_configs/llm_config.json` for a complete configuration.
 
 ## Workflow Modes
 

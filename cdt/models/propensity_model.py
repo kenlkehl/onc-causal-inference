@@ -14,6 +14,7 @@ from .gru_extractor import GRUFeatureExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
+from .llm_extractor import LLMFeatureExtractor
 from ..config import normalize_feature_extractor_type
 
 
@@ -153,6 +154,12 @@ class PropensityOnlyModel(nn.Module):
         gru_pool_projection_dim: int = 128,
         gru_pool_max_vocab: int = 50000,
         gru_pool_min_word_freq: int = 2,
+        # LLM args (decoder-only with random init)
+        llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
+        llm_max_length: int = 8192,
+        llm_projection_dim: Optional[int] = 128,
+        llm_dropout: float = 0.1,
+        llm_gradient_checkpointing: bool = True,
         # Propensity network args
         representation_dim: int = 128,
         device: str = "cuda:0"
@@ -257,6 +264,11 @@ class PropensityOnlyModel(nn.Module):
             'gru_pool_projection_dim': gru_pool_projection_dim,
             'gru_pool_max_vocab': gru_pool_max_vocab,
             'gru_pool_min_word_freq': gru_pool_min_word_freq,
+            'llm_model_name': llm_model_name,
+            'llm_max_length': llm_max_length,
+            'llm_projection_dim': llm_projection_dim,
+            'llm_dropout': llm_dropout,
+            'llm_gradient_checkpointing': llm_gradient_checkpointing,
             'representation_dim': representation_dim
         }
 
@@ -349,6 +361,17 @@ class PropensityOnlyModel(nn.Module):
             )
             logger.info(f"Propensity model using GRU-Pool: "
                        f"GRU {gru_pool_gru_hidden_dim}x{2 if gru_pool_gru_bidirectional else 1}")
+        elif self.feature_extractor_type == "llm":
+            # LLM feature extractor (decoder-only with random init)
+            self.feature_extractor = LLMFeatureExtractor(
+                model_name=llm_model_name,
+                max_length=llm_max_length,
+                projection_dim=llm_projection_dim,
+                dropout=llm_dropout,
+                gradient_checkpointing=llm_gradient_checkpointing,
+                device=self._device
+            )
+            logger.info(f"Propensity model using LLM: {llm_model_name} (random init)")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(
@@ -555,6 +578,12 @@ def create_propensity_model_from_config(
         gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
         gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # LLM args
+        llm_model_name=getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        llm_max_length=getattr(arch_config, 'llm_max_length', 8192),
+        llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
+        llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
+        llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
         # Propensity network args
         representation_dim=representation_dim,
         device=str(device)

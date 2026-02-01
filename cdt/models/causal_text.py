@@ -15,6 +15,7 @@ from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
+from .llm_extractor import LLMFeatureExtractor
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
@@ -173,6 +174,12 @@ class CausalText(nn.Module):
         gru_pool_projection_dim: int = 128,
         gru_pool_max_vocab: int = 50000,
         gru_pool_min_word_freq: int = 2,
+        # LLM Feature Extractor args (decoder-only with random init)
+        llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
+        llm_max_length: int = 8192,
+        llm_projection_dim: Optional[int] = 128,
+        llm_dropout: float = 0.1,
+        llm_gradient_checkpointing: bool = True,
         # CLAM instance-level loss args (for GRU-Pool extractor)
         clam_enabled: bool = False,
         clam_num_instances: int = 5,
@@ -332,6 +339,11 @@ class CausalText(nn.Module):
             'gru_pool_projection_dim': gru_pool_projection_dim,
             'gru_pool_max_vocab': gru_pool_max_vocab,
             'gru_pool_min_word_freq': gru_pool_min_word_freq,
+            'llm_model_name': llm_model_name,
+            'llm_max_length': llm_max_length,
+            'llm_projection_dim': llm_projection_dim,
+            'llm_dropout': llm_dropout,
+            'llm_gradient_checkpointing': llm_gradient_checkpointing,
             'clam_enabled': clam_enabled,
             'clam_num_instances': clam_num_instances,
             'clam_instance_hidden_dim': clam_instance_hidden_dim,
@@ -531,6 +543,18 @@ class CausalText(nn.Module):
                        f"GRU {gru_pool_gru_hidden_dim}x{2 if gru_pool_gru_bidirectional else 1}, "
                        f"{gru_pool_transformer_layers} transformer layers, "
                        f"gated_attention_dim={gru_pool_gated_attention_dim}, projection_dim={gru_pool_projection_dim}")
+        elif self.feature_extractor_type == "llm":
+            # LLM feature extractor (decoder-only with random init)
+            self.feature_extractor = LLMFeatureExtractor(
+                model_name=llm_model_name,
+                max_length=llm_max_length,
+                projection_dim=llm_projection_dim,
+                dropout=llm_dropout,
+                gradient_checkpointing=llm_gradient_checkpointing,
+                device=self._device
+            )
+            logger.info(f"Using LLM feature extractor: {llm_model_name} (random init), "
+                       f"max_length={llm_max_length}, projection_dim={llm_projection_dim}")
         else:
             # CNN feature extractor (default)
             self.feature_extractor = CNNFeatureExtractor(

@@ -34,6 +34,7 @@ cdt/models/gru_extractor.py
 cdt/models/gru_pool_extractor.py
 cdt/models/gru_transformer_mil_extractor.py
 cdt/models/hierarchical_transformer_extractor.py
+cdt/models/llm_extractor.py
 cdt/models/mlp_dragonnet.py
 cdt/models/outcome_heads.py
 cdt/models/outcome_model.py

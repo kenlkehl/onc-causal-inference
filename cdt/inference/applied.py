@@ -479,6 +479,12 @@ def _train_single_model(
         clam_enabled=getattr(arch_config, 'clam_enabled', False),
         clam_num_instances=getattr(arch_config, 'clam_num_instances', 5),
         clam_instance_hidden_dim=getattr(arch_config, 'clam_instance_hidden_dim', 64),
+        # LLM args (decoder-only with random init)
+        llm_model_name=getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        llm_max_length=getattr(arch_config, 'llm_max_length', 8192),
+        llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
+        llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
+        llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -553,6 +559,9 @@ def _train_single_model(
         logger.info(f"Using GRU-Pool feature extractor: "
                    f"GRU {getattr(arch_config, 'gru_pool_gru_hidden_dim', 128)}x{2 if getattr(arch_config, 'gru_pool_gru_bidirectional', True) else 1}, "
                    f"{getattr(arch_config, 'gru_pool_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "llm":
+        # LLM uses pretrained tokenizer, no fit_tokenizer needed
+        logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} (random init)")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
