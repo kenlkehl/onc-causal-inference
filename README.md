@@ -35,7 +35,7 @@ python oracle_experiment_scripts/run_causal_forest_experiment.py \
     --n-folds 3
 ```
 
-For CPU-only machines, use `--device cpu`.
+For CPU-only machines, use `--device cpu`.  On Apple Silicon Macs, you can also use `--device mps`.
 
 Results include:
 - `metrics_summary.csv` - ITE correlation, ATE bias, and CI coverage metrics
