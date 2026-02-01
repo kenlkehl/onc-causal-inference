@@ -65,7 +65,7 @@ For long clinical documents where confounders are mentioned in specific sentence
 
 **Task-Specific Multi-Head Aggregation**: The hierarchical confounder extractors use task-specific aggregation to combine the K latent confounder representations. Separate learnable queries for propensity and outcome tasks allow each to weight confounders differently based on patient characteristics. This reduces dimensionality from K×D to 2×D while enabling patient-specific and task-specific weighting.
 
-See `examples/confounder_config.json` and `examples/gru_confounder_config.json` for configuration examples.
+See `example_configs/confounder_config.json` and `example_configs/gru_confounder_config.json` for configuration examples.
 
 ### Hierarchical Transformer Extractor
 
@@ -103,7 +103,7 @@ hier_transformer_dropout: float = 0.1
 hier_transformer_projection_dim: int = 128  # Final output dimension
 ```
 
-See `examples/hierarchical_transformer_config.json` for a complete configuration example.
+See `example_configs/hierarchical_transformer_config.json` for a complete configuration example.
 
 ### Gated MIL Hierarchical Extractor
 
@@ -183,7 +183,7 @@ gated_mil_token_hidden_dim: int = 64  # Hidden dim for token-level gating
 - When interpretability (which sentences each confounder attends to) is important
 - Use `gated_mil_hierarchical=True` when fine-grained token distinctions matter
 
-See `examples/gated_mil_config.json` for a complete configuration example.
+See `example_configs/gated_mil_config.json` for a complete configuration example.
 
 ### Causal Forest Mode
 
@@ -252,7 +252,7 @@ Stage 2: Effect Estimation (Causal Forest)
 pip install econml>=0.14.0
 ```
 
-See `examples/causal_forest_config.json` for a complete configuration example.
+See `example_configs/causal_forest_config.json` for a complete configuration example.
 
 ### Workflow Modes
 
@@ -298,53 +298,51 @@ CDT includes a traditional propensity score matching (PSM) module that can be ru
 
 This allows comparison of DragonNet's ITE estimates with traditional PSM estimates, providing validation and enabling traditional statistical inference.
 
-## Installation
+## Installation and Quickstart
 
-### Prerequisites
+Get started with CDT in 4 steps:
 
-- Python 3.8+
-- CUDA-capable GPU (recommended for practical use)
-
-### Clone the Repository
+### 1. Install uv (if not already installed)
 
 ```bash
-git clone https://github.com/kenlkehl/causal-dragonnet-text.git
-cd causal-dragonnet-text
-```
-
-### Install uv (Recommended Package Manager)
-
-[uv](https://github.com/astral-sh/uv) is a fast Python package manager. Install it via:
-
-```bash
-# On macOS/Linux
+# macOS/Linux
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
 # Or with pip
 pip install uv
 ```
 
-### Create Environment and Install
+### 2. Clone the repository
 
 ```bash
-# Create a virtual environment
+git clone -b mil-learning https://github.com/kenlkehl/causal-dragonnet-text.git
+cd causal-dragonnet-text
+```
+
+### 3. Create environment and install
+
+```bash
 uv venv --python 3.10
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install CDT in editable mode
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 uv pip install -e .
-
-# For development (includes testing/linting tools)
-uv pip install -e ".[dev]"
 ```
 
-### Alternative: Standard pip Installation
+### 4. Run the example experiment
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e .
+python oracle_experiment_scripts/run_causal_forest_experiment.py \
+    --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
+    --output-dir ../quickstart_results \
+    --device cuda:0 \
+    --epochs 20 \
+    --n-folds 3
 ```
+
+For CPU-only machines, use `--device cpu`.
+
+Results will be saved to `../quickstart_results/` (outside the repo) including:
+- `metrics_summary.csv` - ITE correlation, ATE bias, and CI coverage metrics
+- `*/predictions.parquet` - Per-sample treatment effect predictions
 
 ## Dataset Requirements
 
@@ -549,7 +547,7 @@ The `predictions.parquet` file contains:
 
 ## Example: Semantic CNN for Oncology
 
-See `examples/semantic_cnn_config.json` for a complete configuration with clinical oncology concepts:
+See `example_configs/semantic_cnn_config.json` for a complete configuration with clinical oncology concepts:
 
 ```json
 {

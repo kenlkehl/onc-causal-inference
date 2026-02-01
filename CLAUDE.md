@@ -32,7 +32,7 @@ cdt/
 ├── matching/              # PropensityMatcher, balance utilities
 └── analysis/              # ATT/ATE estimation, PSM analysis
 
-examples/                  # Config files for each extractor type
+example_configs/           # Config files for each extractor type
 synthetic_data/            # LLM-based synthetic data generation
 ```
 
@@ -129,7 +129,7 @@ preds = model.predict(texts)
 ite = preds['y1_prob'] - preds['y0_prob']
 ```
 
-See `examples/` for complete config files for each extractor type.
+See `example_configs/` for complete config files for each extractor type.
 
 ## Extractor-Specific Notes
 
@@ -331,13 +331,6 @@ preds = model.predict(texts)
 4. **No gradient interference**: Representation learning is complete before effect estimation
 5. **Theoretical guarantees**: Asymptotic normality and coverage guarantees
 
-### Dependencies
-
-Requires `econml>=0.14.0`:
-```bash
-pip install econml
-```
-
 ## Training Options for τ Learning
 
 | Option | Effect |
@@ -396,9 +389,9 @@ output_dir/
 
 ## Dependencies
 
-**Core**: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow
+**Core**: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow, econml
 
-**Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided), econml (causal forest)
+**Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided)
 
 ## Adding a New Feature Extractor
 
@@ -414,7 +407,7 @@ When adding a new feature extractor type, update ALL of the following files:
 | `cdt/training/plasmode.py` | Add CausalText params and initialization path |
 | `cdt/models/propensity_model.py` | Add import, `__init__` params, config, instantiation, `create_propensity_model_from_config()` |
 | `cdt/training/propensity_trimming.py` | Add initialization path in `_train_propensity_model()` |
-| `examples/new_config.json` | Create example configuration file |
+| `example_configs/new_config.json` | Create example configuration file |
 | `CLAUDE.md` | Update Feature Extractors table, architecture docs, file lists |
 | `README.md` | Update documentation if significant user-facing changes |
 
