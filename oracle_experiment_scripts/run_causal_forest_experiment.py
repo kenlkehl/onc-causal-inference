@@ -2,8 +2,16 @@
 """Causal Forest experiment for synthetic clinical text.
 
 This script runs experiments using the two-stage CausalTextForest approach:
-- Stage 1: Train neural feature extractor (GRU-Pool) with propensity + outcome loss
+- Stage 1: Train neural feature extractor with propensity + outcome loss
 - Stage 2: Train CausalForestDML on extracted features for ITE estimation
+
+Supported feature extractors:
+- gru_pool (default): BiGRU chunks + transformer + gated attention pooling
+- bert: HuggingFace transformer [CLS] embedding
+- gru: BiGRU + attention
+- cnn: 1D CNN with semantic filters
+- hierarchical_transformer: Chunk BERT + transformer pooling
+- gated_mil_hierarchical: Gated MIL + K confounders + task-specific weighting
 
 Key advantages of causal forest approach:
 - Doubly-robust estimation (robust to misspecification of either nuisance model)
@@ -17,7 +25,7 @@ Experimental Conditions:
 3. LLM-Extracted (llm_structured_text) - LLM extracted confounders as text
 
 Usage:
-    # Basic usage
+    # Basic usage with default GRU-Pool extractor
     python oracle_experiment_scripts/run_causal_forest_experiment.py \
         --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
         --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest \
@@ -25,6 +33,13 @@ Usage:
         --n-folds 5 \
         --cf-n-estimators 100 \
         --epochs 20
+
+    # With BERT feature extractor
+    python oracle_experiment_scripts/run_causal_forest_experiment.py \
+        --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
+        --output-dir ../pcori_experiments/causal_forest_bert \
+        --device cuda:0 \
+        --feature-extractor bert
 
     # With R-learner representation training (adds τ head and R-loss to Stage 1)
     python oracle_experiment_scripts/run_causal_forest_experiment.py \
@@ -68,12 +83,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# Extractors that require fit_tokenizer (learn vocabulary from scratch)
+EXTRACTORS_REQUIRING_TOKENIZER = {"cnn", "gru", "gru_pool"}
+
+# Valid extractor types for CausalTextForest
+VALID_EXTRACTORS = ["gru_pool", "bert", "gru", "cnn", "hierarchical_transformer", "gated_mil_hierarchical"]
+
+
 @dataclass
 class ExperimentConfig:
     """Configuration for an experimental condition."""
     name: str
     text_column: str
-    # GRU-Pool architecture params
+    # Feature extractor type
+    feature_extractor_type: str = "gru_pool"
+    # GRU-Pool architecture params (also used by gru, cnn where applicable)
     embedding_dim: int = 128
     gru_hidden_dim: int = 128
     gru_num_layers: int = 1
@@ -234,44 +258,94 @@ def train_causal_forest_model(
 ) -> Tuple[CausalTextForest, List[Dict]]:
     """Train a CausalTextForest model for one fold."""
     text_column = config.text_column
+    extractor_type = config.feature_extractor_type
+
+    # Build extractor-specific kwargs
+    model_kwargs = {
+        'feature_extractor_type': extractor_type,
+        # Common settings
+        'representation_dim': 128,
+        'hidden_dim': 64,
+        'dropout': 0.2,
+        # Causal forest settings
+        'cf_n_estimators': config.cf_n_estimators,
+        'cf_min_samples_leaf': config.cf_min_samples_leaf,
+        'cf_honest': config.cf_honest,
+        'cf_inference': True,
+        # R-learner representation training
+        'cf_use_rlearner_representation': use_rlearner_representation,
+        'cf_gamma_rlearner': gamma_rlearner,
+        'device': str(device)
+    }
+
+    # Add extractor-specific parameters
+    if extractor_type == "gru_pool":
+        model_kwargs.update({
+            'gru_pool_embedding_dim': config.embedding_dim,
+            'gru_pool_gru_hidden_dim': config.gru_hidden_dim,
+            'gru_pool_gru_num_layers': config.gru_num_layers,
+            'gru_pool_gru_bidirectional': True,
+            'gru_pool_gru_dropout': 0.1,
+            'gru_pool_max_chunks': config.max_chunks,
+            'gru_pool_chunk_size': config.chunk_size,
+            'gru_pool_chunk_overlap': config.chunk_overlap,
+            'gru_pool_transformer_layers': config.transformer_layers,
+            'gru_pool_transformer_heads': config.transformer_heads,
+            'gru_pool_transformer_dim': config.transformer_dim,
+            'gru_pool_gated_attention_dim': config.gated_attention_dim,
+            'gru_pool_projection_dim': config.projection_dim,
+            'gru_pool_max_vocab': 50000,
+            'gru_pool_min_word_freq': 2,
+        })
+    elif extractor_type == "gru":
+        model_kwargs.update({
+            'embedding_dim': config.embedding_dim,
+            'gru_hidden_dim': config.gru_hidden_dim,
+            'gru_num_layers': config.gru_num_layers,
+            'gru_bidirectional': True,
+            'gru_dropout': 0.1,
+            'max_vocab_size': 50000,
+        })
+    elif extractor_type == "cnn":
+        model_kwargs.update({
+            'embedding_dim': config.embedding_dim,
+            'kernel_sizes': [3, 4, 5, 7],
+            'num_filters': 64,
+            'max_vocab_size': 50000,
+        })
+    elif extractor_type == "bert":
+        # BERT uses pretrained model, minimal config needed
+        model_kwargs.update({
+            'bert_model_name': 'prajjwal1/bert-tiny',
+            'bert_projection_dim': config.projection_dim,
+            'bert_freeze_encoder': False,
+        })
+    elif extractor_type == "hierarchical_transformer":
+        model_kwargs.update({
+            'hier_transformer_max_chunks': config.max_chunks,
+            'hier_transformer_chunk_size': config.chunk_size,
+            'hier_transformer_chunk_overlap': config.chunk_overlap,
+            'hier_transformer_transformer_layers': config.transformer_layers,
+            'hier_transformer_transformer_heads': config.transformer_heads,
+            'hier_transformer_transformer_dim': config.transformer_dim,
+            'hier_transformer_projection_dim': config.projection_dim,
+        })
+    elif extractor_type == "gated_mil_hierarchical":
+        model_kwargs.update({
+            'gated_mil_max_chunks': config.max_chunks,
+            'gated_mil_chunk_size': config.chunk_size,
+            'gated_mil_chunk_overlap': config.chunk_overlap,
+            'gated_mil_num_confounders': 8,
+            'gated_mil_gated_attention_dim': config.gated_attention_dim,
+        })
 
     # Create model
-    model = CausalTextForest(
-        feature_extractor_type="gru_pool",
-        # GRU-Pool settings
-        gru_pool_embedding_dim=config.embedding_dim,
-        gru_pool_gru_hidden_dim=config.gru_hidden_dim,
-        gru_pool_gru_num_layers=config.gru_num_layers,
-        gru_pool_gru_bidirectional=True,
-        gru_pool_gru_dropout=0.1,
-        gru_pool_max_chunks=config.max_chunks,
-        gru_pool_chunk_size=config.chunk_size,
-        gru_pool_chunk_overlap=config.chunk_overlap,
-        gru_pool_transformer_layers=config.transformer_layers,
-        gru_pool_transformer_heads=config.transformer_heads,
-        gru_pool_transformer_dim=config.transformer_dim,
-        gru_pool_gated_attention_dim=config.gated_attention_dim,
-        gru_pool_projection_dim=config.projection_dim,
-        gru_pool_max_vocab=50000,
-        gru_pool_min_word_freq=2,
-        # Simple heads for representation learning
-        representation_dim=128,
-        hidden_dim=64,
-        dropout=0.2,
-        # Causal forest settings
-        cf_n_estimators=config.cf_n_estimators,
-        cf_min_samples_leaf=config.cf_min_samples_leaf,
-        cf_honest=config.cf_honest,
-        cf_inference=True,
-        # R-learner representation training
-        cf_use_rlearner_representation=use_rlearner_representation,
-        cf_gamma_rlearner=gamma_rlearner,
-        device=str(device)
-    )
+    model = CausalTextForest(**model_kwargs)
 
-    # Fit tokenizer
+    # Fit tokenizer only for extractors that need it
     train_texts = train_df[text_column].tolist()
-    model.fit_tokenizer(train_texts)
+    if extractor_type in EXTRACTORS_REQUIRING_TOKENIZER:
+        model.fit_tokenizer(train_texts)
 
     # Create datasets
     train_dataset = TextDataset(
@@ -456,8 +530,10 @@ def run_condition(
     logger.info(f"\n{'='*60}")
     logger.info(f"Running condition: {config.name}")
     logger.info(f"  Text column: {config.text_column}")
+    logger.info(f"  Feature extractor: {config.feature_extractor_type}")
     logger.info(f"  Causal forest: {config.cf_n_estimators} trees, honest={config.cf_honest}")
-    logger.info(f"  GRU-Pool: embed={config.embedding_dim}, hidden={config.gru_hidden_dim}")
+    if config.feature_extractor_type in ("gru_pool", "gru", "cnn"):
+        logger.info(f"  Extractor params: embed={config.embedding_dim}, hidden={config.gru_hidden_dim}")
     logger.info(f"  Stop grad propensity: {stop_grad_propensity}")
     logger.info(f"  R-learner representation: {use_rlearner_representation}")
     if use_rlearner_representation:
@@ -569,7 +645,7 @@ def create_llm_structured_text(df: pd.DataFrame) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Run Causal Forest experiment with GRU-Pool feature extraction"
+        description="Run Causal Forest experiment with configurable feature extraction"
     )
     parser.add_argument(
         "--dataset", "-d",
@@ -589,7 +665,14 @@ def main():
         default="cuda:0",
         help="Device to use (cuda:0, cpu, etc.)"
     )
-    # GRU-Pool architecture parameters
+    parser.add_argument(
+        "--feature-extractor",
+        type=str,
+        default="gru_pool",
+        choices=VALID_EXTRACTORS,
+        help="Feature extractor type (default: gru_pool)"
+    )
+    # Architecture parameters (used by extractors where applicable)
     parser.add_argument(
         "--embedding-dim",
         type=int,
@@ -624,7 +707,7 @@ def main():
     parser.add_argument(
         "--cf-n-estimators",
         type=int,
-        default=100,
+        default=200,
         help="Number of trees in causal forest (must be divisible by 4)"
     )
     parser.add_argument(
@@ -700,12 +783,16 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     device = torch.device(args.device if torch.cuda.is_available() else "cpu")
+    extractor_type = args.feature_extractor
     logger.info(f"Using device: {device}")
-    logger.info(f"Using CausalTextForest (GRU-Pool + CausalForestDML)")
-    logger.info(f"  Embedding dim: {args.embedding_dim}")
-    logger.info(f"  GRU hidden dim: {args.gru_hidden_dim} x 2 directions")
-    logger.info(f"  Transformer layers: {args.transformer_layers}")
-    logger.info(f"  Transformer dim: {args.transformer_dim}")
+    logger.info(f"Using CausalTextForest ({extractor_type} + CausalForestDML)")
+    logger.info(f"  Feature extractor: {extractor_type}")
+    if extractor_type in ("gru_pool", "gru", "cnn"):
+        logger.info(f"  Embedding dim: {args.embedding_dim}")
+        logger.info(f"  GRU hidden dim: {args.gru_hidden_dim} x 2 directions")
+    if extractor_type in ("gru_pool", "hierarchical_transformer"):
+        logger.info(f"  Transformer layers: {args.transformer_layers}")
+        logger.info(f"  Transformer dim: {args.transformer_dim}")
     logger.info(f"  Causal forest: {args.cf_n_estimators} trees")
     logger.info(f"  stop_grad_propensity: {args.stop_grad_propensity}")
     logger.info(f"  R-learner representation: {args.rlearner}")
@@ -744,6 +831,7 @@ def main():
         new_config = ExperimentConfig(
             name=config.name,
             text_column=config.text_column,
+            feature_extractor_type=extractor_type,
             embedding_dim=args.embedding_dim,
             gru_hidden_dim=args.gru_hidden_dim,
             transformer_layers=args.transformer_layers,
@@ -813,7 +901,7 @@ def main():
     config_info = {
         'dataset': args.dataset,
         'model_type': 'causal_forest',
-        'feature_extractor_type': 'gru_pool',
+        'feature_extractor_type': extractor_type,
         'embedding_dim': args.embedding_dim,
         'gru_hidden_dim': args.gru_hidden_dim,
         'transformer_layers': args.transformer_layers,
