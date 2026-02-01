@@ -52,6 +52,9 @@ Homepage = "https://github.com/kenlkehl/causal-dragonnet-text"
 Documentation = "https://github.com/kenlkehl/causal-dragonnet-text"
 Repository = "https://github.com/kenlkehl/causal-dragonnet-text"
 
+[tool.setuptools.packages.find]
+include = ["cdt", "cdt.*"]
+
 [tool.black]
 line-length = 100
 target-version = ['py38', 'py39', 'py310']

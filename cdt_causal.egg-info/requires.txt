@@ -9,6 +9,7 @@ pyarrow
 joblib>=1.2.0
 openai>=1.0.0
 entmax>=1.0
+econml>=0.14.0
 
 [dev]
 pytest>=7.0.0

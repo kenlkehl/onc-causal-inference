@@ -2,7 +2,6 @@ LICENSE
 MANIFEST.in
 README.md
 pyproject.toml
-setup.py
 cdt/__init__.py
 cdt/cli.py
 cdt/config.py
@@ -43,7 +42,6 @@ cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/traditional_logreg.py
 cdt/models/uplift.py
-cdt/models/.ipynb_checkpoints/causal_forest_head-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py
@@ -57,19 +55,6 @@ cdt_causal.egg-info/dependency_links.txt
 cdt_causal.egg-info/entry_points.txt
 cdt_causal.egg-info/requires.txt
 cdt_causal.egg-info/top_level.txt
-examples/bert_config.json
-examples/causal_forest_config.json
-examples/concept_aware_metastatic_sites.json
-examples/confounder_config.json
-examples/gated_mil_config.json
-examples/gru_confounder_3way_config.json
-examples/gru_confounder_config.json
-examples/gru_pool_config.json
-examples/gru_transformer_mil_config.json
-examples/hierarchical_transformer_config.json
-examples/modernbert_config.json
-examples/rlearner_config.json
-examples/semantic_cnn_config.json
 synthetic_data/__init__.py
 synthetic_data/cli.py
 synthetic_data/config.py
@@ -77,5 +62,3 @@ synthetic_data/generator.py
 synthetic_data/llm_client.py
 synthetic_data/prompts.py
 synthetic_data/vllm_batch_client.py
-tests/__init__.py
-tests/test_traditional_logreg.py
