@@ -12,19 +12,20 @@ logger = logging.getLogger(__name__)
 
 class DragonNet(nn.Module):
     """Binary treatment DragonNet. Can be initialized from pretrained multi-treatment model."""
-    
-    def __init__(self, input_dim, representation_dim=200, hidden_outcome_dim=100):
+
+    def __init__(self, input_dim, representation_dim=200, hidden_outcome_dim=100, dropout=0.2):
         super().__init__()
+        self.dropout_rate = dropout
+
         # Shared representation layers (can be loaded from pretrained)
         self.representation_fc1 = nn.Linear(input_dim, representation_dim)
-        self.representation_fc2 = nn.Linear(representation_dim, representation_dim)
-        self.representation_fc3 = nn.Linear(representation_dim, representation_dim)
-        self.representation_fc4 = nn.Linear(representation_dim, representation_dim)
-        self.representation_fc5 = nn.Linear(representation_dim, representation_dim)
         self.representation_fc6 = nn.Linear(representation_dim, representation_dim)
 
+        # Dropout for representation layers
+        self.rep_dropout = nn.Dropout(dropout)
+
         # Binary treatment propensity head (matches old_cdt: single linear layer)
-        self.propensity_fc1 = nn.Linear(representation_dim, 1)        
+        self.propensity_fc1 = nn.Linear(representation_dim, 1)
 
         # Binary outcome heads (matches old_cdt: 2 hidden layers)
         self.outcome0_fc1 = nn.Linear(representation_dim, hidden_outcome_dim)
@@ -35,35 +36,51 @@ class DragonNet(nn.Module):
         self.outcome1_fc2 = nn.Linear(hidden_outcome_dim, hidden_outcome_dim)
         self.outcome1_fc3 = nn.Linear(hidden_outcome_dim, 1)
 
+        # Dropout for outcome heads
+        self.outcome_dropout = nn.Dropout(dropout)
+
         
     def forward(self, confounder_features):
         """
         Args:
             confounder_features: Output from FeatureExtractor
                 Shape: (batch, num_confounders * features_per_confounder)
-        
+
         Returns:
             y0_logit, y1_logit, t_logit, final_common_layer
         """
         h = F.relu(self.representation_fc1(confounder_features))
-        h = F.relu(self.representation_fc2(h))
-        h = F.relu(self.representation_fc3(h))
-        h = F.relu(self.representation_fc4(h))
-        h = F.relu(self.representation_fc5(h))
+        h = self.rep_dropout(h)
         final_common_layer = F.elu(self.representation_fc6(h))
+        final_common_layer = self.rep_dropout(final_common_layer)
 
         t_logit = self.propensity_fc1(final_common_layer)
 
         y0 = F.relu(self.outcome0_fc1(final_common_layer))
+        y0 = self.outcome_dropout(y0)
         y0 = F.elu(self.outcome0_fc2(y0))
+        y0 = self.outcome_dropout(y0)
         y0_logit = self.outcome0_fc3(y0)
 
         y1 = F.relu(self.outcome1_fc1(final_common_layer))
+        y1 = self.outcome_dropout(y1)
         y1 = F.elu(self.outcome1_fc2(y1))
+        y1 = self.outcome_dropout(y1)
         y1_logit = self.outcome1_fc3(y1)
 
         return y0_logit, y1_logit, t_logit, final_common_layer
 
+    def get_representation(self, features):
+        """Compute shared representation from input features."""
+        h = F.relu(self.representation_fc1(features))
+        h = self.rep_dropout(h)
+        final_common_layer = F.elu(self.representation_fc6(h))
+        final_common_layer = self.rep_dropout(final_common_layer)
+        return final_common_layer
+
+    def propensity_from_representation(self, phi):
+        """Compute propensity logit from shared representation."""
+        return self.propensity_fc1(phi)
 
     def load_pretrained_representation(self, pretrained_state_dict):
         """

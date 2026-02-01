@@ -1,2 +1,3 @@
 cdt
 synthetic_data
+tests

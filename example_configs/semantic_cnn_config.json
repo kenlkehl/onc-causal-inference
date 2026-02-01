@@ -1,0 +1,167 @@
+{
+  "output_dir": "./cdt_results",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 5,
+
+  "applied_inference": {
+    "dataset_path": "./data/clinical_notes.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "split_column": "split",
+    "cv_folds": 5,
+
+    "architecture": {
+      "model_type": "dragonnet",
+
+      "cnn_embedding_dim": 128,
+      "cnn_kernel_sizes": [3, 4, 5, 7],
+      "cnn_dropout": 0.1,
+      "cnn_max_length": 2048,
+      "cnn_min_word_freq": 2,
+      "cnn_max_vocab_size": 50000,
+
+      "cnn_init_embeddings_from": "emilyalsentzer/Bio_ClinicalBERT",
+      "cnn_freeze_embeddings": false,
+
+      "cnn_explicit_filter_concepts": {
+        "3": [
+          "stage iv cancer",
+          "performance status poor",
+          "disease progression noted",
+          "tumor size increased",
+          "lymph node positive",
+          "prior chemotherapy received",
+          "adverse event reported",
+          "patient tolerated well",
+          "imaging showed progression",
+          "biopsy confirmed malignancy",
+          "metastatic disease present",
+          "complete response achieved",
+          "partial response noted",
+          "stable disease confirmed",
+          "treatment was discontinued",
+          "grade three toxicity",
+          "dose reduction required",
+          "hospitalization was required",
+          "palliative care initiated",
+          "clinical trial enrollment"
+        ],
+        "4": [
+          "no evidence of disease",
+          "complete response to treatment",
+          "partial response to therapy",
+          "stable disease on imaging",
+          "progressive disease confirmed today",
+          "patient refused further treatment",
+          "switched to second line",
+          "developed grade three toxicity",
+          "eastern cooperative oncology group",
+          "white blood cell count",
+          "absolute neutrophil count low",
+          "platelet count was decreased",
+          "hemoglobin level was low",
+          "creatinine clearance was reduced",
+          "liver function tests elevated"
+        ],
+        "5": [
+          "white blood cell count elevated",
+          "eastern cooperative oncology group performance",
+          "computed tomography scan of chest",
+          "magnetic resonance imaging of brain",
+          "positron emission tomography scan showed",
+          "patient was started on chemotherapy",
+          "treatment was held due to",
+          "dose was reduced due to",
+          "patient experienced grade three toxicity",
+          "imaging revealed new metastatic lesions"
+        ],
+        "7": [
+          "patient was started on first line chemotherapy regimen",
+          "imaging revealed new metastatic lesions in the liver",
+          "treatment was discontinued due to progressive disease noted",
+          "patient was enrolled in a clinical trial for",
+          "biopsy confirmed metastatic adenocarcinoma of the lung with",
+          "the patient has a history of smoking for years",
+          "next generation sequencing revealed the following mutations present"
+        ]
+      },
+      "cnn_num_kmeans_filters": 64,
+      "cnn_num_random_filters": 0,
+
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+
+    "training": {
+      "epochs": 50,
+      "batch_size": 8,
+      "learning_rate": 0.0001,
+      "optimizer": "adamw",
+      "lr_schedule": "linear",
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1
+    },
+
+    "use_pretrained_weights": false,
+
+    "matching_analysis": {
+      "enabled": true,
+      "method": "nearest",
+      "caliper": 0.2,
+      "caliper_scale": "std",
+      "ratio": 1,
+      "replacement": false,
+      "n_bootstrap": 1000,
+      "ci_level": 0.95
+    }
+  },
+
+  "plasmode_experiments": {
+    "enabled": false,
+    "num_repeats": 3,
+    "save_datasets": false,
+    "train_fraction": 0.8,
+    "generator_architecture": {
+      "model_type": "dragonnet",
+      "cnn_embedding_dim": 128,
+      "cnn_kernel_sizes": [3, 4, 5, 7],
+      "cnn_init_embeddings_from": "emilyalsentzer/Bio_ClinicalBERT",
+      "cnn_num_kmeans_filters": 64,
+      "cnn_num_random_filters": 0,
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+    "generator_training": {
+      "learning_rate": 0.0001,
+      "epochs": 20,
+      "batch_size": 8
+    },
+    "evaluator_architecture": {
+      "model_type": "dragonnet",
+      "cnn_embedding_dim": 128,
+      "cnn_kernel_sizes": [3, 4, 5, 7],
+      "cnn_init_embeddings_from": "emilyalsentzer/Bio_ClinicalBERT",
+      "cnn_num_kmeans_filters": 64,
+      "cnn_num_random_filters": 0,
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+    "evaluator_training": {
+      "learning_rate": 0.0001,
+      "epochs": 20,
+      "batch_size": 8
+    },
+    "plasmode_scenarios": [
+      {
+        "generation_mode": "phi_linear",
+        "preserve_observed_treatments": true,
+        "baseline_control_outcome_rate": 0.2,
+        "target_ate_prob": 0.10,
+        "outcome_heterogeneity_scale": 1.0,
+        "ite_heterogeneity_scale": 1.0
+      }
+    ]
+  }
+}

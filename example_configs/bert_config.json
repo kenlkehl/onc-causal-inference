@@ -1,0 +1,90 @@
+{
+  "output_dir": "./cdt_results_bert",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 1,
+
+  "applied_inference": {
+    "dataset_path": "./data/clinical_notes.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "split_column": "split",
+    "cv_folds": 5,
+
+    "architecture": {
+      "model_type": "dragonnet",
+
+      "feature_extractor_type": "bert",
+
+      "bert_model_name": "bert-base-uncased",
+      "bert_max_length": 512,
+      "bert_projection_dim": 128,
+      "bert_dropout": 0.1,
+      "bert_freeze_encoder": false,
+      "bert_gradient_checkpointing": false,
+
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+
+    "training": {
+      "epochs": 10,
+      "batch_size": 8,
+      "learning_rate": 2e-5,
+      "optimizer": "adamw",
+      "lr_schedule": "linear",
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1
+    },
+
+    "use_pretrained_weights": false
+  },
+
+  "plasmode_experiments": {
+    "enabled": false,
+    "num_repeats": 3,
+    "save_datasets": false,
+    "train_fraction": 0.8,
+    "generator_architecture": {
+      "model_type": "dragonnet",
+      "feature_extractor_type": "bert",
+      "bert_model_name": "bert-base-uncased",
+      "bert_max_length": 512,
+      "bert_projection_dim": 128,
+      "bert_freeze_encoder": false,
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+    "generator_training": {
+      "learning_rate": 2e-5,
+      "epochs": 5,
+      "batch_size": 8
+    },
+    "evaluator_architecture": {
+      "model_type": "dragonnet",
+      "feature_extractor_type": "bert",
+      "bert_model_name": "bert-base-uncased",
+      "bert_max_length": 512,
+      "bert_projection_dim": 128,
+      "bert_freeze_encoder": false,
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+    "evaluator_training": {
+      "learning_rate": 2e-5,
+      "epochs": 5,
+      "batch_size": 8
+    },
+    "plasmode_scenarios": [
+      {
+        "generation_mode": "phi_linear",
+        "preserve_observed_treatments": true,
+        "baseline_control_outcome_rate": 0.2,
+        "target_ate_prob": 0.10,
+        "outcome_heterogeneity_scale": 1.0,
+        "ite_heterogeneity_scale": 1.0
+      }
+    ]
+  }
+}

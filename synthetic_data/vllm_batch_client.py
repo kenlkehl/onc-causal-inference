@@ -19,20 +19,31 @@ class VLLMConfig:
     max_model_len: Optional[int] = None  # Use model default
     temperature: float = 0.8
     max_tokens: int = 10000
+    download_dir: str = "./"
     reasoning_marker: Optional[str] = "assistantfinal"  # Text after this marker is the real output
+    device_ids: Optional[List[int]] = None  # GPU IDs to use (sets CUDA_VISIBLE_DEVICES before loading model)
 
 
 class VLLMBatchClient:
     """Client for direct vLLM batch inference (much faster than HTTP API)."""
-    
+
     def __init__(self, config: VLLMConfig):
         """
         Initialize the vLLM batch client.
-        
+
         Args:
             config: vLLM configuration
         """
+        import os
+
         self.config = config
+
+        # Set CUDA_VISIBLE_DEVICES before loading model if device_ids specified
+        if config.device_ids is not None:
+            device_str = ",".join(str(d) for d in config.device_ids)
+            os.environ["CUDA_VISIBLE_DEVICES"] = device_str
+            logger.info(f"Set CUDA_VISIBLE_DEVICES={device_str}")
+
         logger.info(f"Loading vLLM model: {config.model_name} with TP={config.tensor_parallel_size}")
         
         self.llm = LLM(
@@ -40,6 +51,7 @@ class VLLMBatchClient:
             tensor_parallel_size=config.tensor_parallel_size,
             gpu_memory_utilization=config.gpu_memory_utilization,
             max_model_len=config.max_model_len,
+            download_dir = config.download_dir,
             trust_remote_code=True,
         )
         logger.info("vLLM model loaded successfully")

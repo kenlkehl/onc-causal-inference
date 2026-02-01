@@ -23,6 +23,7 @@ classifiers = [
 
 dependencies = [
     "torch>=2.0.0",
+    "transformers>=4.30.0",
     "sentence-transformers>=2.2.0",
     "pandas>=1.5.0",
     "numpy>=1.23.0",
@@ -30,7 +31,9 @@ dependencies = [
     "tqdm>=4.65.0",
     "pyarrow",
     "joblib>=1.2.0",
-    "openai>=1.0.0"
+    "openai>=1.0.0",
+    "entmax>=1.0",
+    "econml>=0.14.0",
 ]
 
 [project.optional-dependencies]

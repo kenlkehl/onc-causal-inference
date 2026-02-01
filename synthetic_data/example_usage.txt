@@ -2,3 +2,12 @@ python -m synthetic_data.cli \
   --api-url http://localhost:8000/v1 \
   --dataset-size 500 \
   --output-dir ./synthetic_outputs
+
+
+python -m synthetic_data.cli \
+  --dataset-size 1000 \
+  --num-confounders 1 \
+  --max-tokens 50000 \
+  --use-vllm-batch \
+  --tensor-parallel-size 2 \
+  --output-dir ../example_synthetic_data_one_confounder

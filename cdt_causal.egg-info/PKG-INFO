@@ -19,6 +19,7 @@ Requires-Python: >=3.8
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: torch>=2.0.0
+Requires-Dist: transformers>=4.30.0
 Requires-Dist: sentence-transformers>=2.2.0
 Requires-Dist: pandas>=1.5.0
 Requires-Dist: numpy>=1.23.0
@@ -27,6 +28,7 @@ Requires-Dist: tqdm>=4.65.0
 Requires-Dist: pyarrow
 Requires-Dist: joblib>=1.2.0
 Requires-Dist: openai>=1.0.0
+Requires-Dist: entmax>=1.0
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: black>=23.0.0; extra == "dev"
@@ -39,35 +41,189 @@ Dynamic: requires-python
 
 # Causal DragonNet Text (CDT)
 
-A framework for clinical causal inference using electronic health record (EHR) text as the primary input. CDT estimates treatment effects from unstructured clinical narratives by learning confounder representations directly from text.
+A framework for clinical causal inference using electronic health record (EHR) text as the primary input. CDT estimates treatment effects from unstructured clinical narratives using semantically-initialized CNNs with DragonNet causal inference heads.
 
 ## Clinical Research Objective
 
 Observational studies using EHR data are essential for comparative effectiveness research when randomized trials are infeasible or unethical. However, standard approaches rely on structured covariates (diagnoses, labs, demographics) which may fail to capture critical confounders documented only in clinical notes—such as functional status, symptom severity, patient preferences, or nuanced disease characteristics.
 
 CDT addresses this gap by:
-- **Extracting confounders from clinical text** using sentence embeddings and learnable confounder representations
+- **Extracting confounders from clinical text** using 1D CNNs with semantically meaningful filters
 - **Estimating treatment effects** using a DragonNet architecture that jointly models propensity scores and potential outcomes
 - **Validating methods via plasmode simulation** to assess sensitivity to unmeasured confounding and model misspecification
-
-This enables researchers to leverage the rich information in clinical narratives for causal inference while providing tools to evaluate the robustness of their estimates.
 
 ## How It Works
 
 ### Architecture Overview
 
-CDT processes clinical text through three stages:
+CDT processes clinical text through a CNN-based pipeline:
 
-1. **Text Embedding**: Clinical notes are chunked and embedded using a sentence transformer (default: `all-MiniLM-L6-v2`)
+1. **Word-Level Tokenization**: Clinical notes are tokenized at the word level with a vocabulary built from training data
 
-2. **Confounder Extraction**: A feature extractor learns to identify confounder-relevant patterns from embeddings using:
-   - Learnable latent confounders (data-driven patterns)
-   - Optional explicit confounders (user-specified clinical queries like "What is the patient's performance status?")
+2. **Semantic Embeddings**: Word embeddings can be initialized from ClinicalBERT (Bio_ClinicalBERT) by:
+   - Tokenizing each vocabulary word with BERT's subword tokenizer
+   - Averaging the subword embeddings
+   - Projecting to the CNN embedding dimension
 
-3. **Causal Inference**: A DragonNet model takes the extracted confounders and jointly predicts:
+3. **CNN Feature Extraction**: 1D convolutions with multiple kernel sizes (e.g., 3, 4, 5, 7 words) extract n-gram patterns. Filters can be initialized from:
+   - **Explicit clinical concepts**: User-specified phrases like "stage iv cancer", "performance status poor"
+   - **Latent patterns**: Data-driven filters learned via k-means clustering of training n-grams
+
+4. **DragonNet Causal Inference**: The CNN features feed into a DragonNet that jointly predicts:
    - Treatment propensity P(T=1|X)
    - Potential outcomes E[Y|T=0,X] and E[Y|T=1,X]
    - Individual treatment effects (ITE) as the difference in potential outcomes
+
+### Semantic Filter Initialization
+
+The key innovation is initializing CNN filters with clinical meaning:
+
+```
+Kernel Size 3 (3-word phrases):
+  - "stage iv cancer"
+  - "performance status poor"
+  - "disease progression noted"
+  ...
+
+Kernel Size 5 (5-word phrases):
+  - "white blood cell count elevated"
+  - "computed tomography scan of chest"
+  ...
+```
+
+Each explicit concept is converted to an embedding sequence using the BERT-initialized word embeddings, creating a filter that responds strongly to that clinical pattern. Additional "latent" filters are learned by clustering n-grams from the training corpus.
+
+### Confounder Extractors
+
+For long clinical documents where confounders are mentioned in specific sentences, CDT offers specialized confounder extractors:
+
+- **ConfounderExtractor**: Sentence-level attention with Perceiver-style cross-attention. Learnable latent queries attend to sentence embeddings using sparse attention (entmax).
+
+- **HierarchicalConfounderExtractor**: Token-level attention using pretrained BERT. Sentence-level sparse attention identifies relevant sentences, then token-level attention preserves fine-grained signal (e.g., "ECOG PS 0" vs "ECOG PS 2").
+
+- **GRUHierarchicalConfounderExtractor**: Learns entirely from scratch via the causal objective. Uses BiGRU with learnable embeddings instead of pretrained BERT. All parameters (embeddings, GRU, attention, latent confounders) optimize together.
+
+**Task-Specific Multi-Head Aggregation**: The hierarchical confounder extractors use task-specific aggregation to combine the K latent confounder representations. Separate learnable queries for propensity and outcome tasks allow each to weight confounders differently based on patient characteristics. This reduces dimensionality from K×D to 2×D while enabling patient-specific and task-specific weighting.
+
+See `examples/confounder_config.json` and `examples/gru_confounder_config.json` for configuration examples.
+
+### Hierarchical Transformer Extractor
+
+For a simpler alternative to ConfounderExtractor, the **HierarchicalTransformerExtractor** provides straightforward hierarchical encoding without latent confounders or sparse attention:
+
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → [CLS] token (S × hidden_dim)
+        ↓
+Transformer Layer(s) with learnable [POOL] token
+        ↓
+Final Representation (D,) → DragonNet/RLearner
+```
+
+**Key features:**
+- **Sentence encoding**: Uses `prajjwal1/bert-tiny` (4.4M params) by default - fast and lightweight
+- **Learnable [POOL] token**: Like BERT's [CLS], aggregates all sentence embeddings through self-attention
+- **Transformer pooling**: 1-2 transformer layers allow sentences to attend to each other
+- **Interpretability**: `interpret_attention()` method shows which sentences contribute most to the final representation
+- **Optional fine-tuning**: Sentence encoder can be frozen or fine-tuned
+
+**Key configuration:**
+```python
+hier_transformer_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
+hier_transformer_freeze_sentence_encoder: bool = True  # Freeze or fine-tune
+hier_transformer_max_sentences: int = 100  # Max sentences per document
+hier_transformer_max_sentence_length: int = 128  # Max tokens per sentence
+hier_transformer_num_layers: int = 2  # Transformer layers for pooling
+hier_transformer_num_heads: int = 4  # Attention heads
+hier_transformer_dim: int = 256  # Transformer hidden dimension
+hier_transformer_dropout: float = 0.1
+hier_transformer_projection_dim: int = 128  # Final output dimension
+```
+
+See `examples/hierarchical_transformer_config.json` for a complete configuration example.
+
+### Gated MIL Hierarchical Extractor
+
+For causally-motivated confounder extraction with task-specific weighting, the **GatedMILHierarchicalExtractor** uses gated MIL (Multiple Instance Learning) attention from pathology AI:
+
+**Key insight**: Confounders are patient characteristics (e.g., performance status, metastatic burden) that affect both treatment assignment and outcomes. The same K confounders should feed into all tasks, but each task can weight them differently:
+- Propensity: "Which confounders predict treatment?"
+- Tau: "Which confounders modify treatment effect?"
+- Outcome: "Which confounders predict baseline outcome?"
+
+**Sentence-level Architecture (default):**
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → [CLS] token (S × D)
+        ↓
+Gated MIL Attention: h = tanh(V·sent) ⊙ sigmoid(U·sent)
+  For each confounder k: a_k = softmax(q_k · W · h)
+        ↓
+K Confounder Representations (K × D)
+        ↓
+Task-Specific Weighting (propensity, tau/y0, outcome/y1)
+        ↓
+Concatenate + MLP Projection → Final Representation
+```
+
+**Token-level Architecture (`gated_mil_hierarchical=True`):**
+
+When fine-grained token distinctions matter (e.g., "ECOG PS 0" vs "ECOG PS 2"), enable token-level gated pooling:
+
+```
+Long Clinical Text
+        ↓
+Split into Sentences (S sentences)
+        ↓
+Tiny BERT per Sentence → ALL tokens (S × L × D)
+        ↓
+Token-Level Gated Pooling:
+  Each confounder query attends to tokens,
+  creating K confounder-specific sentence embeddings
+        ↓
+S × K × D confounder-specific sentence embeddings
+        ↓
+Sentence-Level Gated MIL Attention (per confounder view)
+        ↓
+K Confounder Representations → Task-Specific Weighting
+```
+
+**Key features:**
+- **Gated attention**: tanh × sigmoid gating suppresses irrelevant sentences (from pathology AI)
+- **K confounder queries**: Each learns to extract one type of confounder signal
+- **Task-specific weighting**: Same K confounders, but weighted differently per task
+- **Token-level option**: Preserves fine-grained distinctions when enabled
+- **Interpretability**: `interpret_attention()` shows top-attended sentences per confounder
+- **`get_task_weights()`**: Shows how confounders are weighted per task
+
+**Key configuration:**
+```python
+gated_mil_sentence_model: str = "prajjwal1/bert-tiny"  # Sentence encoder
+gated_mil_freeze_sentence_encoder: bool = True  # Freeze or fine-tune
+gated_mil_max_sentences: int = 100  # Max sentences per document
+gated_mil_max_sentence_length: int = 128  # Max tokens per sentence
+gated_mil_hidden_dim: int = 128  # Hidden dim for gated attention
+gated_mil_num_confounders: int = 4  # Number of confounder queries (K)
+gated_mil_dropout: float = 0.1
+gated_mil_projection_dim: int = 128  # Final output dimension
+# Token-level mode (optional)
+gated_mil_hierarchical: bool = False  # Enable token-level gated pooling
+gated_mil_token_hidden_dim: int = 64  # Hidden dim for token-level gating
+```
+
+**When to use:**
+- Long documents with multiple confounders mentioned in different sentences
+- When you want explicit K confounder queries with task-specific weighting
+- When interpretability (which sentences each confounder attends to) is important
+- Use `gated_mil_hierarchical=True` when fine-grained token distinctions matter
+
+See `examples/gated_mil_config.json` for a complete configuration example.
 
 ### Workflow Modes
 
@@ -76,7 +232,7 @@ CDT processes clinical text through three stages:
 For estimating treatment effects on real clinical data:
 
 ```
-Clinical Text → Embeddings → Confounder Features → DragonNet → Treatment Effect Estimates
+Clinical Text → Word Tokens → CNN Features → DragonNet → Treatment Effect Estimates
 ```
 
 The system supports:
@@ -92,20 +248,26 @@ Plasmode simulation generates synthetic outcomes while preserving the real covar
 
 The plasmode workflow:
 1. Train a "generator" model on real data to learn confounder representations
-2. Generate synthetic outcomes with known true treatment effects using the learned confounders
+2. Generate synthetic outcomes with known true treatment effects
 3. Train an "evaluator" model on the synthetic data
 4. Compare estimated effects to ground truth
 
-Available generation modes:
-- `phi_linear`: Linear relationship between confounders and outcomes
-- `deep_nonlinear`: Deep neural network outcome model
-- `uplift_nonlinear`: Linear baseline with nonlinear treatment effect heterogeneity
+### Propensity Score Matching Analysis
 
-#### Multi-Treatment Pretraining
+CDT includes a traditional propensity score matching (PSM) module that can be run as a post-hoc analysis using DragonNet's learned propensity scores. This provides:
 
-When labeled data for your target treatment comparison is limited, you can pretrain on a larger dataset with multiple treatments. This learns general confounder representations that transfer to the binary treatment setting.
+- **Treatment effect estimation via multiple methods**:
+  - **ATT (Average Treatment Effect on Treated)**: From matched pairs
+  - **ATE via IPW**: Inverse probability weighting
+  - **ATE via Stratification**: Propensity score subclassification
 
-Pretraining → Applied Inference (with pretrained weights) → [Optional: Plasmode Validation]
+- **Balance diagnostics**: Standardized mean differences before/after matching
+
+- **Statistical inference**: Bootstrap confidence intervals, McNemar's test (binary outcomes), paired t-tests (continuous outcomes)
+
+- **Sensitivity analysis**: Rosenbaum bounds to assess robustness to unmeasured confounding
+
+This allows comparison of DragonNet's ITE estimates with traditional PSM estimates, providing validation and enabling traditional statistical inference.
 
 ## Installation
 
@@ -157,20 +319,14 @@ pip install -e .
 
 ## Dataset Requirements
 
-CDT expects datasets in Parquet or CSV format with specific columns depending on your workflow.
-
-### Binary Causal Inference (Applied Inference)
-
-Required columns:
+CDT expects datasets in Parquet or CSV format with the following columns:
 
 | Column | Description | Type |
 |--------|-------------|------|
 | `clinical_text` | The clinical narrative text | string |
 | `treatment_indicator` | Binary treatment assignment (0 or 1) | int/float |
 | `outcome_indicator` | Binary outcome (0 or 1) | int/float |
-| `split` | Data split: "train", "val", "test" | string |
-
-The `split` column is required for fixed-split mode but optional for cross-validation mode (where all data is used and split automatically).
+| `split` | Data split: "train", "val", "test" (optional for CV) | string |
 
 Example:
 ```
@@ -180,18 +336,6 @@ Example:
 | "Patient presents with dyspnea..."     | 0                   | 1                 | train |
 | "History of smoking, 40 pack-years..." | 1                   | 1                 | test  |
 ```
-
-### Multi-Treatment Pretraining
-
-For pretraining on multi-treatment data, use these columns:
-
-| Column | Description | Type |
-|--------|-------------|------|
-| `clinical_text` | The clinical narrative text | string |
-| `treatment` | Treatment category (can be string or integer) | any |
-| `outcome_indicator` | Binary outcome (0 or 1) | int/float |
-
-The `treatment` column can have any number of unique values representing different treatments.
 
 ## Running Experiments
 
@@ -213,44 +357,72 @@ A configuration file controls all aspects of the experiment:
 
 ```json
 {
-  "output_dir": "./results",
+  "output_dir": "./cdt_results",
   "seed": 42,
   "device": "cuda:0",
   "num_workers": 1,
-  "cache_dir": "./cache",
-
-  "pretraining": {
-    "enabled": false,
-    "dataset_path": "./pretrain_data.parquet",
-    "treatment_column": "treatment"
-  },
 
   "applied_inference": {
-    "dataset_path": "./analysis_data.parquet",
+    "dataset_path": "./data/clinical_notes.parquet",
     "text_column": "clinical_text",
     "outcome_column": "outcome_indicator",
     "treatment_column": "treatment_indicator",
-    "split_column": "split",
     "cv_folds": 5,
-    "use_pretrained_weights": true,
 
     "architecture": {
-      "num_latent_confounders": 20,
-      "features_per_confounder": 4
+      "model_type": "dragonnet",
+      "cnn_embedding_dim": 128,
+      "cnn_num_filters": 256,
+      "cnn_kernel_sizes": [3, 4, 5, 7],
+      "cnn_max_length": 2048,
+      "cnn_min_word_freq": 2,
+      "cnn_max_vocab_size": 50000,
+
+      "cnn_init_embeddings_from": "emilyalsentzer/Bio_ClinicalBERT",
+      "cnn_freeze_embeddings": false,
+
+      "cnn_explicit_filter_concepts": {
+        "3": ["stage iv cancer", "performance status poor", "disease progression noted"],
+        "4": ["no evidence of disease", "complete response to treatment"],
+        "5": ["white blood cell count elevated"],
+        "7": ["patient was started on first line chemotherapy regimen"]
+      },
+      "cnn_num_latent_filters": 64,
+
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
     },
 
     "training": {
       "epochs": 50,
       "batch_size": 8,
-      "learning_rate": 0.0001
+      "learning_rate": 0.0001,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1
+    },
+
+    "matching_analysis": {
+      "enabled": true,
+      "method": "nearest",
+      "caliper": 0.2,
+      "caliper_scale": "std",
+      "ratio": 1,
+      "replacement": false,
+      "n_bootstrap": 1000,
+      "ci_level": 0.95
     }
   },
 
   "plasmode_experiments": {
     "enabled": false,
     "num_repeats": 3,
+    "train_fraction": 0.8,
     "plasmode_scenarios": [
-      {"generation_mode": "phi_linear", "target_ate_logit": 0.5}
+      {
+        "generation_mode": "phi_linear",
+        "target_ate_prob": 0.10,
+        "ite_heterogeneity_scale": 1.0
+      }
     ]
   }
 }
@@ -258,16 +430,47 @@ A configuration file controls all aspects of the experiment:
 
 ### Key Configuration Options
 
-**Applied Inference:**
-- `cv_folds`: Set to >1 for cross-validation, or 0/1 for fixed train/val/test splits
-- `use_pretrained_weights`: Whether to initialize from pretraining (requires pretraining to be run first)
-- `num_latent_confounders`: Number of learnable confounder patterns
-- `explicit_confounder_texts`: Optional list of clinical questions to guide confounder extraction
+**CNN Architecture:**
+- `cnn_embedding_dim`: Dimension of word embeddings (default: 128)
+- `cnn_num_filters`: Number of filters per kernel size (default: 256)
+- `cnn_kernel_sizes`: List of kernel sizes for n-gram detection (default: [3, 4, 5, 7])
+- `cnn_max_length`: Maximum sequence length in words (default: 2048)
+
+**Semantic Initialization:**
+- `cnn_init_embeddings_from`: HuggingFace model for embedding initialization (e.g., "emilyalsentzer/Bio_ClinicalBERT")
+- `cnn_freeze_embeddings`: Whether to freeze BERT-initialized embeddings during training
+- `cnn_explicit_filter_concepts`: Dict mapping kernel size (as string) to list of concept phrases
+- `cnn_num_latent_filters`: Number of k-means derived filters per kernel size
+
+**DragonNet Head:**
+- `dragonnet_representation_dim`: Dimension of shared representation layer
+- `dragonnet_hidden_outcome_dim`: Hidden dimension for outcome prediction heads
+
+**Training:**
+- `alpha_propensity`: Weight for propensity score loss
+- `beta_targreg`: Weight for targeted regularization loss
+- `cv_folds`: Number of cross-validation folds (0 or 1 for fixed splits)
 
 **Plasmode:**
-- `generation_mode`: How synthetic outcomes are generated
-- `target_ate_logit`: The true average treatment effect (on logit scale) to simulate
-- `num_repeats`: Number of simulation replicates per scenario
+- `generation_mode`: How synthetic outcomes are generated ("phi_linear")
+- `target_ate_prob`: True average treatment effect on probability scale (e.g., 0.10 = 10% increase)
+- `ite_heterogeneity_scale`: Scale of individual treatment effect heterogeneity
+
+**Matching Analysis (PSM):**
+- `enabled`: Whether to run PSM analysis using DragonNet's propensity scores (default: true)
+- `method`: Matching algorithm - "nearest" (greedy), "optimal" (Hungarian), or "caliper" (default: "nearest")
+- `caliper`: Maximum allowed distance for a match (default: 0.2)
+- `caliper_scale`: Scale for caliper - "propensity", "logit", or "std" (standard deviations of logit propensity)
+- `ratio`: Matching ratio (1:k matching, default: 1)
+- `replacement`: Whether to match with replacement (default: false)
+- `n_bootstrap`: Number of bootstrap iterations for confidence intervals (default: 1000)
+- `ci_level`: Confidence level for intervals (default: 0.95)
+
+**Interpretation:**
+- `save_filter_interpretations`: Save CNN filter interpretation analysis (default: false, CNN only)
+- `filter_interpretation_top_k`: Number of top n-grams per filter to save (default: 10)
+- `save_confounder_interpretations`: Save confounder attention analysis (default: false, confounder extractors only)
+- `confounder_interpretation_top_k`: Number of top-attended sentences per confounder (default: 5)
 
 ### CLI Options
 
@@ -276,7 +479,7 @@ cdt run --config config.json \
     --device cuda:1 \           # Override GPU device
     --workers 4 \               # Parallel workers for CV folds
     --output-dir ./my_results \ # Override output directory
-    --skip-pretraining \        # Skip pretraining phase
+    --skip-applied \            # Skip applied inference
     --skip-plasmode \           # Skip plasmode experiments
     --verbose                   # Enable debug logging
 ```
@@ -288,53 +491,69 @@ After running, results are saved to the output directory:
 ```
 output_dir/
 ├── config.json                    # Copy of experiment configuration
-├── summary.json                   # High-level results summary
 ├── applied_inference/
 │   ├── predictions.parquet        # Per-sample treatment effect estimates
-│   └── training_log.csv           # Training metrics per epoch
+│   ├── training_log.csv           # Training metrics per epoch
+│   ├── filter_interpretations.json           # (if save_filter_interpretations=true, CNN only)
+│   ├── filter_interpretations_summary.txt    # Human-readable filter summary
+│   ├── confounder_interpretations.json       # (if save_confounder_interpretations=true)
+│   ├── confounder_interpretations_summary.txt # Human-readable confounder summary
+│   ├── confounder_task_weights.json          # Task-specific confounder weights
+│   └── psm_analysis/              # (if matching_analysis.enabled=true)
+│       ├── matched_pairs.csv      # Matched treated-control pairs with distances
+│       ├── balance_statistics.csv # SMD before/after matching
+│       ├── sensitivity_analysis.csv # Rosenbaum bounds for hidden bias
+│       └── psm_summary.json       # Treatment effect estimates and comparison
 └── plasmode_experiments/          # (if enabled)
     ├── results.csv                # Aggregated plasmode metrics
     └── simulated_datasets/        # (if save_datasets=true)
 ```
 
 The `predictions.parquet` file contains:
-- `y0_pred`: Predicted outcome probability under control
-- `y1_pred`: Predicted outcome probability under treatment
-- `ite_pred`: Individual treatment effect (y1_pred - y0_pred)
-- `propensity_pred`: Predicted probability of receiving treatment
+- `pred_y0_prob`: Predicted outcome probability under control
+- `pred_y1_prob`: Predicted outcome probability under treatment
+- `pred_ite_prob`: Predicted individual treatment effect on probability scale (pred_y1_prob - pred_y0_prob)
+- `pred_propensity_prob`: Predicted treatment propensity (probability)
 - `cv_fold`: Which cross-validation fold (if using CV)
 
-## Example Workflows
+## Example: Semantic CNN for Oncology
 
-### Simple Binary Treatment Analysis
+See `examples/semantic_cnn_config.json` for a complete configuration with clinical oncology concepts:
 
-```bash
-# 1. Create config
-cdt init -o simple_config.json
-
-# 2. Edit simple_config.json:
-#    - Set applied_inference.dataset_path to your data
-#    - Set cv_folds: 5 for cross-validation
-#    - Disable pretraining and plasmode
-
-# 3. Run
-cdt run --config simple_config.json
+```json
+{
+  "cnn_explicit_filter_concepts": {
+    "3": [
+      "stage iv cancer",
+      "performance status poor",
+      "disease progression noted",
+      "tumor size increased",
+      "lymph node positive",
+      "prior chemotherapy received",
+      "adverse event reported",
+      "patient tolerated well"
+    ],
+    "4": [
+      "no evidence of disease",
+      "complete response to treatment",
+      "partial response to therapy",
+      "stable disease on imaging",
+      "progressive disease confirmed today"
+    ],
+    "5": [
+      "white blood cell count elevated",
+      "eastern cooperative oncology group performance",
+      "computed tomography scan of chest"
+    ],
+    "7": [
+      "patient was started on first line chemotherapy regimen",
+      "imaging revealed new metastatic lesions in the liver"
+    ]
+  }
+}
 ```
 
-### Full Pipeline with Pretraining and Validation
-
-```bash
-# 1. Create config with all features enabled
-cdt init -o full_config.json
-
-# 2. Edit full_config.json:
-#    - Enable pretraining, set dataset_path
-#    - Configure applied_inference
-#    - Enable plasmode_experiments with multiple scenarios
-
-# 3. Run complete pipeline
-cdt run --config full_config.json --workers 4
-```
+These concepts create CNN filters that specifically detect clinically meaningful patterns in the text.
 
 ## Citation
 

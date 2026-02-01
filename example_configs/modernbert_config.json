@@ -1,0 +1,47 @@
+{
+  "output_dir": "./cdt_results_modernbert",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 1,
+
+  "applied_inference": {
+    "dataset_path": "./data/clinical_notes.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "split_column": "split",
+    "cv_folds": 5,
+
+    "architecture": {
+      "model_type": "dragonnet",
+
+      "feature_extractor_type": "bert",
+
+      "bert_model_name": "answerdotai/ModernBERT-base",
+      "bert_max_length": 512,
+      "bert_projection_dim": 128,
+      "bert_dropout": 0.1,
+      "bert_freeze_encoder": false,
+      "bert_gradient_checkpointing": true,
+
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+
+    "training": {
+      "epochs": 10,
+      "batch_size": 4,
+      "learning_rate": 2e-5,
+      "optimizer": "adamw",
+      "lr_schedule": "linear",
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1
+    },
+
+    "use_pretrained_weights": false
+  },
+
+  "plasmode_experiments": {
+    "enabled": false
+  }
+}

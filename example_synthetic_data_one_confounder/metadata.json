@@ -1,0 +1,121 @@
+{
+  "config": {
+    "clinical_question": "Compare the effectiveness of letrozole+palbociclib with letrozole+ribociclib for the first line treatment of metastatic ER positive breast cancer.",
+    "dataset_size": 1000,
+    "treatment_effect_prob": 0.2,
+    "target_treatment_rate": 0.5,
+    "target_control_outcome_rate": 0.5,
+    "enforce_positivity": false,
+    "min_treatment_rate_per_stratum": 0.1,
+    "max_treatment_rate_per_stratum": 0.9,
+    "main_coefficient_scale": 0.3,
+    "interaction_coefficient_scale": 0.1,
+    "target_logit_std": 2.0,
+    "num_confounders": 1,
+    "outcome_type": "binary",
+    "outcome_noise_std": 1.0,
+    "output_dir": "../example_synthetic_data_one_confounder",
+    "llm": {
+      "api_base_url": "http://localhost:8000/v1",
+      "api_key": "",
+      "model_name": "openai/gpt-oss-120b",
+      "temperature": 0.7,
+      "max_tokens": 30000,
+      "timeout": 300.0
+    },
+    "seed": 42
+  },
+  "confounders": [
+    {
+      "name": "metastatic_site_count_category",
+      "type": "categorical",
+      "categories": [
+        "1",
+        "2",
+        "3",
+        "4_or_more"
+      ],
+      "description": "Number of metastatic sites at treatment initiation, categorized to reflect disease burden"
+    }
+  ],
+  "treatment_equation": {
+    "intercept": -2.2340405632317832,
+    "coefficients": {
+      "metastatic_site_count_category_2": 1.9545658961001657,
+      "metastatic_site_count_category_3": 3.9091317922003315,
+      "metastatic_site_count_category_4_or_more": 5.863697688300498
+    },
+    "interactions": [],
+    "original_intercept": -0.5
+  },
+  "outcome_equation": {
+    "intercept": 1.7606471035837112,
+    "coefficients": {
+      "metastatic_site_count_category_2": -1.326576324703558,
+      "metastatic_site_count_category_3": -3.3164408117588953,
+      "metastatic_site_count_category_4_or_more": -5.969593461166012
+    },
+    "interactions": [],
+    "treatment_coefficient": 0.2,
+    "treatment_interactions": [
+      {
+        "term": "metastatic_site_count_category_2",
+        "coefficient": -0.5547736934573703
+      },
+      {
+        "term": "metastatic_site_count_category_3",
+        "coefficient": 1.9930230936285998
+      },
+      {
+        "term": "metastatic_site_count_category_4_or_more",
+        "coefficient": 1.0258589022722164
+      }
+    ],
+    "original_intercept": -1.0
+  },
+  "summary_statistics": {
+    "age": {
+      "type": "continuous",
+      "mean": 62.5,
+      "std": 10.8
+    },
+    "ecog_performance_status": {
+      "type": "categorical",
+      "proportions": {
+        "0": 0.15,
+        "1": 0.45,
+        "2": 0.3,
+        "3": 0.1
+      }
+    },
+    "charlson_comorbidity_index": {
+      "type": "continuous",
+      "mean": 2.1,
+      "std": 1.4
+    },
+    "metastatic_site_count_category": {
+      "type": "categorical",
+      "proportions": {
+        "1": 0.3,
+        "2": 0.35,
+        "3": 0.2,
+        "4_or_more": 0.15
+      }
+    }
+  },
+  "dataset_statistics": {
+    "n_patients": 1000,
+    "treatment_rate": 0.525,
+    "outcome_rate": 0.552,
+    "mean_treatment_prob": 0.5198160314052993,
+    "std_treatment_prob": 0.3300689967882783,
+    "mean_outcome_prob": 0.5634177636606912,
+    "std_outcome_prob": 0.2742356752554061,
+    "mean_ite_prob": 0.08535597095704757,
+    "std_ite_prob": 0.21261841974625026,
+    "clinical_text_stats": {
+      "non_empty_count": "1000",
+      "mean_length": 8216.952
+    }
+  }
+}

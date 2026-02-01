@@ -1,0 +1,87 @@
+{
+  "_comment": "Example config for concept-aware CNN filters targeting metastatic site count",
+  "_description": "This config demonstrates how to use explicit semantic filter concepts to initialize CNN filters with domain knowledge about metastatic disease patterns",
+
+  "applied_inference": {
+    "data_path": "example_synthetic_data_one_confounder/dataset.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "cv_folds": 5,
+
+    "training": {
+      "epochs": 50,
+      "batch_size": 16,
+      "learning_rate": 0.0001,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1,
+      "lr_schedule": "linear",
+      "weight_decay": 0.01,
+      "gradient_clip_norm": 1.0
+    },
+
+    "architecture": {
+      "feature_extractor_type": "cnn",
+      "model_type": "dragonnet",
+
+      "cnn_embedding_dim": 128,
+      "cnn_kernel_sizes": [3, 4, 5, 7],
+      "cnn_dropout": 0.1,
+      "cnn_max_length": 2048,
+      "cnn_min_word_freq": 2,
+      "cnn_max_vocab_size": 50000,
+
+      "cnn_init_embeddings_from": "emilyalsentzer/Bio_ClinicalBERT",
+      "cnn_freeze_embeddings": false,
+      "cnn_freeze_filters": false,
+
+      "cnn_num_kmeans_filters": 32,
+      "cnn_num_random_filters": 0,
+
+      "cnn_explicit_filter_concepts": {
+        "3": [
+          "single metastatic site",
+          "one metastatic lesion",
+          "solitary bone metastasis",
+          "isolated liver metastasis",
+          "oligometastatic disease noted",
+          "limited metastatic burden",
+          "multiple metastatic sites",
+          "widespread metastatic disease",
+          "extensive bone involvement",
+          "diffuse hepatic metastases"
+        ],
+        "4": [
+          "metastatic to the bone",
+          "metastatic to the liver",
+          "metastases involving the bone",
+          "metastases involving the liver",
+          "metastatic disease in bone",
+          "metastatic lesions in liver",
+          "osseous metastatic disease noted",
+          "hepatic metastatic disease noted"
+        ],
+        "5": [
+          "metastatic disease involving bone and",
+          "metastatic lesions noted in the",
+          "widespread metastatic disease with involvement",
+          "multiple sites of metastatic disease",
+          "extensive metastatic burden with lesions"
+        ],
+        "7": [
+          "metastatic disease with involvement of bone liver and",
+          "widespread metastatic burden involving multiple organ systems including",
+          "evidence of metastatic disease in bone liver lung and"
+        ]
+      },
+
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64,
+      "dragonnet_dropout": 0.2
+    }
+  },
+
+  "plasmode": {
+    "enabled": false
+  }
+}

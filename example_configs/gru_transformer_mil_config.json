@@ -1,0 +1,69 @@
+{
+  "output_dir": "./cdt_results_gru_transformer_mil",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 4,
+  "save_confounder_interpretations": true,
+  "confounder_interpretation_top_k": 5,
+
+  "applied_inference": {
+    "dataset_path": "./dataset.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "cv_folds": 5,
+    "architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "gru_transformer_mil",
+
+      "gru_mil_embedding_dim": 128,
+      "gru_mil_gru_hidden_dim": 128,
+      "gru_mil_gru_num_layers": 1,
+      "gru_mil_gru_bidirectional": true,
+      "gru_mil_gru_dropout": 0.1,
+      "gru_mil_max_chunks": 100,
+      "gru_mil_chunk_size": 128,
+      "gru_mil_chunk_overlap": 32,
+      "gru_mil_transformer_layers": 2,
+      "gru_mil_transformer_heads": 4,
+      "gru_mil_transformer_dim": 256,
+      "gru_mil_num_confounders": 4,
+      "gru_mil_mil_hidden_dim": 128,
+      "gru_mil_projection_dim": 128,
+      "gru_mil_max_vocab": 50000,
+      "gru_mil_min_word_freq": 2,
+
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64,
+      "dragonnet_dropout": 0.2
+    },
+    "training": {
+      "learning_rate": 1e-4,
+      "optimizer": "adamw",
+      "lr_schedule": "linear",
+      "epochs": 50,
+      "batch_size": 8,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.0,
+      "gamma_rlearner": 1.0,
+      "weight_decay": 0.01,
+      "gradient_clip_norm": 1.0,
+      "stop_grad_propensity": false,
+      "attention_entropy_weight": 0.0
+    },
+    "propensity_trimming": {
+      "enabled": false,
+      "min_propensity": 0.1,
+      "max_propensity": 0.9,
+      "cv_folds": 5,
+      "propensity_epochs": 20
+    },
+    "matching_analysis": {
+      "enabled": false
+    }
+  },
+
+  "plasmode_experiments": {
+    "enabled": false
+  }
+}

@@ -1,12 +1,13 @@
 # cdt/training/plasmode.py
-"""Plasmode simulation experiments for sensitivity analysis."""
+"""Plasmode simulation experiments for sensitivity analysis - CNN-based approach."""
 
 import logging
 import random
 import json
+import gc
 from pathlib import Path
 from dataclasses import asdict
-from typing import Optional, List, Union, Tuple, Dict, Any
+from typing import Optional, List, Tuple, Dict, Any, Union
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -17,15 +18,12 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
-from sentence_transformers import SentenceTransformer
 
-from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig
-from ..models.causal_dragonnet import CausalDragonnetText
-from ..data import ClinicalTextDataset, collate_batch, EmbeddingCache
-from ..utils import (
-    cuda_cleanup, get_memory_info, set_seed, load_pretrained_with_dimension_matching,
-    compute_latent_drift, log_latent_drift, compute_confounder_feature_stats, log_confounder_stats
-)
+from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig, normalize_feature_extractor_type
+from ..models.causal_text import CausalText
+from ..models.causal_text_forest import CausalTextForest
+from ..data import ClinicalTextDataset, collate_batch
+from ..utils import cuda_cleanup, get_memory_info, set_seed
 
 
 logger = logging.getLogger(__name__)
@@ -37,25 +35,63 @@ def run_plasmode_experiments(
     plasmode_config: PlasmodeExperimentConfig,
     output_path: Path,
     device: torch.device,
-    cache: Optional[EmbeddingCache] = None,
+    cache=None,  # Kept for API compatibility
     pretrained_weights_path: Optional[Path] = None,
     num_repeats: int = 3,
     num_workers: int = 1,
     gpu_ids: Optional[List[int]] = None
 ) -> None:
     """
-    Run plasmode sensitivity experiments with parallel execution.
+    Run plasmode sensitivity experiments with CNN backbone.
     """
-    logger.info("="*80)
-    logger.info(f"PLASMODE SENSITIVITY EXPERIMENTS (Workers: {num_workers})")
-    logger.info("="*80)
-    
-    # Split data - We use the real training data as the base for simulation
-    train_df = dataset.copy() ##[dataset[applied_config.split_column] == 'train'].copy()
-    
-    logger.info(f"Using {len(train_df)} training samples for plasmode generation base")
-    logger.info(f"Running {len(plasmode_config.plasmode_scenarios)} scenarios × {num_repeats} repeats")
-    
+    logger.info("=" * 80)
+    logger.info(f"PLASMODE SENSITIVITY EXPERIMENTS - CNN (Workers: {num_workers})")
+    logger.info("=" * 80)
+
+    train_df = dataset.copy()
+
+    # Propensity trimming preprocessing (if enabled)
+    if hasattr(plasmode_config, 'propensity_trimming') and plasmode_config.propensity_trimming.enabled:
+        logger.info("=" * 80)
+        logger.info("PROPENSITY-BASED DATASET TRIMMING FOR PLASMODE")
+        logger.info("=" * 80)
+
+        from .propensity_trimming import train_propensity_model_cv, trim_by_propensity
+
+        # Train propensity model with CV to get out-of-sample scores
+        train_df, propensity_training_log = train_propensity_model_cv(
+            train_df, applied_config, device, num_workers, gpu_ids
+        )
+
+        # Save propensity model training log
+        training_log_path = output_path.parent / "plasmode_propensity_trimming_training_log.csv"
+        propensity_training_log.to_csv(training_log_path, index=False)
+        logger.info(f"Propensity training log saved to: {training_log_path}")
+
+        original_size = len(train_df)
+
+        # Trim dataset
+        train_df, trimming_stats = trim_by_propensity(
+            train_df,
+            plasmode_config.propensity_trimming.min_propensity,
+            plasmode_config.propensity_trimming.max_propensity
+        )
+
+        logger.info(f"Plasmode base data trimmed: {original_size} -> {len(train_df)} "
+                   f"({trimming_stats['removed_low']} below min, "
+                   f"{trimming_stats['removed_high']} above max)")
+
+        # Save trimming stats
+        trimming_stats_path = output_path.parent / "plasmode_propensity_trimming_stats.json"
+        with open(trimming_stats_path, 'w') as f:
+            json.dump(trimming_stats, f, indent=2)
+        logger.info(f"Trimming stats saved to: {trimming_stats_path}")
+
+        logger.info("=" * 80)
+
+    logger.info(f"Using {len(train_df)} samples for plasmode generation base")
+    logger.info(f"Running {len(plasmode_config.plasmode_scenarios)} scenarios x {num_repeats} repeats")
+
     # Dataset saving setup
     save_datasets = getattr(plasmode_config, 'save_datasets', False)
     dataset_dir = None
@@ -63,55 +99,18 @@ def run_plasmode_experiments(
         dataset_dir = output_path.parent / "simulated_datasets"
         dataset_dir.mkdir(parents=True, exist_ok=True)
         logger.info(f"Simulated datasets will be saved to: {dataset_dir}")
-        
-    # Pre-compute Explicit Confounder Embeddings (GPU) to avoid slower CPU encoding in concurrent workers
-    gen_texts = plasmode_config.generator_architecture.explicit_confounder_texts
-    eval_texts = plasmode_config.evaluator_architecture.explicit_confounder_texts
-    
-    precomputed_embeddings = {}
-    
-    unique_text_sets = []
-    if gen_texts: unique_text_sets.append(tuple(gen_texts))
-    if eval_texts: unique_text_sets.append(tuple(eval_texts))
-    unique_text_sets = set(unique_text_sets)
-    
-    if unique_text_sets:
-        logger.info("Pre-computing explicit confounder embeddings on GPU for efficiency...")
-        # Use first available GPU or CPU
-        compute_device = torch.device(f"cuda:{gpu_ids[0]}" if gpu_ids else "cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Load temp model
-        model_name = plasmode_config.generator_architecture.embedding_model_name
-        temp_st = SentenceTransformer(model_name)
-        temp_st.to(compute_device)
-        
-        for text_tuple in unique_text_sets:
-            logger.info(f"  Encoding set of {len(text_tuple)} texts...")
-            with torch.no_grad():
-                embs = temp_st.encode(list(text_tuple), convert_to_tensor=True, device=compute_device, show_progress_bar=False)
-                # Move to CPU for sharing across processes
-                precomputed_embeddings[text_tuple] = embs.cpu()
-        
-        # Cleanup
-        del temp_st
-        cuda_cleanup()
-        logger.info("Pre-computation complete.")
-    
+
     # Prepare all tasks
     tasks = []
     for scenario_idx, scenario in enumerate(plasmode_config.plasmode_scenarios):
-        logger.info(f"\n{'='*80}")
-        logger.info(f"SCENARIO {scenario_idx+1}/{len(plasmode_config.plasmode_scenarios)}")
+        logger.info(f"\n{'=' * 80}")
+        logger.info(f"SCENARIO {scenario_idx + 1}/{len(plasmode_config.plasmode_scenarios)}")
         logger.info(f"  Mode: {scenario.generation_mode}")
-        logger.info(f"  Target ATE: {scenario.target_ate_logit}")
-        logger.info(f"  Outcome Scale (SD): {scenario.outcome_heterogeneity_scale}")
-        logger.info(f"  ITE Scale (SD): {scenario.ite_heterogeneity_scale}")
-        logger.info(f"{'='*80}")
-        
+        logger.info(f"  Target ATE (prob): {scenario.target_ate_prob}")
+        logger.info(f"{'=' * 80}")
+
         for repeat_idx in range(num_repeats):
-            # Determine device for this task
             if gpu_ids:
-                # Round-robin assignment based on total task index
                 task_global_idx = len(tasks)
                 device_id = gpu_ids[task_global_idx % len(gpu_ids)]
                 task_device = torch.device(f"cuda:{device_id}")
@@ -126,121 +125,98 @@ def run_plasmode_experiments(
                 'applied_config': applied_config,
                 'plasmode_config': plasmode_config,
                 'device': task_device,
-                'cache': cache,
-                'pretrained_weights_path': pretrained_weights_path,
                 'dataset_dir': dataset_dir,
-                'precomputed_embeddings': precomputed_embeddings
             })
 
-    # Execute tasks in parallel
     logger.info(f"Starting {len(tasks)} experiments on {num_workers} workers...")
-    
+
     results = Parallel(n_jobs=num_workers)(
         delayed(_worker_wrapper)(task) for task in tasks
     )
-    
+
     # Aggregate results
     all_results = []
     all_training_logs = []
-    
+
     for res in results:
         if res is not None:
             metrics, logs = res
             all_results.append(metrics)
             all_training_logs.extend(logs)
-            
+
     # Save aggregated training logs
     if all_training_logs:
         log_path = output_path.parent / "plasmode_training_log_aggregate.csv"
         pd.DataFrame(all_training_logs).to_csv(log_path, index=False)
         logger.info(f"Aggregated plasmode training logs saved to: {log_path}")
-    
+
     # Save results summary
     if all_results:
         results_df = pd.DataFrame(all_results)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         results_df.to_csv(output_path, index=False)
-        
-        logger.info(f"\n{'='*80}")
+
+        logger.info(f"\n{'=' * 80}")
         logger.info("PLASMODE EXPERIMENTS COMPLETE")
         logger.info(f"Results saved to: {output_path}")
         logger.info(f"Total experiments: {len(results_df)}")
-        logger.info(f"{'='*80}")
-        
-        # Summary statistics
+        logger.info(f"{'=' * 80}")
+
         summary = results_df.groupby('generation_mode').agg({
-            'ate_bias': ['mean', 'std'],
-            'ate_rmse': ['mean', 'std'],
-            'ite_correlation': ['mean', 'std'],
-            'ite_regression_slope': ['mean', 'std']
+            'ate_bias_prob': ['mean', 'std'],
+            'ate_rmse_prob': ['mean', 'std'],
+            'ite_correlation_prob': ['mean', 'std'],
         }).round(4)
-        
-        logger.info("\nSummary by generation mode:")
+
+        logger.info("\nSummary by generation mode (probability scale):")
         logger.info(f"\n{summary}")
     else:
         logger.error("No successful experiments completed")
 
 
 def _worker_wrapper(task: Dict[str, Any]) -> Optional[Tuple[dict, List[Dict[str, Any]]]]:
-    """Helper for parallel execution to handle setup and error catching."""
+    """Helper for parallel execution."""
     scenario_idx = task['scenario_idx']
     repeat_idx = task['repeat_idx']
     scenario = task['scenario']
     dataset_dir = task['dataset_dir']
     plasmode_config = task['plasmode_config']
-    precomputed_embeddings = task.get('precomputed_embeddings', {})
-    
-    # Set seed unique to this repeat
-    current_seed = random.randint(0, 1000)
+
+    current_seed = random.randint(0, 10000)
     set_seed(current_seed)
-    
-    # Prepare hyperparameters metadata
+
     hyperparams = {
         'scenario_idx': scenario_idx,
         'repeat_idx': repeat_idx,
         'seed': current_seed,
         'generation_mode': scenario.generation_mode,
-        **asdict(scenario),  # Include all scenario params
-        'generator_training': asdict(plasmode_config.generator_training),
-        'evaluator_training': asdict(plasmode_config.evaluator_training)
+        **asdict(scenario),
     }
-    
-    # Determine dataset/config/log path if saving is enabled
+
     save_dataset_path = None
-    save_config_path = None
-    save_log_path = None
-    
     if dataset_dir:
         base_name = f"scenario_{scenario_idx}_repeat_{repeat_idx}_{scenario.generation_mode}"
         save_dataset_path = dataset_dir / f"{base_name}.parquet"
-        save_config_path = dataset_dir / f"{base_name}_params.json"
-        save_log_path = dataset_dir / f"{base_name}_log.csv"
-        
+
     try:
-        # Single split per repeat: train_fraction determines the split
         metrics, logs = _run_single_plasmode_experiment(
             train_df=task['train_df'],
             scenario=scenario,
             applied_config=task['applied_config'],
             plasmode_config=plasmode_config,
             device=task['device'],
-            cache=task['cache'],
-            pretrained_weights_path=task['pretrained_weights_path'],
-            save_dataset_path=save_dataset_path,
-            save_config_path=save_config_path,
-            save_log_path=save_log_path,
             hyperparams=hyperparams,
-            precomputed_embeddings=precomputed_embeddings
+            save_dataset_path=save_dataset_path,
         )
-        
+
         metrics['scenario_idx'] = scenario_idx
         metrics['repeat_idx'] = repeat_idx
         metrics['generation_mode'] = scenario.generation_mode
-        metrics['target_ate'] = scenario.target_ate_logit
+        metrics['target_ate_prob'] = scenario.target_ate_prob
         metrics['train_fraction'] = plasmode_config.train_fraction
-        
+
         return metrics, logs
-        
+
     except Exception as e:
         logger.error(f"Scenario {scenario_idx} Repeat {repeat_idx} Failed: {e}", exc_info=True)
         return None
@@ -254,1264 +230,763 @@ def _run_single_plasmode_experiment(
     applied_config: AppliedInferenceConfig,
     plasmode_config: PlasmodeExperimentConfig,
     device: torch.device,
-    cache: Optional[EmbeddingCache],
-    pretrained_weights_path: Optional[Path],
-    save_dataset_path: Optional[Path] = None,
-    save_config_path: Optional[Path] = None,
-    save_log_path: Optional[Path] = None,
     hyperparams: Optional[Dict[str, Any]] = None,
-    precomputed_embeddings: Dict[Tuple[str], Any] = None
+    save_dataset_path: Optional[Path] = None,
 ) -> Tuple[dict, List[Dict[str, Any]]]:
-    """Run a single plasmode experiment with train/eval split. Returns (metrics, training_logs)
-    
-    Flow:
-    1. Split data into train_split (train_fraction) and eval_split (1 - train_fraction)
-    2. Train generator on train_split only
-    3. Generate synthetic outcomes for both train_split and eval_split
-    4. Train evaluator on train_split (with simulated outcomes)
-    5. Predict on eval_split and calculate metrics
-    
-    This ensures:
-    - Consistent DGP within each experiment (one generator per repeat)
-    - Out-of-sample evaluation (evaluator never sees eval_split during training)
-    - Statistical robustness via multiple repeats across the experiment
-    """
-    
-    # Get train_fraction from config (default 0.8)
+    """Run a single plasmode experiment."""
+
     train_fraction = getattr(plasmode_config, 'train_fraction', 0.8)
     seed = hyperparams.get('seed', 42) if hyperparams else 42
-    
-    # Step 0: Split data into train and eval sets for this experiment
+
+    # Split data
     train_split_df, eval_split_df = train_test_split(
         train_df, train_size=train_fraction, random_state=seed
     )
     train_split_df = train_split_df.reset_index(drop=True)
     eval_split_df = eval_split_df.reset_index(drop=True)
-    
-    logger.info(f"Single-split experiment: Training on {len(train_split_df)} samples, evaluating on {len(eval_split_df)}")
-    
-    # Get precomputed embeddings for generator if available
-    gen_texts = plasmode_config.generator_architecture.explicit_confounder_texts
-    gen_embeddings = precomputed_embeddings.get(tuple(gen_texts)) if gen_texts and precomputed_embeddings else None
-    
-    # Step 1: Train generator on TRAIN SPLIT only
-    generator, gen_history = _train_plasmode_generator(
+
+    logger.info(f"Single-split: Training on {len(train_split_df)}, evaluating on {len(eval_split_df)}")
+
+    # Step 1: Train generator
+    generator, gen_history = _train_cnn_model(
         train_split_df,
+        eval_split_df,
         applied_config,
-        plasmode_config,
-        device,
-        cache,
-        pretrained_weights_path,
-        explicit_confounder_embeddings=gen_embeddings
+        plasmode_config.generator_architecture,
+        plasmode_config.generator_training,
+        device
     )
-    
-    # Tag history
+
     for entry in gen_history:
         entry['model_type'] = 'generator'
         entry['generation_mode'] = scenario.generation_mode
-        entry['scenario_idx'] = hyperparams.get('scenario_idx') if hyperparams else -1
-        entry['repeat_idx'] = hyperparams.get('repeat_idx') if hyperparams else -1
-    
-    # Step 2: Generate synthetic outcomes for BOTH splits using the same generator
-    oracle_mode = getattr(plasmode_config, 'oracle_mode', False)
-    
-    # Generate for train split (for evaluator training)
-    if oracle_mode:
-        train_plasmode_df, train_confounder_features = _generate_plasmode_data(
-            train_split_df,
-            generator,
-            scenario,
-            applied_config,
-            device,
-            cache,
-            return_confounders=True
-        )
-        # Generate for eval split (for metrics)
-        eval_plasmode_df, eval_confounder_features = _generate_plasmode_data(
-            eval_split_df,
-            generator,
-            scenario,
-            applied_config,
-            device,
-            cache,
-            return_confounders=True
-        )
-        logger.info("Oracle mode: Evaluator will use generator's confounder_features directly")
-    else:
-        train_plasmode_df = _generate_plasmode_data(
-            train_split_df,
-            generator,
-            scenario,
-            applied_config,
-            device,
-            cache,
-            return_confounders=False
-        )
-        eval_plasmode_df = _generate_plasmode_data(
-            eval_split_df,
-            generator,
-            scenario,
-            applied_config,
-            device,
-            cache,
-            return_confounders=False
-        )
-        train_confounder_features = None
-        eval_confounder_features = None
-    
-    # Mark splits in dataframes
+        entry['scenario_idx'] = hyperparams.get('scenario_idx', -1)
+        entry['repeat_idx'] = hyperparams.get('repeat_idx', -1)
+
+    # Step 2: Generate synthetic outcomes
+    train_plasmode_df = _generate_plasmode_data(
+        train_split_df, generator, scenario, applied_config, device
+    )
+    eval_plasmode_df = _generate_plasmode_data(
+        eval_split_df, generator, scenario, applied_config, device
+    )
+
     train_plasmode_df['sim_split'] = 'train'
     eval_plasmode_df['sim_split'] = 'eval'
-    
-    # Step 3: Train evaluator on TRAIN SPLIT (pass eval split for AUROC monitoring only, not early stopping)
-    if oracle_mode:
-        # Oracle mode: train on pre-extracted confounder_features (no standardization)
-        evaluator, eval_history = _train_confounder_evaluator(
-            train_confounder_features,
-            train_plasmode_df,
-            eval_confounder_features,  # For validation metrics (monitoring only)
-            eval_plasmode_df,
-            applied_config,
-            plasmode_config,
-            device
-        )
-    else:
-        # Get precomputed embeddings for evaluator if available
-        eval_texts = plasmode_config.evaluator_architecture.explicit_confounder_texts
-        eval_embeddings = precomputed_embeddings.get(tuple(eval_texts)) if eval_texts and precomputed_embeddings else None
 
-        # Realistic mode: train on text, learn own confounders
-        evaluator, eval_history = _train_plasmode_evaluator(
-            train_plasmode_df,
-            eval_plasmode_df,  # For validation metrics (monitoring only, no early stopping)
-            applied_config,
-            plasmode_config,
-            device,
-            cache,
-            pretrained_weights_path,
-            explicit_confounder_embeddings=eval_embeddings
-        )
+    # Step 3: Train evaluator on simulated data
+    evaluator, eval_history = _train_cnn_model(
+        train_plasmode_df,
+        eval_plasmode_df,
+        applied_config,
+        plasmode_config.evaluator_architecture,
+        plasmode_config.evaluator_training,
+        device
+    )
 
-    # Tag history
     for entry in eval_history:
         entry['model_type'] = 'evaluator'
         entry['generation_mode'] = scenario.generation_mode
-        entry['scenario_idx'] = hyperparams.get('scenario_idx') if hyperparams else -1
-        entry['repeat_idx'] = hyperparams.get('repeat_idx') if hyperparams else -1
-        entry['oracle_mode'] = oracle_mode
+        entry['scenario_idx'] = hyperparams.get('scenario_idx', -1)
+        entry['repeat_idx'] = hyperparams.get('repeat_idx', -1)
 
     combined_history = gen_history + eval_history
 
-    # Step 4: Generate predictions for EVAL SPLIT only (the held-out data)
-    if oracle_mode:
-        preds_dict = _predict_confounder_evaluator(
-            evaluator,
-            eval_confounder_features,
-            device
-        )
-    else:
-        preds_dict = _predict_plasmode_evaluator(
-            evaluator,
-            eval_plasmode_df,
-            applied_config,
-            plasmode_config,
-            device,
-            cache
-        )
-    
-    # Add estimated metrics to eval dataframe
-    eval_plasmode_df['estimated_ite'] = preds_dict['ite']
-    eval_plasmode_df['estimated_y0_logit'] = preds_dict['y0_logit']
-    eval_plasmode_df['estimated_y1_logit'] = preds_dict['y1_logit']
-    eval_plasmode_df['estimated_propensity_logit'] = preds_dict['propensity_logit']
-    
-    # Save dataset (eval split only - the held-out data with out-of-sample predictions)
+    # Step 4: Generate predictions for eval split
+    preds_dict = _predict_cnn_model(evaluator, eval_plasmode_df, applied_config, device)
+
+    # Probability scale predictions only
+    eval_plasmode_df['estimated_y0_prob'] = preds_dict['y0_prob']
+    eval_plasmode_df['estimated_y1_prob'] = preds_dict['y1_prob']
+    eval_plasmode_df['estimated_ite_prob'] = preds_dict['ite_prob']
+    eval_plasmode_df['estimated_propensity_prob'] = preds_dict['propensity_prob']
+
+    # Save dataset
     if save_dataset_path is not None:
-        logger.info(f"Saving simulated dataset (eval split only) to {save_dataset_path}")
         eval_plasmode_df.to_parquet(save_dataset_path, index=False)
-        
-        if save_config_path is not None and hyperparams is not None:
-            try:
-                hyperparams_copy = hyperparams.copy()
-                hyperparams_copy['train_fraction'] = train_fraction
-                with open(save_config_path, 'w') as f:
-                    json.dump(hyperparams_copy, f, indent=2)
-                logger.info(f"Saved params to {save_config_path}")
-            except Exception as e:
-                logger.warning(f"Failed to save simulation parameters: {e}")
-                
-        if save_log_path is not None:
-            try:
-                pd.DataFrame(combined_history).to_csv(save_log_path, index=False)
-                logger.info(f"Saved training log to {save_log_path}")
-            except Exception as e:
-                logger.warning(f"Failed to save training log: {e}")
-    
-    # Step 5: Evaluate performance on EVAL SPLIT only (out-of-sample)
+
+    # Step 5: Evaluate (probability scale)
     metrics = _evaluate_plasmode_performance(
         eval_plasmode_df,
-        preds_dict['ite'],
-        scenario.target_ate_logit
+        scenario.target_ate_prob
     )
-    
-    logger.info(f"Experiment complete: ATE bias={metrics['ate_bias']:.4f}, ITE corr={metrics['ite_correlation']:.4f}")
 
-    # Add metadata to metrics
-    metrics['oracle_mode'] = oracle_mode
-    metrics['train_fraction'] = train_fraction
+    logger.info(f"Experiment complete: ATE bias={metrics['ate_bias_prob']:.4f}, "
+                f"ITE corr={metrics['ite_correlation_prob']:.4f}")
+
     metrics['n_train'] = len(train_split_df)
     metrics['n_eval'] = len(eval_split_df)
+
+    # Cleanup
+    del generator, evaluator
+    gc.collect()
+    cuda_cleanup()
 
     return metrics, combined_history
 
 
-def _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_y0, all_y1, all_prop):
-    """Helper to compute AUROCs from collected batch outputs."""
-    y_true = torch.cat(all_targets).numpy()
-    t_true = torch.cat(all_treatments).numpy()
-    y0_scores = torch.cat(all_y0).numpy()
-    y1_scores = torch.cat(all_y1).numpy()
-    prop_scores = torch.sigmoid(torch.cat(all_prop)).numpy() # sigmoid for prop score
-    
-    # Safe AUROC calculation
-    def safe_auc(y, score):
-        try:
-            if len(np.unique(y)) < 2: return None
-            return roc_auc_score(y, score)
-        except: return None
-
-    # AUROC Y0 (on T=0 samples)
-    mask0 = (t_true == 0)
-    auroc_y0 = safe_auc(y_true[mask0], y0_scores[mask0]) if mask0.any() else None
-    
-    # AUROC Y1 (on T=1 samples)
-    mask1 = (t_true == 1)
-    auroc_y1 = safe_auc(y_true[mask1], y1_scores[mask1]) if mask1.any() else None
-    
-    # AUROC Propensity
-    auroc_prop = safe_auc(t_true, prop_scores)
-    
-    return {
-        'loss': epoch_loss / len(loader),
-        'auroc_y0': auroc_y0,
-        'auroc_y1': auroc_y1,
-        'auroc_prop': auroc_prop
-    }
-
-
-def _train_plasmode_generator(
+def _train_cnn_model(
     train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
     applied_config: AppliedInferenceConfig,
-    plasmode_config: PlasmodeExperimentConfig,
-    device: torch.device,
-    cache: Optional[EmbeddingCache],
-    pretrained_weights_path: Optional[Path],
-    explicit_confounder_embeddings: Optional[torch.Tensor] = None
-) -> Tuple[CausalDragonnetText, List[Dict[str, Any]]]:
-    """Train binary treatment generator. Returns (model, history)."""
-    
-    generator_df = train_df.copy()
-    
-    # Create generator model using CausalDragonnetText (Binary)
-    gen_arch = plasmode_config.generator_architecture
-    generator = CausalDragonnetText(
-        sentence_transformer_model_name=gen_arch.embedding_model_name,
-        num_latent_confounders=gen_arch.num_latent_confounders,
-        features_per_confounder=gen_arch.features_per_confounder,
-        explicit_confounder_texts=gen_arch.explicit_confounder_texts,
-        aggregator_mode=gen_arch.aggregator_mode,
-        dragonnet_representation_dim=gen_arch.dragonnet_representation_dim,
-        dragonnet_hidden_outcome_dim=gen_arch.dragonnet_hidden_outcome_dim,
-        chunk_size=gen_arch.chunk_size,
-        chunk_overlap=gen_arch.chunk_overlap,
-        device=str(device),
-        model_type=gen_arch.model_type
-    )
-    
-    # Load pretrained weights
-    if pretrained_weights_path is not None:
-        logger.info("Loading pretrained weights for generator...")
-        try:
-            pretrained_checkpoint = torch.load(
-                pretrained_weights_path, 
-                map_location=device,
-                weights_only=False
-            )
-            load_pretrained_with_dimension_matching(
-                generator,
-                pretrained_checkpoint,
-                strict=False,
-                auto_adjust=True
-            )
-        except Exception as e:
-            logger.warning(f"Failed to load pretrained weights: {e}")
-    
-    # Snapshot initial latent confounders for drift tracking
-    initial_latents = None
-    if generator.feature_extractor.latent_confounders is not None:
-        initial_latents = generator.feature_extractor.latent_confounders.data.clone()
-    
-    # Create dataset
-    gen_dataset = ClinicalTextDataset(
-        data=generator_df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column, 
-        model=generator.sentence_transformer_model,
-        device=device,
-        chunk_size=gen_arch.chunk_size,
-        chunk_overlap=gen_arch.chunk_overlap,
-        cache=cache
-    )
-    
-    gen_loader = DataLoader(
-        gen_dataset,
-        batch_size=plasmode_config.generator_training.batch_size,
-        shuffle=True,
-        collate_fn=collate_batch,
-        num_workers=0
-    )
-    
-    # Optimizer & Scheduler
-    gen_train = plasmode_config.generator_training
-    optimizer = torch.optim.AdamW(
-        generator.parameters(),
-        lr=gen_train.learning_rate,
-        weight_decay=1e-4  # Match old_cdt behavior
-    )
+    arch_config,
+    train_config,
+    device: torch.device
+) -> Tuple[Union[CausalText, CausalTextForest], List[Dict[str, Any]]]:
+    """Train a model with CNN, BERT, or Causal Forest.
 
-    if gen_train.lr_schedule == "linear":
-        total_steps = len(gen_loader) * gen_train.epochs
-        scheduler = torch.optim.lr_scheduler.LinearLR(
-            optimizer,
-            start_factor=1.0,
-            end_factor=0.1,
-            total_iters=total_steps
+    Dispatches to _train_causal_forest_model for model_type="causal_forest".
+    """
+    # Check for causal forest model type
+    model_type = getattr(arch_config, 'model_type', 'dragonnet')
+    if model_type == "causal_forest":
+        return _train_causal_forest_model(
+            train_df, val_df, applied_config, arch_config, train_config, device
         )
-    else:
-        scheduler = None
-    
-    # Training loop
-    generator.train()
-    history = []
-    
-    for epoch in range(gen_train.epochs):
-        epoch_loss = 0.0
-        all_targets = []
-        all_treatments = []
-        all_y0 = []
-        all_y1 = []
-        all_prop = []
-        
-        for batch in tqdm(gen_loader, desc=f"Generator Epoch {epoch+1}", leave=False):
-            batch = {k: v.to(device) if torch.is_tensor(v) else v for k, v in batch.items()}
-            
-            # Convert chunks
-            batch['chunk_embeddings'] = [
-                batch['chunk_embeddings'][i, :, :].contiguous()
-                for i in range(batch['chunk_embeddings'].size(0))
-            ]
-            
-            optimizer.zero_grad()
-            losses = generator.train_step(
-                batch,
-                alpha_propensity=gen_train.alpha_propensity,
-                beta_targreg=gen_train.beta_targreg
-            )
-            losses['loss'].backward()
-            #torch.nn.utils.clip_grad_norm_(generator.parameters(), max_norm=1.0)
-            optimizer.step()
 
-            if scheduler is not None:
-                scheduler.step()
-                
-            epoch_loss += losses['loss'].item()
-            
-            # Collect
-            all_targets.append(batch['outcome'].detach().cpu())
-            all_treatments.append(batch['treatment'].detach().cpu())
-            all_y0.append(losses['y0_logit'].detach().cpu())
-            all_y1.append(losses['y1_logit'].detach().cpu())
-            all_prop.append(losses['t_logit'].detach().cpu())
-            
-        # Calc metrics
-        metrics = _compute_epoch_metrics(epoch_loss, gen_loader, all_targets, all_treatments, all_y0, all_y1, all_prop)
-        
-        epoch_log = {
-            'epoch': epoch + 1,
-            'train_loss': metrics['loss'],
-            'train_auroc_y0': metrics['auroc_y0'],
-            'train_auroc_y1': metrics['auroc_y1'],
-            'train_auroc_prop': metrics['auroc_prop'],
-        }
-        history.append(epoch_log)
-    
-    generator.eval()
-    
-    # Compute and log latent drift
-    if initial_latents is not None and generator.feature_extractor.latent_confounders is not None:
-        drift_df = compute_latent_drift(initial_latents, generator.feature_extractor.latent_confounders.data)
-        log_latent_drift(drift_df, prefix="Generator ")
-    
-    return generator, history
-
-
-def _generate_plasmode_data(
-    train_df: pd.DataFrame,
-    generator: CausalDragonnetText,
-    scenario: PlasmodeConfig,
-    applied_config: AppliedInferenceConfig,
-    device: torch.device,
-    cache: Optional[EmbeddingCache],
-    return_confounders: bool = False
-) -> Union[pd.DataFrame, Tuple[pd.DataFrame, np.ndarray]]:
-    """Generate synthetic plasmode outcomes using learned confounders.
-
-    Args:
-        train_df: Training dataframe with text data
-        generator: Trained generator model
-        scenario: Plasmode scenario configuration
-        applied_config: Applied inference configuration
-        device: Torch device
-        cache: Optional embedding cache
-        return_confounders: If True, also return the extracted confounder matrix
-
-    Returns:
-        If return_confounders=False: plasmode_df
-        If return_confounders=True: (plasmode_df, confounders_array)
-    """
-
-    # Extract confounder representations
-    gen_dataset = ClinicalTextDataset(
-        data=train_df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column,
-        model=generator.sentence_transformer_model,
-        device=device,
-        chunk_size=generator.chunk_size,
-        chunk_overlap=generator.chunk_overlap,
-        cache=cache
+    # Get feature extractor type (default to "cnn" for backward compatibility)
+    # Normalize type (e.g., "modernbert" -> "bert")
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'cnn')
     )
 
-    gen_loader = DataLoader(gen_dataset, batch_size=32, shuffle=False, collate_fn=collate_batch)
-
-    all_confounders = []
-    generator.eval()
-    with torch.no_grad():
-        for batch in gen_loader:
-            chunk_embeddings = [
-                batch['chunk_embeddings'][i, :, :].to(device).contiguous()
-                for i in range(batch['chunk_embeddings'].size(0))
-            ]
-            # Extract raw confounder features (before DragonNet)
-            # Use feature_extractor directly to get raw confounders without LayerNorm
-            # This ensures generator and evaluator share the same confounder space
-            confounders = generator.feature_extractor(chunk_embeddings)
-            all_confounders.append(confounders.cpu())
-
-    # Use raw confounder features for ITE generation
-    # This is before DragonNet, so both generator and evaluator can learn in this space
-    all_confounders = torch.cat(all_confounders, dim=0).numpy()
-    plasmode_df = train_df.copy()
-
-    # Treatments
-    if scenario.preserve_observed_treatments:
-        treatments = train_df[applied_config.treatment_column].values
-    else:
-        treatments = np.random.binomial(1, 0.5, size=len(train_df))
-
-    # Outcomes and True ITE - generated from raw confounder features
-    if scenario.generation_mode == "phi_linear":
-        outcomes, true_ite, true_y0, true_y1 = _generate_linear_outcomes(all_confounders, treatments, scenario)
-    elif scenario.generation_mode == "deep_nonlinear":
-        outcomes, true_ite, true_y0, true_y1 = _generate_deep_nonlinear_outcomes(all_confounders, treatments, scenario, device)
-    elif scenario.generation_mode == "uplift_nonlinear":
-        outcomes, true_ite, true_y0, true_y1 = _generate_uplift_outcomes(all_confounders, treatments, scenario, device)
-    else:
-        raise ValueError(f"Unknown generation mode: {scenario.generation_mode}")
-
-    plasmode_df[applied_config.treatment_column] = treatments
-    plasmode_df[applied_config.outcome_column] = outcomes
-    plasmode_df['true_ite'] = true_ite
-    plasmode_df['true_y0_logit'] = true_y0
-    plasmode_df['true_y1_logit'] = true_y1
-
-    if return_confounders:
-        return plasmode_df, all_confounders
-    return plasmode_df
-
-
-def _standardize(x: np.ndarray) -> np.ndarray:
-    """Z-score standardization to mean=0, std=1 (matching old working code)."""
-    std = np.std(x)
-    if std < 1e-9:
-        return x - np.mean(x)
-    return (x - np.mean(x)) / std
-
-
-def _generate_linear_outcomes(confounders, treatments, scenario):
-    """
-    Linear outcomes with explainable heterogeneity.
-    Uses unit vector projections and z-score standardization (matching old working code).
-    """
-    n_samples, n_features = confounders.shape
-    np.random.seed(42)
-
-    # Base logit for control outcome rate
-    base_logit = np.log(scenario.baseline_control_outcome_rate / (1 - scenario.baseline_control_outcome_rate))
-
-    # 1. Prognostic Component - use normalized unit vector projection
-    v0 = np.random.randn(n_features, 1)
-    v0 = v0 / np.linalg.norm(v0)  # Unit vector
-    s0 = confounders @ v0
-    s0 = _standardize(s0)  # Z-score to ensure zero mean, unit variance
-    logits_y0 = base_logit + scenario.outcome_heterogeneity_scale * s0.flatten()
-
-    # 2. ITE Component - use normalized unit vector projection
-    v_ite = np.random.randn(n_features, 1)
-    v_ite = v_ite / np.linalg.norm(v_ite)  # Unit vector
-    s_ite = confounders @ v_ite
-    s_ite = _standardize(s_ite)  # Z-score to ensure zero mean, unit variance
-    true_ite_logits = scenario.target_ate_logit + scenario.ite_heterogeneity_scale * s_ite.flatten()
-
-    # 3. Combine
-    logits_y1 = logits_y0 + true_ite_logits
-    final_logit = logits_y0 + (true_ite_logits * treatments)
-
-    probs = 1 / (1 + np.exp(-final_logit))
-    outcomes = np.random.binomial(1, probs)
-    return outcomes, true_ite_logits, logits_y0, logits_y1
-
-
-def _generate_deep_nonlinear_outcomes(confounders, treatments, scenario, device):
-    """
-    Deep nonlinear outcomes. Uses z-score standardization then scales (matching old working code).
-    """
-    # Initialize MLP
-    input_dim = confounders.shape[1] + 1
-    hidden_dims = scenario.deep_nonlinear_hidden_dims
-    layers = []
-    prev_dim = input_dim
-    for hidden_dim in hidden_dims:
-        layers.extend([
-            nn.Linear(prev_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(scenario.deep_nonlinear_dropout)
-        ])
-        prev_dim = hidden_dim
-    layers.append(nn.Linear(prev_dim, 1))
-
-    outcome_model = nn.Sequential(*layers).to(device)
-    for module in outcome_model.modules():
-        if isinstance(module, nn.Linear):
-            nn.init.kaiming_normal_(module.weight, nonlinearity='relu')
-            nn.init.zeros_(module.bias)
-
-    # Base logit for control outcome rate
-    base_logit = np.log(scenario.baseline_control_outcome_rate / (1 - scenario.baseline_control_outcome_rate))
-
-    outcome_model.eval()
-    with torch.no_grad():
-        X_0 = np.concatenate([confounders, np.zeros((len(confounders), 1))], axis=1)
-        logits_0_raw = outcome_model(torch.tensor(X_0, dtype=torch.float32, device=device)).squeeze().cpu().numpy()
-
-        X_1 = np.concatenate([confounders, np.ones((len(confounders), 1))], axis=1)
-        logits_1_raw = outcome_model(torch.tensor(X_1, dtype=torch.float32, device=device)).squeeze().cpu().numpy()
-
-        ite_raw = logits_1_raw - logits_0_raw
-
-        # Standardize then scale (matching old working code pattern)
-        logits_y0 = base_logit + scenario.outcome_heterogeneity_scale * _standardize(logits_0_raw)
-        true_ite_logits = scenario.target_ate_logit + scenario.ite_heterogeneity_scale * _standardize(ite_raw)
-
-        logits_y1 = logits_y0 + true_ite_logits
-        final_logits = logits_y0 + (true_ite_logits * treatments)
-
-        probs = 1 / (1 + np.exp(-final_logits))
-        outcomes = np.random.binomial(1, probs)
-
-    return outcomes, true_ite_logits, logits_y0, logits_y1
-
-
-def _generate_uplift_outcomes(confounders, treatments, scenario, device):
-    """
-    Uplift model (Linear Base + Nonlinear ITE).
-    Uses unit vector projections and z-score standardization (matching old working code).
-    """
-    n_samples, n_features = confounders.shape
-    np.random.seed(42)
-
-    # Base logit for control outcome rate
-    base_logit = np.log(scenario.baseline_control_outcome_rate / (1 - scenario.baseline_control_outcome_rate))
-
-    # 1. Base Model - use normalized unit vector projection
-    v0 = np.random.randn(n_features, 1)
-    v0 = v0 / np.linalg.norm(v0)  # Unit vector
-    s0 = confounders @ v0
-    logits_y0 = base_logit + scenario.outcome_heterogeneity_scale * s0.flatten()
-
-    # 2. Uplift Model
-    if scenario.uplift_hidden_dims:
-        input_dim = confounders.shape[1]
-        layers = []
-        prev_dim = input_dim
-        for hidden_dim in scenario.uplift_hidden_dims:
-            layers.extend([
-                nn.Linear(prev_dim, hidden_dim),
-                nn.ReLU() if scenario.uplift_activation == 'relu' else nn.Tanh(),
-                nn.Dropout(scenario.uplift_dropout)
-            ])
-            prev_dim = hidden_dim
-        layers.append(nn.Linear(prev_dim, 1))
-        uplift_model = nn.Sequential(*layers).to(device)
-
-        for module in uplift_model.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.kaiming_normal_(module.weight, nonlinearity='relu')
-                nn.init.zeros_(module.bias)
-
-        uplift_model.eval()
-        with torch.no_grad():
-            ite_raw = uplift_model(torch.tensor(confounders, dtype=torch.float32, device=device)).squeeze().cpu().numpy()
-    else:
-        # Use normalized unit vector projection for linear ITE
-        v_ite = np.random.randn(n_features, 1)
-        v_ite = v_ite / np.linalg.norm(v_ite)  # Unit vector
-        ite_raw = (confounders @ v_ite).flatten()
-
-    # Scale raw ITE
-    true_ite_logits = scenario.target_ate_logit + scenario.ite_heterogeneity_scale * ite_raw
-
-    logits_y1 = logits_y0 + true_ite_logits
-    final_logits = logits_y0 + (true_ite_logits * treatments)
-
-    probs = 1 / (1 + np.exp(-final_logits))
-    outcomes = np.random.binomial(1, probs)
-    return outcomes, true_ite_logits, logits_y0, logits_y1
-
-
-def _train_plasmode_evaluator(
-    train_df: pd.DataFrame,
-    val_df: Optional[pd.DataFrame],
-    applied_config: AppliedInferenceConfig,
-    plasmode_config: PlasmodeExperimentConfig,
-    device: torch.device,
-    cache: Optional[EmbeddingCache],
-    pretrained_weights_path: Optional[Path],
-    explicit_confounder_embeddings: Optional[torch.Tensor] = None
-) -> Tuple[CausalDragonnetText, List[Dict[str, Any]]]:
-    """Train evaluator model on plasmode TRAINING data (realistic mode). Returns (model, history).
-    
-    Args:
-        train_df: Training dataframe
-        val_df: Validation dataframe. If None, skip validation and return None for val metrics.
-        applied_config: Applied inference configuration
-        plasmode_config: Plasmode experiment configuration
-        device: Torch device
-        cache: Optional embedding cache
-        pretrained_weights_path: Optional path to pretrained weights
-        explicit_confounder_embeddings: Optional precomputed confounder embeddings
-    """
-    
-    eval_arch = plasmode_config.evaluator_architecture
-    evaluator = CausalDragonnetText(
-        sentence_transformer_model_name=eval_arch.embedding_model_name,
-        num_latent_confounders=eval_arch.num_latent_confounders,
-        features_per_confounder=eval_arch.features_per_confounder,
-        explicit_confounder_texts=eval_arch.explicit_confounder_texts,
-        aggregator_mode=eval_arch.aggregator_mode,
-        dragonnet_representation_dim=eval_arch.dragonnet_representation_dim,
-        dragonnet_hidden_outcome_dim=eval_arch.dragonnet_hidden_outcome_dim,
-        chunk_size=eval_arch.chunk_size,
-        chunk_overlap=eval_arch.chunk_overlap,
+    model = CausalText(
+        feature_extractor_type=feature_extractor_type,
+        # CNN args
+        embedding_dim=arch_config.cnn_embedding_dim,
+        kernel_sizes=arch_config.cnn_kernel_sizes,
+        explicit_filter_concepts=arch_config.cnn_explicit_filter_concepts,
+        num_kmeans_filters=arch_config.cnn_num_kmeans_filters,
+        num_random_filters=arch_config.cnn_num_random_filters,
+        cnn_dropout=arch_config.cnn_dropout,
+        max_length=arch_config.cnn_max_length,
+        min_word_freq=getattr(arch_config, 'cnn_min_word_freq', 2),
+        max_vocab_size=getattr(arch_config, 'cnn_max_vocab_size', 50000),
+        projection_dim=arch_config.dragonnet_representation_dim,
+        # BERT args
+        bert_model_name=getattr(arch_config, 'bert_model_name', 'bert-base-uncased'),
+        bert_max_length=getattr(arch_config, 'bert_max_length', 512),
+        bert_projection_dim=getattr(arch_config, 'bert_projection_dim', 128),
+        bert_dropout=getattr(arch_config, 'bert_dropout', 0.1),
+        bert_freeze_encoder=getattr(arch_config, 'bert_freeze_encoder', False),
+        bert_gradient_checkpointing=getattr(arch_config, 'bert_gradient_checkpointing', False),
+        # Hierarchical Transformer args
+        hier_transformer_sentence_model=getattr(arch_config, 'hier_transformer_sentence_model', 'prajjwal1/bert-tiny'),
+        hier_transformer_freeze_sentence_encoder=getattr(arch_config, 'hier_transformer_freeze_sentence_encoder', True),
+        hier_transformer_max_chunks=getattr(arch_config, 'hier_transformer_max_chunks', 100),
+        hier_transformer_chunk_size=getattr(arch_config, 'hier_transformer_chunk_size', 128),
+        hier_transformer_chunk_overlap=getattr(arch_config, 'hier_transformer_chunk_overlap', 32),
+        hier_transformer_num_layers=getattr(arch_config, 'hier_transformer_num_layers', 2),
+        hier_transformer_num_heads=getattr(arch_config, 'hier_transformer_num_heads', 4),
+        hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
+        hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
+        hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
+        # Gated MIL Hierarchical args
+        gated_mil_sentence_model=getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny'),
+        gated_mil_freeze_sentence_encoder=getattr(arch_config, 'gated_mil_freeze_sentence_encoder', True),
+        gated_mil_max_chunks=getattr(arch_config, 'gated_mil_max_chunks', 100),
+        gated_mil_chunk_size=getattr(arch_config, 'gated_mil_chunk_size', 128),
+        gated_mil_chunk_overlap=getattr(arch_config, 'gated_mil_chunk_overlap', 32),
+        gated_mil_hidden_dim=getattr(arch_config, 'gated_mil_hidden_dim', 128),
+        gated_mil_num_confounders=getattr(arch_config, 'gated_mil_num_confounders', 4),
+        gated_mil_dropout=getattr(arch_config, 'gated_mil_dropout', 0.1),
+        gated_mil_projection_dim=getattr(arch_config, 'gated_mil_projection_dim', 128),
+        gated_mil_hierarchical=getattr(arch_config, 'gated_mil_hierarchical', False),
+        gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
+        gated_mil_use_mean_pooling=getattr(arch_config, 'gated_mil_use_mean_pooling', False),
+        # GRU-Pool args
+        gru_pool_embedding_dim=getattr(arch_config, 'gru_pool_embedding_dim', 128),
+        gru_pool_gru_hidden_dim=getattr(arch_config, 'gru_pool_gru_hidden_dim', 128),
+        gru_pool_gru_num_layers=getattr(arch_config, 'gru_pool_gru_num_layers', 1),
+        gru_pool_gru_bidirectional=getattr(arch_config, 'gru_pool_gru_bidirectional', True),
+        gru_pool_gru_dropout=getattr(arch_config, 'gru_pool_gru_dropout', 0.1),
+        gru_pool_max_chunks=getattr(arch_config, 'gru_pool_max_chunks', 100),
+        gru_pool_chunk_size=getattr(arch_config, 'gru_pool_chunk_size', 128),
+        gru_pool_chunk_overlap=getattr(arch_config, 'gru_pool_chunk_overlap', 32),
+        gru_pool_transformer_layers=getattr(arch_config, 'gru_pool_transformer_layers', 2),
+        gru_pool_transformer_heads=getattr(arch_config, 'gru_pool_transformer_heads', 4),
+        gru_pool_transformer_dim=getattr(arch_config, 'gru_pool_transformer_dim', 256),
+        gru_pool_gated_attention_dim=getattr(arch_config, 'gru_pool_gated_attention_dim', 128),
+        gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
+        gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
+        gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # CLAM instance-level loss args
+        clam_enabled=getattr(arch_config, 'clam_enabled', False),
+        clam_num_instances=getattr(arch_config, 'clam_num_instances', 5),
+        clam_instance_hidden_dim=getattr(arch_config, 'clam_instance_hidden_dim', 64),
+        # DragonNet args
+        dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
+        dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
         device=str(device),
-        model_type=eval_arch.model_type
+        model_type=arch_config.model_type
     )
-    
-    if pretrained_weights_path is not None:
-        try:
-            pretrained_checkpoint = torch.load(pretrained_weights_path, map_location=device)
-            load_pretrained_with_dimension_matching(evaluator, pretrained_checkpoint, strict=False, auto_adjust=True)
-        except Exception as e:
-            logger.warning(f"Failed to load pretrained weights: {e}")
-    
-    # Snapshot initial latent confounders for drift tracking
-    initial_latents = None
-    if evaluator.feature_extractor.latent_confounders is not None:
-        initial_latents = evaluator.feature_extractor.latent_confounders.data.clone()
-    
-    # Training dataset
+
+    train_texts = train_df[applied_config.text_column].tolist()
+
+    if feature_extractor_type == "cnn":
+        # CNN-specific initialization
+        # Fit tokenizer
+        model.fit_tokenizer(train_texts)
+
+        # Initialize embeddings from BERT if configured (unless random init is explicitly requested)
+        use_random_init = getattr(arch_config, 'cnn_use_random_embedding_init', False)
+        if not use_random_init and getattr(arch_config, 'cnn_init_embeddings_from', None):
+            model.feature_extractor.init_embeddings_from_bert(
+                arch_config.cnn_init_embeddings_from,
+                freeze=getattr(arch_config, 'cnn_freeze_embeddings', False)
+            )
+        elif use_random_init:
+            logger.info("Using random embedding initialization (cnn_use_random_embedding_init=True)")
+
+        # Initialize filters from explicit concepts and/or k-means
+        if arch_config.cnn_explicit_filter_concepts or arch_config.cnn_num_kmeans_filters > 0:
+            model.feature_extractor.init_filters(
+                texts=train_texts,
+                freeze=arch_config.cnn_freeze_filters
+            )
+    elif feature_extractor_type == "gru":
+        # GRU-specific initialization
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Fitted word tokenizer on {len(train_texts)} training texts")
+
+        # Initialize embeddings from BERT if configured
+        if getattr(arch_config, 'gru_init_embeddings_from', None):
+            model.feature_extractor.init_embeddings_from_bert(
+                arch_config.gru_init_embeddings_from,
+                freeze=getattr(arch_config, 'gru_freeze_embeddings', False)
+            )
+    elif feature_extractor_type == "confounder":
+        # Confounder extractor initialization
+        # Check if GRU-based (requires fit_tokenizer)
+        if getattr(arch_config, 'confounder_use_gru', False):
+            model.fit_tokenizer(train_texts)
+            logger.info(f"Fitted word tokenizer for GRU confounder extractor on {len(train_texts)} texts")
+        else:
+            # BERT-based or sentence-level: trigger lazy initialization
+            model.fit_tokenizer(train_texts)  # No-op for pretrained encoders, triggers init
+            logger.info("Using confounder feature extractor (pretrained encoder)")
+    elif feature_extractor_type == "hierarchical_transformer":
+        # Hierarchical Transformer: trigger lazy initialization
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        logger.info(f"Using Hierarchical Transformer feature extractor: {arch_config.hier_transformer_sentence_model}")
+    elif feature_extractor_type == "gated_mil_hierarchical":
+        # Gated MIL Hierarchical: trigger lazy initialization
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        logger.info(f"Using Gated MIL Hierarchical feature extractor: {getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny')}, "
+                   f"{getattr(arch_config, 'gated_mil_num_confounders', 4)} confounders")
+    elif feature_extractor_type == "gru_transformer_mil":
+        # GRU-Transformer-MIL: requires fit_tokenizer
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Using GRU-Transformer-MIL feature extractor")
+    elif feature_extractor_type == "gru_pool":
+        # GRU-Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Using GRU-Pool feature extractor")
+    else:
+        # BERT uses pretrained tokenizer, no fit_tokenizer needed
+        logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
+
+    # Create datasets
     train_dataset = ClinicalTextDataset(
         data=train_df,
         text_column=applied_config.text_column,
         outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column,
-        model=evaluator.sentence_transformer_model,
-        device=device,
-        chunk_size=eval_arch.chunk_size,
-        chunk_overlap=eval_arch.chunk_overlap,
-        cache=cache
+        treatment_column=applied_config.treatment_column
     )
-    
-    # Validation dataset (optional)
-    val_loader = None
-    if val_df is not None:
-        val_dataset = ClinicalTextDataset(
-            data=val_df,
-            text_column=applied_config.text_column,
-            outcome_column=applied_config.outcome_column,
-            treatment_column=applied_config.treatment_column,
-            model=evaluator.sentence_transformer_model,
-            device=device,
-            chunk_size=eval_arch.chunk_size,
-            chunk_overlap=eval_arch.chunk_overlap,
-            cache=cache
-        )
-        val_loader = DataLoader(
-            val_dataset,
-            batch_size=plasmode_config.evaluator_training.batch_size,
-            shuffle=False,
-            collate_fn=collate_batch
-        )
-    
-    # Training loader
-    eval_loader = DataLoader(
-        train_dataset, 
-        batch_size=plasmode_config.evaluator_training.batch_size, 
-        shuffle=True, 
-        collate_fn=collate_batch
-    )
-    
-    eval_train = plasmode_config.evaluator_training
-    optimizer = torch.optim.AdamW(
-        evaluator.parameters(), 
-        lr=eval_train.learning_rate,
-        weight_decay=1e-4  # Match old_cdt behavior
-    )
-    
-    if eval_train.lr_schedule == "linear":
-        total_steps = len(eval_loader) * eval_train.epochs
-        scheduler = torch.optim.lr_scheduler.LinearLR(optimizer, start_factor=1.0, end_factor=0.1, total_iters=total_steps)
-    else:
-        scheduler = None
-    
-    evaluator.train()
-    history = []
-    
-    for epoch in range(eval_train.epochs):
-        epoch_losses = {'total': 0.0, 'outcome': 0.0, 'propensity': 0.0, 'targreg': 0.0}
-        
-        # TRAIN LOOP
-        evaluator.train()
-        all_targets = []
-        all_treatments = []
-        all_y0 = []
-        all_y1 = []
-        all_prop = []
-        
-        for batch in eval_loader:
-            batch = {k: v.to(device) if torch.is_tensor(v) else v for k, v in batch.items()}
-            batch['chunk_embeddings'] = [batch['chunk_embeddings'][i, :, :].contiguous() for i in range(batch['chunk_embeddings'].size(0))]
-            
-            optimizer.zero_grad()
-            losses = evaluator.train_step(batch, alpha_propensity=eval_train.alpha_propensity, beta_targreg=eval_train.beta_targreg)
-            losses['loss'].backward()
-            #torch.nn.utils.clip_grad_norm_(evaluator.parameters(), max_norm=1.0)
-            optimizer.step()
-            
-            if scheduler is not None:
-                scheduler.step()
-                
-            epoch_losses['total'] += losses['loss'].item()
-            epoch_losses['outcome'] += losses['outcome_loss'].item()
-            epoch_losses['propensity'] += losses['propensity_loss'].item()
-            epoch_losses['targreg'] += (losses['targreg_loss'].item() if torch.is_tensor(losses['targreg_loss']) else losses['targreg_loss'])
-            
-            all_targets.append(batch['outcome'].detach().cpu())
-            all_treatments.append(batch['treatment'].detach().cpu())
-            all_y0.append(losses['y0_logit'].detach().cpu())
-            all_y1.append(losses['y1_logit'].detach().cpu())
-            all_prop.append(losses['t_logit'].detach().cpu())
 
-        train_metrics = _compute_epoch_metrics(epoch_losses['total'], eval_loader, all_targets, all_treatments, all_y0, all_y1, all_prop)
-
-        # VALIDATION LOOP (only if val_df was provided)
-        if val_loader is not None:
-            val_losses = {'total': 0.0, 'outcome': 0.0, 'propensity': 0.0, 'targreg': 0.0}
-            evaluator.eval()
-            val_targets = []
-            val_treatments = []
-            val_y0 = []
-            val_y1 = []
-            val_prop = []
-            
-            with torch.no_grad():
-                for batch in val_loader:
-                    batch = {k: v.to(device) if torch.is_tensor(v) else v for k, v in batch.items()}
-                    batch['chunk_embeddings'] = [batch['chunk_embeddings'][i, :, :].contiguous() for i in range(batch['chunk_embeddings'].size(0))]
-                    
-                    losses = evaluator.train_step(batch, alpha_propensity=eval_train.alpha_propensity, beta_targreg=eval_train.beta_targreg)
-                    val_losses['total'] += losses['loss'].item()
-                    val_losses['outcome'] += losses['outcome_loss'].item()
-                    val_losses['propensity'] += losses['propensity_loss'].item()
-                    val_losses['targreg'] += (losses['targreg_loss'].item() if torch.is_tensor(losses['targreg_loss']) else losses['targreg_loss'])
-                    
-                    val_targets.append(batch['outcome'].detach().cpu())
-                    val_treatments.append(batch['treatment'].detach().cpu())
-                    val_y0.append(losses['y0_logit'].detach().cpu())
-                    val_y1.append(losses['y1_logit'].detach().cpu())
-                    val_prop.append(losses['t_logit'].detach().cpu())
-            
-            val_metrics = _compute_epoch_metrics(val_losses['total'], val_loader, val_targets, val_treatments, val_y0, val_y1, val_prop)
-            
-            epoch_log = {
-                'epoch': epoch + 1,
-                'train_loss': train_metrics['loss'],
-                'train_auroc_y0': train_metrics['auroc_y0'],
-                'train_auroc_y1': train_metrics['auroc_y1'],
-                'train_auroc_prop': train_metrics['auroc_prop'],
-                'val_loss': val_metrics['loss'],
-                'val_auroc_y0': val_metrics['auroc_y0'],
-                'val_auroc_y1': val_metrics['auroc_y1'],
-                'val_auroc_prop': val_metrics['auroc_prop'],
-            }
-        else:
-            # No validation set - report None for validation metrics
-            epoch_log = {
-                'epoch': epoch + 1,
-                'train_loss': train_metrics['loss'],
-                'train_auroc_y0': train_metrics['auroc_y0'],
-                'train_auroc_y1': train_metrics['auroc_y1'],
-                'train_auroc_prop': train_metrics['auroc_prop'],
-                'val_loss': None,
-                'val_auroc_y0': None,
-                'val_auroc_y1': None,
-                'val_auroc_prop': None,
-            }
-        history.append(epoch_log)
-
-    # Compute and log latent drift
-    if initial_latents is not None and evaluator.feature_extractor.latent_confounders is not None:
-        drift_df = compute_latent_drift(initial_latents, evaluator.feature_extractor.latent_confounders.data)
-        log_latent_drift(drift_df, prefix="Evaluator ")
-
-    return evaluator, history
-
-
-def _predict_plasmode_evaluator(
-    evaluator: CausalDragonnetText,
-    df: pd.DataFrame,
-    applied_config: AppliedInferenceConfig,
-    plasmode_config: PlasmodeExperimentConfig,
-    device: torch.device,
-    cache: Optional[EmbeddingCache]
-) -> dict:
-    """Generate ITE predictions (logits) for a dataframe."""
-    
-    dataset = ClinicalTextDataset(
-        data=df,
+    val_dataset = ClinicalTextDataset(
+        data=val_df,
         text_column=applied_config.text_column,
         outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column,
-        model=evaluator.sentence_transformer_model,
-        device=device,
-        chunk_size=plasmode_config.evaluator_architecture.chunk_size,
-        chunk_overlap=plasmode_config.evaluator_architecture.chunk_overlap,
-        cache=cache
+        treatment_column=applied_config.treatment_column
     )
-    
-    loader = DataLoader(dataset, batch_size=32, shuffle=False, collate_fn=collate_batch)
-    
-    evaluator.eval()
-    all_ite_logits = []
-    all_y0_logits = []
-    all_y1_logits = []
-    all_propensity = []
-    all_confounder_features = []  # For diagnostics
-    
-    with torch.no_grad():
-        for batch in tqdm(loader, desc="Generating predictions", leave=False):
-            chunk_embeddings = [batch['chunk_embeddings'][i, :, :].to(device).contiguous() for i in range(batch['chunk_embeddings'].size(0))]
-            
-            # Extract confounder features for diagnostics
-            features = evaluator.feature_extractor(chunk_embeddings)
-            all_confounder_features.append(features.cpu().numpy())
-            
-            preds = evaluator.predict(chunk_embeddings)
-            
-            all_ite_logits.append((preds['y1_logit'] - preds['y0_logit']).cpu().numpy())
-            all_y0_logits.append(preds['y0_logit'].cpu().numpy())
-            all_y1_logits.append(preds['y1_logit'].cpu().numpy())
-            all_propensity.append(preds['t_logit'].cpu().numpy())  # Use logit scale
 
-    # Log confounder feature statistics
-    confounder_features = np.concatenate(all_confounder_features, axis=0)
-    eval_arch = plasmode_config.evaluator_architecture
-    num_explicit = len(eval_arch.explicit_confounder_texts) if eval_arch.explicit_confounder_texts else 0
-    num_total = num_explicit + eval_arch.num_latent_confounders
-    stats_df = compute_confounder_feature_stats(
-        confounder_features,
-        num_confounders=num_total,
-        features_per_confounder=eval_arch.features_per_confounder,
-        explicit_confounder_texts=eval_arch.explicit_confounder_texts,
-        num_latent=eval_arch.num_latent_confounders
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=True,
+        collate_fn=collate_batch
     )
-    log_confounder_stats(stats_df, prefix="Evaluator Inference ")
 
-    return {
-        'ite': np.concatenate(all_ite_logits),
-        'y0_logit': np.concatenate(all_y0_logits),
-        'y1_logit': np.concatenate(all_y1_logits),
-        'propensity_logit': np.concatenate(all_propensity)
-    }
-
-
-# =============================================================================
-# Confounder-based evaluator (oracle mode: uses generator's confounders directly)
-# =============================================================================
-
-class ConfounderDataset(torch.utils.data.Dataset):
-    """Simple dataset for pre-extracted confounders."""
-
-    def __init__(self, confounders: np.ndarray, treatments: np.ndarray, outcomes: np.ndarray):
-        self.confounders = torch.tensor(confounders, dtype=torch.float32)
-        self.treatments = torch.tensor(treatments, dtype=torch.float32)
-        self.outcomes = torch.tensor(outcomes, dtype=torch.float32)
-
-    def __len__(self):
-        return len(self.confounders)
-
-    def __getitem__(self, idx):
-        return {
-            'confounders': self.confounders[idx],
-            'treatment': self.treatments[idx],
-            'outcome': self.outcomes[idx]
-        }
-
-
-def _train_confounder_evaluator(
-    train_confounder_features: np.ndarray,
-    train_df: pd.DataFrame,
-    val_confounder_features: Optional[np.ndarray],
-    val_df: Optional[pd.DataFrame],
-    applied_config: AppliedInferenceConfig,
-    plasmode_config: PlasmodeExperimentConfig,
-    device: torch.device
-) -> Tuple[nn.Module, List[Dict[str, Any]]]:
-    """
-    Train outcome heads directly on pre-extracted confounder_features (oracle mode).
-
-    This bypasses the text -> embedding -> confounder pipeline and trains only
-    lightweight outcome heads on the generator's confounder_features. Since ITEs are
-    generated from confounder_features, this ensures the evaluator can properly recover them.
-
-    Args:
-        train_confounder_features: Confounder features matrix for training set
-            Shape: (n_train, num_confounders * features_per_confounder)
-        train_df: Training dataframe with outcome and treatment columns
-        val_confounder_features: Confounder features matrix for validation set. If None, skip validation.
-        val_df: Validation dataframe. If None, skip validation.
-        applied_config: Applied inference configuration
-        plasmode_config: Plasmode experiment configuration
-        device: Torch device
-
-    Returns:
-        Tuple of (trained outcome heads model, training history)
-    """
-    from ..models.outcome_heads import OutcomeHeadsOnly, UpliftHeadsOnly
-
-    confounder_dim = train_confounder_features.shape[1]
-    eval_arch = plasmode_config.evaluator_architecture
-    eval_training = plasmode_config.evaluator_training
-
-    # Create lightweight outcome heads that take confounder_features directly (no representation layers!)
-    # Using full DragonNet/UpliftNet here would double-process through 6 more
-    # representation layers, causing severe attenuation of the ITE signal.
-    if eval_arch.model_type == "uplift":
-        model = UpliftHeadsOnly(
-            confounder_dim=confounder_dim,
-            hidden_outcome_dim=eval_arch.dragonnet_hidden_outcome_dim
-        ).to(device)
-    else:
-        model = OutcomeHeadsOnly(
-            confounder_dim=confounder_dim,
-            hidden_outcome_dim=eval_arch.dragonnet_hidden_outcome_dim
-        ).to(device)
-
-    # Create training dataset
-    train_dataset = ConfounderDataset(
-        confounders=train_confounder_features,
-        treatments=train_df[applied_config.treatment_column].values,
-        outcomes=train_df[applied_config.outcome_column].values
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_batch
     )
-    train_loader = DataLoader(train_dataset, batch_size=eval_training.batch_size, shuffle=True)
 
-    # Create validation dataset (optional)
-    val_loader = None
-    if val_confounder_features is not None and val_df is not None:
-        val_dataset = ConfounderDataset(
-            confounders=val_confounder_features,
-            treatments=val_df[applied_config.treatment_column].values,
-            outcomes=val_df[applied_config.outcome_column].values
-        )
-        val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
-
-    # Optimizer
-    if eval_training.optimizer == "adamw":
-        optimizer = torch.optim.AdamW(
-            model.parameters(), 
-            lr=eval_training.learning_rate,
-            weight_decay=1e-4  # Match old_cdt behavior
-        )
-    else:
-        optimizer = torch.optim.Adam(model.parameters(), lr=eval_training.learning_rate)
-
-    # Learning rate scheduler
-    if eval_training.lr_schedule == "linear":
-        scheduler = torch.optim.lr_scheduler.LinearLR(
-            optimizer, start_factor=1.0, end_factor=0.1, total_iters=eval_training.epochs
-        )
-    else:
-        scheduler = None
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=train_config.learning_rate,
+        weight_decay=1e-4
+    )
 
     history = []
-    alpha_propensity = eval_training.alpha_propensity
-    beta_targreg = eval_training.beta_targreg
+    best_val_loss = float('inf')
+    best_model_state = None
 
-    for epoch in range(eval_training.epochs):
-        # Training
+    # Get gamma_rlearner and advanced training options from config
+    gamma_rlearner = getattr(train_config, 'gamma_rlearner', 1.0)
+    stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
+    attention_entropy_weight = getattr(train_config, 'attention_entropy_weight', 0.0)
+    clam_instance_weight = getattr(train_config, 'clam_instance_weight', 0.5)
+
+    for epoch in range(train_config.epochs):
         model.train()
         epoch_loss = 0.0
-        n_batches = 0
 
         for batch in train_loader:
-            confounders = batch['confounders'].to(device)
-            treatments = batch['treatment'].to(device)
-            outcomes = batch['outcome'].to(device)
+            batch['outcome'] = batch['outcome'].to(device)
+            batch['treatment'] = batch['treatment'].to(device)
 
             optimizer.zero_grad()
-
-            if eval_arch.model_type == "uplift":
-                y0_logit, tau_logit, t_logit, phi = model(confounders)
-                y1_logit = y0_logit + tau_logit
-            else:
-                y0_logit, y1_logit, t_logit, phi = model(confounders)
-
-            # Propensity loss
-            propensity_loss = F.binary_cross_entropy_with_logits(
-                t_logit.squeeze(-1), treatments
+            losses = model.train_step(
+                batch,
+                alpha_propensity=train_config.alpha_propensity,
+                beta_targreg=train_config.beta_targreg,
+                gamma_rlearner=gamma_rlearner,
+                stop_grad_propensity=stop_grad_propensity,
+                attention_entropy_weight=attention_entropy_weight,
+                clam_instance_weight=clam_instance_weight
             )
-
-            # Outcome loss (factual only)
-            factual_logit = torch.where(
-                treatments.unsqueeze(1) > 0.5,
-                y1_logit,
-                y0_logit
-            )
-            outcome_loss = F.binary_cross_entropy_with_logits(
-                factual_logit.squeeze(-1), outcomes
-            )
-
-            # Targeted regularization
-            targreg_loss = torch.tensor(0.0, device=device)
-            if beta_targreg > 0:
-                propensity = torch.sigmoid(t_logit).clamp(1e-3, 1 - 1e-3)
-                H = (treatments.unsqueeze(1) / propensity) - \
-                    ((1 - treatments.unsqueeze(1)) / (1 - propensity))
-                factual_prob = torch.sigmoid(factual_logit)
-                moment = torch.mean((outcomes.unsqueeze(1) - factual_prob) * H)
-                targreg_loss = moment ** 2
-
-            total_loss = outcome_loss + alpha_propensity * propensity_loss + beta_targreg * targreg_loss
-            total_loss.backward()
+            losses['loss'].backward()
             optimizer.step()
+            epoch_loss += losses['loss'].item()
 
-            epoch_loss += total_loss.item()
-            n_batches += 1
+        train_loss = epoch_loss / len(train_loader)
 
-        if scheduler:
-            scheduler.step()
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                batch['outcome'] = batch['outcome'].to(device)
+                batch['treatment'] = batch['treatment'].to(device)
+                losses = model.train_step(
+                    batch,
+                    alpha_propensity=train_config.alpha_propensity,
+                    beta_targreg=train_config.beta_targreg,
+                    gamma_rlearner=gamma_rlearner,
+                    stop_grad_propensity=stop_grad_propensity,
+                    attention_entropy_weight=attention_entropy_weight,
+                    clam_instance_weight=clam_instance_weight
+                )
+                val_loss += losses['loss'].item()
 
-        # Validation (only if val data was provided)
-        if val_loader is not None:
-            model.eval()
-            val_loss = 0.0
-            val_batches = 0
-            all_y0, all_y1, all_prop = [], [], []
-            all_targets, all_treatments_val = [], []
+        val_loss = val_loss / len(val_loader)
 
-            with torch.no_grad():
-                for batch in val_loader:
-                    confounders = batch['confounders'].to(device)
-                    treatments = batch['treatment'].to(device)
-                    outcomes = batch['outcome'].to(device)
+        history.append({
+            'epoch': epoch + 1,
+            'train_loss': train_loss,
+            'val_loss': val_loss
+        })
 
-                    if eval_arch.model_type == "uplift":
-                        y0_logit, tau_logit, t_logit, phi = model(confounders)
-                        y1_logit = y0_logit + tau_logit
-                    else:
-                        y0_logit, y1_logit, t_logit, phi = model(confounders)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_state = model.state_dict()
 
-                    propensity_loss = F.binary_cross_entropy_with_logits(
-                        t_logit.squeeze(-1), treatments
-                    )
-                    factual_logit = torch.where(
-                        treatments.unsqueeze(1) > 0.5,
-                        y1_logit,
-                        y0_logit
-                    )
-                    outcome_loss = F.binary_cross_entropy_with_logits(
-                        factual_logit.squeeze(-1), outcomes
-                    )
-                    val_loss += (outcome_loss + alpha_propensity * propensity_loss).item()
-                    val_batches += 1
-
-                    all_y0.append(torch.sigmoid(y0_logit).cpu())
-                    all_y1.append(torch.sigmoid(y1_logit).cpu())
-                    all_prop.append(torch.sigmoid(t_logit).cpu())
-                    all_targets.append(outcomes.cpu())
-                    all_treatments_val.append(treatments.cpu())
-
-            # Compute AUROCs
-            y_true = torch.cat(all_targets).numpy()
-            t_true = torch.cat(all_treatments_val).numpy()
-            y0_scores = torch.cat(all_y0).numpy().squeeze()
-            y1_scores = torch.cat(all_y1).numpy().squeeze()
-            prop_scores = torch.cat(all_prop).numpy().squeeze()
-
-            try:
-                auroc_y0 = roc_auc_score(y_true[t_true == 0], y0_scores[t_true == 0]) if (t_true == 0).sum() > 0 else np.nan
-                auroc_y1 = roc_auc_score(y_true[t_true == 1], y1_scores[t_true == 1]) if (t_true == 1).sum() > 0 else np.nan
-                auroc_prop = roc_auc_score(t_true, prop_scores)
-            except:
-                auroc_y0, auroc_y1, auroc_prop = np.nan, np.nan, np.nan
-
-            epoch_log = {
-                'epoch': epoch + 1,
-                'train_loss': epoch_loss / max(n_batches, 1),
-                'val_loss': val_loss / max(val_batches, 1),
-                'val_auroc_y0': auroc_y0,
-                'val_auroc_y1': auroc_y1,
-                'val_auroc_prop': auroc_prop,
-            }
-        else:
-            # No validation set - report None for validation metrics
-            epoch_log = {
-                'epoch': epoch + 1,
-                'train_loss': epoch_loss / max(n_batches, 1),
-                'val_loss': None,
-                'val_auroc_y0': None,
-                'val_auroc_y1': None,
-                'val_auroc_prop': None,
-            }
-        history.append(epoch_log)
+    if best_model_state:
+        model.load_state_dict(best_model_state)
 
     return model, history
 
 
-def _predict_confounder_evaluator(
-    model: nn.Module,
-    confounder_features: np.ndarray,
+def _train_causal_forest_model(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    applied_config: AppliedInferenceConfig,
+    arch_config,
+    train_config,
     device: torch.device
-) -> dict:
+) -> Tuple[CausalTextForest, List[Dict[str, Any]]]:
+    """Train a CausalTextForest model for plasmode experiments.
+
+    Two-stage approach:
+        1. Train neural feature extractor with propensity + outcome losses
+           (optionally with R-learner loss for representation training)
+        2. Train causal forest on extracted features
     """
-    Generate ITE predictions from outcome heads using pre-extracted confounder_features.
-
-    Args:
-        model: Trained OutcomeHeadsOnly/UpliftHeadsOnly model
-        confounder_features: Confounder features matrix (n_samples, num_confounders * features_per_confounder)
-        device: Torch device
-
-    Returns:
-        Dictionary with 'ite', 'y0_logit', 'y1_logit', 'propensity' arrays
-    """
-    from ..models.outcome_heads import UpliftHeadsOnly
-
-    model.eval()
-    is_uplift = isinstance(model, UpliftHeadsOnly)
-
-    dataset = torch.utils.data.TensorDataset(
-        torch.tensor(confounder_features, dtype=torch.float32)
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'gru_pool')
     )
-    loader = DataLoader(dataset, batch_size=32, shuffle=False)
 
-    all_ite_logits = []
-    all_y0_logits = []
-    all_y1_logits = []
-    all_propensity = []
+    # Get causal forest config
+    cf_config = getattr(arch_config, 'causal_forest', None)
+    if cf_config is None:
+        cf_n_estimators = 100
+        cf_max_depth = None
+        cf_min_samples_leaf = 5
+        cf_max_features = "sqrt"
+        cf_honest = True
+        cf_inference = True
+        cf_use_rlearner_representation = False
+        cf_gamma_rlearner = 1.0
+    else:
+        cf_n_estimators = getattr(cf_config, 'n_estimators', 100)
+        cf_max_depth = getattr(cf_config, 'max_depth', None)
+        cf_min_samples_leaf = getattr(cf_config, 'min_samples_leaf', 5)
+        cf_max_features = getattr(cf_config, 'max_features', "sqrt")
+        cf_honest = getattr(cf_config, 'honest', True)
+        cf_inference = getattr(cf_config, 'inference', True)
+        cf_use_rlearner_representation = getattr(cf_config, 'use_rlearner_representation', False)
+        cf_gamma_rlearner = getattr(cf_config, 'gamma_rlearner', 1.0)
+
+    model = CausalTextForest(
+        feature_extractor_type=feature_extractor_type,
+        # GRU-Pool args (most common for causal forest)
+        gru_pool_embedding_dim=getattr(arch_config, 'gru_pool_embedding_dim', 128),
+        gru_pool_gru_hidden_dim=getattr(arch_config, 'gru_pool_gru_hidden_dim', 128),
+        gru_pool_gru_num_layers=getattr(arch_config, 'gru_pool_gru_num_layers', 1),
+        gru_pool_gru_bidirectional=getattr(arch_config, 'gru_pool_gru_bidirectional', True),
+        gru_pool_gru_dropout=getattr(arch_config, 'gru_pool_gru_dropout', 0.1),
+        gru_pool_max_chunks=getattr(arch_config, 'gru_pool_max_chunks', 100),
+        gru_pool_chunk_size=getattr(arch_config, 'gru_pool_chunk_size', 128),
+        gru_pool_chunk_overlap=getattr(arch_config, 'gru_pool_chunk_overlap', 32),
+        gru_pool_transformer_layers=getattr(arch_config, 'gru_pool_transformer_layers', 2),
+        gru_pool_transformer_heads=getattr(arch_config, 'gru_pool_transformer_heads', 4),
+        gru_pool_transformer_dim=getattr(arch_config, 'gru_pool_transformer_dim', 256),
+        gru_pool_gated_attention_dim=getattr(arch_config, 'gru_pool_gated_attention_dim', 128),
+        gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
+        gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
+        gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # BERT args (if using BERT extractor)
+        bert_model_name=getattr(arch_config, 'bert_model_name', 'bert-base-uncased'),
+        bert_max_length=getattr(arch_config, 'bert_max_length', 512),
+        bert_projection_dim=getattr(arch_config, 'bert_projection_dim', 128),
+        bert_dropout=getattr(arch_config, 'bert_dropout', 0.1),
+        bert_freeze_encoder=getattr(arch_config, 'bert_freeze_encoder', False),
+        bert_gradient_checkpointing=getattr(arch_config, 'bert_gradient_checkpointing', False),
+        # Hierarchical Transformer args
+        hier_transformer_sentence_model=getattr(arch_config, 'hier_transformer_sentence_model', 'prajjwal1/bert-tiny'),
+        hier_transformer_freeze_sentence_encoder=getattr(arch_config, 'hier_transformer_freeze_sentence_encoder', True),
+        hier_transformer_max_chunks=getattr(arch_config, 'hier_transformer_max_chunks', 100),
+        hier_transformer_chunk_size=getattr(arch_config, 'hier_transformer_chunk_size', 128),
+        hier_transformer_chunk_overlap=getattr(arch_config, 'hier_transformer_chunk_overlap', 32),
+        hier_transformer_num_layers=getattr(arch_config, 'hier_transformer_num_layers', 2),
+        hier_transformer_num_heads=getattr(arch_config, 'hier_transformer_num_heads', 4),
+        hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
+        hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
+        hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
+        # Gated MIL Hierarchical args
+        gated_mil_sentence_model=getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny'),
+        gated_mil_freeze_sentence_encoder=getattr(arch_config, 'gated_mil_freeze_sentence_encoder', True),
+        gated_mil_max_chunks=getattr(arch_config, 'gated_mil_max_chunks', 100),
+        gated_mil_chunk_size=getattr(arch_config, 'gated_mil_chunk_size', 128),
+        gated_mil_chunk_overlap=getattr(arch_config, 'gated_mil_chunk_overlap', 32),
+        gated_mil_hidden_dim=getattr(arch_config, 'gated_mil_hidden_dim', 128),
+        gated_mil_num_confounders=getattr(arch_config, 'gated_mil_num_confounders', 4),
+        gated_mil_dropout=getattr(arch_config, 'gated_mil_dropout', 0.1),
+        gated_mil_projection_dim=getattr(arch_config, 'gated_mil_projection_dim', 128),
+        gated_mil_hierarchical=getattr(arch_config, 'gated_mil_hierarchical', False),
+        gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
+        gated_mil_use_mean_pooling=getattr(arch_config, 'gated_mil_use_mean_pooling', False),
+        # Head args
+        representation_dim=getattr(arch_config, 'dragonnet_representation_dim', 128),
+        hidden_dim=getattr(arch_config, 'dragonnet_hidden_outcome_dim', 64),
+        dropout=getattr(arch_config, 'dragonnet_dropout', 0.2),
+        # Causal forest args
+        cf_n_estimators=cf_n_estimators,
+        cf_max_depth=cf_max_depth,
+        cf_min_samples_leaf=cf_min_samples_leaf,
+        cf_max_features=cf_max_features,
+        cf_honest=cf_honest,
+        cf_inference=cf_inference,
+        cf_use_rlearner_representation=cf_use_rlearner_representation,
+        cf_gamma_rlearner=cf_gamma_rlearner,
+        device=str(device)
+    )
+
+    train_texts = train_df[applied_config.text_column].tolist()
+    model.fit_tokenizer(train_texts)
+    logger.info(f"Using CausalTextForest with {feature_extractor_type.upper()} extractor")
+
+    # Create datasets
+    train_dataset = ClinicalTextDataset(
+        data=train_df,
+        text_column=applied_config.text_column,
+        outcome_column=applied_config.outcome_column,
+        treatment_column=applied_config.treatment_column
+    )
+
+    val_dataset = ClinicalTextDataset(
+        data=val_df,
+        text_column=applied_config.text_column,
+        outcome_column=applied_config.outcome_column,
+        treatment_column=applied_config.treatment_column
+    )
+
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=True,
+        collate_fn=collate_batch
+    )
+
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_batch
+    )
+
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=train_config.learning_rate,
+        weight_decay=getattr(train_config, 'weight_decay', 0.01)
+    )
+
+    history = []
+    best_val_loss = float('inf')
+    best_model_state = None
+
+    # Training options
+    alpha_propensity = train_config.alpha_propensity
+    stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
+    label_smoothing = getattr(train_config, 'label_smoothing', 0.0)
+    gamma_rlearner = cf_gamma_rlearner if model.use_rlearner_representation else 0.0
+
+    # Stage 1: Train representation
+    for epoch in range(train_config.epochs):
+        model.train()
+        epoch_loss = 0.0
+        train_r_loss = 0.0
+
+        for batch in train_loader:
+            batch['outcome'] = batch['outcome'].to(device)
+            batch['treatment'] = batch['treatment'].to(device)
+
+            optimizer.zero_grad()
+            losses = model.train_representation_step(
+                batch,
+                alpha_propensity=alpha_propensity,
+                gamma_rlearner=gamma_rlearner,
+                label_smoothing=label_smoothing,
+                stop_grad_propensity=stop_grad_propensity
+            )
+            losses['loss'].backward()
+            optimizer.step()
+            epoch_loss += losses['loss'].item()
+            train_r_loss += losses.get('r_loss', torch.tensor(0.0)).item()
+
+        train_loss = epoch_loss / len(train_loader)
+        train_r_loss = train_r_loss / len(train_loader)
+
+        # Validation
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                batch['outcome'] = batch['outcome'].to(device)
+                batch['treatment'] = batch['treatment'].to(device)
+                losses = model.train_representation_step(
+                    batch,
+                    alpha_propensity=alpha_propensity,
+                    gamma_rlearner=gamma_rlearner,
+                    stop_grad_propensity=stop_grad_propensity
+                )
+                val_loss += losses['loss'].item()
+
+        val_loss = val_loss / len(val_loader)
+
+        epoch_log = {
+            'epoch': epoch + 1,
+            'train_loss': train_loss,
+            'val_loss': val_loss,
+        }
+        if model.use_rlearner_representation:
+            epoch_log['train_r_loss'] = train_r_loss
+        history.append(epoch_log)
+
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+    # Restore best model state
+    if best_model_state:
+        model.load_state_dict(best_model_state)
+        model.to(device)
+
+    # Stage 2: Train causal forest on extracted features
+    combined_df = pd.concat([train_df, val_df])
+    combined_texts = combined_df[applied_config.text_column].tolist()
+    combined_T = combined_df[applied_config.treatment_column].values
+    combined_Y = combined_df[applied_config.outcome_column].values
+    model.train_causal_forest(combined_texts, combined_T, combined_Y)
+
+    return model, history
+
+
+def _generate_plasmode_data(
+    df: pd.DataFrame,
+    generator: Union[CausalText, CausalTextForest],
+    scenario: PlasmodeConfig,
+    applied_config: AppliedInferenceConfig,
+    device: torch.device
+) -> pd.DataFrame:
+    """Generate synthetic outcomes using the generator model."""
+
+    plasmode_df = df.copy()
+
+    # Get features from generator
+    dataset = ClinicalTextDataset(
+        data=df,
+        text_column=applied_config.text_column,
+        outcome_column=applied_config.outcome_column,
+        treatment_column=applied_config.treatment_column
+    )
+
+    loader = DataLoader(
+        dataset,
+        batch_size=32,
+        shuffle=False,
+        collate_fn=collate_batch
+    )
+
+    generator.eval()
+    all_features = []
 
     with torch.no_grad():
-        for (batch_cf,) in loader:
-            batch_cf = batch_cf.to(device)
+        for batch in loader:
+            texts = batch['texts']
+            features = generator.get_features(texts)
+            all_features.append(features.cpu().numpy())
 
-            if is_uplift:
-                y0_logit, tau_logit, t_logit, _ = model(batch_cf)
-                y1_logit = y0_logit + tau_logit
-                ite_logit = tau_logit
-            else:
-                y0_logit, y1_logit, t_logit, _ = model(batch_cf)
-                ite_logit = y1_logit - y0_logit
+    confounder_features = np.concatenate(all_features, axis=0)
 
-            all_ite_logits.append(ite_logit.squeeze(-1).cpu().numpy())
-            all_y0_logits.append(y0_logit.squeeze(-1).cpu().numpy())
-            all_y1_logits.append(y1_logit.squeeze(-1).cpu().numpy())
-            all_propensity.append(t_logit.squeeze(-1).cpu().numpy())  # Keep on logit scale
+    # Generate synthetic ITEs based on scenario
+    np.random.seed(42)
+
+    # Convert target ATE from probability scale to logit scale for simulation
+    # Use baseline control outcome rate to compute approximate logit ITE
+    p0 = scenario.baseline_control_outcome_rate
+    p1 = min(0.99, max(0.01, p0 + scenario.target_ate_prob))  # Clamp to valid range
+    target_ate_logit = np.log(p1 / (1 - p1)) - np.log(p0 / (1 - p0))
+
+    if scenario.generation_mode == "phi_linear":
+        # Simple linear ITE based on features
+        weights = np.random.randn(confounder_features.shape[1]) * 0.1
+        base_ite = confounder_features @ weights
+        base_ite = base_ite * scenario.ite_heterogeneity_scale
+        ite_logit = base_ite + target_ate_logit
+
+    else:
+        # Default: constant ATE
+        ite_logit = np.full(len(df), target_ate_logit)
+
+    # Generate Y0 and Y1 (internally using logit space for proper simulation)
+    y0_logit = np.random.randn(len(df)) * scenario.outcome_heterogeneity_scale
+    y0_logit += np.log(scenario.baseline_control_outcome_rate / (1 - scenario.baseline_control_outcome_rate))
+
+    y1_logit = y0_logit + ite_logit
+
+    # Sample outcomes
+    treatments = df[applied_config.treatment_column].values
+    y0_prob = 1 / (1 + np.exp(-y0_logit))
+    y1_prob = 1 / (1 + np.exp(-y1_logit))
+
+    observed_prob = np.where(treatments == 1, y1_prob, y0_prob)
+    observed_outcome = (np.random.rand(len(df)) < observed_prob).astype(float)
+
+    plasmode_df[applied_config.outcome_column] = observed_outcome
+    # Probability scale ground truth only
+    plasmode_df['true_y0_prob'] = y0_prob
+    plasmode_df['true_y1_prob'] = y1_prob
+    plasmode_df['true_ite_prob'] = y1_prob - y0_prob
+
+    return plasmode_df
+
+
+def _predict_cnn_model(
+    model: Union[CausalText, CausalTextForest],
+    df: pd.DataFrame,
+    applied_config: AppliedInferenceConfig,
+    device: torch.device
+) -> dict:
+    """Generate predictions from CausalText or CausalTextForest model."""
+
+    # Handle CausalTextForest separately (uses different prediction API)
+    if isinstance(model, CausalTextForest):
+        texts = df[applied_config.text_column].tolist()
+        preds = model.predict(texts, return_ci=False)
+        return {
+            'y0_prob': preds['pred_y0_prob'],
+            'y1_prob': preds['pred_y1_prob'],
+            'propensity_prob': preds['pred_propensity_prob'],
+            'ite_prob': preds['pred_ite_prob']
+        }
+
+    # CausalText prediction path
+    dataset = ClinicalTextDataset(
+        data=df,
+        text_column=applied_config.text_column,
+        outcome_column=applied_config.outcome_column,
+        treatment_column=applied_config.treatment_column
+    )
+
+    loader = DataLoader(
+        dataset,
+        batch_size=32,
+        shuffle=False,
+        collate_fn=collate_batch
+    )
+
+    model.eval()
+    all_y0 = []
+    all_y1 = []
+    all_prop = []
+
+    with torch.no_grad():
+        for batch in loader:
+            texts = batch['texts']
+            preds = model.predict(texts)
+            all_y0.append(preds['y0_logit'].cpu().numpy())
+            all_y1.append(preds['y1_logit'].cpu().numpy())
+            all_prop.append(preds['t_logit'].cpu().numpy())
+
+    y0_logit = np.concatenate(all_y0)
+    y1_logit = np.concatenate(all_y1)
+    prop_logit = np.concatenate(all_prop)
+    ite_logit = y1_logit - y0_logit
+
+    # Convert to probabilities using sigmoid
+    y0_prob = 1.0 / (1.0 + np.exp(-y0_logit))
+    y1_prob = 1.0 / (1.0 + np.exp(-y1_logit))
+    propensity_prob = 1.0 / (1.0 + np.exp(-prop_logit))
+    ite_prob = y1_prob - y0_prob
 
     return {
-        'ite': np.concatenate(all_ite_logits),
-        'y0_logit': np.concatenate(all_y0_logits),
-        'y1_logit': np.concatenate(all_y1_logits),
-        'propensity_logit': np.concatenate(all_propensity)
+        'y0_prob': y0_prob,
+        'y1_prob': y1_prob,
+        'propensity_prob': propensity_prob,
+        'ite_prob': ite_prob
     }
 
 
 def _evaluate_plasmode_performance(
     df: pd.DataFrame,
-    predicted_ite: np.ndarray,
-    target_ate_logit: float
+    target_ate_prob: float
 ) -> dict:
-    """
-    Evaluate plasmode performance by comparing predicted ITEs to true ITEs.
-    
-    Args:
-        df: DataFrame with 'true_ite' column containing ground truth ITE logits
-        predicted_ite: Array of predicted ITE logits from the evaluator
-        target_ate_logit: The target ATE (logit) used in simulation
-        
-    Returns:
-        Dictionary with performance metrics:
-        - ate_bias: Difference between estimated and true mean ATE
-        - ate_rmse: Root mean squared error of ATE estimation
-        - ite_correlation: Pearson correlation between predicted and true ITE
-        - ite_regression_slope: Slope of predicted vs true ITE regression
-    """
-    true_ite = df['true_ite'].values
-    
-    # ATE metrics
-    true_ate = np.mean(true_ite)
-    estimated_ate = np.mean(predicted_ite)
-    ate_bias = estimated_ate - true_ate
-    ate_rmse = np.sqrt(np.mean((predicted_ite - true_ite) ** 2))
-    
-    # ITE correlation
-    if np.std(true_ite) > 1e-9 and np.std(predicted_ite) > 1e-9:
-        ite_correlation = np.corrcoef(true_ite, predicted_ite)[0, 1]
+    """Evaluate plasmode performance on probability scale."""
+
+    # Probability scale evaluation
+    true_ite_prob = df['true_ite_prob'].values
+    estimated_ite_prob = df['estimated_ite_prob'].values
+    true_ate_prob = true_ite_prob.mean()
+    estimated_ate_prob = estimated_ite_prob.mean()
+
+    ate_bias_prob = estimated_ate_prob - true_ate_prob
+    ate_rmse_prob = np.sqrt((estimated_ate_prob - true_ate_prob) ** 2)
+
+    # ITE correlation (probability scale)
+    if np.std(true_ite_prob) > 0 and np.std(estimated_ite_prob) > 0:
+        ite_correlation_prob = np.corrcoef(true_ite_prob, estimated_ite_prob)[0, 1]
     else:
-        ite_correlation = np.nan
-    
-    # ITE regression slope (predicted vs true)
-    if np.var(true_ite) > 1e-9:
-        ite_regression_slope = np.cov(true_ite, predicted_ite)[0, 1] / np.var(true_ite)
-    else:
-        ite_regression_slope = np.nan
-    
+        ite_correlation_prob = 0.0
+
     return {
-        'ate_bias': ate_bias,
-        'ate_rmse': ate_rmse,
-        'ite_correlation': ite_correlation,
-        'ite_regression_slope': ite_regression_slope,
-        'true_ate': true_ate,
-        'estimated_ate': estimated_ate,
-        'target_ate': target_ate_logit
+        'true_ate_prob': true_ate_prob,
+        'estimated_ate_prob': estimated_ate_prob,
+        'ate_bias_prob': ate_bias_prob,
+        'ate_rmse_prob': ate_rmse_prob,
+        'ite_correlation_prob': ite_correlation_prob,
     }
