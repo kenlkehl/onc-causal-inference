@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "Ken Kehl", email = "kenneth_kehl@dfci.harvard.edu"}
+    {name = "Ken Kehl", email = "kenneth_kehl at dfci.harvard.edu"}
 ]
 keywords = ["causal inference", "machine learning", "clinical text", "nlp"]
 classifiers = [
