@@ -218,6 +218,27 @@ Key parameters: `llm_model_name`, `llm_max_length`, `llm_projection_dim`, `llm_g
 
 See `example_configs/llm_config.json` for a complete configuration.
 
+### Numeric Feature Extraction
+
+All extractors support an optional parallel numeric feature channel that provides magnitude-aware
+encoding of clinical numbers (lab values, vitals, scores, doses, ages). Numbers are detected via
+regex, binned on a log scale, and classified by context keywords. This helps models understand that
+5 < 10 < 100 and that "creatinine 1.8" carries different meaning than "ECOG 2".
+
+Enable in config:
+```json
+{
+  "architecture": {
+    "numeric_features_enabled": true,
+    "numeric_embedding_dim": 32,
+    "numeric_magnitude_bins": 8,
+    "numeric_type_categories": 10
+  }
+}
+```
+
+Disabled by default (`numeric_features_enabled: false`) — no behavior change unless enabled.
+
 ## Workflow Modes
 
 ### Applied Inference

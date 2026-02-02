@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .cnn_extractor import WordTokenizer  # Reuse word-level tokenizer
+from .numeric_features import NumericEmbedding
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,11 @@ class GRUFeatureExtractor(nn.Module):
         max_length: int = 8192,
         min_word_freq: int = 2,
         max_vocab_size: Optional[int] = 50000,
-        device: torch.device = None
+        device: torch.device = None,
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         """
         Initialize GRU feature extractor.
@@ -175,6 +180,16 @@ class GRUFeatureExtractor(nn.Module):
         # Layer norm for embeddings
         self.embed_layer_norm = nn.LayerNorm(embedding_dim)
         self.embed_dropout = nn.Dropout(dropout)
+
+        # Numeric feature embedding (position-aligned)
+        self.numeric_features_enabled = numeric_features_enabled
+        self.numeric_embedding = None
+        if numeric_features_enabled:
+            self.numeric_embedding = NumericEmbedding(
+                num_magnitude_bins=numeric_magnitude_bins,
+                num_type_categories=numeric_type_categories,
+                embedding_dim=embedding_dim  # Match word embedding dim for addition
+            )
 
         logger.info(f"GRUFeatureExtractor initialized:")
         logger.info(f"  Embedding dim: {embedding_dim}")
@@ -305,6 +320,14 @@ class GRUFeatureExtractor(nn.Module):
 
         # Embed tokens
         embeddings = self.embedding(input_ids)  # (batch, seq_len, embedding_dim)
+
+        # Add numeric embeddings if enabled
+        if self.numeric_features_enabled and self.numeric_embedding is not None:
+            numeric_embs = self.numeric_embedding(
+                texts, input_ids, self.tokenizer._tokenize, self.tokenizer.word_to_id
+            )
+            embeddings = embeddings + numeric_embs
+
         embeddings = self.embed_layer_norm(embeddings)
         embeddings = self.embed_dropout(embeddings)
 

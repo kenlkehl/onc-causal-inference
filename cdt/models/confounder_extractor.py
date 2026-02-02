@@ -36,6 +36,7 @@ import torch.nn.functional as F
 
 from .sparse_attention import sparse_softmax, SparseCrossAttention, top_k_attention
 from .chunking import split_into_chunks_hf, split_into_chunks_vocab
+from .numeric_features import NumericFeatureVector
 
 
 logger = logging.getLogger(__name__)
@@ -345,7 +346,12 @@ class ConfounderExtractor(nn.Module):
         # Regularization
         dropout: float = 0.1,
         # Device
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        # Numeric features
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         """
         Initialize confounder extractor.
@@ -368,6 +374,10 @@ class ConfounderExtractor(nn.Module):
             top_k: K for top-k attention method
             dropout: Dropout rate
             device: Device to place model on
+            numeric_features_enabled: Whether to extract and merge numeric features from text
+            numeric_embedding_dim: Output dimension of numeric feature vector
+            numeric_magnitude_bins: Number of magnitude bins for numeric encoding
+            numeric_type_categories: Number of numeric type categories
         """
         super().__init__()
 
@@ -431,6 +441,23 @@ class ConfounderExtractor(nn.Module):
 
         # Store output dimension
         self._output_dim = value_dim
+
+        # Numeric feature vector
+        self.numeric_features_enabled = numeric_features_enabled
+        self.numeric_feature_vector = None
+        if numeric_features_enabled:
+            self.numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=numeric_magnitude_bins,
+                num_type_categories=numeric_type_categories,
+                output_dim=numeric_embedding_dim
+            )
+            # Merge layer: C*D + numeric_dim -> C*D (before output projection)
+            output_dim = value_dim * self.total_confounders
+            self._numeric_merge = nn.Sequential(
+                nn.Linear(output_dim + numeric_embedding_dim, output_dim),
+                nn.LayerNorm(output_dim),
+                nn.ReLU(),
+            )
 
         logger.info(f"ConfounderExtractor initialized:")
         logger.info(f"  Latent confounders: {num_latent_confounders}")
@@ -564,6 +591,13 @@ class ConfounderExtractor(nn.Module):
 
         # Flatten confounders: (B, C, D) -> (B, C*D)
         flat_confounders = refined_confounders.reshape(batch_size, -1)
+
+        # Add numeric features before output projection
+        if self.numeric_features_enabled and self.numeric_feature_vector is not None:
+            numeric_feats = self.numeric_feature_vector(texts)
+            flat_confounders = self._numeric_merge(
+                torch.cat([flat_confounders, numeric_feats], dim=1)
+            )
 
         # Project to output dimension
         features = self.output_projection(flat_confounders)
@@ -874,7 +908,12 @@ class HierarchicalConfounderExtractor(nn.Module):
         # Model type for task-specific aggregation
         model_type: str = "dragonnet",
         # Device
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        # Numeric features
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         """
         Initialize hierarchical confounder extractor.
@@ -897,6 +936,10 @@ class HierarchicalConfounderExtractor(nn.Module):
                        task-specific aggregation. DragonNet uses propensity/Y0/Y1 queries,
                        R-Learner uses propensity/outcome/tau queries.
             device: Device to place model on
+            numeric_features_enabled: Whether to extract and merge numeric features from text
+            numeric_embedding_dim: Output dimension of numeric feature vector
+            numeric_magnitude_bins: Number of magnitude bins for numeric encoding
+            numeric_type_categories: Number of numeric type categories
         """
         super().__init__()
 
@@ -911,6 +954,10 @@ class HierarchicalConfounderExtractor(nn.Module):
         self.sparse_method = sparse_method
         self.top_k = top_k
         self.model_type = model_type
+        self.numeric_features_enabled = numeric_features_enabled
+        self._numeric_embedding_dim = numeric_embedding_dim
+        self._numeric_magnitude_bins = numeric_magnitude_bins
+        self._numeric_type_categories = numeric_type_categories
 
         # Token encoder (BERT-based)
         self.token_encoder = TokenEncoder(
@@ -1021,6 +1068,21 @@ class HierarchicalConfounderExtractor(nn.Module):
             nn.Linear(output_input_dim, self.value_dim),
             nn.LayerNorm(self.value_dim)
         ).to(self._device)
+
+        # Numeric feature vector
+        self._numeric_feature_vector = None
+        if self.numeric_features_enabled:
+            self._numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=self._numeric_magnitude_bins,
+                num_type_categories=self._numeric_type_categories,
+                output_dim=self._numeric_embedding_dim
+            ).to(self._device)
+            output_input_dim = self._encoder_dim * 3
+            self._numeric_merge = nn.Sequential(
+                nn.Linear(output_input_dim + self._numeric_embedding_dim, output_input_dim),
+                nn.LayerNorm(output_input_dim),
+                nn.ReLU(),
+            ).to(self._device)
 
         logger.info(f"  Encoder dim: {self._encoder_dim}")
 
@@ -1327,6 +1389,13 @@ class HierarchicalConfounderExtractor(nn.Module):
         # Stack batch: (B, 3*D)
         batch_aggregated = torch.stack(batch_results)
 
+        # Add numeric features before output projection
+        if self.numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)
+            batch_aggregated = self._numeric_merge(
+                torch.cat([batch_aggregated, numeric_feats], dim=1)
+            )
+
         # Project to output: (B, 3*D) -> (B, value_dim)
         features = self._output_projection(batch_aggregated)
 
@@ -1502,7 +1571,12 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
         # Model type for task-specific aggregation
         model_type: str = "dragonnet",
         # Device
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        # Numeric features
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         """
         Initialize GRU-based hierarchical confounder extractor.
@@ -1529,6 +1603,10 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
                        task-specific aggregation. DragonNet uses propensity/Y0/Y1 queries,
                        R-Learner uses propensity/outcome/tau queries.
             device: Device to place model on
+            numeric_features_enabled: Whether to extract and merge numeric features from text
+            numeric_embedding_dim: Output dimension of numeric feature vector
+            numeric_magnitude_bins: Number of magnitude bins for numeric encoding
+            numeric_type_categories: Number of numeric type categories
         """
         super().__init__()
 
@@ -1544,6 +1622,10 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
         self.top_k = top_k
         self.gru_bidirectional = gru_bidirectional
         self.model_type = model_type
+        self.numeric_features_enabled = numeric_features_enabled
+        self._numeric_embedding_dim = numeric_embedding_dim
+        self._numeric_magnitude_bins = numeric_magnitude_bins
+        self._numeric_type_categories = numeric_type_categories
 
         # Import WordTokenizer from cnn_extractor
         from .cnn_extractor import WordTokenizer
@@ -1620,6 +1702,21 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
             nn.Linear(output_input_dim, value_dim),
             nn.LayerNorm(value_dim)
         )
+
+        # Numeric feature vector
+        self._numeric_feature_vector = None
+        if numeric_features_enabled:
+            self._numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=numeric_magnitude_bins,
+                num_type_categories=numeric_type_categories,
+                output_dim=numeric_embedding_dim
+            )
+            output_input_dim = self._encoder_dim * 3
+            self._numeric_merge = nn.Sequential(
+                nn.Linear(output_input_dim + numeric_embedding_dim, output_input_dim),
+                nn.LayerNorm(output_input_dim),
+                nn.ReLU(),
+            )
 
         self._output_dim = value_dim
 
@@ -2063,6 +2160,13 @@ class GRUHierarchicalConfounderExtractor(nn.Module):
 
         # Stack batch: (B, 3*D)
         batch_aggregated = torch.stack(batch_results)
+
+        # Add numeric features before output projection
+        if self.numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)
+            batch_aggregated = self._numeric_merge(
+                torch.cat([batch_aggregated, numeric_feats], dim=1)
+            )
 
         # Project to output: (B, 3*D) -> (B, value_dim)
         features = self._output_projection(batch_aggregated)

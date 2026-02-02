@@ -5,6 +5,7 @@ pyproject.toml
 cdt/__init__.py
 cdt/cli.py
 cdt/config.py
+cdt/.ipynb_checkpoints/config-checkpoint.py
 cdt/analysis/__init__.py
 cdt/analysis/psm_analysis.py
 cdt/analysis/statistical_analysis.py
@@ -36,6 +37,7 @@ cdt/models/gru_transformer_mil_extractor.py
 cdt/models/hierarchical_transformer_extractor.py
 cdt/models/llm_extractor.py
 cdt/models/mlp_dragonnet.py
+cdt/models/numeric_features.py
 cdt/models/outcome_heads.py
 cdt/models/outcome_model.py
 cdt/models/propensity_model.py
@@ -43,6 +45,7 @@ cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/traditional_logreg.py
 cdt/models/uplift.py
+cdt/models/.ipynb_checkpoints/gru_pool_extractor-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py

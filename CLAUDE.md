@@ -21,6 +21,7 @@ cdt/
 │   ├── causal_forest_head.py  # CausalForestDML wrapper
 │   ├── cnn_extractor.py, bert_extractor.py, gru_extractor.py
 │   ├── llm_extractor.py                  # Decoder-only LLM with random init
+│   ├── numeric_features.py               # Numeric value featurization (magnitude + type)
 │   ├── chunking.py                       # Token-based text chunking utilities
 │   ├── confounder_extractor.py           # Perceiver-style sparse attention
 │   ├── hierarchical_transformer_extractor.py
@@ -239,6 +240,38 @@ No `fit_tokenizer()` required - uses pretrained tokenizer from HuggingFace.
 
 Gradient checkpointing is enabled by default for memory efficiency.
 
+## Numeric Feature Extraction
+
+Clinical text contains numbers critical for causal inference (lab values, vitals, scores, doses, ages)
+that receive no special treatment from standard tokenizers. The numeric features module (`cdt/models/numeric_features.py`)
+adds magnitude-aware numeric featurization as a parallel channel to all extractors.
+
+### How It Works
+
+1. **Regex extraction**: Detects integers, decimals, and fractions (e.g., BP 120/80) in raw text
+2. **Log-scale magnitude binning**: Maps values into 8 bins: `[0, 0.1, 1, 10, 100, 1000, 10000, 100000]`
+3. **Context-based type detection**: Classifies numbers by preceding keywords into 10 categories
+   (vitals, labs, scores, demographics, doses, etc.)
+4. **Injection into extractor pipeline**: Two strategies depending on architecture
+
+### Injection Strategies
+
+| Strategy | Used By | Method |
+|----------|---------|--------|
+| `NumericEmbedding` (position-aligned) | `cnn`, `gru` | Added to word embeddings at token positions |
+| `NumericFeatureVector` (document-level) | `bert`, `llm`, `gru_pool`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `confounder` | Aggregate histogram merged before output projection |
+
+### Config Parameters
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `numeric_features_enabled` | Enable numeric feature extraction | `False` |
+| `numeric_embedding_dim` | Output dimension of numeric feature vectors | `32` |
+| `numeric_magnitude_bins` | Number of log-scale magnitude bins | `8` |
+| `numeric_type_categories` | Number of numeric type categories | `10` |
+
+When `numeric_features_enabled` is `False` (default), there is no behavior change to any extractor.
+
 ## CLAM Instance-Level Loss
 
 CLAM-style (Lu et al., Nature BME 2021) instance-level supervision is available for all hierarchical
@@ -377,6 +410,7 @@ preds = model.predict(texts)
 | `gamma_rlearner>1.0` | Stronger treatment effect signal |
 | `clam_enabled=True` | Enables CLAM instance-level loss (hierarchical extractors) |
 | `clam_instance_weight>0` | Weight for instance-level loss on top-attended chunks |
+| `numeric_features_enabled=True` | Adds magnitude-aware numeric featurization from clinical text |
 
 ## Matching & Analysis
 
@@ -419,6 +453,7 @@ output_dir/
 | Causal forest model | `cdt/models/causal_text_forest.py`, `cdt/models/causal_forest_head.py` |
 | Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
 | Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `llm_extractor.py` |
+| Numeric features | `cdt/models/numeric_features.py` |
 | Text chunking | `cdt/models/chunking.py` |
 | Training | `cdt/inference/applied.py`, `cdt/inference/applied_forest.py` |
 | Config | `cdt/config.py` |

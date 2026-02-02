@@ -23,6 +23,7 @@ from .sparse_attention import (
     adaptive_top_k,
     SparseCrossAttention,
 )
+from .numeric_features import NumericEmbedding, NumericFeatureVector, extract_numeric_patterns
 from .causal_text import CausalText, CausalCNNText  # CausalCNNText is deprecated alias
 from .propensity_model import PropensityOnlyModel, PropensityNet, create_propensity_model_from_config
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
@@ -63,6 +64,9 @@ __all__ = [
     'PropensityNet',
     'create_propensity_model_from_config',
     'CausalForestHead',
+    'NumericEmbedding',
+    'NumericFeatureVector',
+    'extract_numeric_patterns',
     'CausalTextForest',
     'ECONML_AVAILABLE',
 ]

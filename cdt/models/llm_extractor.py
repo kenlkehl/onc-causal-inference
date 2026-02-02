@@ -34,6 +34,8 @@ from typing import Optional, List, Dict, Any
 import torch
 import torch.nn as nn
 
+from .numeric_features import NumericFeatureVector
+
 logger = logging.getLogger(__name__)
 
 
@@ -63,7 +65,11 @@ class LLMFeatureExtractor(nn.Module):
         projection_dim: Optional[int] = 128,
         dropout: float = 0.1,
         gradient_checkpointing: bool = True,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         super().__init__()
 
@@ -134,12 +140,30 @@ class LLMFeatureExtractor(nn.Module):
             self._output_dim = self._hidden_size
             self._projection = None
 
+        # Numeric feature vector (concatenated before projection)
+        self.numeric_features_enabled = numeric_features_enabled
+        self.numeric_feature_vector = None
+        if numeric_features_enabled:
+            self.numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=numeric_magnitude_bins,
+                num_type_categories=numeric_type_categories,
+                output_dim=numeric_embedding_dim
+            )
+            # Merge layer: hidden_size + numeric_dim -> hidden_size
+            self._numeric_merge = nn.Sequential(
+                nn.Linear(self._hidden_size + numeric_embedding_dim, self._hidden_size),
+                nn.LayerNorm(self._hidden_size),
+                nn.ReLU(),
+            )
+
         logger.info(f"LLMFeatureExtractor initialized:")
         logger.info(f"  Model: {model_name} (random weights)")
         logger.info(f"  Hidden size: {self._hidden_size}")
         logger.info(f"  Max length: {max_length}")
         logger.info(f"  Output dim: {self._output_dim}")
         logger.info(f"  Gradient checkpointing: {gradient_checkpointing}")
+        if numeric_features_enabled:
+            logger.info(f"  Numeric features: enabled (dim={numeric_embedding_dim})")
 
     @property
     def output_dim(self) -> int:
@@ -189,6 +213,13 @@ class LLMFeatureExtractor(nn.Module):
         # Convert to float32 if needed (Qwen3 uses BFloat16 by default)
         if last_token_embedding.dtype != torch.float32:
             last_token_embedding = last_token_embedding.float()
+
+        # Add numeric features before projection
+        if self.numeric_features_enabled and self.numeric_feature_vector is not None:
+            numeric_feats = self.numeric_feature_vector(texts)
+            last_token_embedding = self._numeric_merge(
+                torch.cat([last_token_embedding, numeric_feats], dim=1)
+            )
 
         # Apply projection if configured
         if self._projection is not None:

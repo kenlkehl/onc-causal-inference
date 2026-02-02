@@ -160,6 +160,11 @@ class PropensityOnlyModel(nn.Module):
         llm_projection_dim: Optional[int] = 128,
         llm_dropout: float = 0.1,
         llm_gradient_checkpointing: bool = True,
+        # Numeric feature args
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10,
         # Propensity network args
         representation_dim: int = 128,
         device: str = "cuda:0"
@@ -269,6 +274,10 @@ class PropensityOnlyModel(nn.Module):
             'llm_projection_dim': llm_projection_dim,
             'llm_dropout': llm_dropout,
             'llm_gradient_checkpointing': llm_gradient_checkpointing,
+            'numeric_features_enabled': numeric_features_enabled,
+            'numeric_embedding_dim': numeric_embedding_dim,
+            'numeric_magnitude_bins': numeric_magnitude_bins,
+            'numeric_type_categories': numeric_type_categories,
             'representation_dim': representation_dim
         }
 
@@ -280,6 +289,10 @@ class PropensityOnlyModel(nn.Module):
                 max_length=bert_max_length,
                 dropout=bert_dropout,
                 freeze_encoder=bert_freeze_encoder,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             if bert_gradient_checkpointing:
@@ -297,6 +310,10 @@ class PropensityOnlyModel(nn.Module):
                 max_length=gru_max_length,
                 min_word_freq=gru_min_word_freq,
                 max_vocab_size=gru_max_vocab_size,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info("Propensity model using GRU feature extractor")
@@ -312,6 +329,10 @@ class PropensityOnlyModel(nn.Module):
                 transformer_dim=hier_transformer_dim,
                 transformer_dropout=hier_transformer_dropout,
                 projection_dim=hier_transformer_projection_dim,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Propensity model using Hierarchical Transformer: {hier_transformer_sentence_model}")
@@ -335,6 +356,10 @@ class PropensityOnlyModel(nn.Module):
                 max_vocab_size=gru_mil_max_vocab,
                 min_word_freq=gru_mil_min_word_freq,
                 model_type="rlearner",  # Propensity model always uses rlearner-style weighting
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Propensity model using GRU-Transformer-MIL: "
@@ -357,6 +382,10 @@ class PropensityOnlyModel(nn.Module):
                 projection_dim=gru_pool_projection_dim,
                 max_vocab_size=gru_pool_max_vocab,
                 min_word_freq=gru_pool_min_word_freq,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Propensity model using GRU-Pool: "
@@ -369,6 +398,10 @@ class PropensityOnlyModel(nn.Module):
                 projection_dim=llm_projection_dim,
                 dropout=llm_dropout,
                 gradient_checkpointing=llm_gradient_checkpointing,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Propensity model using LLM: {llm_model_name} (random init)")
@@ -385,6 +418,10 @@ class PropensityOnlyModel(nn.Module):
                 max_length=max_length,
                 min_word_freq=min_word_freq,
                 max_vocab_size=max_vocab_size,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info("Propensity model using CNN feature extractor")
@@ -584,6 +621,11 @@ def create_propensity_model_from_config(
         llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
         llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
         llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
+        # Numeric feature args
+        numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
+        numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
+        numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
+        numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
         # Propensity network args
         representation_dim=representation_dim,
         device=str(device)

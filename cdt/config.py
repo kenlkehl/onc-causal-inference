@@ -321,6 +321,12 @@ class ModelArchitectureConfig:
     llm_dropout: float = 0.1  # Dropout rate for projection layers
     llm_gradient_checkpointing: bool = True  # Enable gradient checkpointing for memory efficiency
 
+    # Numeric feature extraction (magnitude-aware number encoding)
+    numeric_features_enabled: bool = False  # Enable numeric feature extraction
+    numeric_embedding_dim: int = 32  # Dimension of numeric embeddings
+    numeric_magnitude_bins: int = 8  # Number of log-scale magnitude bins
+    numeric_type_categories: int = 10  # Number of numeric type categories
+
     # DragonNet head dimensions
     dragonnet_representation_dim: int = 128
     dragonnet_hidden_outcome_dim: int = 64

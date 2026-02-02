@@ -45,6 +45,7 @@ from .cnn_extractor import WordTokenizer
 from .gru_extractor import AttentionPooling
 from .hierarchical_transformer_extractor import InterpretableTransformerLayer
 from .chunking import split_into_chunks_vocab
+from .numeric_features import NumericFeatureVector
 
 
 logger = logging.getLogger(__name__)
@@ -179,11 +180,19 @@ class GRUPoolExtractor(nn.Module):
         projection_dim: int = 128,
         max_vocab_size: int = 50000,
         min_word_freq: int = 2,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         super().__init__()
 
         self._device = device or torch.device('cpu')
+        self._numeric_features_enabled = numeric_features_enabled
+        self._numeric_embedding_dim = numeric_embedding_dim
+        self._numeric_magnitude_bins = numeric_magnitude_bins
+        self._numeric_type_categories = numeric_type_categories
         self._embedding_dim = embedding_dim
         self._gru_hidden_dim = gru_hidden_dim
         self._gru_num_layers = gru_num_layers
@@ -266,6 +275,21 @@ class GRUPoolExtractor(nn.Module):
             nn.Linear(transformer_dim, projection_dim),
             nn.LayerNorm(projection_dim)
         )
+
+        # Numeric feature vector (concatenated to document embedding before output projection)
+        self._numeric_feature_vector = None
+        if numeric_features_enabled:
+            self._numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=numeric_magnitude_bins,
+                num_type_categories=numeric_type_categories,
+                output_dim=numeric_embedding_dim
+            )
+            # Merge layer: transformer_dim + numeric_dim -> transformer_dim
+            self._numeric_merge = nn.Sequential(
+                nn.Linear(transformer_dim + numeric_embedding_dim, transformer_dim),
+                nn.LayerNorm(transformer_dim),
+                nn.ReLU(),
+            )
 
         self._initialized = False
 
@@ -451,6 +475,13 @@ class GRUPoolExtractor(nn.Module):
             # 6. Apply gated attention pooling
             pooled, _ = self._gated_pooling(sequence.squeeze(0))  # (transformer_dim,)
 
+            # 6.5. Add numeric features if enabled
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([text])  # (1, numeric_dim)
+                pooled = self._numeric_merge(
+                    torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
+
             # 7. Output projection
             output = self._output_projection(pooled)  # (projection_dim,)
             batch_outputs.append(output)
@@ -528,6 +559,13 @@ class GRUPoolExtractor(nn.Module):
 
             # 6. Apply gated attention pooling
             pooled, attn_weights = self._gated_pooling(transformer_chunk_embs)  # (transformer_dim,), (C,)
+
+            # 6.5. Add numeric features if enabled
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([text])  # (1, numeric_dim)
+                pooled = self._numeric_merge(
+                    torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
 
             # 7. Output projection
             output = self._output_projection(pooled)  # (projection_dim,)

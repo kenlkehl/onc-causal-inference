@@ -52,6 +52,7 @@ from .cnn_extractor import WordTokenizer
 from .gru_extractor import AttentionPooling
 from .hierarchical_transformer_extractor import InterpretableTransformerLayer
 from .gated_mil_attention import GatedMILAttention, TaskSpecificConfounderWeighting
+from .numeric_features import NumericFeatureVector
 
 
 logger = logging.getLogger(__name__)
@@ -111,11 +112,19 @@ class GRUTransformerMILExtractor(nn.Module):
         max_vocab_size: int = 50000,
         min_word_freq: int = 2,
         model_type: str = "rlearner",
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         super().__init__()
 
         self._device = device or torch.device('cpu')
+        self._numeric_features_enabled = numeric_features_enabled
+        self._numeric_embedding_dim = numeric_embedding_dim
+        self._numeric_magnitude_bins = numeric_magnitude_bins
+        self._numeric_type_categories = numeric_type_categories
         self._embedding_dim = embedding_dim
         self._gru_hidden_dim = gru_hidden_dim
         self._gru_num_layers = gru_num_layers
@@ -245,6 +254,21 @@ class GRUTransformerMILExtractor(nn.Module):
             nn.Linear(self._projection_dim * 2, self._projection_dim),
             nn.LayerNorm(self._projection_dim)
         ).to(self._device)
+
+        # Numeric feature vector (merged into combined representation before output projection)
+        self._numeric_feature_vector = None
+        self._numeric_merge = None
+        if self._numeric_features_enabled:
+            self._numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=self._numeric_magnitude_bins,
+                num_type_categories=self._numeric_type_categories,
+                output_dim=self._numeric_embedding_dim
+            ).to(self._device)
+            self._numeric_merge = nn.Sequential(
+                nn.Linear(3 * self._transformer_dim + self._numeric_embedding_dim, 3 * self._transformer_dim),
+                nn.LayerNorm(3 * self._transformer_dim),
+                nn.ReLU(),
+            ).to(self._device)
 
         self._initialized = True
         logger.info(f"GRUTransformerMILExtractor fully initialized: vocab_size={self.tokenizer.vocab_size}")
@@ -409,6 +433,13 @@ class GRUTransformerMILExtractor(nn.Module):
 
         # Stack batch
         batch_outputs = torch.stack(batch_outputs)  # (B, 3 * transformer_dim)
+
+        # Add numeric features if enabled
+        if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)  # (B, numeric_dim)
+            batch_outputs = self._numeric_merge(
+                torch.cat([batch_outputs, numeric_feats], dim=1)
+            )
 
         # 9. Project to output dimension
         features = self._output_projection(batch_outputs)  # (B, projection_dim)
