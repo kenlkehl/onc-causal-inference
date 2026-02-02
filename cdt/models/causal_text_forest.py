@@ -147,6 +147,11 @@ class CausalTextForest(nn.Module):
         # R-learner representation training args
         cf_use_rlearner_representation: bool = False,
         cf_gamma_rlearner: float = 1.0,
+        # Numeric feature args
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10,
         # Device
         device: str = "cuda:0"
     ):
@@ -260,6 +265,10 @@ class CausalTextForest(nn.Module):
             'cf_random_state': cf_random_state,
             'cf_use_rlearner_representation': cf_use_rlearner_representation,
             'cf_gamma_rlearner': cf_gamma_rlearner,
+            'numeric_features_enabled': numeric_features_enabled,
+            'numeric_embedding_dim': numeric_embedding_dim,
+            'numeric_magnitude_bins': numeric_magnitude_bins,
+            'numeric_type_categories': numeric_type_categories,
         }
 
         # Initialize feature extractor (reuse existing implementations)
@@ -270,6 +279,10 @@ class CausalTextForest(nn.Module):
                 max_length=bert_max_length,
                 dropout=bert_dropout,
                 freeze_encoder=bert_freeze_encoder,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             if bert_gradient_checkpointing:
@@ -286,6 +299,10 @@ class CausalTextForest(nn.Module):
                 max_length=max_length,
                 min_word_freq=min_word_freq,
                 max_vocab_size=max_vocab_size,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
         elif self.feature_extractor_type == "hierarchical_transformer":
@@ -300,6 +317,10 @@ class CausalTextForest(nn.Module):
                 transformer_dim=hier_transformer_dim,
                 transformer_dropout=hier_transformer_dropout,
                 projection_dim=hier_transformer_projection_dim,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
         elif self.feature_extractor_type == "gated_mil_hierarchical":
@@ -317,6 +338,10 @@ class CausalTextForest(nn.Module):
                 hierarchical=gated_mil_hierarchical,
                 token_hidden_dim=gated_mil_token_hidden_dim,
                 use_mean_pooling=gated_mil_use_mean_pooling,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
         elif self.feature_extractor_type == "gru_pool":
@@ -336,6 +361,10 @@ class CausalTextForest(nn.Module):
                 projection_dim=gru_pool_projection_dim,
                 max_vocab_size=gru_pool_max_vocab,
                 min_word_freq=gru_pool_min_word_freq,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
         elif self.feature_extractor_type == "llm":
@@ -345,6 +374,10 @@ class CausalTextForest(nn.Module):
                 projection_dim=llm_projection_dim,
                 dropout=llm_dropout,
                 gradient_checkpointing=llm_gradient_checkpointing,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
         elif self.feature_extractor_type == "cnn":
@@ -359,6 +392,10 @@ class CausalTextForest(nn.Module):
                 max_length=max_length,
                 min_word_freq=min_word_freq,
                 max_vocab_size=max_vocab_size,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
         else:

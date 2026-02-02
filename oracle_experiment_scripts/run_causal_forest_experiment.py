@@ -35,7 +35,7 @@ Usage:
         --gamma-rlearner 1.0
 
 python oracle_experiment_scripts/run_causal_forest_experiment.py         --dataset example_synthetic_data_ten_confounders/dataset_with_extraction.parquet         --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest_with
-_rlearner_gated_mil_ten_confounders         --device cuda:0         --n-folds 5         --cf-n-estimators 200         --epochs 20  --rlearner --gamma-rlearner 1.0 --feature-extractor gated_mil_hierarchicals
+_rlearner_gated_mil_ten_confounders         --device mps         --n-folds 5         --cf-n-estimators 200         --epochs 20  --rlearner --gamma-rlearner 1.0 
 
 """
 
@@ -244,7 +244,8 @@ def train_causal_forest_model(
     learning_rate: float,
     stop_grad_propensity: bool = False,
     use_rlearner_representation: bool = False,
-    gamma_rlearner: float = 1.0
+    gamma_rlearner: float = 1.0,
+    numeric_features: bool = False
 ) -> Tuple[CausalTextForest, List[Dict]]:
     """Train a CausalTextForest model for one fold."""
     text_column = config.text_column
@@ -280,6 +281,7 @@ def train_causal_forest_model(
         # R-learner representation training
         cf_use_rlearner_representation=use_rlearner_representation,
         cf_gamma_rlearner=gamma_rlearner,
+        numeric_features_enabled=numeric_features,
         device=str(device)
     )
 
@@ -464,7 +466,8 @@ def run_condition(
     output_dir: Optional[Path] = None,
     stop_grad_propensity: bool = False,
     use_rlearner_representation: bool = False,
-    gamma_rlearner: float = 1.0
+    gamma_rlearner: float = 1.0,
+    numeric_features: bool = False
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
     """Run cross-validation for one experimental condition."""
     logger.info(f"\n{'='*60}")
@@ -501,7 +504,8 @@ def run_condition(
             epochs, batch_size, learning_rate,
             stop_grad_propensity=stop_grad_propensity,
             use_rlearner_representation=use_rlearner_representation,
-            gamma_rlearner=gamma_rlearner
+            gamma_rlearner=gamma_rlearner,
+            numeric_features=numeric_features
         )
 
         preds = predict_model(model, test_df, config.text_column, batch_size)
@@ -703,6 +707,12 @@ def main():
         default=1.0,
         help="Weight for R-learner loss (only used when --rlearner is set)"
     )
+    parser.add_argument(
+        "--numeric-features",
+        action="store_true",
+        default=False,
+        help="Enable magnitude-aware numeric feature extraction from clinical text"
+    )
 
     args = parser.parse_args()
 
@@ -727,6 +737,7 @@ def main():
     logger.info(f"  R-learner representation: {args.rlearner}")
     if args.rlearner:
         logger.info(f"  gamma_rlearner: {args.gamma_rlearner}")
+    logger.info(f"  Numeric features: {args.numeric_features}")
 
     # Load dataset
     df = pd.read_parquet(args.dataset)
@@ -793,7 +804,8 @@ def main():
                 output_dir=output_dir,
                 stop_grad_propensity=args.stop_grad_propensity,
                 use_rlearner_representation=args.rlearner,
-                gamma_rlearner=args.gamma_rlearner
+                gamma_rlearner=args.gamma_rlearner,
+                numeric_features=args.numeric_features
             )
 
             if metrics:
@@ -844,6 +856,7 @@ def main():
         'stop_grad_propensity': args.stop_grad_propensity,
         'use_rlearner_representation': args.rlearner,
         'gamma_rlearner': args.gamma_rlearner,
+        'numeric_features': args.numeric_features,
         'n_folds': args.n_folds,
         'device': str(device),
         'conditions_run': [c.name for c in conditions if c.name in all_metrics]

@@ -31,6 +31,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .chunking import split_into_chunks_hf
+from .numeric_features import NumericFeatureVector
 
 
 logger = logging.getLogger(__name__)
@@ -115,11 +116,19 @@ class HierarchicalTransformerExtractor(nn.Module):
         transformer_dim: int = 256,
         transformer_dropout: float = 0.1,
         projection_dim: int = 128,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         super().__init__()
 
         self._device = device or torch.device('cpu')
+        self._numeric_features_enabled = numeric_features_enabled
+        self._numeric_embedding_dim = numeric_embedding_dim
+        self._numeric_magnitude_bins = numeric_magnitude_bins
+        self._numeric_type_categories = numeric_type_categories
         self._sentence_encoder_model = sentence_encoder_model
         self._freeze = freeze_sentence_encoder
         self._max_chunks = max_chunks
@@ -200,6 +209,21 @@ class HierarchicalTransformerExtractor(nn.Module):
             nn.Linear(self._transformer_dim, self._projection_dim),
             nn.LayerNorm(self._projection_dim)
         ).to(self._device)
+
+        # Numeric feature vector (merged after [POOL] extraction, before output projection)
+        self._numeric_feature_vector = None
+        self._numeric_merge = None
+        if self._numeric_features_enabled:
+            self._numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=self._numeric_magnitude_bins,
+                num_type_categories=self._numeric_type_categories,
+                output_dim=self._numeric_embedding_dim
+            ).to(self._device)
+            self._numeric_merge = nn.Sequential(
+                nn.Linear(self._transformer_dim + self._numeric_embedding_dim, self._transformer_dim),
+                nn.LayerNorm(self._transformer_dim),
+                nn.ReLU(),
+            ).to(self._device)
 
         self._initialized = True
         logger.info("HierarchicalTransformerExtractor initialization complete")
@@ -306,6 +330,14 @@ class HierarchicalTransformerExtractor(nn.Module):
 
             # 7. Extract [POOL] output (position 0)
             pool_output = sequence[0, 0, :]  # (transformer_dim,)
+
+            # 7.5. Add numeric features if enabled
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([text])  # (1, numeric_dim)
+                pool_output = self._numeric_merge(
+                    torch.cat([pool_output.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
+
             batch_outputs.append(pool_output)
 
         # Stack batch

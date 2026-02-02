@@ -9,6 +9,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from .numeric_features import NumericEmbedding
+
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +259,11 @@ class CNNFeatureExtractor(nn.Module):
         max_length: int = 2048,
         min_word_freq: int = 2,
         max_vocab_size: Optional[int] = 50000,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         """
         Initialize CNN feature extractor.
@@ -275,6 +281,10 @@ class CNNFeatureExtractor(nn.Module):
             min_word_freq: Minimum word frequency to include in vocabulary
             max_vocab_size: Maximum vocabulary size
             device: Device to place model on
+            numeric_features_enabled: Enable numeric feature embeddings
+            numeric_embedding_dim: Dimension of numeric embeddings
+            numeric_magnitude_bins: Number of log-scale magnitude bins
+            numeric_type_categories: Number of numeric type categories
         """
         super().__init__()
 
@@ -372,6 +382,16 @@ class CNNFeatureExtractor(nn.Module):
 
         # Store computed num_filters for reference
         self._num_filters = num_filters
+
+        # Numeric feature embedding (position-aligned)
+        self.numeric_features_enabled = numeric_features_enabled
+        self.numeric_embedding = None
+        if numeric_features_enabled:
+            self.numeric_embedding = NumericEmbedding(
+                num_magnitude_bins=numeric_magnitude_bins,
+                num_type_categories=numeric_type_categories,
+                embedding_dim=embedding_dim
+            )
 
         logger.info(f"CNNFeatureExtractor initialized:")
         logger.info(f"  Embedding dim: {embedding_dim}")
@@ -743,6 +763,13 @@ class CNNFeatureExtractor(nn.Module):
 
         # Embed words: (batch, seq_len) -> (batch, seq_len, embed_dim)
         x = self.embedding(input_ids)
+
+        # Add numeric embeddings if enabled
+        if self.numeric_features_enabled and self.numeric_embedding is not None:
+            numeric_embs = self.numeric_embedding(
+                texts, input_ids, self.tokenizer._tokenize, self.tokenizer.word_to_id
+            )
+            x = x + numeric_embs
 
         # Apply attention mask (zero out padding)
         x = x * attention_mask.unsqueeze(-1).float()

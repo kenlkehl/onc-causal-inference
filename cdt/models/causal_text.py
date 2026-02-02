@@ -191,7 +191,12 @@ class CausalText(nn.Module):
         device: str = "cuda:0",
         model_type: str = "dragonnet",  # "dragonnet", "uplift", or "rlearner"
         # Auxiliary features (for hybrid text + categorical models)
-        auxiliary_dim: int = 0  # Dimension of auxiliary categorical features (0 = no auxiliary)
+        auxiliary_dim: int = 0,  # Dimension of auxiliary categorical features (0 = no auxiliary)
+        # Numeric feature args
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10,
     ):
         """
         Initialize causal inference model with CNN, BERT, or GRU feature extractor.
@@ -351,7 +356,11 @@ class CausalText(nn.Module):
             'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
             'dragonnet_dropout': dragonnet_dropout,
             'model_type': model_type,
-            'auxiliary_dim': auxiliary_dim
+            'auxiliary_dim': auxiliary_dim,
+            'numeric_features_enabled': numeric_features_enabled,
+            'numeric_embedding_dim': numeric_embedding_dim,
+            'numeric_magnitude_bins': numeric_magnitude_bins,
+            'numeric_type_categories': numeric_type_categories,
         }
 
         # Store auxiliary dimension
@@ -365,6 +374,10 @@ class CausalText(nn.Module):
                 max_length=bert_max_length,
                 dropout=bert_dropout,
                 freeze_encoder=bert_freeze_encoder,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             if bert_gradient_checkpointing:
@@ -382,6 +395,10 @@ class CausalText(nn.Module):
                 max_length=max_length,
                 min_word_freq=min_word_freq,
                 max_vocab_size=max_vocab_size,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Using GRU feature extractor: {gru_num_layers} layers, "
@@ -408,6 +425,10 @@ class CausalText(nn.Module):
                     value_dim=confounder_value_dim,
                     dropout=confounder_dropout,
                     model_type=model_type,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
                     device=self._device
                 )
                 logger.info(f"Using GRU Hierarchical Confounder feature extractor: {confounder_num_latents} latents, "
@@ -429,6 +450,10 @@ class CausalText(nn.Module):
                     top_k=confounder_top_k,
                     dropout=confounder_dropout,
                     model_type=model_type,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
                     device=self._device
                 )
                 logger.info(f"Using Hierarchical Confounder feature extractor: {confounder_num_latents} latents, "
@@ -450,6 +475,10 @@ class CausalText(nn.Module):
                     sparse_alpha=confounder_sparse_alpha,
                     top_k=confounder_top_k,
                     dropout=confounder_dropout,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
                     device=self._device
                 )
                 logger.info(f"Using Confounder feature extractor: {confounder_num_latents} latents, "
@@ -467,6 +496,10 @@ class CausalText(nn.Module):
                 transformer_dim=hier_transformer_dim,
                 transformer_dropout=hier_transformer_dropout,
                 projection_dim=hier_transformer_projection_dim,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Using Hierarchical Transformer feature extractor: {hier_transformer_sentence_model}, "
@@ -488,6 +521,10 @@ class CausalText(nn.Module):
                 hierarchical=gated_mil_hierarchical,
                 token_hidden_dim=gated_mil_token_hidden_dim,
                 use_mean_pooling=gated_mil_use_mean_pooling,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Using Gated MIL Hierarchical feature extractor: {gated_mil_sentence_model}, "
@@ -513,6 +550,10 @@ class CausalText(nn.Module):
                 max_vocab_size=gru_mil_max_vocab,
                 min_word_freq=gru_mil_min_word_freq,
                 model_type=model_type,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Using GRU-Transformer-MIL feature extractor: "
@@ -537,6 +578,10 @@ class CausalText(nn.Module):
                 projection_dim=gru_pool_projection_dim,
                 max_vocab_size=gru_pool_max_vocab,
                 min_word_freq=gru_pool_min_word_freq,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Using GRU-Pool feature extractor: "
@@ -551,6 +596,10 @@ class CausalText(nn.Module):
                 projection_dim=llm_projection_dim,
                 dropout=llm_dropout,
                 gradient_checkpointing=llm_gradient_checkpointing,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info(f"Using LLM feature extractor: {llm_model_name} (random init), "
@@ -568,6 +617,10 @@ class CausalText(nn.Module):
                 max_length=max_length,
                 min_word_freq=min_word_freq,
                 max_vocab_size=max_vocab_size,
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
                 device=self._device
             )
             logger.info("Using CNN feature extractor")

@@ -8,6 +8,8 @@ import torch.nn as nn
 
 from transformers import AutoTokenizer, AutoModel
 
+from .numeric_features import NumericFeatureVector
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +41,11 @@ class BertFeatureExtractor(nn.Module):
         max_length: int = 512,
         dropout: float = 0.1,
         freeze_encoder: bool = False,
-        device: Optional[torch.device] = None
+        device: Optional[torch.device] = None,
+        numeric_features_enabled: bool = False,
+        numeric_embedding_dim: int = 32,
+        numeric_magnitude_bins: int = 8,
+        numeric_type_categories: int = 10
     ):
         """
         Initialize BERT feature extractor.
@@ -98,6 +104,25 @@ class BertFeatureExtractor(nn.Module):
 
         # Dropout for CLS embedding (before projection)
         self.dropout = nn.Dropout(dropout)
+
+        # Numeric feature vector (concatenated to output)
+        self.numeric_features_enabled = numeric_features_enabled
+        self._numeric_dim = 0
+        self.numeric_feature_vector = None
+        if numeric_features_enabled:
+            self._numeric_dim = numeric_embedding_dim
+            self.numeric_feature_vector = NumericFeatureVector(
+                num_magnitude_bins=numeric_magnitude_bins,
+                num_type_categories=numeric_type_categories,
+                output_dim=numeric_embedding_dim
+            )
+            # Projection to merge text + numeric features back to output_dim
+            base_dim = projection_dim if projection_dim is not None else self._hidden_size
+            self.numeric_merge = nn.Sequential(
+                nn.Linear(base_dim + numeric_embedding_dim, base_dim),
+                nn.LayerNorm(base_dim),
+                nn.ReLU(),
+            )
 
         logger.info(f"BertFeatureExtractor initialized:")
         logger.info(f"  Model: {model_name}")
@@ -166,6 +191,11 @@ class BertFeatureExtractor(nn.Module):
             features = self.projection(cls_embedding)
         else:
             features = cls_embedding
+
+        # Add numeric features if enabled
+        if self.numeric_features_enabled and self.numeric_feature_vector is not None:
+            numeric_feats = self.numeric_feature_vector(texts)
+            features = self.numeric_merge(torch.cat([features, numeric_feats], dim=1))
 
         return features
 

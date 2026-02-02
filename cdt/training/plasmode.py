@@ -421,6 +421,11 @@ def _train_cnn_model(
         llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
         llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
         llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
+        # Numeric feature args
+        numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
+        numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
+        numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
+        numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
