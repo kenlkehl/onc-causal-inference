@@ -1,0 +1,26 @@
+{
+  "dragonnet": {
+    "model_type": "dragonnet",
+    "final_train_loss": 1.109451397061348,
+    "propensity_auroc": 0.8299668375037684,
+    "ite_correlation": -0.08745153954619794,
+    "ite_mae": 0.32191143450279475,
+    "mean_pred_ite": "-0.07089117",
+    "std_pred_ite": "0.30818096",
+    "mean_true_ite": -0.0011159865488849768,
+    "std_true_ite": 0.24136199298817626,
+    "y0_auroc": 0.6784897025171625,
+    "y1_auroc": 0.6810506566604128
+  },
+  "causal_forest": {
+    "model_type": "causal_forest",
+    "ite_correlation": 0.2724386802944429,
+    "ite_mae": 0.1822876956013896,
+    "mean_pred_ite": -0.02621841797234926,
+    "std_pred_ite": 0.054376391518104014,
+    "mean_true_ite": -0.0011159865488849768,
+    "std_true_ite": 0.24136199298817626,
+    "ci_coverage": 0.64,
+    "mean_ci_width": 0.42628376261750306
+  }
+}

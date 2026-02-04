@@ -12,6 +12,9 @@ cdt/
 ├── config.py              # Dataclass configs
 ├── data/dataset.py        # ClinicalTextDataset
 ├── experiments/runner.py  # Orchestrates inference & plasmode
+├── extraction/
+│   ├── explicit_confounders.py   # LLM-based confounder extraction via vLLM
+│   └── cache.py                  # Extraction result caching
 ├── inference/
 │   ├── applied.py         # Applied inference (CV or fixed split)
 │   └── applied_forest.py  # Causal forest inference pipeline
@@ -22,6 +25,7 @@ cdt/
 │   ├── cnn_extractor.py, bert_extractor.py, gru_extractor.py
 │   ├── llm_extractor.py                  # Decoder-only LLM with random init
 │   ├── numeric_features.py               # Numeric value featurization (magnitude + type)
+│   ├── explicit_confounder_featurizer.py # MLP featurization of extracted confounders
 │   ├── chunking.py                       # Token-based text chunking utilities
 │   ├── confounder_extractor.py           # Perceiver-style sparse attention
 │   ├── hierarchical_transformer_extractor.py
@@ -272,6 +276,104 @@ adds magnitude-aware numeric featurization as a parallel channel to all extracto
 
 When `numeric_features_enabled` is `False` (default), there is no behavior change to any extractor.
 
+## Explicit Confounder Extraction
+
+Researchers can specify explicit confounder variables to be extracted from clinical text using an LLM
+(via vLLM). The extracted confounders are featurized and concatenated to text embeddings before the
+causal heads.
+
+### How It Works
+
+```
+1. Config specifies explicit confounders (name, type, categories)
+2. vLLM extracts confounders from clinical text (preprocessing step)
+3. Generates structured values per patient with missingness flags
+4. ExplicitConfounderFeaturizer MLP encodes confounders
+5. Concatenated to text feature extractor output
+6. Combined representation -> Causal heads (DragonNet, R-Learner, etc.)
+
+For Causal Forest: Raw confounder features added directly to neural features
+```
+
+### Confounder Specification
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Confounder name (e.g., "performance_status") |
+| `type` | string | "categorical" or "continuous" |
+| `categories` | list | Valid categories for categorical (e.g., ["0", "1", "2", "3", "4"]) |
+| `description` | string | Description used in LLM prompt |
+
+### vLLM Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `server` | Connect to running vLLM OpenAI-compatible server | Production, shared infrastructure |
+| `start_server` | Start vLLM server subprocess, then connect | Batch jobs with cleanup |
+| `python_api` | Use vLLM Python API directly (in-process) | Single-run experiments |
+
+### Config Parameters
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `enabled` | Enable explicit confounder extraction | `False` |
+| `confounders` | List of ExplicitConfounderSpec | `[]` |
+| `vllm_mode` | "server", "start_server", or "python_api" | `"server"` |
+| `vllm_server_url` | URL for vLLM server | `"http://localhost:8000/v1"` |
+| `vllm_model_name` | Model name for extraction | `"Qwen/Qwen2.5-7B-Instruct"` |
+| `vllm_tensor_parallel_size` | Number of GPUs | `1` |
+| `extraction_batch_size` | Batch size for extraction | `32` |
+| `extraction_max_retries` | Retries before marking missing | `3` |
+| `cache_enabled` | Cache extraction results | `True` |
+| `featurizer_output_dim` | MLP output dimension | `64` |
+| `featurizer_hidden_dim` | MLP hidden dimension | `128` |
+
+### Example Config
+
+```json
+{
+  "explicit_confounders": {
+    "enabled": true,
+    "confounders": [
+      {
+        "name": "performance_status",
+        "type": "categorical",
+        "categories": ["0", "1", "2", "3", "4"],
+        "description": "ECOG performance status"
+      },
+      {
+        "name": "age_at_diagnosis",
+        "type": "continuous",
+        "description": "Patient age at diagnosis in years"
+      }
+    ],
+    "vllm_mode": "python_api",
+    "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
+    "cache_enabled": true,
+    "featurizer_output_dim": 64
+  }
+}
+```
+
+### Featurization
+
+For **neural models** (DragonNet, R-Learner, etc.):
+- Categorical: k-1 dummy variables (reference coding)
+- Continuous: Z-score normalized
+- Missingness: Binary indicator per confounder
+- MLP projection to `featurizer_output_dim`
+
+For **Causal Forest**:
+- Raw features (no MLP) for interpretability
+- One-hot categoricals + normalized continuous + missingness indicators
+
+### Caching
+
+Extraction results are cached to avoid redundant LLM calls:
+- Cache keyed by: dataset path hash + extraction config hash
+- Cache location: `{dataset_dir}/.cdt_cache/extraction_{hash}.parquet`
+- Invalidated automatically if config changes
+
 ## CLAM Instance-Level Loss
 
 CLAM-style (Lu et al., Nature BME 2021) instance-level supervision is available for all hierarchical
@@ -454,6 +556,7 @@ output_dir/
 | Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
 | Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `llm_extractor.py` |
 | Numeric features | `cdt/models/numeric_features.py` |
+| Explicit confounders | `cdt/extraction/explicit_confounders.py`, `cdt/extraction/cache.py`, `cdt/models/explicit_confounder_featurizer.py` |
 | Text chunking | `cdt/models/chunking.py` |
 | Training | `cdt/inference/applied.py`, `cdt/inference/applied_forest.py` |
 | Config | `cdt/config.py` |
@@ -463,7 +566,7 @@ output_dir/
 
 **Core**: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow, econml
 
-**Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided)
+**Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided), vllm (explicit confounder extraction)
 
 **Device support**: CUDA (NVIDIA GPUs), MPS (Apple Silicon M1/M2/M3), CPU
 

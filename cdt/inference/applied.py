@@ -15,7 +15,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig, normalize_feature_extractor_type
+from ..config import AppliedInferenceConfig, normalize_feature_extractor_type, ExplicitConfounderSpec
 from ..models.causal_text import CausalText
 from ..data import (
     ClinicalTextDataset,
@@ -23,6 +23,7 @@ from ..data import (
     load_dataset
 )
 from ..utils import cuda_cleanup, get_memory_info
+from ..extraction import VLLMConfounderExtractor, ExtractionCache
 
 # Import forest inference (lazy to avoid import errors if econml not installed)
 def _get_forest_inference():
@@ -31,6 +32,114 @@ def _get_forest_inference():
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_explicit_confounder_specs(config: AppliedInferenceConfig) -> Optional[List[ExplicitConfounderSpec]]:
+    """Get explicit confounder specs from config if enabled."""
+    if hasattr(config, 'explicit_confounders') and config.explicit_confounders.enabled:
+        return config.explicit_confounders.confounders
+    return None
+
+
+def _run_explicit_confounder_extraction(
+    dataset: pd.DataFrame,
+    config: AppliedInferenceConfig,
+    output_path: Path
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Run LLM-based explicit confounder extraction as a preprocessing step.
+
+    Args:
+        dataset: Input DataFrame with clinical text
+        config: Configuration with explicit_confounders settings
+        output_path: Output path (used for cache location)
+
+    Returns:
+        Tuple of (enriched_dataset, confounder_column_names)
+    """
+    logger.info("=" * 80)
+    logger.info("EXPLICIT CONFOUNDER EXTRACTION (LLM)")
+    logger.info("=" * 80)
+
+    conf_config = config.explicit_confounders
+    specs = conf_config.confounders
+
+    logger.info(f"Extracting {len(specs)} confounders: {[s.name for s in specs]}")
+    logger.info(f"vLLM mode: {conf_config.vllm_mode}, model: {conf_config.vllm_model_name}")
+
+    # Check cache
+    cache = ExtractionCache(cache_dir=conf_config.cache_dir)
+    cache_config = {
+        'confounders': specs,
+        'vllm_model_name': conf_config.vllm_model_name,
+        'extraction_temperature': conf_config.extraction_temperature,
+        'extraction_max_tokens': conf_config.extraction_max_tokens,
+    }
+
+    cached_df = None
+    if conf_config.cache_enabled:
+        cached_df = cache.load_if_valid(
+            config.dataset_path,
+            cache_config,
+            expected_rows=len(dataset)
+        )
+
+    if cached_df is not None:
+        logger.info("Using cached extraction results")
+        # Merge cached columns into dataset
+        confounder_columns = [f"explicit_conf_{s.name}" for s in specs]
+        for col in cached_df.columns:
+            dataset[col] = cached_df[col].values
+        return dataset, confounder_columns
+
+    # Run extraction
+    logger.info(f"Running LLM extraction on {len(dataset)} texts...")
+    texts = dataset[config.text_column].tolist()
+
+    extractor = VLLMConfounderExtractor(
+        specs=specs,
+        mode=conf_config.vllm_mode,
+        server_url=conf_config.vllm_server_url or "http://localhost:8000/v1",
+        model_name=conf_config.vllm_model_name,
+        tensor_parallel_size=conf_config.vllm_tensor_parallel_size,
+        gpu_memory_utilization=conf_config.vllm_gpu_memory_utilization,
+        download_dir=conf_config.vllm_download_dir,
+        max_retries=conf_config.extraction_max_retries,
+        temperature=conf_config.extraction_temperature,
+        max_tokens=conf_config.extraction_max_tokens
+    )
+
+    try:
+        extracted_df = extractor.extract_to_dataframe(
+            texts,
+            batch_size=conf_config.extraction_batch_size
+        )
+    finally:
+        extractor.cleanup()
+
+    # Merge extracted columns into dataset
+    confounder_columns = [f"explicit_conf_{s.name}" for s in specs]
+    for col in extracted_df.columns:
+        dataset[col] = extracted_df[col].values
+
+    # Log extraction statistics
+    for spec in specs:
+        col = f"explicit_conf_{spec.name}"
+        missing_col = f"{col}_missing"
+        if missing_col in dataset.columns:
+            missing_count = dataset[missing_col].sum()
+            logger.info(f"  {spec.name}: {len(dataset) - missing_count}/{len(dataset)} extracted "
+                       f"({missing_count} missing)")
+
+    # Save cache
+    if conf_config.cache_enabled:
+        cache.save(config.dataset_path, cache_config, extracted_df)
+
+    logger.info("=" * 80)
+    logger.info("CONTINUING WITH MODEL TRAINING")
+    logger.info("=" * 80)
+
+    return dataset, confounder_columns
 
 
 def run_applied_inference(
@@ -64,6 +173,13 @@ def run_applied_inference(
         save_confounder_interpretations: Whether to save confounder attention analysis
         confounder_interpretation_top_k: Number of top-attended sentences per confounder
     """
+    # Explicit confounder extraction (if enabled)
+    explicit_confounder_columns = None
+    if hasattr(config, 'explicit_confounders') and config.explicit_confounders.enabled:
+        dataset, explicit_confounder_columns = _run_explicit_confounder_extraction(
+            dataset, config, output_path
+        )
+
     # Route to causal forest inference if model_type is "causal_forest"
     if hasattr(config, 'architecture') and config.architecture.model_type == "causal_forest":
         logger.info("Routing to Causal Forest inference pipeline")
@@ -73,7 +189,8 @@ def run_applied_inference(
             config=config,
             output_path=output_path,
             device=device,
-            num_workers=num_workers
+            num_workers=num_workers,
+            explicit_confounder_columns=explicit_confounder_columns
         )
         return
 
@@ -157,13 +274,15 @@ def run_applied_inference(
         _run_cv_inference(
             dataset, config, output_path, device, gpu_ids, num_workers,
             save_filter_interpretations, filter_interpretation_top_k,
-            save_confounder_interpretations, confounder_interpretation_top_k
+            save_confounder_interpretations, confounder_interpretation_top_k,
+            explicit_confounder_columns=explicit_confounder_columns
         )
     else:
         _run_fixed_split_inference(
             dataset, config, output_path, device,
             save_filter_interpretations, filter_interpretation_top_k,
-            save_confounder_interpretations, confounder_interpretation_top_k
+            save_confounder_interpretations, confounder_interpretation_top_k,
+            explicit_confounder_columns=explicit_confounder_columns
         )
 
 
@@ -177,7 +296,8 @@ def _run_cv_inference(
     save_filter_interpretations: bool = False,
     filter_interpretation_top_k: int = 10,
     save_confounder_interpretations: bool = False,
-    confounder_interpretation_top_k: int = 5
+    confounder_interpretation_top_k: int = 5,
+    explicit_confounder_columns: Optional[List[str]] = None
 ) -> None:
     """Run K-Fold Cross-Validation inference."""
     k = config.cv_folds
@@ -202,7 +322,8 @@ def _run_cv_inference(
         results = Parallel(n_jobs=num_workers)(
             delayed(_process_fold)(
                 fold, train_idx, test_idx, dataset, config,
-                devices[fold % len(devices)]
+                devices[fold % len(devices)],
+                explicit_confounder_columns=explicit_confounder_columns
             )
             for fold, (train_idx, test_idx) in enumerate(splits)
         )
@@ -211,7 +332,8 @@ def _run_cv_inference(
         for fold, (train_idx, test_idx) in enumerate(splits):
             results.append(_process_fold(
                 fold, train_idx, test_idx, dataset, config,
-                devices[0]
+                devices[0],
+                explicit_confounder_columns=explicit_confounder_columns
             ))
 
     # Unpack results
@@ -267,7 +389,8 @@ def _process_fold(
     test_idx: np.ndarray,
     dataset: pd.DataFrame,
     config: AppliedInferenceConfig,
-    device: torch.device
+    device: torch.device,
+    explicit_confounder_columns: Optional[List[str]] = None
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """Process a single fold (can be run in parallel)."""
     # Re-configure logger for worker process
@@ -281,14 +404,20 @@ def _process_fold(
     test_df = dataset.iloc[test_idx]
 
     # 2. Train Model on this fold
-    model, history = _train_single_model(train_df, test_df, config, device)
+    model, history = _train_single_model(
+        train_df, test_df, config, device,
+        explicit_confounder_columns=explicit_confounder_columns
+    )
 
     # Log History
     for entry in history:
         entry['fold'] = fold + 1
 
     # 3. Predict on Held-out Test fold
-    preds = _predict_dataset(model, test_df, config, device)
+    preds = _predict_dataset(
+        model, test_df, config, device,
+        explicit_confounder_columns=explicit_confounder_columns
+    )
 
     # 4. Store predictions with indices to reconstruct dataframe
     preds_df = test_df.copy()
@@ -330,7 +459,8 @@ def _run_fixed_split_inference(
     save_filter_interpretations: bool = False,
     filter_interpretation_top_k: int = 10,
     save_confounder_interpretations: bool = False,
-    confounder_interpretation_top_k: int = 5
+    confounder_interpretation_top_k: int = 5,
+    explicit_confounder_columns: Optional[List[str]] = None
 ) -> None:
     """Run inference using fixed train/val/test splits."""
     logger.info("Running Fixed Split Inference (Train/Val/Test)")
@@ -343,7 +473,10 @@ def _run_fixed_split_inference(
     logger.info(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
     # Train
-    model, history = _train_single_model(train_df, val_df, config, device)
+    model, history = _train_single_model(
+        train_df, val_df, config, device,
+        explicit_confounder_columns=explicit_confounder_columns
+    )
 
     # Save training logs
     log_path = output_path.parent / "training_log.csv"
@@ -367,7 +500,10 @@ def _run_fixed_split_inference(
 
     # Predict on Test
     logger.info("Generating predictions on test set...")
-    preds = _predict_dataset(model, test_df, config, device)
+    preds = _predict_dataset(
+        model, test_df, config, device,
+        explicit_confounder_columns=explicit_confounder_columns
+    )
 
     # Combine predictions (probability scale, pred_* prefix indicates predicted values)
     results_df = test_df.copy()
@@ -383,7 +519,8 @@ def _train_single_model(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     config: AppliedInferenceConfig,
-    device: torch.device
+    device: torch.device,
+    explicit_confounder_columns: Optional[List[str]] = None
 ) -> Tuple[CausalText, List[Dict[str, Any]]]:
     """Train a single model instance (CNN or BERT feature extractor)."""
     arch_config = config.architecture
@@ -490,6 +627,11 @@ def _train_single_model(
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
         numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
         numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
+        # Explicit confounder featurizer args
+        explicit_confounder_specs=_get_explicit_confounder_specs(config) if explicit_confounder_columns else None,
+        explicit_confounder_output_dim=getattr(config.explicit_confounders, 'featurizer_output_dim', 64) if hasattr(config, 'explicit_confounders') else 64,
+        explicit_confounder_hidden_dim=getattr(config.explicit_confounders, 'featurizer_hidden_dim', 128) if hasattr(config, 'explicit_confounders') else 128,
+        explicit_confounder_dropout=getattr(config.explicit_confounders, 'featurizer_dropout', 0.1) if hasattr(config, 'explicit_confounders') else 0.1,
         # DragonNet args
         dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
         dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
@@ -571,19 +713,36 @@ def _train_single_model(
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
 
+    # Fit explicit confounder featurizer if specs provided
+    if explicit_confounder_columns and model.explicit_confounder_featurizer is not None:
+        # Extract confounder values from training data for fitting normalization stats
+        train_confounder_values = []
+        for idx in range(len(train_df)):
+            row_values = {}
+            for col in explicit_confounder_columns:
+                row_values[col] = train_df[col].iloc[idx]
+                missing_col = f"{col}_missing"
+                if missing_col in train_df.columns:
+                    row_values[f"{col}_missing"] = train_df[missing_col].iloc[idx]
+            train_confounder_values.append(row_values)
+        model.fit_explicit_confounder_featurizer(train_confounder_values)
+        logger.info(f"Fitted explicit confounder featurizer on {len(train_confounder_values)} training samples")
+
     # Create datasets
     train_dataset = ClinicalTextDataset(
         data=train_df,
         text_column=config.text_column,
         outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
+        treatment_column=config.treatment_column,
+        explicit_confounder_columns=explicit_confounder_columns
     )
 
     val_dataset = ClinicalTextDataset(
         data=val_df,
         text_column=config.text_column,
         outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
+        treatment_column=config.treatment_column,
+        explicit_confounder_columns=explicit_confounder_columns
     )
 
     # Create data loaders
@@ -666,14 +825,16 @@ def _predict_dataset(
     model: CausalText,
     df: pd.DataFrame,
     config: AppliedInferenceConfig,
-    device: torch.device
+    device: torch.device,
+    explicit_confounder_columns: Optional[List[str]] = None
 ) -> dict:
     """Generate predictions for a dataframe."""
     dataset = ClinicalTextDataset(
         data=df,
         text_column=config.text_column,
         outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
+        treatment_column=config.treatment_column,
+        explicit_confounder_columns=explicit_confounder_columns
     )
 
     loader = DataLoader(
@@ -853,8 +1014,9 @@ def _generate_predictions(
     with torch.no_grad():
         for batch in tqdm(loader, desc="Predicting", leave=False):
             texts = batch['texts']
+            explicit_confounder_values = batch.get('explicit_confounder_values', None)
 
-            preds = model.predict(texts)
+            preds = model.predict(texts, explicit_confounder_values=explicit_confounder_values)
 
             all_y0.append(preds['y0_logit'].cpu().numpy())
             all_y1.append(preds['y1_logit'].cpu().numpy())

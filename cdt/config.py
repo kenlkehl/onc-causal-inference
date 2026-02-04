@@ -9,6 +9,63 @@ import hashlib
 
 
 # =============================================================================
+# EXPLICIT CONFOUNDER EXTRACTION CONFIGURATION
+# =============================================================================
+
+@dataclass
+class ExplicitConfounderSpec:
+    """Specification for a single explicit confounder to extract from clinical text."""
+    name: str  # e.g., "performance_status"
+    type: str  # "categorical" or "continuous"
+    categories: Optional[List[str]] = None  # For categorical only (e.g., ["0", "1", "2", "3", "4"])
+    description: Optional[str] = None  # Used in LLM prompt (e.g., "ECOG performance status")
+
+    def __post_init__(self):
+        if self.type not in ("categorical", "continuous"):
+            raise ValueError(f"type must be 'categorical' or 'continuous', got '{self.type}'")
+        if self.type == "categorical" and not self.categories:
+            raise ValueError(f"categories required for categorical confounder '{self.name}'")
+
+
+@dataclass
+class ExplicitConfounderExtractionConfig:
+    """Configuration for LLM-based confounder extraction from clinical text.
+
+    This enables extraction of explicit confounder variables (e.g., performance status,
+    disease stage) from unstructured clinical text using an LLM. The extracted values
+    are then featurized and concatenated to text embeddings before the causal head.
+    """
+    enabled: bool = False
+    confounders: List[ExplicitConfounderSpec] = field(default_factory=list)
+
+    # vLLM mode: "server", "start_server", or "python_api"
+    # - "server": Connect to running vLLM OpenAI-compatible server
+    # - "start_server": Start vLLM server subprocess for the job, then connect
+    # - "python_api": Use vLLM Python API directly (no server, in-process)
+    vllm_mode: str = "server"
+    vllm_server_url: Optional[str] = "http://localhost:8000/v1"
+    vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+    vllm_tensor_parallel_size: int = 1
+    vllm_gpu_memory_utilization: float = 0.9
+    vllm_download_dir: Optional[str] = None  # Model download directory
+
+    # Extraction settings
+    extraction_batch_size: int = 32
+    extraction_max_retries: int = 3  # Retries per patient before marking as missing
+    extraction_temperature: float = 0.0  # LLM temperature (0 for deterministic)
+    extraction_max_tokens: int = 1024  # Max tokens for LLM response
+
+    # Caching
+    cache_enabled: bool = True  # Cache extraction results to disk
+    cache_dir: Optional[str] = None  # Directory for cache files (default: alongside dataset)
+
+    # Featurizer settings (for neural models only)
+    featurizer_output_dim: int = 64
+    featurizer_hidden_dim: int = 128
+    featurizer_dropout: float = 0.1
+
+
+# =============================================================================
 # MATCHING ANALYSIS CONFIGURATION (used as post-hoc analysis with DragonNet)
 # =============================================================================
 
@@ -440,6 +497,9 @@ class AppliedInferenceConfig:
     # PSM analysis configuration (uses DragonNet's propensity scores)
     matching_analysis: MatchingAnalysisConfig = field(default_factory=MatchingAnalysisConfig)
 
+    # Explicit confounder extraction configuration (LLM-based)
+    explicit_confounders: ExplicitConfounderExtractionConfig = field(default_factory=ExplicitConfounderExtractionConfig)
+
 
 @dataclass
 class PlasmodeExperimentConfig:
@@ -455,6 +515,9 @@ class PlasmodeExperimentConfig:
     plasmode_scenarios: List[PlasmodeConfig] = field(default_factory=list)
     propensity_trimming: PropensityTrimmingConfig = field(default_factory=PropensityTrimmingConfig)
     oracle_mode: bool = False  # If True, evaluator sees generator's exact features
+
+    # Explicit confounder extraction configuration (LLM-based)
+    explicit_confounders: ExplicitConfounderExtractionConfig = field(default_factory=ExplicitConfounderExtractionConfig)
 
 
 @dataclass
@@ -504,12 +567,25 @@ class ExperimentConfig:
                 arch_data['causal_forest'] = CausalForestConfig(**arch_data['causal_forest'])
             return ModelArchitectureConfig(**arch_data)
 
+        def parse_explicit_confounders_config(conf_data: Dict[str, Any]) -> ExplicitConfounderExtractionConfig:
+            """Parse explicit confounders config, handling nested confounder specs."""
+            if not conf_data:
+                return ExplicitConfounderExtractionConfig()
+            conf_data = conf_data.copy()
+            if 'confounders' in conf_data and isinstance(conf_data['confounders'], list):
+                conf_data['confounders'] = [
+                    ExplicitConfounderSpec(**c) if isinstance(c, dict) else c
+                    for c in conf_data['confounders']
+                ]
+            return ExplicitConfounderExtractionConfig(**conf_data)
+
         applied = AppliedInferenceConfig(
             **{k: parse_architecture_config(v) if k == 'architecture'
                else TrainingConfig(**v) if k == 'training'
                else PropensityTrimmingConfig(**v) if k == 'propensity_trimming'
                else OutcomeModelConfig(**v) if k == 'outcome_model'
                else MatchingAnalysisConfig(**v) if k == 'matching_analysis'
+               else parse_explicit_confounders_config(v) if k == 'explicit_confounders'
                else v
                for k, v in data.get('applied_inference', {}).items()}
         )
@@ -526,7 +602,8 @@ class ExperimentConfig:
             evaluator_training=TrainingConfig(**plasmode_data.get('evaluator_training', {})),
             plasmode_scenarios=[PlasmodeConfig(**s) for s in plasmode_data.get('plasmode_scenarios', [])],
             propensity_trimming=PropensityTrimmingConfig(**plasmode_data.get('propensity_trimming', {})),
-            oracle_mode=plasmode_data.get('oracle_mode', False)
+            oracle_mode=plasmode_data.get('oracle_mode', False),
+            explicit_confounders=parse_explicit_confounders_config(plasmode_data.get('explicit_confounders', {}))
         )
 
         return cls(

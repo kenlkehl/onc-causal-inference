@@ -1,0 +1,80 @@
+{
+  "output_dir": "./cdt_results_explicit_confounders",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 1,
+
+  "applied_inference": {
+    "dataset_path": "./dataset.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "cv_folds": 5,
+
+    "explicit_confounders": {
+      "enabled": true,
+      "confounders": [
+        {
+          "name": "performance_status",
+          "type": "categorical",
+          "categories": ["0", "1", "2", "3", "4"],
+          "description": "ECOG performance status (0=fully active, 4=bedridden)"
+        },
+        {
+          "name": "age_at_diagnosis",
+          "type": "continuous",
+          "description": "Patient age at diagnosis in years"
+        },
+        {
+          "name": "disease_stage",
+          "type": "categorical",
+          "categories": ["I", "II", "III", "IV"],
+          "description": "Cancer stage at diagnosis (I-IV)"
+        },
+        {
+          "name": "bmi",
+          "type": "continuous",
+          "description": "Body mass index"
+        }
+      ],
+      "vllm_mode": "python_api",
+      "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
+      "vllm_tensor_parallel_size": 1,
+      "vllm_gpu_memory_utilization": 0.9,
+      "extraction_batch_size": 32,
+      "extraction_max_retries": 3,
+      "extraction_temperature": 0.0,
+      "extraction_max_tokens": 1024,
+      "cache_enabled": true,
+      "featurizer_output_dim": 64,
+      "featurizer_hidden_dim": 128,
+      "featurizer_dropout": 0.1
+    },
+
+    "architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "gru_pool",
+      "gru_pool_embedding_dim": 128,
+      "gru_pool_gru_hidden_dim": 128,
+      "gru_pool_transformer_layers": 2,
+      "gru_pool_max_chunks": 100,
+      "gru_pool_chunk_size": 128,
+      "dragonnet_representation_dim": 128,
+      "dragonnet_hidden_outcome_dim": 64
+    },
+
+    "training": {
+      "epochs": 30,
+      "batch_size": 16,
+      "learning_rate": 0.0005,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1,
+      "gamma_rlearner": 1.0,
+      "stop_grad_propensity": false
+    }
+  },
+
+  "plasmode_experiments": {
+    "enabled": false
+  }
+}

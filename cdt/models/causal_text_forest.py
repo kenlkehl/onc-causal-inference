@@ -18,7 +18,8 @@ from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
 from .llm_extractor import LLMFeatureExtractor
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
-from ..config import normalize_feature_extractor_type
+from .explicit_confounder_featurizer import get_raw_confounder_features
+from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
 
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,8 @@ class CausalTextForest(nn.Module):
         numeric_embedding_dim: int = 32,
         numeric_magnitude_bins: int = 8,
         numeric_type_categories: int = 10,
+        # Explicit confounder args (raw features, no MLP)
+        explicit_confounder_specs: Optional[List[ExplicitConfounderSpec]] = None,
         # Device
         device: str = "cuda:0"
     ):
@@ -269,7 +272,29 @@ class CausalTextForest(nn.Module):
             'numeric_embedding_dim': numeric_embedding_dim,
             'numeric_magnitude_bins': numeric_magnitude_bins,
             'numeric_type_categories': numeric_type_categories,
+            'explicit_confounder_specs': explicit_confounder_specs,
         }
+
+        # Explicit confounder support (raw features for interpretability)
+        self.explicit_confounder_specs = explicit_confounder_specs or []
+        self._explicit_confounder_means = {}
+        self._explicit_confounder_stds = {}
+        self._explicit_confounders_fitted = False
+
+        if self.explicit_confounder_specs:
+            # Calculate raw feature dimension
+            raw_dim = 0
+            for spec in self.explicit_confounder_specs:
+                if spec.type == "categorical":
+                    n_cats = len(spec.categories) if spec.categories else 2
+                    raw_dim += (n_cats - 1) + 1  # k-1 dummies + missing
+                else:
+                    raw_dim += 2  # value + missing
+            self._explicit_confounder_raw_dim = raw_dim
+            logger.info(f"Explicit confounders: {len(self.explicit_confounder_specs)} specs, "
+                       f"raw feature dim: {raw_dim}")
+        else:
+            self._explicit_confounder_raw_dim = 0
 
         # Initialize feature extractor (reuse existing implementations)
         if self.feature_extractor_type == "bert":
@@ -569,10 +594,30 @@ class CausalTextForest(nn.Module):
             'outcome_logit': outcome_logit.detach()
         }
 
+    # Alias for API consistency with CausalText
+    def train_step(
+        self,
+        batch: Dict[str, Any],
+        alpha_propensity: float = 1.0,
+        gamma_rlearner: float = 1.0,
+        label_smoothing: float = 0.0,
+        stop_grad_propensity: bool = False,
+        **kwargs  # Ignore extra args like beta_targreg for compatibility
+    ) -> Dict[str, torch.Tensor]:
+        """Alias for train_representation_step for API consistency."""
+        return self.train_representation_step(
+            batch=batch,
+            alpha_propensity=alpha_propensity,
+            gamma_rlearner=gamma_rlearner,
+            label_smoothing=label_smoothing,
+            stop_grad_propensity=stop_grad_propensity
+        )
+
     def extract_features(
         self,
         texts: List[str],
-        batch_size: int = 32
+        batch_size: int = 32,
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract features and nuisance predictions for all texts.
@@ -580,9 +625,12 @@ class CausalTextForest(nn.Module):
         Args:
             texts: List of all text strings
             batch_size: Batch size for processing
+            explicit_confounder_values: Optional list of dicts with confounder values.
+                If provided and explicit_confounder_specs is set, raw confounder features
+                are concatenated to neural features.
 
         Returns:
-            features: Feature matrix (n_samples, feature_dim)
+            features: Feature matrix (n_samples, feature_dim + confounder_dim)
             propensity: Propensity predictions (n_samples,)
             outcome_pred: Outcome predictions (n_samples,)
         """
@@ -600,8 +648,17 @@ class CausalTextForest(nn.Module):
                 all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
                 all_outcome.append(torch.sigmoid(outcome_logit).cpu().numpy())
 
+        neural_features = np.vstack(all_features)
+
+        # Concatenate raw confounder features if provided
+        if explicit_confounder_values is not None and self.explicit_confounder_specs:
+            raw_conf_features = self._get_raw_confounder_features(explicit_confounder_values)
+            combined_features = np.hstack([neural_features, raw_conf_features])
+        else:
+            combined_features = neural_features
+
         return (
-            np.vstack(all_features),
+            combined_features,
             np.vstack(all_propensity).flatten(),
             np.vstack(all_outcome).flatten()
         )
@@ -611,7 +668,8 @@ class CausalTextForest(nn.Module):
         texts: List[str],
         T: np.ndarray,
         Y: np.ndarray,
-        batch_size: int = 32
+        batch_size: int = 32,
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
     ) -> 'CausalTextForest':
         """
         Train causal forest on extracted features.
@@ -625,14 +683,23 @@ class CausalTextForest(nn.Module):
             T: Treatment indicators
             Y: Outcome indicators
             batch_size: Batch size for feature extraction
+            explicit_confounder_values: Optional list of dicts with confounder values.
+                If provided, raw confounder features are concatenated to neural features.
 
         Returns:
             self
         """
         logger.info("Extracting features for causal forest training...")
-        features, _, _ = self.extract_features(texts, batch_size)
+        features, _, _ = self.extract_features(
+            texts, batch_size,
+            explicit_confounder_values=explicit_confounder_values
+        )
 
-        # Fit causal forest on neural network features
+        if self.explicit_confounder_specs and explicit_confounder_values is not None:
+            logger.info(f"  Neural features: {features.shape[1] - self._explicit_confounder_raw_dim}, "
+                       f"Raw confounder features: {self._explicit_confounder_raw_dim}")
+
+        # Fit causal forest on neural network features (+ raw confounder features if provided)
         # Nuisance functions are estimated internally using random forests
         self.causal_forest.fit(
             X=features,
@@ -647,7 +714,8 @@ class CausalTextForest(nn.Module):
         texts: List[str],
         batch_size: int = 32,
         return_ci: bool = True,
-        alpha: float = 0.05
+        alpha: float = 0.05,
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, np.ndarray]:
         """
         Predict ITEs using trained causal forest.
@@ -657,6 +725,8 @@ class CausalTextForest(nn.Module):
             batch_size: Batch size for feature extraction
             return_ci: Whether to return confidence intervals
             alpha: Significance level for confidence intervals
+            explicit_confounder_values: Optional list of dicts with confounder values.
+                Must be provided if model was trained with explicit confounders.
 
         Returns:
             Dictionary with predictions:
@@ -665,8 +735,11 @@ class CausalTextForest(nn.Module):
                 - outcome_pred: Outcome predictions from neural network
                 - tau_lower, tau_upper: Confidence intervals (if return_ci)
         """
-        # Extract features
-        features, propensity, outcome_pred = self.extract_features(texts, batch_size)
+        # Extract features (with raw confounder features if provided)
+        features, propensity, outcome_pred = self.extract_features(
+            texts, batch_size,
+            explicit_confounder_values=explicit_confounder_values
+        )
 
         # Get ITE predictions from causal forest
         cf_preds = self.causal_forest.predict(features, return_ci=return_ci, alpha=alpha)
@@ -711,6 +784,77 @@ class CausalTextForest(nn.Module):
         if hasattr(self.feature_extractor, 'fit_tokenizer'):
             self.feature_extractor.fit_tokenizer(texts)
         return self
+
+    def fit_explicit_confounders(
+        self,
+        confounder_values_list: List[Dict[str, Any]]
+    ) -> 'CausalTextForest':
+        """
+        Compute normalization statistics for explicit confounders from training data.
+
+        For causal forest, we use raw features (no MLP) for interpretability.
+        This method computes mean/std for continuous confounders.
+
+        Args:
+            confounder_values_list: List of dicts with confounder values.
+                Keys should match spec.name (e.g., "age", not "explicit_conf_age").
+
+        Returns:
+            self for method chaining
+        """
+        if not self.explicit_confounder_specs:
+            return self
+
+        # Collect continuous values
+        continuous_values = {
+            spec.name: [] for spec in self.explicit_confounder_specs if spec.type == "continuous"
+        }
+
+        for values in confounder_values_list:
+            for spec in self.explicit_confounder_specs:
+                if spec.type == "continuous":
+                    val = values.get(spec.name)
+                    missing = values.get(f"{spec.name}_missing", val is None)
+                    if not missing and val is not None:
+                        continuous_values[spec.name].append(float(val))
+
+        # Compute mean and std for each continuous confounder
+        for name, vals in continuous_values.items():
+            if vals:
+                self._explicit_confounder_means[name] = sum(vals) / len(vals)
+                variance = sum((v - self._explicit_confounder_means[name]) ** 2 for v in vals) / len(vals)
+                self._explicit_confounder_stds[name] = max(variance ** 0.5, 1e-6)
+            else:
+                self._explicit_confounder_means[name] = 0.0
+                self._explicit_confounder_stds[name] = 1.0
+
+        self._explicit_confounders_fitted = True
+        logger.info(f"Fitted explicit confounders on {len(confounder_values_list)} samples")
+        return self
+
+    def _get_raw_confounder_features(
+        self,
+        confounder_values_list: List[Dict[str, Any]]
+    ) -> np.ndarray:
+        """
+        Get raw confounder features as numpy array.
+
+        Args:
+            confounder_values_list: List of dicts with confounder values
+
+        Returns:
+            (n_samples, raw_dim) numpy array
+        """
+        if not self.explicit_confounder_specs:
+            return np.zeros((len(confounder_values_list), 0))
+
+        features, _ = get_raw_confounder_features(
+            confounder_values_list,
+            self.explicit_confounder_specs,
+            continuous_means=self._explicit_confounder_means,
+            continuous_stds=self._explicit_confounder_stds
+        )
+        return np.array(features)
 
     def to(self, device):
         """Override to track device properly."""

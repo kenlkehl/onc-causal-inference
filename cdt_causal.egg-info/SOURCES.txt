@@ -12,6 +12,9 @@ cdt/data/__init__.py
 cdt/data/dataset.py
 cdt/experiments/__init__.py
 cdt/experiments/runner.py
+cdt/extraction/__init__.py
+cdt/extraction/cache.py
+cdt/extraction/explicit_confounders.py
 cdt/inference/__init__.py
 cdt/inference/applied.py
 cdt/inference/applied_forest.py
@@ -28,6 +31,7 @@ cdt/models/cnn_extractor.py
 cdt/models/components.py
 cdt/models/confounder_extractor.py
 cdt/models/dragonnet.py
+cdt/models/explicit_confounder_featurizer.py
 cdt/models/gated_mil_attention.py
 cdt/models/gated_mil_hierarchical_extractor.py
 cdt/models/gru_extractor.py
@@ -64,3 +68,4 @@ synthetic_data/generator.py
 synthetic_data/llm_client.py
 synthetic_data/prompts.py
 synthetic_data/vllm_batch_client.py
+tests/test_explicit_confounders_e2e.py

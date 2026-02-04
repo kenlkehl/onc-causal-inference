@@ -24,6 +24,7 @@ from .sparse_attention import (
     SparseCrossAttention,
 )
 from .numeric_features import NumericEmbedding, NumericFeatureVector, extract_numeric_patterns
+from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer, get_raw_confounder_features
 from .causal_text import CausalText, CausalCNNText  # CausalCNNText is deprecated alias
 from .propensity_model import PropensityOnlyModel, PropensityNet, create_propensity_model_from_config
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
@@ -67,6 +68,8 @@ __all__ = [
     'NumericEmbedding',
     'NumericFeatureVector',
     'extract_numeric_patterns',
+    'ExplicitConfounderFeaturizer',
+    'get_raw_confounder_features',
     'CausalTextForest',
     'ECONML_AVAILABLE',
 ]
