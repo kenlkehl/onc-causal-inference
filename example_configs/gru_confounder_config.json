@@ -68,9 +68,9 @@
 
       "confounder_dropout": 0.1,
 
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64,
-      "dragonnet_dropout": 0.2
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64,
+      "causal_head_dropout": 0.2
     },
 
     "training": {
@@ -127,8 +127,8 @@
       "confounder_sparse_alpha": 1.5,
       "confounder_top_k": 5,
       "confounder_dropout": 0.1,
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64
     },
     "generator_training": {
       "learning_rate": 0.0001,
@@ -159,8 +159,8 @@
       "confounder_sparse_alpha": 1.5,
       "confounder_top_k": 5,
       "confounder_dropout": 0.1,
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64
     },
     "evaluator_training": {
       "learning_rate": 0.0001,

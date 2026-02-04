@@ -357,9 +357,9 @@ def _create_causal_forest_model(
         gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
         # Head args
-        representation_dim=getattr(arch_config, 'dragonnet_representation_dim', 128),
-        hidden_dim=getattr(arch_config, 'dragonnet_hidden_outcome_dim', 64),
-        dropout=getattr(arch_config, 'dragonnet_dropout', 0.2),
+        representation_dim=getattr(arch_config, 'causal_head_representation_dim', 128),
+        hidden_dim=getattr(arch_config, 'causal_head_hidden_outcome_dim', 64),
+        dropout=getattr(arch_config, 'causal_head_dropout', 0.2),
         # Causal forest args
         cf_n_estimators=cf_n_estimators,
         cf_max_depth=cf_max_depth,

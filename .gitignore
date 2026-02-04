@@ -1,3 +1,4 @@
 .claude/
 ./experiments_*/
 __pycache__/
+.test_outputs/

@@ -531,10 +531,10 @@ def train_task_specific_model(
         confounder_sparse_method="entmax",
         confounder_sparse_alpha=1.5,
         confounder_dropout=0.1,
-        # DragonNet/R-Learner head parameters
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        # Causal head parameters
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 
@@ -694,9 +694,9 @@ def train_mlp_model(
     model = MLPDragonNet(
         input_dim=encoder.num_categories,
         hidden_dims=[32, 32],
-        dragonnet_representation_dim=32,
-        dragonnet_hidden_outcome_dim=16,
-        dragonnet_dropout=0.2,
+        causal_head_representation_dim=32,
+        causal_head_hidden_outcome_dim=16,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 

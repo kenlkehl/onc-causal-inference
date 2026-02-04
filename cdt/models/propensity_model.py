@@ -552,7 +552,7 @@ def create_propensity_model_from_config(
         max_length=arch_config.cnn_max_length,
         min_word_freq=getattr(arch_config, 'cnn_min_word_freq', 2),
         max_vocab_size=getattr(arch_config, 'cnn_max_vocab_size', 50000),
-        projection_dim=arch_config.dragonnet_representation_dim,
+        projection_dim=arch_config.causal_head_representation_dim,
         # BERT args
         bert_model_name=getattr(arch_config, 'bert_model_name', 'bert-base-uncased'),
         bert_max_length=getattr(arch_config, 'bert_max_length', 512),

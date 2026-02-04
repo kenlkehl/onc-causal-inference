@@ -321,10 +321,10 @@ def train_bert_rlearner_model(
         bert_dropout=0.1,
         bert_freeze_encoder=config.freeze_encoder,
         bert_gradient_checkpointing=True,  # Enable for memory efficiency with long sequences
-        # DragonNet/R-Learner head parameters
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        # Causal head parameters
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device),
         auxiliary_dim=auxiliary_dim
     )
@@ -485,9 +485,9 @@ def train_mlp_model(
     model = MLPDragonNet(
         input_dim=encoder.num_categories,
         hidden_dims=[32, 32],
-        dragonnet_representation_dim=32,
-        dragonnet_hidden_outcome_dim=16,
-        dragonnet_dropout=0.2,
+        causal_head_representation_dim=32,
+        causal_head_hidden_outcome_dim=16,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 

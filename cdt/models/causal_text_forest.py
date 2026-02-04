@@ -18,7 +18,7 @@ from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
 from .llm_extractor import LLMFeatureExtractor
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
-from .explicit_confounder_featurizer import get_raw_confounder_features
+from .explicit_confounder_featurizer import get_raw_confounder_features, ExplicitConfounderFeaturizer
 from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
 
 
@@ -153,8 +153,11 @@ class CausalTextForest(nn.Module):
         numeric_embedding_dim: int = 32,
         numeric_magnitude_bins: int = 8,
         numeric_type_categories: int = 10,
-        # Explicit confounder args (raw features, no MLP)
+        # Explicit confounder args (raw features for causal forest, MLP for Stage 1 training)
         explicit_confounder_specs: Optional[List[ExplicitConfounderSpec]] = None,
+        explicit_confounder_output_dim: int = 64,
+        explicit_confounder_hidden_dim: int = 128,
+        explicit_confounder_dropout: float = 0.1,
         # Device
         device: str = "cuda:0"
     ):
@@ -273,7 +276,13 @@ class CausalTextForest(nn.Module):
             'numeric_magnitude_bins': numeric_magnitude_bins,
             'numeric_type_categories': numeric_type_categories,
             'explicit_confounder_specs': explicit_confounder_specs,
+            'explicit_confounder_output_dim': explicit_confounder_output_dim,
+            'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
+            'explicit_confounder_dropout': explicit_confounder_dropout,
         }
+
+        # Store explicit confounder output dim for head input calculation
+        self._explicit_confounder_output_dim = explicit_confounder_output_dim
 
         # Explicit confounder support (raw features for interpretability)
         self.explicit_confounder_specs = explicit_confounder_specs or []
@@ -295,6 +304,20 @@ class CausalTextForest(nn.Module):
                        f"raw feature dim: {raw_dim}")
         else:
             self._explicit_confounder_raw_dim = 0
+
+        # Initialize ExplicitConfounderFeaturizer (MLP) for Stage 1 training
+        # This allows the neural network to learn from explicit confounders during representation learning
+        if self.explicit_confounder_specs:
+            self.explicit_confounder_featurizer = ExplicitConfounderFeaturizer(
+                specs=self.explicit_confounder_specs,
+                output_dim=explicit_confounder_output_dim,
+                hidden_dim=explicit_confounder_hidden_dim,
+                dropout=explicit_confounder_dropout,
+                device=str(self._device)
+            )
+            logger.info(f"ExplicitConfounderFeaturizer for Stage 1: output_dim={explicit_confounder_output_dim}")
+        else:
+            self.explicit_confounder_featurizer = None
 
         # Initialize feature extractor (reuse existing implementations)
         if self.feature_extractor_type == "bert":
@@ -429,7 +452,12 @@ class CausalTextForest(nn.Module):
         logger.info(f"Using {self.feature_extractor_type.upper()} feature extractor")
 
         # Simple propensity head for representation learning
+        # Input dim = text features + explicit confounder features (if any)
         input_dim = self.feature_extractor.output_dim
+        if self.explicit_confounder_featurizer is not None:
+            input_dim += explicit_confounder_output_dim
+        self._head_input_dim = input_dim  # Store for logging
+
         self.propensity_head = nn.Sequential(
             nn.Linear(input_dim, representation_dim),
             nn.ReLU(),
@@ -488,12 +516,17 @@ class CausalTextForest(nn.Module):
         logger.info(f"  Feature dim: {input_dim}")
         logger.info(f"  Causal forest: {cf_n_estimators} trees, honest={cf_honest}")
 
-    def forward(self, texts: List[str]) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        texts: List[str],
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through neural components.
 
         Args:
             texts: List of text strings
+            explicit_confounder_values: Optional list of dicts with explicit confounder values
 
         Returns:
             features: Extracted features (batch, feature_dim)
@@ -501,6 +534,12 @@ class CausalTextForest(nn.Module):
             outcome_logit: Outcome prediction (batch, 1)
         """
         features = self.feature_extractor(texts)
+
+        # Concatenate explicit confounder features if provided
+        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
+            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
+            features = torch.cat([features, conf_features], dim=1)
+
         propensity_logit = self.propensity_head(features)
         outcome_logit = self.outcome_head(features)
         return features, propensity_logit, outcome_logit
@@ -521,7 +560,8 @@ class CausalTextForest(nn.Module):
         loss to encourage embeddings to capture treatment effect heterogeneity.
 
         Args:
-            batch: Dictionary with 'texts', 'treatment', 'outcome' keys
+            batch: Dictionary with 'texts', 'treatment', 'outcome' keys.
+                   Optional 'explicit_confounder_values' for explicit confounders.
             alpha_propensity: Weight for propensity loss
             gamma_rlearner: Weight for R-learner loss (only used if use_rlearner_representation=True)
             label_smoothing: Label smoothing factor
@@ -533,6 +573,7 @@ class CausalTextForest(nn.Module):
         texts = batch['texts']
         treatments = batch['treatment']
         outcomes = batch['outcome']
+        explicit_confounder_values = batch.get('explicit_confounder_values', None)
 
         # Apply label smoothing
         if label_smoothing > 0:
@@ -542,8 +583,13 @@ class CausalTextForest(nn.Module):
             treatments_smooth = treatments
             outcomes_smooth = outcomes
 
-        # Extract features
+        # Extract features from text
         features = self.feature_extractor(texts)
+
+        # Concatenate explicit confounder features if provided
+        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
+            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
+            features = torch.cat([features, conf_features], dim=1)
 
         # Propensity prediction
         if stop_grad_propensity:
@@ -635,20 +681,33 @@ class CausalTextForest(nn.Module):
             outcome_pred: Outcome predictions (n_samples,)
         """
         self.eval()
-        all_features = []
+        all_text_features = []
         all_propensity = []
         all_outcome = []
 
         with torch.no_grad():
             for i in range(0, len(texts), batch_size):
                 batch_texts = texts[i:i + batch_size]
-                features, prop_logit, outcome_logit = self.forward(batch_texts)
 
-                all_features.append(features.cpu().numpy())
+                # Get batch slice of confounder values if provided
+                batch_conf_values = None
+                if explicit_confounder_values is not None:
+                    batch_conf_values = explicit_confounder_values[i:i + batch_size]
+
+                # Extract text features directly (for causal forest input)
+                text_features = self.feature_extractor(batch_texts)
+                all_text_features.append(text_features.cpu().numpy())
+
+                # Get propensity/outcome predictions using full forward (with MLP confounders)
+                # These are used for nuisance estimation in causal forest
+                _, prop_logit, outcome_logit = self.forward(
+                    batch_texts,
+                    explicit_confounder_values=batch_conf_values
+                )
                 all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
                 all_outcome.append(torch.sigmoid(outcome_logit).cpu().numpy())
 
-        neural_features = np.vstack(all_features)
+        neural_features = np.vstack(all_text_features)
 
         # Concatenate raw confounder features if provided
         if explicit_confounder_values is not None and self.explicit_confounder_specs:
@@ -785,6 +844,29 @@ class CausalTextForest(nn.Module):
             self.feature_extractor.fit_tokenizer(texts)
         return self
 
+    def fit_explicit_confounder_featurizer(
+        self,
+        confounder_values_list: List[Dict[str, Any]]
+    ) -> 'CausalTextForest':
+        """
+        Fit the explicit confounder featurizer (MLP) on training data.
+
+        This computes normalization statistics (mean/std) for continuous confounders
+        used during Stage 1 neural network training. Must be called before training
+        if explicit confounders are used.
+
+        Args:
+            confounder_values_list: List of dicts with confounder values from training data.
+                Each dict should have "{name}" and "{name}_missing" keys.
+
+        Returns:
+            self for method chaining
+        """
+        if self.explicit_confounder_featurizer is not None:
+            self.explicit_confounder_featurizer.fit(confounder_values_list)
+            logger.info("Fitted ExplicitConfounderFeaturizer for Stage 1 training")
+        return self
+
     def fit_explicit_confounders(
         self,
         confounder_values_list: List[Dict[str, Any]]
@@ -900,6 +982,10 @@ class CausalTextForest(nn.Module):
         # Save causal forest model (pickled)
         if self.causal_forest._fitted:
             checkpoint['causal_forest_model'] = pickle.dumps(self.causal_forest.model)
+
+        # Save explicit confounder featurizer state if enabled
+        if self.explicit_confounder_featurizer is not None:
+            checkpoint['explicit_confounder_featurizer_state'] = self.explicit_confounder_featurizer.get_state()
 
         if optimizer is not None:
             checkpoint['optimizer_state_dict'] = optimizer.state_dict()

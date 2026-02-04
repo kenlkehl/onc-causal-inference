@@ -256,9 +256,9 @@ def create_model(
 
     common_kwargs = {
         "device": str(device),
-        "dragonnet_representation_dim": 128,
-        "dragonnet_hidden_outcome_dim": 64,
-        "dragonnet_dropout": 0.2,
+        "causal_head_representation_dim": 128,
+        "causal_head_hidden_outcome_dim": 64,
+        "causal_head_dropout": 0.2,
     }
 
     if model_type == "causal_forest":

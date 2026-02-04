@@ -48,6 +48,13 @@ cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/traditional_logreg.py
 cdt/models/uplift.py
+cdt/models/.ipynb_checkpoints/causal_text-checkpoint.py
+cdt/models/.ipynb_checkpoints/causal_text_forest-checkpoint.py
+cdt/models/.ipynb_checkpoints/dragonnet-checkpoint.py
+cdt/models/.ipynb_checkpoints/explicit_confounder_featurizer-checkpoint.py
+cdt/models/.ipynb_checkpoints/outcome_model-checkpoint.py
+cdt/models/.ipynb_checkpoints/rlearner-checkpoint.py
+cdt/models/.ipynb_checkpoints/uplift-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py

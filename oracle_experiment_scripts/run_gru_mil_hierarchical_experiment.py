@@ -255,10 +255,10 @@ def train_gru_mil_model(
         gru_mil_projection_dim=config.projection_dim,
         gru_mil_max_vocab=50000,
         gru_mil_min_word_freq=2,
-        # DragonNet/RLearner head settings
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        # Causal head settings
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 

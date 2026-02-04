@@ -384,10 +384,10 @@ class ModelArchitectureConfig:
     numeric_magnitude_bins: int = 8  # Number of log-scale magnitude bins
     numeric_type_categories: int = 10  # Number of numeric type categories
 
-    # DragonNet head dimensions
-    dragonnet_representation_dim: int = 128
-    dragonnet_hidden_outcome_dim: int = 64
-    dragonnet_dropout: float = 0.2  # Dropout in DragonNet representation and outcome layers
+    # Causal head dimensions (applies to all causal heads: DragonNet, RLearner, UpliftNet, etc.)
+    causal_head_representation_dim: int = 128
+    causal_head_hidden_outcome_dim: int = 64
+    causal_head_dropout: float = 0.2  # Dropout in causal head representation and outcome layers
 
     # Causal Forest config (used when model_type="causal_forest")
     causal_forest: CausalForestConfig = field(default_factory=CausalForestConfig)

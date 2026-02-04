@@ -53,9 +53,9 @@
       "_comment_token_hidden_dim": "Hidden dimension for token-level gated attention. Only used when gated_mil_hierarchical=true.",
       "gated_mil_token_hidden_dim": 64,
 
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64,
-      "dragonnet_dropout": 0.2
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64,
+      "causal_head_dropout": 0.2
     },
 
     "training": {
@@ -105,8 +105,8 @@
       "gated_mil_projection_dim": 128,
       "gated_mil_hierarchical": false,
       "gated_mil_token_hidden_dim": 64,
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64
     },
     "generator_training": {
       "learning_rate": 0.0001,
@@ -130,8 +130,8 @@
       "gated_mil_projection_dim": 128,
       "gated_mil_hierarchical": false,
       "gated_mil_token_hidden_dim": 64,
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64
     },
     "evaluator_training": {
       "learning_rate": 0.0001,

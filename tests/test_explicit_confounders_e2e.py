@@ -8,7 +8,7 @@ This script tests the complete pipeline:
 3. GRU-Pool feature extractor with DragonNet causal head
 4. GRU-Pool feature extractor with Causal Forest
 
-Uses a 100-patient sample from example_synthetic_data_ten_confounders dataset
+Uses a 100-patient sample from example_synthetic_data_(one/ten)_confounders dataset
 and the google/medgemma-1.5-4b-it model for extraction.
 
 Usage:
@@ -63,6 +63,17 @@ logger = logging.getLogger(__name__)
 
 def get_confounder_specs() -> List[ExplicitConfounderSpec]:
     """Get confounder specifications from the synthetic dataset metadata."""
+
+    # for one confounder
+    return [
+        ExplicitConfounderSpec(
+            name="metastatic_site_count",
+            type="categorical",
+            categories=["1", "2", "3", "4_or_more"],
+            description="Number of metastatic sites at treatment initiation, categorized to reflect disease burden"
+            )
+    ]
+    # for ten confounders
     return [
         ExplicitConfounderSpec(
             name="age",
@@ -128,7 +139,7 @@ def get_confounder_specs() -> List[ExplicitConfounderSpec]:
 # ============================================================================
 
 def load_sample_dataset(
-    dataset_path: str = "example_synthetic_data_ten_confounders/dataset.parquet",
+    dataset_path: str = "example_synthetic_data_one_confounder/dataset.parquet",
     sample_size: int = 100,
     seed: int = 42
 ) -> pd.DataFrame:
@@ -259,7 +270,7 @@ def train_and_evaluate_dragonnet(
     device: str = "cuda:0",
     epochs: int = 10,
     batch_size: int = 8,
-    learning_rate: float = 0.001
+    learning_rate: float = 5e-5
 ) -> Dict:
     """Train and evaluate GRU-Pool + DragonNet with explicit confounders.
 
@@ -288,23 +299,22 @@ def train_and_evaluate_dragonnet(
     # Create model with explicit confounders
     model = CausalText(
         feature_extractor_type="gru_pool",
-        gru_pool_embedding_dim=64,
-        gru_pool_gru_hidden_dim=64,
-        gru_pool_transformer_layers=1,
-        gru_pool_max_chunks=50,
+        gru_pool_embedding_dim=128,
+        gru_pool_gru_hidden_dim=128,
+        gru_pool_transformer_layers=4,
+        gru_pool_max_chunks=100,
         gru_pool_chunk_size=128,
         gru_pool_chunk_overlap=32,
-        gru_pool_projection_dim=64,
+        gru_pool_projection_dim=128,
         gru_pool_max_vocab=10000,
         gru_pool_min_word_freq=2,
-        dragonnet_representation_dim=64,
-        dragonnet_hidden_outcome_dim=32,
-        dragonnet_dropout=0.2,
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.0,
         explicit_confounder_specs=specs,
-        explicit_confounder_output_dim=32,
         explicit_confounder_hidden_dim=64,
-        explicit_confounder_dropout=0.1,
-        model_type="dragonnet",
+        explicit_confounder_dropout=0.0,
+        model_type="rlearner",
         device=device
     )
 
@@ -450,7 +460,7 @@ def train_and_evaluate_causal_forest(
     device: str = "cuda:0",
     epochs: int = 10,
     batch_size: int = 8,
-    learning_rate: float = 0.001
+    learning_rate: float = 5e-5
 ) -> Dict:
     """Train and evaluate GRU-Pool + Causal Forest with explicit confounders.
 
@@ -496,21 +506,23 @@ def train_and_evaluate_causal_forest(
     # Create model WITH explicit confounder specs
     model = CausalTextForest(
         feature_extractor_type="gru_pool",
-        gru_pool_embedding_dim=64,
-        gru_pool_gru_hidden_dim=64,
-        gru_pool_transformer_layers=1,
-        gru_pool_max_chunks=50,
+        gru_pool_embedding_dim=128,
+        gru_pool_gru_hidden_dim=128,
+        gru_pool_transformer_layers=4,
+        gru_pool_max_chunks=100,
         gru_pool_chunk_size=128,
         gru_pool_chunk_overlap=32,
-        gru_pool_projection_dim=64,
+        gru_pool_projection_dim=128,
         gru_pool_max_vocab=10000,
         gru_pool_min_word_freq=2,
-        representation_dim=64,
-        hidden_dim=32,
+        representation_dim=128,
+        hidden_dim=64,
+        dropout=0.0,
         cf_n_estimators=100,
         cf_min_samples_leaf=5,
         cf_honest=True,
         cf_inference=True,
+        cf_use_rlearner_representation=True,
         explicit_confounder_specs=specs,  # Native support for explicit confounders
         device=device
     )
@@ -542,8 +554,14 @@ def train_and_evaluate_causal_forest(
 
     # Get confounder values for fitting normalization stats
     train_conf_values = [train_dataset[i]['explicit_confounder_values'] for i in range(len(train_dataset))]
+
+    # Fit the MLP featurizer for Stage 1 training (learns jointly with text extractor)
+    model.fit_explicit_confounder_featurizer(train_conf_values)
+    logger.info("Fitted ExplicitConfounderFeaturizer for Stage 1 training")
+
+    # Fit raw confounder stats for Stage 2 causal forest
     model.fit_explicit_confounders(train_conf_values)
-    logger.info("Fitted explicit confounder normalization stats")
+    logger.info("Fitted explicit confounder normalization stats for causal forest")
 
     # Stage 1: Train neural network for feature extraction
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=0.01)
@@ -656,7 +674,7 @@ def main():
                         help="Test both DragonNet and Causal Forest")
     parser.add_argument("--device", default="cuda:0",
                         help="Device for training")
-    parser.add_argument("--epochs", type=int, default=10,
+    parser.add_argument("--epochs", type=int, default=20,
                         help="Number of training epochs")
     parser.add_argument("--batch-size", type=int, default=8,
                         help="Batch size for training")
@@ -720,7 +738,7 @@ def main():
     # Train and evaluate models
     results = {}
 
-    # Test DragonNet
+    #Test DragonNet
     results['dragonnet'] = train_and_evaluate_dragonnet(
         df,
         confounder_columns,

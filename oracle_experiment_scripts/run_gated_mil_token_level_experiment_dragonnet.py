@@ -256,10 +256,10 @@ def train_gated_mil_token_model(
         gated_mil_hierarchical=config.hierarchical,  # True for token-level
         gated_mil_token_hidden_dim=config.token_hidden_dim,
         gated_mil_use_mean_pooling=use_mean_pooling,
-        # DragonNet head settings
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        # Causal head settings
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 

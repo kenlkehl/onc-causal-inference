@@ -363,7 +363,7 @@ def _train_cnn_model(
         max_length=arch_config.cnn_max_length,
         min_word_freq=getattr(arch_config, 'cnn_min_word_freq', 2),
         max_vocab_size=getattr(arch_config, 'cnn_max_vocab_size', 50000),
-        projection_dim=arch_config.dragonnet_representation_dim,
+        projection_dim=arch_config.causal_head_representation_dim,
         # BERT args
         bert_model_name=getattr(arch_config, 'bert_model_name', 'bert-base-uncased'),
         bert_max_length=getattr(arch_config, 'bert_max_length', 512),
@@ -426,9 +426,9 @@ def _train_cnn_model(
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
         numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
         numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
-        # DragonNet args
-        dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
-        dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
+        # Causal head args
+        causal_head_representation_dim=arch_config.causal_head_representation_dim,
+        causal_head_hidden_outcome_dim=arch_config.causal_head_hidden_outcome_dim,
         device=str(device),
         model_type=arch_config.model_type
     )
@@ -696,9 +696,9 @@ def _train_causal_forest_model(
         gated_mil_token_hidden_dim=getattr(arch_config, 'gated_mil_token_hidden_dim', 64),
         gated_mil_use_mean_pooling=getattr(arch_config, 'gated_mil_use_mean_pooling', False),
         # Head args
-        representation_dim=getattr(arch_config, 'dragonnet_representation_dim', 128),
-        hidden_dim=getattr(arch_config, 'dragonnet_hidden_outcome_dim', 64),
-        dropout=getattr(arch_config, 'dragonnet_dropout', 0.2),
+        representation_dim=getattr(arch_config, 'causal_head_representation_dim', 128),
+        hidden_dim=getattr(arch_config, 'causal_head_hidden_outcome_dim', 64),
+        dropout=getattr(arch_config, 'causal_head_dropout', 0.2),
         # Causal forest args
         cf_n_estimators=cf_n_estimators,
         cf_max_depth=cf_max_depth,

@@ -223,7 +223,7 @@ def _train_propensity_model(
     # Create propensity model
     model = create_propensity_model_from_config(
         arch_config=arch_config,
-        representation_dim=arch_config.dragonnet_representation_dim,
+        representation_dim=arch_config.causal_head_representation_dim,
         device=device
     )
 

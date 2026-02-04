@@ -36,9 +36,9 @@
       "clam_num_instances": 5,
       "clam_instance_hidden_dim": 64,
 
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64,
-      "dragonnet_dropout": 0.2
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64,
+      "causal_head_dropout": 0.2
     },
     "training": {
       "learning_rate": 1e-4,

@@ -54,9 +54,9 @@
       "cnn_num_kmeans_filters": 64,
       "cnn_num_random_filters": 0,
 
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64,
-      "dragonnet_dropout": 0.2
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64,
+      "causal_head_dropout": 0.2
     },
 
     "training": {
@@ -100,8 +100,8 @@
       "cnn_init_embeddings_from": "emilyalsentzer/Bio_ClinicalBERT",
       "cnn_num_kmeans_filters": 64,
       "cnn_num_random_filters": 0,
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64
     },
     "generator_training": {
       "learning_rate": 0.0001,
@@ -119,8 +119,8 @@
       "cnn_init_embeddings_from": "emilyalsentzer/Bio_ClinicalBERT",
       "cnn_num_kmeans_filters": 64,
       "cnn_num_random_filters": 0,
-      "dragonnet_representation_dim": 128,
-      "dragonnet_hidden_outcome_dim": 64
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64
     },
     "evaluator_training": {
       "learning_rate": 0.0001,

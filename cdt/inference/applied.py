@@ -557,7 +557,7 @@ def _train_single_model(
         num_kmeans_filters=arch_config.cnn_num_kmeans_filters,
         num_random_filters=arch_config.cnn_num_random_filters,
         cnn_dropout=arch_config.cnn_dropout,
-        projection_dim=arch_config.dragonnet_representation_dim,
+        projection_dim=arch_config.causal_head_representation_dim,
         # BERT args
         bert_model_name=getattr(arch_config, 'bert_model_name', 'bert-base-uncased'),
         bert_max_length=getattr(arch_config, 'bert_max_length', 512),
@@ -632,10 +632,10 @@ def _train_single_model(
         explicit_confounder_output_dim=getattr(config.explicit_confounders, 'featurizer_output_dim', 64) if hasattr(config, 'explicit_confounders') else 64,
         explicit_confounder_hidden_dim=getattr(config.explicit_confounders, 'featurizer_hidden_dim', 128) if hasattr(config, 'explicit_confounders') else 128,
         explicit_confounder_dropout=getattr(config.explicit_confounders, 'featurizer_dropout', 0.1) if hasattr(config, 'explicit_confounders') else 0.1,
-        # DragonNet args
-        dragonnet_representation_dim=arch_config.dragonnet_representation_dim,
-        dragonnet_hidden_outcome_dim=arch_config.dragonnet_hidden_outcome_dim,
-        dragonnet_dropout=getattr(arch_config, 'dragonnet_dropout', 0.2),
+        # Causal head args
+        causal_head_representation_dim=arch_config.causal_head_representation_dim,
+        causal_head_hidden_outcome_dim=arch_config.causal_head_hidden_outcome_dim,
+        causal_head_dropout=getattr(arch_config, 'causal_head_dropout', 0.2),
         device=str(device),
         model_type=arch_config.model_type
     )

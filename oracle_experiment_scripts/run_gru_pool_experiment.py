@@ -267,10 +267,10 @@ def train_gru_pool_model(
         gru_pool_projection_dim=config.projection_dim,
         gru_pool_max_vocab=50000,
         gru_pool_min_word_freq=2,
-        # DragonNet/RLearner head settings
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        # Causal head settings
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 

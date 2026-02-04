@@ -231,10 +231,10 @@ def train_gated_mil_model(
         gated_mil_dropout=0.1,
         gated_mil_projection_dim=config.projection_dim,
         gated_mil_use_mean_pooling=use_mean_pooling,
-        # DragonNet/RLearner head settings
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        # Causal head settings
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 

@@ -372,9 +372,9 @@ def train_cnn_model(
         projection_dim=128,
         cnn_dropout=0.1,
         max_length=2048,
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device),
         auxiliary_dim=auxiliary_dim
     )
@@ -496,9 +496,9 @@ def train_mlp_model(
     model = MLPDragonNet(
         input_dim=encoder.num_categories,
         hidden_dims=[32, 32],
-        dragonnet_representation_dim=32,
-        dragonnet_hidden_outcome_dim=16,
-        dragonnet_dropout=0.2,
+        causal_head_representation_dim=32,
+        causal_head_hidden_outcome_dim=16,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 

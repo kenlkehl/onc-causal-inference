@@ -33,9 +33,9 @@ class MLPDragonNet(nn.Module):
         self,
         input_dim: int,
         hidden_dims: List[int] = [64, 64],
-        dragonnet_representation_dim: int = 64,
-        dragonnet_hidden_outcome_dim: int = 32,
-        dragonnet_dropout: float = 0.2,
+        causal_head_representation_dim: int = 64,
+        causal_head_hidden_outcome_dim: int = 32,
+        causal_head_dropout: float = 0.2,
         input_dropout: float = 0.1,
         device: str = "cuda:0"
     ):
@@ -45,9 +45,9 @@ class MLPDragonNet(nn.Module):
         Args:
             input_dim: Dimension of input features (e.g., number of categories)
             hidden_dims: List of hidden layer dimensions for the MLP encoder
-            dragonnet_representation_dim: DragonNet representation dimension
-            dragonnet_hidden_outcome_dim: DragonNet outcome hidden dimension
-            dragonnet_dropout: Dropout rate for DragonNet layers
+            causal_head_representation_dim: Causal head representation dimension
+            causal_head_hidden_outcome_dim: Causal head outcome hidden dimension
+            causal_head_dropout: Dropout rate for causal head layers
             input_dropout: Dropout rate for input layer
             device: Device string
         """
@@ -60,9 +60,9 @@ class MLPDragonNet(nn.Module):
         self.config = {
             'input_dim': input_dim,
             'hidden_dims': hidden_dims,
-            'dragonnet_representation_dim': dragonnet_representation_dim,
-            'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
-            'dragonnet_dropout': dragonnet_dropout,
+            'causal_head_representation_dim': causal_head_representation_dim,
+            'causal_head_hidden_outcome_dim': causal_head_hidden_outcome_dim,
+            'causal_head_dropout': causal_head_dropout,
             'input_dropout': input_dropout
         }
 
@@ -77,21 +77,21 @@ class MLPDragonNet(nn.Module):
             layers.append(nn.Linear(prev_dim, hidden_dim))
             layers.append(nn.LayerNorm(hidden_dim))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dragonnet_dropout))
+            layers.append(nn.Dropout(causal_head_dropout))
             prev_dim = hidden_dim
 
         self.encoder = nn.Sequential(*layers)
 
         # Final projection to match DragonNet input
         encoder_output_dim = hidden_dims[-1] if hidden_dims else input_dim
-        self.projection = nn.Linear(encoder_output_dim, dragonnet_representation_dim)
+        self.projection = nn.Linear(encoder_output_dim, causal_head_representation_dim)
 
         # DragonNet head
         self.dragonnet = DragonNet(
-            input_dim=dragonnet_representation_dim,
-            representation_dim=dragonnet_representation_dim,
-            hidden_outcome_dim=dragonnet_hidden_outcome_dim,
-            dropout=dragonnet_dropout
+            input_dim=causal_head_representation_dim,
+            representation_dim=causal_head_representation_dim,
+            hidden_outcome_dim=causal_head_hidden_outcome_dim,
+            dropout=causal_head_dropout
         )
 
         # Move to device
@@ -100,13 +100,13 @@ class MLPDragonNet(nn.Module):
         logger.info(f"MLPDragonNet initialized:")
         logger.info(f"  Input dim: {input_dim}")
         logger.info(f"  Hidden dims: {hidden_dims}")
-        logger.info(f"  DragonNet representation dim: {dragonnet_representation_dim}")
+        logger.info(f"  Causal head representation dim: {causal_head_representation_dim}")
         logger.info(f"  Device: {self._device}")
 
     @property
     def output_dim(self) -> int:
         """Output dimension of the encoder."""
-        return self.config['dragonnet_representation_dim']
+        return self.config['causal_head_representation_dim']
 
     def forward(
         self,
@@ -354,9 +354,9 @@ def create_llm_extract_only_model(
     return MLPDragonNet(
         input_dim=num_categories,
         hidden_dims=[32, 32],  # Small network for simple categorical input
-        dragonnet_representation_dim=32,
-        dragonnet_hidden_outcome_dim=16,
-        dragonnet_dropout=0.2,
+        causal_head_representation_dim=32,
+        causal_head_hidden_outcome_dim=16,
+        causal_head_dropout=0.2,
         input_dropout=0.0,
         device=device
     )

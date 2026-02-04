@@ -185,10 +185,10 @@ class CausalText(nn.Module):
         clam_enabled: bool = False,
         clam_num_instances: int = 5,
         clam_instance_hidden_dim: int = 64,
-        # DragonNet args
-        dragonnet_representation_dim: int = 128,
-        dragonnet_hidden_outcome_dim: int = 64,
-        dragonnet_dropout: float = 0.2,
+        # Causal head args (applies to all causal heads: DragonNet, RLearner, UpliftNet, etc.)
+        causal_head_representation_dim: int = 128,
+        causal_head_hidden_outcome_dim: int = 64,
+        causal_head_dropout: float = 0.2,
         device: str = "cuda:0",
         model_type: str = "dragonnet",  # "dragonnet", "uplift", or "rlearner"
         # Auxiliary features (for hybrid text + categorical models)
@@ -231,9 +231,9 @@ class CausalText(nn.Module):
             gru_bidirectional: (GRU) Use bidirectional GRU
             gru_attention_dim: (GRU) Attention hidden dimension (default: 2*hidden_dim)
             gru_projection_dim: (GRU) Output projection dimension
-            dragonnet_representation_dim: DragonNet representation dimension
-            dragonnet_hidden_outcome_dim: DragonNet outcome hidden dimension
-            dragonnet_dropout: Dropout rate for DragonNet layers
+            causal_head_representation_dim: Causal head representation dimension
+            causal_head_hidden_outcome_dim: Causal head outcome hidden dimension
+            causal_head_dropout: Dropout rate for causal head layers
             device: Device string
             model_type: Architecture type ("dragonnet", "uplift", or "rlearner")
             auxiliary_dim: Dimension of auxiliary categorical features (0 = disabled)
@@ -358,9 +358,9 @@ class CausalText(nn.Module):
             'clam_enabled': clam_enabled,
             'clam_num_instances': clam_num_instances,
             'clam_instance_hidden_dim': clam_instance_hidden_dim,
-            'dragonnet_representation_dim': dragonnet_representation_dim,
-            'dragonnet_hidden_outcome_dim': dragonnet_hidden_outcome_dim,
-            'dragonnet_dropout': dragonnet_dropout,
+            'causal_head_representation_dim': causal_head_representation_dim,
+            'causal_head_hidden_outcome_dim': causal_head_hidden_outcome_dim,
+            'causal_head_dropout': causal_head_dropout,
             'model_type': model_type,
             'auxiliary_dim': auxiliary_dim,
             'numeric_features_enabled': numeric_features_enabled,
@@ -638,12 +638,12 @@ class CausalText(nn.Module):
         # Auxiliary feature projection (if enabled)
         if auxiliary_dim > 0:
             self.auxiliary_projection = nn.Sequential(
-                nn.Linear(auxiliary_dim, dragonnet_representation_dim // 2),
-                nn.LayerNorm(dragonnet_representation_dim // 2),
+                nn.Linear(auxiliary_dim, causal_head_representation_dim // 2),
+                nn.LayerNorm(causal_head_representation_dim // 2),
                 nn.ReLU(),
-                nn.Dropout(dragonnet_dropout)
+                nn.Dropout(causal_head_dropout)
             )
-            logger.info(f"Auxiliary features enabled: {auxiliary_dim} -> {dragonnet_representation_dim // 2}")
+            logger.info(f"Auxiliary features enabled: {auxiliary_dim} -> {causal_head_representation_dim // 2}")
         else:
             self.auxiliary_projection = None
 
@@ -666,40 +666,40 @@ class CausalText(nn.Module):
         # Input dim = text features + auxiliary features (if any) + explicit confounder features (if any)
         input_dim = self.feature_extractor.output_dim
         if auxiliary_dim > 0:
-            input_dim += dragonnet_representation_dim // 2
+            input_dim += causal_head_representation_dim // 2
         if self.explicit_confounder_featurizer is not None:
             input_dim += explicit_confounder_output_dim
 
         if model_type == "uplift":
             self.net = UpliftNet(
                 input_dim=input_dim,
-                representation_dim=dragonnet_representation_dim,
-                hidden_outcome_dim=dragonnet_hidden_outcome_dim,
-                dropout=dragonnet_dropout
+                representation_dim=causal_head_representation_dim,
+                hidden_outcome_dim=causal_head_hidden_outcome_dim,
+                dropout=causal_head_dropout
             )
             logger.info("Using UpliftNet architecture (Base + ITE parametrization)")
         elif model_type == "rlearner":
             self.net = RLearnerNet(
                 input_dim=input_dim,
-                representation_dim=dragonnet_representation_dim,
-                hidden_outcome_dim=dragonnet_hidden_outcome_dim,
-                dropout=dragonnet_dropout
+                representation_dim=causal_head_representation_dim,
+                hidden_outcome_dim=causal_head_hidden_outcome_dim,
+                dropout=causal_head_dropout
             )
             logger.info("Using R-Learner architecture (direct tau optimization)")
         elif model_type == "traditional_logreg":
             self.net = TraditionalLogRegNet(
                 input_dim=input_dim,
-                representation_dim=dragonnet_representation_dim,
-                hidden_outcome_dim=dragonnet_hidden_outcome_dim,
-                dropout=dragonnet_dropout
+                representation_dim=causal_head_representation_dim,
+                hidden_outcome_dim=causal_head_hidden_outcome_dim,
+                dropout=causal_head_dropout
             )
             logger.info("Using Traditional LogReg architecture (treatment as feature)")
         else:
             self.net = DragonNet(
                 input_dim=input_dim,
-                representation_dim=dragonnet_representation_dim,
-                hidden_outcome_dim=dragonnet_hidden_outcome_dim,
-                dropout=dragonnet_dropout
+                representation_dim=causal_head_representation_dim,
+                hidden_outcome_dim=causal_head_hidden_outcome_dim,
+                dropout=causal_head_dropout
             )
             logger.info("Using classic DragonNet architecture")
 
@@ -751,28 +751,28 @@ class CausalText(nn.Module):
                         input_dim=instance_input_dim,
                         representation_dim=clam_instance_hidden_dim,
                         hidden_outcome_dim=clam_instance_hidden_dim // 2,
-                        dropout=dragonnet_dropout
+                        dropout=causal_head_dropout
                     )
                 elif model_type == "uplift":
                     self.instance_head = UpliftNet(
                         input_dim=instance_input_dim,
                         representation_dim=clam_instance_hidden_dim,
                         hidden_outcome_dim=clam_instance_hidden_dim // 2,
-                        dropout=dragonnet_dropout
+                        dropout=causal_head_dropout
                     )
                 elif model_type == "traditional_logreg":
                     self.instance_head = TraditionalLogRegNet(
                         input_dim=instance_input_dim,
                         representation_dim=clam_instance_hidden_dim,
                         hidden_outcome_dim=clam_instance_hidden_dim // 2,
-                        dropout=dragonnet_dropout
+                        dropout=causal_head_dropout
                     )
                 else:
                     self.instance_head = DragonNet(
                         input_dim=instance_input_dim,
                         representation_dim=clam_instance_hidden_dim,
                         hidden_outcome_dim=clam_instance_hidden_dim // 2,
-                        dropout=dragonnet_dropout
+                        dropout=causal_head_dropout
                     )
                 logger.info(f"CLAM instance-level loss enabled: {clam_num_instances} top chunks, "
                            f"instance_input_dim={instance_input_dim}, instance_head_dim={clam_instance_hidden_dim}")
@@ -1557,28 +1557,28 @@ class CausalText(nn.Module):
                             input_dim=actual_dim,
                             representation_dim=self.clam_instance_hidden_dim,
                             hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
-                            dropout=self.config['dragonnet_dropout']
+                            dropout=self.config['causal_head_dropout']
                         )
                     elif self.model_type == "uplift":
                         self.instance_head = UpliftNet(
                             input_dim=actual_dim,
                             representation_dim=self.clam_instance_hidden_dim,
                             hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
-                            dropout=self.config['dragonnet_dropout']
+                            dropout=self.config['causal_head_dropout']
                         )
                     elif self.model_type == "traditional_logreg":
                         self.instance_head = TraditionalLogRegNet(
                             input_dim=actual_dim,
                             representation_dim=self.clam_instance_hidden_dim,
                             hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
-                            dropout=self.config['dragonnet_dropout']
+                            dropout=self.config['causal_head_dropout']
                         )
                     else:
                         self.instance_head = DragonNet(
                             input_dim=actual_dim,
                             representation_dim=self.clam_instance_hidden_dim,
                             hidden_outcome_dim=self.clam_instance_hidden_dim // 2,
-                            dropout=self.config['dragonnet_dropout']
+                            dropout=self.config['causal_head_dropout']
                         )
                     self.instance_head.to(self._device)
 

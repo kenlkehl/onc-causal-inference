@@ -232,9 +232,9 @@ def train_model(
         clam_num_instances=config.clam_num_instances,
         clam_instance_hidden_dim=config.clam_instance_hidden_dim,
         # Causal head settings
-        dragonnet_representation_dim=128,
-        dragonnet_hidden_outcome_dim=64,
-        dragonnet_dropout=0.2,
+        causal_head_representation_dim=128,
+        causal_head_hidden_outcome_dim=64,
+        causal_head_dropout=0.2,
         device=str(device)
     )
 
