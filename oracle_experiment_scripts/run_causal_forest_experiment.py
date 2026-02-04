@@ -32,10 +32,11 @@ Usage:
         --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest_rlearner \
         --device cuda:0 \
         --rlearner \
-        --gamma-rlearner 1.0
+        --gamma-rlearner 1.0 \
+        --cf-n-estimators 500 \
+        --epochs 20
 
-python oracle_experiment_scripts/run_causal_forest_experiment.py         --dataset example_synthetic_data_ten_confounders/dataset_with_extraction.parquet         --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest_with
-_rlearner_gated_mil_ten_confounders         --device mps         --n-folds 5         --cf-n-estimators 200         --epochs 20  --rlearner --gamma-rlearner 1.0 
+
 
 """
 
@@ -107,20 +108,23 @@ class ExperimentConfig:
 
 # Define experimental conditions
 EXPERIMENT_CONDITIONS = [
+
     ExperimentConfig(
-        name="1_oracle_patient_prompt",
-        text_column="patient_prompt",
-    ),
-    ExperimentConfig(
-        name="2_realistic_clinical_text",
-        text_column="clinical_text",
-    ),
-    ExperimentConfig(
-        name="3_llm_extracted",
-        text_column="llm_structured_text",  # Will be created from llm_extracted_metastatic_sites
-    ),
+         name="2_realistic_clinical_text",
+         text_column="clinical_text",
+    )
+
+
 ]
 
+    # ExperimentConfig(
+    #     name="1_oracle_patient_prompt",
+    #     text_column="patient_prompt",
+    # ),
+    # ExperimentConfig(
+    #     name="3_llm_extracted",
+    #     text_column="llm_structured_text", 
+    # ),
 
 class TextDataset(Dataset):
     """Simple dataset for text + labels."""

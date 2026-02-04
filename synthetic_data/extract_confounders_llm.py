@@ -9,7 +9,8 @@ Usage:
         --input example_synthetic_data/dataset.parquet \
         --output example_synthetic_data/dataset_with_extraction.parquet \
         --vllm-url http://localhost:8000/v1 \
-        --model openai/gpt-oss-120b
+        --model openai/gpt-oss-120b \
+	--download-dir /data1/ken/models
 
     # With explicit metadata path:
     python synthetic_data/extract_confounders_llm.py \
@@ -119,6 +120,73 @@ Respond with JSON only, no other text:
     return prompt
 
 
+def parse_harmony_response(text: str) -> str:
+    """Parse harmony format response to extract the final channel content.
+
+    gpt-oss models use the harmony format with channels like:
+    - <|channel|>analysis - reasoning/chain-of-thought
+    - <|channel|>commentary - tool preambles
+    - <|channel|>final - user-facing answer
+
+    Args:
+        text: Raw harmony format model output
+
+    Returns:
+        Content from the final channel, or the original text if not in harmony format
+    """
+    if not text:
+        return text
+
+    # Try using openai_harmony parser if available
+    try:
+        from openai_harmony import (
+            load_harmony_encoding,
+            HarmonyEncodingName,
+            Role,
+        )
+        encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+
+        # Encode the text to tokens and parse
+        tokens = encoding.encode(text)
+        messages = encoding.parse_messages_from_completion_tokens(tokens, Role.ASSISTANT)
+
+        # Extract content from the final channel
+        for msg in messages:
+            if hasattr(msg, 'content') and msg.content:
+                content = msg.content
+                # Check if it's the final channel content
+                if hasattr(content, 'channel') and content.channel == 'final':
+                    if hasattr(content, 'text'):
+                        return content.text
+                # Also try direct text extraction
+                elif hasattr(content, 'text'):
+                    return content.text
+
+        # If parsing succeeded but no final channel, return last message content
+        if messages and hasattr(messages[-1], 'content'):
+            content = messages[-1].content
+            if hasattr(content, 'text'):
+                return content.text
+
+    except ImportError:
+        pass
+    except Exception as e:
+        logger.debug(f"Harmony parsing failed: {e}, falling back to regex")
+
+    # Fallback: use regex to extract content after <|channel|>final or <|message|>
+    # Look for final channel content
+    final_match = re.search(r'<\|channel\|>final[^<]*<\|message\|>(.+?)(?:<\||$)', text, re.DOTALL)
+    if final_match:
+        return final_match.group(1).strip()
+
+    # Look for any message content
+    message_match = re.search(r'<\|message\|>(.+?)(?:<\||$)', text, re.DOTALL)
+    if message_match:
+        return message_match.group(1).strip()
+
+    return text
+
+
 def strip_reasoning_prefix(text: str, marker: str = "assistantfinal") -> str:
     """Strip reasoning prefix from model output.
 
@@ -134,6 +202,10 @@ def strip_reasoning_prefix(text: str, marker: str = "assistantfinal") -> str:
     """
     if not text or not marker:
         return text
+
+    # First try harmony format parsing for gpt-oss models
+    if '<|channel|>' in text or '<|message|>' in text:
+        return parse_harmony_response(text)
 
     marker_lower = marker.lower()
     text_lower = text.lower()
@@ -428,6 +500,7 @@ class VLLMBatchClientWrapper:
     def __init__(
         self,
         model_name: str = "openai/gpt-oss-120b",
+	download_dir: str = "/data1/ken/models",
         tensor_parallel_size: int = 2,
         gpu_memory_utilization: float = 0.90,
         confounders: Optional[List[Dict[str, Any]]] = None
@@ -451,7 +524,8 @@ class VLLMBatchClientWrapper:
             model=model_name,
             tensor_parallel_size=tensor_parallel_size,
             gpu_memory_utilization=gpu_memory_utilization,
-            trust_remote_code=True
+            trust_remote_code=True,
+	    download_dir=download_dir
         )
         self.model_name = model_name
         self.confounders = confounders or []
@@ -479,20 +553,101 @@ class VLLMBatchClientWrapper:
         """
         from vllm import SamplingParams
 
-        # Build prompts dynamically based on confounders
-        prompts = [
-            f"User: {build_extraction_prompt(text[:8000], self.confounders)}\n\nAssistant:"
-            for text in clinical_texts
-        ]
+        # Check if this is a gpt-oss model that requires harmony format
+        is_gpt_oss = "gpt-oss" in self.model_name.lower()
 
-        sampling_params = SamplingParams(
-            temperature=temperature,
-            max_tokens=max_tokens,
-            stop=["User:", "\n\n"]
-        )
+        if is_gpt_oss:
+            try:
+                from openai_harmony import (
+                    HarmonyEncodingName,
+                    load_harmony_encoding,
+                    Conversation,
+                    Message,
+                    Role,
+                    SystemContent,
+                    DeveloperContent,
+                )
+                use_harmony = True
+                encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+                stop_token_ids = encoding.stop_tokens_for_assistant_actions()
+                logger.info(f"Using harmony format for gpt-oss model with {len(stop_token_ids)} stop tokens")
+            except ImportError:
+                logger.warning(
+                    "openai-harmony package not found. Install with: pip install openai-harmony. "
+                    "Falling back to chat template format."
+                )
+                use_harmony = False
+        else:
+            use_harmony = False
 
-        logger.info(f"Running vLLM batch inference on {len(prompts)} texts...")
-        outputs = self.llm.generate(prompts, sampling_params)
+        # Build prompts
+        prompts = []
+        prompt_token_ids = []
+
+        for text in clinical_texts:
+            user_content = build_extraction_prompt(text[:8000], self.confounders)
+
+            if use_harmony:
+                # Use harmony format for gpt-oss models
+                convo = Conversation.from_messages([
+                    Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
+                    Message.from_role_and_content(
+                        Role.DEVELOPER,
+                        DeveloperContent.new().with_instructions(
+                            "You are a clinical data extraction assistant. "
+                            "Extract patient characteristics from clinical notes and respond with valid JSON only."
+                        ),
+                    ),
+                    Message.from_role_and_content(Role.USER, user_content),
+                ])
+                prefill_ids = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
+                prompt_token_ids.append(prefill_ids)
+            else:
+                # Use tokenizer chat template for other models
+                tokenizer = self.llm.get_tokenizer()
+                messages = [{"role": "user", "content": user_content}]
+                if hasattr(tokenizer, 'apply_chat_template'):
+                    try:
+                        prompt = tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to apply chat template: {e}, using fallback")
+                        prompt = f"User: {user_content}\n\nAssistant:"
+                else:
+                    prompt = f"User: {user_content}\n\nAssistant:"
+                prompts.append(prompt)
+
+        # Set up sampling params
+        if use_harmony:
+            sampling_params = SamplingParams(
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop_token_ids=stop_token_ids
+            )
+        else:
+            # For non-harmony models, get stop tokens from tokenizer if available
+            tokenizer = self.llm.get_tokenizer()
+            stop_tokens = []
+            if hasattr(tokenizer, 'eos_token') and tokenizer.eos_token:
+                stop_tokens.append(tokenizer.eos_token)
+            # Add common stop sequences but not \n\n which truncates JSON
+            stop_tokens.extend(["User:"])
+            sampling_params = SamplingParams(
+                temperature=temperature,
+                max_tokens=max_tokens,
+                stop=stop_tokens
+            )
+
+        # Run generation with appropriate input format
+        if use_harmony:
+            logger.info(f"Running vLLM batch inference on {len(prompt_token_ids)} texts (harmony format)...")
+            outputs = self.llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
+        else:
+            logger.info(f"Running vLLM batch inference on {len(prompts)} texts...")
+            outputs = self.llm.generate(prompts, sampling_params)
 
         results = []
         raw_responses = []
@@ -733,6 +888,15 @@ def main():
         help="Skip accuracy evaluation against ground truth"
     )
 
+    parser.add_argument(
+        "--download-dir",
+        type=str,
+	default="/data1/ken/models",
+        help="VLLM model download dir"
+    )
+
+
+
     args = parser.parse_args()
 
     # Set global reasoning marker
@@ -785,6 +949,7 @@ def main():
     if args.vllm_direct:
         client = VLLMBatchClientWrapper(
             model_name=args.model,
+	    download_dir=args.download_dir,
             tensor_parallel_size=args.tensor_parallel_size,
             confounders=confounders
         )

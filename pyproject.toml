@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
-    {name = "Ken Kehl", email = "kenneth_kehl at dfci.harvard.edu"}
+    {name = "Ken Kehl", email = "kenneth_kehl@dfci.harvard.edu"}
 ]
 keywords = ["causal inference", "machine learning", "clinical text", "nlp"]
 classifiers = [
@@ -32,6 +32,7 @@ dependencies = [
     "pyarrow",
     "joblib>=1.2.0",
     "openai>=1.0.0",
+    "openai-harmony>=0.0.8",
     "entmax>=1.0",
     "econml>=0.14.0",
     "llvmlite>=0.46.0",

@@ -26,6 +26,7 @@ Requires-Dist: tqdm>=4.65.0
 Requires-Dist: pyarrow
 Requires-Dist: joblib>=1.2.0
 Requires-Dist: openai>=1.0.0
+Requires-Dist: openai-harmony>=0.0.8
 Requires-Dist: entmax>=1.0
 Requires-Dist: econml>=0.14.0
 Requires-Dist: llvmlite>=0.46.0

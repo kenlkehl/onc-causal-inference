@@ -5,7 +5,6 @@ pyproject.toml
 cdt/__init__.py
 cdt/cli.py
 cdt/config.py
-cdt/.ipynb_checkpoints/config-checkpoint.py
 cdt/analysis/__init__.py
 cdt/analysis/psm_analysis.py
 cdt/analysis/statistical_analysis.py
@@ -45,7 +44,6 @@ cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/traditional_logreg.py
 cdt/models/uplift.py
-cdt/models/.ipynb_checkpoints/gru_pool_extractor-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py
