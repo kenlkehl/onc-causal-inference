@@ -1,4 +1,4 @@
-# cdt/models/causal_cnn.py
+# cdt/models/causal_text.py
 """Causal inference model using simple 1D CNN for text representation."""
 
 import logging
@@ -7,20 +7,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .cnn_extractor import CNNFeatureExtractor
-from .bert_extractor import BertFeatureExtractor
-from .gru_extractor import GRUFeatureExtractor
-from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
-from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
-from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
-from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
-from .gru_pool_extractor import GRUPoolExtractor
-from .llm_extractor import LLMFeatureExtractor
 from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
 from .traditional_logreg import TraditionalLogRegNet
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer
+from .extractor_factory import create_feature_extractor
 from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
 
 
@@ -382,264 +374,133 @@ class CausalText(nn.Module):
         # Store auxiliary dimension
         self.auxiliary_dim = auxiliary_dim
 
-        # Initialize feature extractor based on normalized type
-        if self.feature_extractor_type == "bert":
-            self.feature_extractor = BertFeatureExtractor(
-                model_name=bert_model_name,
-                projection_dim=bert_projection_dim,
-                max_length=bert_max_length,
-                dropout=bert_dropout,
-                freeze_encoder=bert_freeze_encoder,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            if bert_gradient_checkpointing:
-                self.feature_extractor.gradient_checkpointing_enable()
-            logger.info(f"Using BERT feature extractor: {bert_model_name}")
-        elif self.feature_extractor_type == "gru":
-            self.feature_extractor = GRUFeatureExtractor(
-                embedding_dim=embedding_dim,
-                hidden_dim=gru_hidden_dim,
-                num_layers=gru_num_layers,
-                dropout=gru_dropout,
-                bidirectional=gru_bidirectional,
-                attention_dim=gru_attention_dim,
-                projection_dim=gru_projection_dim,
-                max_length=max_length,
-                min_word_freq=min_word_freq,
-                max_vocab_size=max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Using GRU feature extractor: {gru_num_layers} layers, "
-                       f"hidden_dim={gru_hidden_dim}, bidirectional={gru_bidirectional}")
-        elif self.feature_extractor_type == "confounder":
-            if confounder_use_gru:
-                # GRU-based hierarchical extractor (learns from scratch)
-                self.feature_extractor = GRUHierarchicalConfounderExtractor(
-                    vocab_size=confounder_gru_max_vocab,
-                    embedding_dim=confounder_gru_embedding_dim,
-                    min_word_freq=confounder_gru_min_word_freq,
-                    max_sentence_length=confounder_gru_max_sentence_length,
-                    gru_hidden_dim=confounder_gru_hidden_dim,
-                    gru_num_layers=confounder_gru_num_layers,
-                    gru_bidirectional=confounder_gru_bidirectional,
-                    gru_dropout=confounder_gru_dropout,
-                    num_latent_confounders=confounder_num_latents,
-                    num_attention_heads=confounder_num_heads,
-                    sparse_attention=confounder_sparse_attention,
-                    sparse_alpha=confounder_sparse_alpha,
-                    sparse_method=confounder_sparse_method,
-                    top_k=confounder_top_k,
-                    max_sentences=confounder_max_sentences,
-                    value_dim=confounder_value_dim,
-                    dropout=confounder_dropout,
-                    model_type=model_type,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-                logger.info(f"Using GRU Hierarchical Confounder feature extractor: {confounder_num_latents} latents, "
-                           f"GRU hidden_dim={confounder_gru_hidden_dim}, sparse={confounder_sparse_attention}")
-            elif confounder_hierarchical:
-                # Hierarchical extractor with token-level attention (BERT-based)
-                self.feature_extractor = HierarchicalConfounderExtractor(
-                    num_latent_confounders=confounder_num_latents,
-                    explicit_confounder_texts=confounder_explicit_texts,
-                    value_dim=confounder_value_dim,
-                    token_encoder_model=confounder_token_encoder,
-                    freeze_token_encoder=confounder_freeze_token_encoder,
-                    max_sentences=confounder_max_sentences,
-                    max_sentence_tokens=confounder_max_sentence_tokens,
-                    num_attention_heads=confounder_num_heads,
-                    sparse_attention=confounder_sparse_attention,
-                    sparse_method=confounder_sparse_method,
-                    sparse_alpha=confounder_sparse_alpha,
-                    top_k=confounder_top_k,
-                    dropout=confounder_dropout,
-                    model_type=model_type,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-                logger.info(f"Using Hierarchical Confounder feature extractor: {confounder_num_latents} latents, "
-                           f"token_encoder={confounder_token_encoder}, sparse={confounder_sparse_attention}")
-            else:
-                # Standard sentence-level extractor
-                self.feature_extractor = ConfounderExtractor(
-                    num_latent_confounders=confounder_num_latents,
-                    explicit_confounder_texts=confounder_explicit_texts,
-                    value_dim=confounder_value_dim,
-                    sentence_transformer_model=confounder_sentence_model,
-                    freeze_sentence_encoder=confounder_freeze_encoder,
-                    max_sentences=confounder_max_sentences,
-                    num_attention_heads=confounder_num_heads,
-                    num_iterations=confounder_num_iterations,
-                    use_self_attention=confounder_use_self_attention,
-                    sparse_attention=confounder_sparse_attention,
-                    sparse_method=confounder_sparse_method,
-                    sparse_alpha=confounder_sparse_alpha,
-                    top_k=confounder_top_k,
-                    dropout=confounder_dropout,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-                logger.info(f"Using Confounder feature extractor: {confounder_num_latents} latents, "
-                           f"{confounder_num_iterations} iterations, sparse={confounder_sparse_attention}")
-        elif self.feature_extractor_type == "hierarchical_transformer":
-            # Hierarchical Transformer: chunk BERT + transformer pooling
-            self.feature_extractor = HierarchicalTransformerExtractor(
-                sentence_encoder_model=hier_transformer_sentence_model,
-                freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
-                max_chunks=hier_transformer_max_chunks,
-                chunk_size=hier_transformer_chunk_size,
-                chunk_overlap=hier_transformer_chunk_overlap,
-                num_transformer_layers=hier_transformer_num_layers,
-                num_attention_heads=hier_transformer_num_heads,
-                transformer_dim=hier_transformer_dim,
-                transformer_dropout=hier_transformer_dropout,
-                projection_dim=hier_transformer_projection_dim,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Using Hierarchical Transformer feature extractor: {hier_transformer_sentence_model}, "
-                       f"{hier_transformer_num_layers} layers, chunk_size={hier_transformer_chunk_size}, "
-                       f"projection_dim={hier_transformer_projection_dim}")
-        elif self.feature_extractor_type == "gated_mil_hierarchical":
-            # Gated MIL Hierarchical: chunk BERT + gated MIL attention with task-specific weighting
-            self.feature_extractor = GatedMILHierarchicalExtractor(
-                sentence_encoder_model=gated_mil_sentence_model,
-                freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
-                max_chunks=gated_mil_max_chunks,
-                chunk_size=gated_mil_chunk_size,
-                chunk_overlap=gated_mil_chunk_overlap,
-                mil_hidden_dim=gated_mil_hidden_dim,
-                num_confounders=gated_mil_num_confounders,
-                model_type=model_type,
-                projection_dim=gated_mil_projection_dim,
-                dropout=gated_mil_dropout,
-                hierarchical=gated_mil_hierarchical,
-                token_hidden_dim=gated_mil_token_hidden_dim,
-                use_mean_pooling=gated_mil_use_mean_pooling,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Using Gated MIL Hierarchical feature extractor: {gated_mil_sentence_model}, "
-                       f"{gated_mil_num_confounders} confounders, projection_dim={gated_mil_projection_dim}, "
-                       f"hierarchical={gated_mil_hierarchical}, mean_pooling={gated_mil_use_mean_pooling}")
-        elif self.feature_extractor_type == "gru_transformer_mil":
-            # GRU-Transformer-MIL: learned BiGRU + transformer + gated MIL attention
-            self.feature_extractor = GRUTransformerMILExtractor(
-                embedding_dim=gru_mil_embedding_dim,
-                gru_hidden_dim=gru_mil_gru_hidden_dim,
-                gru_num_layers=gru_mil_gru_num_layers,
-                gru_bidirectional=gru_mil_gru_bidirectional,
-                gru_dropout=gru_mil_gru_dropout,
-                max_chunks=gru_mil_max_chunks,
-                chunk_size=gru_mil_chunk_size,
-                chunk_overlap=gru_mil_chunk_overlap,
-                transformer_layers=gru_mil_transformer_layers,
-                transformer_heads=gru_mil_transformer_heads,
-                transformer_dim=gru_mil_transformer_dim,
-                num_confounders=gru_mil_num_confounders,
-                mil_hidden_dim=gru_mil_mil_hidden_dim,
-                projection_dim=gru_mil_projection_dim,
-                max_vocab_size=gru_mil_max_vocab,
-                min_word_freq=gru_mil_min_word_freq,
-                model_type=model_type,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Using GRU-Transformer-MIL feature extractor: "
-                       f"GRU {gru_mil_gru_hidden_dim}x{2 if gru_mil_gru_bidirectional else 1}, "
-                       f"{gru_mil_transformer_layers} transformer layers, "
-                       f"{gru_mil_num_confounders} confounders, projection_dim={gru_mil_projection_dim}")
-        elif self.feature_extractor_type == "gru_pool":
-            # GRU-Pool: learned BiGRU + transformer + gated attention pooling (no task-specific weighting)
-            self.feature_extractor = GRUPoolExtractor(
-                embedding_dim=gru_pool_embedding_dim,
-                gru_hidden_dim=gru_pool_gru_hidden_dim,
-                gru_num_layers=gru_pool_gru_num_layers,
-                gru_bidirectional=gru_pool_gru_bidirectional,
-                gru_dropout=gru_pool_gru_dropout,
-                max_chunks=gru_pool_max_chunks,
-                chunk_size=gru_pool_chunk_size,
-                chunk_overlap=gru_pool_chunk_overlap,
-                transformer_layers=gru_pool_transformer_layers,
-                transformer_heads=gru_pool_transformer_heads,
-                transformer_dim=gru_pool_transformer_dim,
-                gated_attention_dim=gru_pool_gated_attention_dim,
-                projection_dim=gru_pool_projection_dim,
-                max_vocab_size=gru_pool_max_vocab,
-                min_word_freq=gru_pool_min_word_freq,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Using GRU-Pool feature extractor: "
-                       f"GRU {gru_pool_gru_hidden_dim}x{2 if gru_pool_gru_bidirectional else 1}, "
-                       f"{gru_pool_transformer_layers} transformer layers, "
-                       f"gated_attention_dim={gru_pool_gated_attention_dim}, projection_dim={gru_pool_projection_dim}")
-        elif self.feature_extractor_type == "llm":
-            # LLM feature extractor (decoder-only with random init)
-            self.feature_extractor = LLMFeatureExtractor(
-                model_name=llm_model_name,
-                max_length=llm_max_length,
-                projection_dim=llm_projection_dim,
-                dropout=llm_dropout,
-                gradient_checkpointing=llm_gradient_checkpointing,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Using LLM feature extractor: {llm_model_name} (random init), "
-                       f"max_length={llm_max_length}, projection_dim={llm_projection_dim}")
-        else:
-            # CNN feature extractor (default)
-            self.feature_extractor = CNNFeatureExtractor(
-                embedding_dim=embedding_dim,
-                kernel_sizes=kernel_sizes,
-                explicit_filter_concepts=explicit_filter_concepts,
-                num_kmeans_filters=num_kmeans_filters,
-                num_random_filters=num_random_filters,
-                projection_dim=projection_dim,
-                dropout=cnn_dropout,
-                max_length=max_length,
-                min_word_freq=min_word_freq,
-                max_vocab_size=max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info("Using CNN feature extractor")
+        # Initialize feature extractor using factory
+        self.feature_extractor = create_feature_extractor(
+            extractor_type=self.feature_extractor_type,
+            device=self._device,
+            model_type=model_type,
+            # CNN args
+            embedding_dim=embedding_dim,
+            kernel_sizes=kernel_sizes,
+            explicit_filter_concepts=explicit_filter_concepts,
+            num_kmeans_filters=num_kmeans_filters,
+            num_random_filters=num_random_filters,
+            cnn_dropout=cnn_dropout,
+            max_length=max_length,
+            min_word_freq=min_word_freq,
+            max_vocab_size=max_vocab_size,
+            projection_dim=projection_dim,
+            # BERT args
+            bert_model_name=bert_model_name,
+            bert_max_length=bert_max_length,
+            bert_projection_dim=bert_projection_dim,
+            bert_dropout=bert_dropout,
+            bert_freeze_encoder=bert_freeze_encoder,
+            bert_gradient_checkpointing=bert_gradient_checkpointing,
+            # GRU args
+            gru_hidden_dim=gru_hidden_dim,
+            gru_num_layers=gru_num_layers,
+            gru_dropout=gru_dropout,
+            gru_bidirectional=gru_bidirectional,
+            gru_attention_dim=gru_attention_dim,
+            gru_projection_dim=gru_projection_dim,
+            # Confounder args
+            confounder_num_latents=confounder_num_latents,
+            confounder_explicit_texts=confounder_explicit_texts,
+            confounder_value_dim=confounder_value_dim,
+            confounder_sentence_model=confounder_sentence_model,
+            confounder_freeze_encoder=confounder_freeze_encoder,
+            confounder_max_sentences=confounder_max_sentences,
+            confounder_num_heads=confounder_num_heads,
+            confounder_num_iterations=confounder_num_iterations,
+            confounder_use_self_attention=confounder_use_self_attention,
+            confounder_sparse_attention=confounder_sparse_attention,
+            confounder_sparse_method=confounder_sparse_method,
+            confounder_sparse_alpha=confounder_sparse_alpha,
+            confounder_top_k=confounder_top_k,
+            confounder_dropout=confounder_dropout,
+            confounder_hierarchical=confounder_hierarchical,
+            confounder_token_encoder=confounder_token_encoder,
+            confounder_freeze_token_encoder=confounder_freeze_token_encoder,
+            confounder_max_sentence_tokens=confounder_max_sentence_tokens,
+            confounder_use_gru=confounder_use_gru,
+            confounder_gru_embedding_dim=confounder_gru_embedding_dim,
+            confounder_gru_hidden_dim=confounder_gru_hidden_dim,
+            confounder_gru_num_layers=confounder_gru_num_layers,
+            confounder_gru_bidirectional=confounder_gru_bidirectional,
+            confounder_gru_dropout=confounder_gru_dropout,
+            confounder_gru_max_vocab=confounder_gru_max_vocab,
+            confounder_gru_min_word_freq=confounder_gru_min_word_freq,
+            confounder_gru_max_sentence_length=confounder_gru_max_sentence_length,
+            # Hierarchical Transformer args
+            hier_transformer_sentence_model=hier_transformer_sentence_model,
+            hier_transformer_freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
+            hier_transformer_max_chunks=hier_transformer_max_chunks,
+            hier_transformer_chunk_size=hier_transformer_chunk_size,
+            hier_transformer_chunk_overlap=hier_transformer_chunk_overlap,
+            hier_transformer_num_layers=hier_transformer_num_layers,
+            hier_transformer_num_heads=hier_transformer_num_heads,
+            hier_transformer_dim=hier_transformer_dim,
+            hier_transformer_dropout=hier_transformer_dropout,
+            hier_transformer_projection_dim=hier_transformer_projection_dim,
+            # Gated MIL args
+            gated_mil_sentence_model=gated_mil_sentence_model,
+            gated_mil_freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
+            gated_mil_max_chunks=gated_mil_max_chunks,
+            gated_mil_chunk_size=gated_mil_chunk_size,
+            gated_mil_chunk_overlap=gated_mil_chunk_overlap,
+            gated_mil_hidden_dim=gated_mil_hidden_dim,
+            gated_mil_num_confounders=gated_mil_num_confounders,
+            gated_mil_dropout=gated_mil_dropout,
+            gated_mil_projection_dim=gated_mil_projection_dim,
+            gated_mil_hierarchical=gated_mil_hierarchical,
+            gated_mil_token_hidden_dim=gated_mil_token_hidden_dim,
+            gated_mil_use_mean_pooling=gated_mil_use_mean_pooling,
+            # GRU-Transformer-MIL args
+            gru_mil_embedding_dim=gru_mil_embedding_dim,
+            gru_mil_gru_hidden_dim=gru_mil_gru_hidden_dim,
+            gru_mil_gru_num_layers=gru_mil_gru_num_layers,
+            gru_mil_gru_bidirectional=gru_mil_gru_bidirectional,
+            gru_mil_gru_dropout=gru_mil_gru_dropout,
+            gru_mil_max_chunks=gru_mil_max_chunks,
+            gru_mil_chunk_size=gru_mil_chunk_size,
+            gru_mil_chunk_overlap=gru_mil_chunk_overlap,
+            gru_mil_transformer_layers=gru_mil_transformer_layers,
+            gru_mil_transformer_heads=gru_mil_transformer_heads,
+            gru_mil_transformer_dim=gru_mil_transformer_dim,
+            gru_mil_num_confounders=gru_mil_num_confounders,
+            gru_mil_mil_hidden_dim=gru_mil_mil_hidden_dim,
+            gru_mil_projection_dim=gru_mil_projection_dim,
+            gru_mil_max_vocab=gru_mil_max_vocab,
+            gru_mil_min_word_freq=gru_mil_min_word_freq,
+            # GRU-Pool args
+            gru_pool_embedding_dim=gru_pool_embedding_dim,
+            gru_pool_gru_hidden_dim=gru_pool_gru_hidden_dim,
+            gru_pool_gru_num_layers=gru_pool_gru_num_layers,
+            gru_pool_gru_bidirectional=gru_pool_gru_bidirectional,
+            gru_pool_gru_dropout=gru_pool_gru_dropout,
+            gru_pool_max_chunks=gru_pool_max_chunks,
+            gru_pool_chunk_size=gru_pool_chunk_size,
+            gru_pool_chunk_overlap=gru_pool_chunk_overlap,
+            gru_pool_transformer_layers=gru_pool_transformer_layers,
+            gru_pool_transformer_heads=gru_pool_transformer_heads,
+            gru_pool_transformer_dim=gru_pool_transformer_dim,
+            gru_pool_gated_attention_dim=gru_pool_gated_attention_dim,
+            gru_pool_projection_dim=gru_pool_projection_dim,
+            gru_pool_max_vocab=gru_pool_max_vocab,
+            gru_pool_min_word_freq=gru_pool_min_word_freq,
+            # LLM args
+            llm_model_name=llm_model_name,
+            llm_max_length=llm_max_length,
+            llm_projection_dim=llm_projection_dim,
+            llm_dropout=llm_dropout,
+            llm_gradient_checkpointing=llm_gradient_checkpointing,
+            # Numeric args
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+        )
 
         # Auxiliary feature projection (if enabled)
         if auxiliary_dim > 0:
@@ -799,160 +660,133 @@ class CausalText(nn.Module):
         )
 
         if dual_mode_enabled:
-            # Create second feature extractor with same architecture
-            # We need to duplicate the extractor instantiation logic
-            if self.feature_extractor_type == "bert":
-                self.effect_feature_extractor = BertFeatureExtractor(
-                    model_name=bert_model_name,
-                    projection_dim=bert_projection_dim,
-                    max_length=bert_max_length,
-                    dropout=bert_dropout,
-                    freeze_encoder=bert_freeze_encoder,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-                if bert_gradient_checkpointing:
-                    self.effect_feature_extractor.gradient_checkpointing_enable()
-            elif self.feature_extractor_type == "gru":
-                self.effect_feature_extractor = GRUFeatureExtractor(
-                    embedding_dim=embedding_dim,
-                    hidden_dim=gru_hidden_dim,
-                    num_layers=gru_num_layers,
-                    dropout=gru_dropout,
-                    bidirectional=gru_bidirectional,
-                    attention_dim=gru_attention_dim,
-                    projection_dim=gru_projection_dim,
-                    max_length=max_length,
-                    min_word_freq=min_word_freq,
-                    max_vocab_size=max_vocab_size,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-            elif self.feature_extractor_type == "gru_pool":
-                self.effect_feature_extractor = GRUPoolExtractor(
-                    embedding_dim=gru_pool_embedding_dim,
-                    gru_hidden_dim=gru_pool_gru_hidden_dim,
-                    gru_num_layers=gru_pool_gru_num_layers,
-                    gru_bidirectional=gru_pool_gru_bidirectional,
-                    gru_dropout=gru_pool_gru_dropout,
-                    max_chunks=gru_pool_max_chunks,
-                    chunk_size=gru_pool_chunk_size,
-                    chunk_overlap=gru_pool_chunk_overlap,
-                    transformer_layers=gru_pool_transformer_layers,
-                    transformer_heads=gru_pool_transformer_heads,
-                    transformer_dim=gru_pool_transformer_dim,
-                    gated_attention_dim=gru_pool_gated_attention_dim,
-                    projection_dim=gru_pool_projection_dim,
-                    max_vocab_size=gru_pool_max_vocab,
-                    min_word_freq=gru_pool_min_word_freq,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-            elif self.feature_extractor_type == "hierarchical_transformer":
-                self.effect_feature_extractor = HierarchicalTransformerExtractor(
-                    sentence_encoder_model=hier_transformer_sentence_model,
-                    freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
-                    max_chunks=hier_transformer_max_chunks,
-                    chunk_size=hier_transformer_chunk_size,
-                    chunk_overlap=hier_transformer_chunk_overlap,
-                    num_transformer_layers=hier_transformer_num_layers,
-                    num_attention_heads=hier_transformer_num_heads,
-                    transformer_dim=hier_transformer_dim,
-                    transformer_dropout=hier_transformer_dropout,
-                    projection_dim=hier_transformer_projection_dim,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-            elif self.feature_extractor_type == "gated_mil_hierarchical":
-                self.effect_feature_extractor = GatedMILHierarchicalExtractor(
-                    sentence_encoder_model=gated_mil_sentence_model,
-                    freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
-                    max_chunks=gated_mil_max_chunks,
-                    chunk_size=gated_mil_chunk_size,
-                    chunk_overlap=gated_mil_chunk_overlap,
-                    mil_hidden_dim=gated_mil_hidden_dim,
-                    num_confounders=gated_mil_num_confounders,
-                    model_type=model_type,
-                    projection_dim=gated_mil_projection_dim,
-                    dropout=gated_mil_dropout,
-                    hierarchical=gated_mil_hierarchical,
-                    token_hidden_dim=gated_mil_token_hidden_dim,
-                    use_mean_pooling=gated_mil_use_mean_pooling,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-            elif self.feature_extractor_type == "gru_transformer_mil":
-                self.effect_feature_extractor = GRUTransformerMILExtractor(
-                    embedding_dim=gru_mil_embedding_dim,
-                    gru_hidden_dim=gru_mil_gru_hidden_dim,
-                    gru_num_layers=gru_mil_gru_num_layers,
-                    gru_bidirectional=gru_mil_gru_bidirectional,
-                    gru_dropout=gru_mil_gru_dropout,
-                    max_chunks=gru_mil_max_chunks,
-                    chunk_size=gru_mil_chunk_size,
-                    chunk_overlap=gru_mil_chunk_overlap,
-                    transformer_layers=gru_mil_transformer_layers,
-                    transformer_heads=gru_mil_transformer_heads,
-                    transformer_dim=gru_mil_transformer_dim,
-                    num_confounders=gru_mil_num_confounders,
-                    mil_hidden_dim=gru_mil_mil_hidden_dim,
-                    projection_dim=gru_mil_projection_dim,
-                    max_vocab_size=gru_mil_max_vocab,
-                    min_word_freq=gru_mil_min_word_freq,
-                    model_type=model_type,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-            elif self.feature_extractor_type == "llm":
-                self.effect_feature_extractor = LLMFeatureExtractor(
-                    model_name=llm_model_name,
-                    max_length=llm_max_length,
-                    projection_dim=llm_projection_dim,
-                    dropout=llm_dropout,
-                    gradient_checkpointing=llm_gradient_checkpointing,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
-            else:
-                # CNN feature extractor
-                self.effect_feature_extractor = CNNFeatureExtractor(
-                    embedding_dim=embedding_dim,
-                    kernel_sizes=kernel_sizes,
-                    explicit_filter_concepts=explicit_filter_concepts,
-                    num_kmeans_filters=num_kmeans_filters,
-                    num_random_filters=num_random_filters,
-                    projection_dim=projection_dim,
-                    dropout=cnn_dropout,
-                    max_length=max_length,
-                    min_word_freq=min_word_freq,
-                    max_vocab_size=max_vocab_size,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
-                    device=self._device
-                )
+            # Create second feature extractor with same architecture using factory
+            self.effect_feature_extractor = create_feature_extractor(
+                extractor_type=self.feature_extractor_type,
+                device=self._device,
+                model_type=model_type,
+                # CNN args
+                embedding_dim=embedding_dim,
+                kernel_sizes=kernel_sizes,
+                explicit_filter_concepts=explicit_filter_concepts,
+                num_kmeans_filters=num_kmeans_filters,
+                num_random_filters=num_random_filters,
+                cnn_dropout=cnn_dropout,
+                max_length=max_length,
+                min_word_freq=min_word_freq,
+                max_vocab_size=max_vocab_size,
+                projection_dim=projection_dim,
+                # BERT args
+                bert_model_name=bert_model_name,
+                bert_max_length=bert_max_length,
+                bert_projection_dim=bert_projection_dim,
+                bert_dropout=bert_dropout,
+                bert_freeze_encoder=bert_freeze_encoder,
+                bert_gradient_checkpointing=bert_gradient_checkpointing,
+                # GRU args
+                gru_hidden_dim=gru_hidden_dim,
+                gru_num_layers=gru_num_layers,
+                gru_dropout=gru_dropout,
+                gru_bidirectional=gru_bidirectional,
+                gru_attention_dim=gru_attention_dim,
+                gru_projection_dim=gru_projection_dim,
+                # Confounder args
+                confounder_num_latents=confounder_num_latents,
+                confounder_explicit_texts=confounder_explicit_texts,
+                confounder_value_dim=confounder_value_dim,
+                confounder_sentence_model=confounder_sentence_model,
+                confounder_freeze_encoder=confounder_freeze_encoder,
+                confounder_max_sentences=confounder_max_sentences,
+                confounder_num_heads=confounder_num_heads,
+                confounder_num_iterations=confounder_num_iterations,
+                confounder_use_self_attention=confounder_use_self_attention,
+                confounder_sparse_attention=confounder_sparse_attention,
+                confounder_sparse_method=confounder_sparse_method,
+                confounder_sparse_alpha=confounder_sparse_alpha,
+                confounder_top_k=confounder_top_k,
+                confounder_dropout=confounder_dropout,
+                confounder_hierarchical=confounder_hierarchical,
+                confounder_token_encoder=confounder_token_encoder,
+                confounder_freeze_token_encoder=confounder_freeze_token_encoder,
+                confounder_max_sentence_tokens=confounder_max_sentence_tokens,
+                confounder_use_gru=confounder_use_gru,
+                confounder_gru_embedding_dim=confounder_gru_embedding_dim,
+                confounder_gru_hidden_dim=confounder_gru_hidden_dim,
+                confounder_gru_num_layers=confounder_gru_num_layers,
+                confounder_gru_bidirectional=confounder_gru_bidirectional,
+                confounder_gru_dropout=confounder_gru_dropout,
+                confounder_gru_max_vocab=confounder_gru_max_vocab,
+                confounder_gru_min_word_freq=confounder_gru_min_word_freq,
+                confounder_gru_max_sentence_length=confounder_gru_max_sentence_length,
+                # Hierarchical Transformer args
+                hier_transformer_sentence_model=hier_transformer_sentence_model,
+                hier_transformer_freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
+                hier_transformer_max_chunks=hier_transformer_max_chunks,
+                hier_transformer_chunk_size=hier_transformer_chunk_size,
+                hier_transformer_chunk_overlap=hier_transformer_chunk_overlap,
+                hier_transformer_num_layers=hier_transformer_num_layers,
+                hier_transformer_num_heads=hier_transformer_num_heads,
+                hier_transformer_dim=hier_transformer_dim,
+                hier_transformer_dropout=hier_transformer_dropout,
+                hier_transformer_projection_dim=hier_transformer_projection_dim,
+                # Gated MIL args
+                gated_mil_sentence_model=gated_mil_sentence_model,
+                gated_mil_freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
+                gated_mil_max_chunks=gated_mil_max_chunks,
+                gated_mil_chunk_size=gated_mil_chunk_size,
+                gated_mil_chunk_overlap=gated_mil_chunk_overlap,
+                gated_mil_hidden_dim=gated_mil_hidden_dim,
+                gated_mil_num_confounders=gated_mil_num_confounders,
+                gated_mil_dropout=gated_mil_dropout,
+                gated_mil_projection_dim=gated_mil_projection_dim,
+                gated_mil_hierarchical=gated_mil_hierarchical,
+                gated_mil_token_hidden_dim=gated_mil_token_hidden_dim,
+                gated_mil_use_mean_pooling=gated_mil_use_mean_pooling,
+                # GRU-Transformer-MIL args
+                gru_mil_embedding_dim=gru_mil_embedding_dim,
+                gru_mil_gru_hidden_dim=gru_mil_gru_hidden_dim,
+                gru_mil_gru_num_layers=gru_mil_gru_num_layers,
+                gru_mil_gru_bidirectional=gru_mil_gru_bidirectional,
+                gru_mil_gru_dropout=gru_mil_gru_dropout,
+                gru_mil_max_chunks=gru_mil_max_chunks,
+                gru_mil_chunk_size=gru_mil_chunk_size,
+                gru_mil_chunk_overlap=gru_mil_chunk_overlap,
+                gru_mil_transformer_layers=gru_mil_transformer_layers,
+                gru_mil_transformer_heads=gru_mil_transformer_heads,
+                gru_mil_transformer_dim=gru_mil_transformer_dim,
+                gru_mil_num_confounders=gru_mil_num_confounders,
+                gru_mil_mil_hidden_dim=gru_mil_mil_hidden_dim,
+                gru_mil_projection_dim=gru_mil_projection_dim,
+                gru_mil_max_vocab=gru_mil_max_vocab,
+                gru_mil_min_word_freq=gru_mil_min_word_freq,
+                # GRU-Pool args
+                gru_pool_embedding_dim=gru_pool_embedding_dim,
+                gru_pool_gru_hidden_dim=gru_pool_gru_hidden_dim,
+                gru_pool_gru_num_layers=gru_pool_gru_num_layers,
+                gru_pool_gru_bidirectional=gru_pool_gru_bidirectional,
+                gru_pool_gru_dropout=gru_pool_gru_dropout,
+                gru_pool_max_chunks=gru_pool_max_chunks,
+                gru_pool_chunk_size=gru_pool_chunk_size,
+                gru_pool_chunk_overlap=gru_pool_chunk_overlap,
+                gru_pool_transformer_layers=gru_pool_transformer_layers,
+                gru_pool_transformer_heads=gru_pool_transformer_heads,
+                gru_pool_transformer_dim=gru_pool_transformer_dim,
+                gru_pool_gated_attention_dim=gru_pool_gated_attention_dim,
+                gru_pool_projection_dim=gru_pool_projection_dim,
+                gru_pool_max_vocab=gru_pool_max_vocab,
+                gru_pool_min_word_freq=gru_pool_min_word_freq,
+                # LLM args
+                llm_model_name=llm_model_name,
+                llm_max_length=llm_max_length,
+                llm_projection_dim=llm_projection_dim,
+                llm_dropout=llm_dropout,
+                llm_gradient_checkpointing=llm_gradient_checkpointing,
+                # Numeric args
+                numeric_features_enabled=numeric_features_enabled,
+                numeric_embedding_dim=numeric_embedding_dim,
+                numeric_magnitude_bins=numeric_magnitude_bins,
+                numeric_type_categories=numeric_type_categories,
+            )
 
             # Simple MLP for τ(X) - takes effect extractor output, predicts treatment effect
             # Note: τ is unbounded (can be negative) - no final activation

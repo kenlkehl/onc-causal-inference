@@ -6,7 +6,6 @@ from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
 from .traditional_logreg import TraditionalLogRegNet
-from .outcome_heads import OutcomeHeadsOnly, UpliftHeadsOnly
 from .cnn_extractor import CNNFeatureExtractor, WordTokenizer
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor, AttentionPooling
@@ -25,8 +24,9 @@ from .sparse_attention import (
 )
 from .numeric_features import NumericEmbedding, NumericFeatureVector, extract_numeric_patterns
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer, get_raw_confounder_features
-from .causal_text import CausalText, CausalCNNText  # CausalCNNText is deprecated alias
+from .causal_text import CausalText
 from .propensity_model import PropensityOnlyModel, PropensityNet, create_propensity_model_from_config
+from .extractor_factory import create_feature_extractor, create_feature_extractor_from_config
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
 from .causal_text_forest import CausalTextForest
 
@@ -36,8 +36,6 @@ __all__ = [
     'UpliftNet',
     'RLearnerNet',
     'TraditionalLogRegNet',
-    'OutcomeHeadsOnly',
-    'UpliftHeadsOnly',
     'CNNFeatureExtractor',
     'WordTokenizer',
     'BertFeatureExtractor',
@@ -60,7 +58,6 @@ __all__ = [
     'adaptive_top_k',
     'SparseCrossAttention',
     'CausalText',
-    'CausalCNNText',  # Deprecated alias for CausalText
     'PropensityOnlyModel',
     'PropensityNet',
     'create_propensity_model_from_config',
@@ -72,4 +69,6 @@ __all__ = [
     'get_raw_confounder_features',
     'CausalTextForest',
     'ECONML_AVAILABLE',
+    'create_feature_extractor',
+    'create_feature_extractor_from_config',
 ]

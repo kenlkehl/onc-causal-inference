@@ -53,8 +53,11 @@ from tqdm import tqdm
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from cdt.models.causal_cnn import CausalCNNText
-from cdt.models.mlp_dragonnet import MLPDragonNet, CategoricalEncoder
+from cdt.models import CausalText
+from mlp_dragonnet import MLPDragonNet, CategoricalEncoder
+
+# Alias for backward compatibility
+CausalCNNText = CausalText
 
 logging.basicConfig(
     level=logging.INFO,

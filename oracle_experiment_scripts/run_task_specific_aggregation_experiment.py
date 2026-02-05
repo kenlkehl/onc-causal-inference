@@ -50,7 +50,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cdt.models import CausalText
-from cdt.models.mlp_dragonnet import MLPDragonNet, CategoricalEncoder
+from mlp_dragonnet import MLPDragonNet, CategoricalEncoder
 
 logging.basicConfig(
     level=logging.INFO,

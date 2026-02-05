@@ -19,7 +19,7 @@ class DragonNet(nn.Module):
 
         # Shared representation layers (can be loaded from pretrained)
         self.representation_fc1 = nn.Linear(input_dim, representation_dim)
-        self.representation_fc6 = nn.Linear(representation_dim, representation_dim)
+        self.representation_fc2 = nn.Linear(representation_dim, representation_dim)
 
         # Dropout for representation layers
         self.rep_dropout = nn.Dropout(dropout)
@@ -51,7 +51,7 @@ class DragonNet(nn.Module):
         """
         h = F.relu(self.representation_fc1(confounder_features))
         h = self.rep_dropout(h)
-        final_common_layer = F.elu(self.representation_fc6(h))
+        final_common_layer = F.elu(self.representation_fc2(h))
         final_common_layer = self.rep_dropout(final_common_layer)
 
         t_logit = self.propensity_fc1(final_common_layer)
@@ -74,7 +74,7 @@ class DragonNet(nn.Module):
         """Compute shared representation from input features."""
         h = F.relu(self.representation_fc1(features))
         h = self.rep_dropout(h)
-        final_common_layer = F.elu(self.representation_fc6(h))
+        final_common_layer = F.elu(self.representation_fc2(h))
         final_common_layer = self.rep_dropout(final_common_layer)
         return final_common_layer
 
@@ -104,8 +104,7 @@ class DragonNet(nn.Module):
         elif 'representation_fc1' in pretrained_state_dict and isinstance(pretrained_state_dict['representation_fc1'], dict):
             # Nested dict format (legacy)
             state_dict = {}
-            for key in ['representation_fc1', 'representation_fc2', 'representation_fc3',
-                       'representation_fc4', 'representation_fc5', 'representation_fc6']:
+            for key in ['representation_fc1', 'representation_fc2']:
                 if key in pretrained_state_dict:
                     for param_name, param_value in pretrained_state_dict[key].items():
                         state_dict[f'{key}.{param_name}'] = param_value
@@ -129,16 +128,15 @@ class DragonNet(nn.Module):
         try:
             # Create state dict for just the representation layers
             rep_state_dict = {}
-            for key in ['representation_fc1', 'representation_fc2', 'representation_fc3',
-                       'representation_fc4', 'representation_fc5', 'representation_fc6']:
+            for key in ['representation_fc1', 'representation_fc2']:
                 for param_name in ['weight', 'bias']:
                     full_key = f'{key}.{param_name}'
                     if full_key in state_dict:
                         rep_state_dict[full_key] = state_dict[full_key]
-            
+
             # Load with strict=False to allow missing keys (outcome/propensity heads)
             self.load_state_dict(rep_state_dict, strict=False)
-            logger.info("Successfully loaded pretrained representation layers (fc1-fc6)")
+            logger.info("Successfully loaded pretrained representation layers (fc1-fc2)")
             return True
             
         except Exception as e:

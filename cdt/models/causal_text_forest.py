@@ -8,17 +8,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
-from .cnn_extractor import CNNFeatureExtractor
-from .bert_extractor import BertFeatureExtractor
-from .gru_extractor import GRUFeatureExtractor
-from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
-from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
-from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
-from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
-from .gru_pool_extractor import GRUPoolExtractor
-from .llm_extractor import LLMFeatureExtractor
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
 from .explicit_confounder_featurizer import get_raw_confounder_features, ExplicitConfounderFeaturizer
+from .extractor_factory import create_feature_extractor
 from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
 
 
@@ -160,6 +152,10 @@ class CausalTextForest(nn.Module):
         explicit_confounder_output_dim: int = 64,
         explicit_confounder_hidden_dim: int = 128,
         explicit_confounder_dropout: float = 0.1,
+        # CLAM instance-level loss args (for GRU-Pool and other hierarchical extractors)
+        clam_enabled: bool = False,
+        clam_num_instances: int = 5,
+        clam_instance_hidden_dim: int = 64,
         # Device
         device: str = "cuda:0"
     ):
@@ -282,6 +278,9 @@ class CausalTextForest(nn.Module):
             'explicit_confounder_output_dim': explicit_confounder_output_dim,
             'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
             'explicit_confounder_dropout': explicit_confounder_dropout,
+            'clam_enabled': clam_enabled,
+            'clam_num_instances': clam_num_instances,
+            'clam_instance_hidden_dim': clam_instance_hidden_dim,
         }
 
         # Store explicit confounder output dim for head input calculation
@@ -322,135 +321,80 @@ class CausalTextForest(nn.Module):
         else:
             self.explicit_confounder_featurizer = None
 
-        # Initialize feature extractor (reuse existing implementations)
-        if self.feature_extractor_type == "bert":
-            self.feature_extractor = BertFeatureExtractor(
-                model_name=bert_model_name,
-                projection_dim=bert_projection_dim,
-                max_length=bert_max_length,
-                dropout=bert_dropout,
-                freeze_encoder=bert_freeze_encoder,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            if bert_gradient_checkpointing:
-                self.feature_extractor.gradient_checkpointing_enable()
-        elif self.feature_extractor_type == "gru":
-            self.feature_extractor = GRUFeatureExtractor(
-                embedding_dim=embedding_dim,
-                hidden_dim=gru_hidden_dim,
-                num_layers=gru_num_layers,
-                dropout=gru_dropout,
-                bidirectional=gru_bidirectional,
-                attention_dim=gru_attention_dim,
-                projection_dim=gru_projection_dim,
-                max_length=max_length,
-                min_word_freq=min_word_freq,
-                max_vocab_size=max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif self.feature_extractor_type == "hierarchical_transformer":
-            self.feature_extractor = HierarchicalTransformerExtractor(
-                sentence_encoder_model=hier_transformer_sentence_model,
-                freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
-                max_chunks=hier_transformer_max_chunks,
-                chunk_size=hier_transformer_chunk_size,
-                chunk_overlap=hier_transformer_chunk_overlap,
-                num_transformer_layers=hier_transformer_num_layers,
-                num_attention_heads=hier_transformer_num_heads,
-                transformer_dim=hier_transformer_dim,
-                transformer_dropout=hier_transformer_dropout,
-                projection_dim=hier_transformer_projection_dim,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif self.feature_extractor_type == "gated_mil_hierarchical":
-            self.feature_extractor = GatedMILHierarchicalExtractor(
-                sentence_encoder_model=gated_mil_sentence_model,
-                freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
-                max_chunks=gated_mil_max_chunks,
-                chunk_size=gated_mil_chunk_size,
-                chunk_overlap=gated_mil_chunk_overlap,
-                mil_hidden_dim=gated_mil_hidden_dim,
-                num_confounders=gated_mil_num_confounders,
-                model_type="dragonnet",  # Use dragonnet style for representation
-                projection_dim=gated_mil_projection_dim,
-                dropout=gated_mil_dropout,
-                hierarchical=gated_mil_hierarchical,
-                token_hidden_dim=gated_mil_token_hidden_dim,
-                use_mean_pooling=gated_mil_use_mean_pooling,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif self.feature_extractor_type == "gru_pool":
-            self.feature_extractor = GRUPoolExtractor(
-                embedding_dim=gru_pool_embedding_dim,
-                gru_hidden_dim=gru_pool_gru_hidden_dim,
-                gru_num_layers=gru_pool_gru_num_layers,
-                gru_bidirectional=gru_pool_gru_bidirectional,
-                gru_dropout=gru_pool_gru_dropout,
-                max_chunks=gru_pool_max_chunks,
-                chunk_size=gru_pool_chunk_size,
-                chunk_overlap=gru_pool_chunk_overlap,
-                transformer_layers=gru_pool_transformer_layers,
-                transformer_heads=gru_pool_transformer_heads,
-                transformer_dim=gru_pool_transformer_dim,
-                gated_attention_dim=gru_pool_gated_attention_dim,
-                projection_dim=gru_pool_projection_dim,
-                max_vocab_size=gru_pool_max_vocab,
-                min_word_freq=gru_pool_min_word_freq,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif self.feature_extractor_type == "llm":
-            self.feature_extractor = LLMFeatureExtractor(
-                model_name=llm_model_name,
-                max_length=llm_max_length,
-                projection_dim=llm_projection_dim,
-                dropout=llm_dropout,
-                gradient_checkpointing=llm_gradient_checkpointing,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif self.feature_extractor_type == "cnn":
-            self.feature_extractor = CNNFeatureExtractor(
-                embedding_dim=embedding_dim,
-                kernel_sizes=kernel_sizes,
-                explicit_filter_concepts=explicit_filter_concepts,
-                num_kmeans_filters=num_kmeans_filters,
-                num_random_filters=num_random_filters,
-                projection_dim=projection_dim,
-                dropout=cnn_dropout,
-                max_length=max_length,
-                min_word_freq=min_word_freq,
-                max_vocab_size=max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        else:
-            raise ValueError(f"Unsupported feature extractor type: {feature_extractor_type}")
+        # Initialize feature extractor using factory
+        self.feature_extractor = create_feature_extractor(
+            extractor_type=self.feature_extractor_type,
+            device=self._device,
+            model_type="dragonnet",  # Use dragonnet style for representation
+            embedding_dim=embedding_dim,
+            kernel_sizes=kernel_sizes,
+            explicit_filter_concepts=explicit_filter_concepts,
+            num_kmeans_filters=num_kmeans_filters,
+            num_random_filters=num_random_filters,
+            cnn_dropout=cnn_dropout,
+            max_length=max_length,
+            min_word_freq=min_word_freq,
+            max_vocab_size=max_vocab_size,
+            projection_dim=projection_dim,
+            bert_model_name=bert_model_name,
+            bert_max_length=bert_max_length,
+            bert_projection_dim=bert_projection_dim,
+            bert_dropout=bert_dropout,
+            bert_freeze_encoder=bert_freeze_encoder,
+            bert_gradient_checkpointing=bert_gradient_checkpointing,
+            gru_hidden_dim=gru_hidden_dim,
+            gru_num_layers=gru_num_layers,
+            gru_dropout=gru_dropout,
+            gru_bidirectional=gru_bidirectional,
+            gru_attention_dim=gru_attention_dim,
+            gru_projection_dim=gru_projection_dim,
+            hier_transformer_sentence_model=hier_transformer_sentence_model,
+            hier_transformer_freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
+            hier_transformer_max_chunks=hier_transformer_max_chunks,
+            hier_transformer_chunk_size=hier_transformer_chunk_size,
+            hier_transformer_chunk_overlap=hier_transformer_chunk_overlap,
+            hier_transformer_num_layers=hier_transformer_num_layers,
+            hier_transformer_num_heads=hier_transformer_num_heads,
+            hier_transformer_dim=hier_transformer_dim,
+            hier_transformer_dropout=hier_transformer_dropout,
+            hier_transformer_projection_dim=hier_transformer_projection_dim,
+            gated_mil_sentence_model=gated_mil_sentence_model,
+            gated_mil_freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
+            gated_mil_max_chunks=gated_mil_max_chunks,
+            gated_mil_chunk_size=gated_mil_chunk_size,
+            gated_mil_chunk_overlap=gated_mil_chunk_overlap,
+            gated_mil_hidden_dim=gated_mil_hidden_dim,
+            gated_mil_num_confounders=gated_mil_num_confounders,
+            gated_mil_dropout=gated_mil_dropout,
+            gated_mil_projection_dim=gated_mil_projection_dim,
+            gated_mil_hierarchical=gated_mil_hierarchical,
+            gated_mil_token_hidden_dim=gated_mil_token_hidden_dim,
+            gated_mil_use_mean_pooling=gated_mil_use_mean_pooling,
+            gru_pool_embedding_dim=gru_pool_embedding_dim,
+            gru_pool_gru_hidden_dim=gru_pool_gru_hidden_dim,
+            gru_pool_gru_num_layers=gru_pool_gru_num_layers,
+            gru_pool_gru_bidirectional=gru_pool_gru_bidirectional,
+            gru_pool_gru_dropout=gru_pool_gru_dropout,
+            gru_pool_max_chunks=gru_pool_max_chunks,
+            gru_pool_chunk_size=gru_pool_chunk_size,
+            gru_pool_chunk_overlap=gru_pool_chunk_overlap,
+            gru_pool_transformer_layers=gru_pool_transformer_layers,
+            gru_pool_transformer_heads=gru_pool_transformer_heads,
+            gru_pool_transformer_dim=gru_pool_transformer_dim,
+            gru_pool_gated_attention_dim=gru_pool_gated_attention_dim,
+            gru_pool_projection_dim=gru_pool_projection_dim,
+            gru_pool_max_vocab=gru_pool_max_vocab,
+            gru_pool_min_word_freq=gru_pool_min_word_freq,
+            llm_model_name=llm_model_name,
+            llm_max_length=llm_max_length,
+            llm_projection_dim=llm_projection_dim,
+            llm_dropout=llm_dropout,
+            llm_gradient_checkpointing=llm_gradient_checkpointing,
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+        )
 
         logger.info(f"Using {self.feature_extractor_type.upper()} feature extractor")
 
@@ -494,24 +438,32 @@ class CausalTextForest(nn.Module):
             if cf_rlearner_dual_extractors:
                 # DUAL EXTRACTOR MODE: Create a second feature extractor for τ(X)
                 # This provides complete separation between nuisance and effect learning
-                self._create_effect_feature_extractor(
-                    feature_extractor_type=self.feature_extractor_type,
+                self.effect_feature_extractor = create_feature_extractor(
+                    extractor_type=self.feature_extractor_type,
+                    device=self._device,
+                    model_type="dragonnet",
+                    embedding_dim=embedding_dim,
+                    kernel_sizes=kernel_sizes,
+                    explicit_filter_concepts=explicit_filter_concepts,
+                    num_kmeans_filters=num_kmeans_filters,
+                    num_random_filters=num_random_filters,
+                    cnn_dropout=cnn_dropout,
+                    max_length=max_length,
+                    min_word_freq=min_word_freq,
+                    max_vocab_size=max_vocab_size,
+                    projection_dim=projection_dim,
                     bert_model_name=bert_model_name,
-                    bert_projection_dim=bert_projection_dim,
                     bert_max_length=bert_max_length,
+                    bert_projection_dim=bert_projection_dim,
                     bert_dropout=bert_dropout,
                     bert_freeze_encoder=bert_freeze_encoder,
                     bert_gradient_checkpointing=bert_gradient_checkpointing,
-                    embedding_dim=embedding_dim,
                     gru_hidden_dim=gru_hidden_dim,
                     gru_num_layers=gru_num_layers,
                     gru_dropout=gru_dropout,
                     gru_bidirectional=gru_bidirectional,
                     gru_attention_dim=gru_attention_dim,
                     gru_projection_dim=gru_projection_dim,
-                    max_length=max_length,
-                    min_word_freq=min_word_freq,
-                    max_vocab_size=max_vocab_size,
                     hier_transformer_sentence_model=hier_transformer_sentence_model,
                     hier_transformer_freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
                     hier_transformer_max_chunks=hier_transformer_max_chunks,
@@ -554,12 +506,6 @@ class CausalTextForest(nn.Module):
                     llm_projection_dim=llm_projection_dim,
                     llm_dropout=llm_dropout,
                     llm_gradient_checkpointing=llm_gradient_checkpointing,
-                    cnn_dropout=cnn_dropout,
-                    kernel_sizes=kernel_sizes,
-                    explicit_filter_concepts=explicit_filter_concepts,
-                    num_kmeans_filters=num_kmeans_filters,
-                    num_random_filters=num_random_filters,
-                    projection_dim=projection_dim,
                     numeric_features_enabled=numeric_features_enabled,
                     numeric_embedding_dim=numeric_embedding_dim,
                     numeric_magnitude_bins=numeric_magnitude_bins,
@@ -600,6 +546,54 @@ class CausalTextForest(nn.Module):
         else:
             self.effect_head = None
 
+        # CLAM instance-level loss head (for hierarchical extractors)
+        # Creates a separate, lightweight head for top-attended chunks
+        self.clam_enabled = clam_enabled
+        self.clam_num_instances = clam_num_instances
+        self.clam_instance_hidden_dim = clam_instance_hidden_dim
+        self.instance_propensity_head = None
+        self.instance_outcome_head = None
+
+        # Define which extractors support CLAM and their instance input dimensions
+        clam_supported_extractors = {
+            "gru_pool": gru_pool_transformer_dim,
+            "hierarchical_transformer": hier_transformer_dim,
+            "gated_mil_hierarchical": None,  # Needs lazy init
+            "gru_transformer_mil": gru_pool_transformer_dim,  # Uses same transformer dim
+        }
+
+        if clam_enabled:
+            if self.feature_extractor_type not in clam_supported_extractors:
+                logger.warning(f"CLAM instance loss is not supported for {self.feature_extractor_type} extractor. "
+                              f"Supported extractors: {list(clam_supported_extractors.keys())}. Disabling CLAM.")
+                self.clam_enabled = False
+            else:
+                # Get instance input dimension based on extractor type
+                instance_input_dim = clam_supported_extractors[self.feature_extractor_type]
+
+                # For gated_mil_hierarchical, use default BERT-tiny hidden size
+                if instance_input_dim is None:
+                    instance_input_dim = 128  # Default for bert-tiny
+
+                # Create simple propensity and outcome heads for instances
+                # These are lightweight heads that supervise top-attended chunks
+                self.instance_propensity_head = nn.Sequential(
+                    nn.Linear(instance_input_dim, clam_instance_hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(clam_instance_hidden_dim, 1)
+                )
+
+                self.instance_outcome_head = nn.Sequential(
+                    nn.Linear(instance_input_dim, clam_instance_hidden_dim),
+                    nn.ReLU(),
+                    nn.Dropout(dropout),
+                    nn.Linear(clam_instance_hidden_dim, 1)
+                )
+
+                logger.info(f"CLAM instance-level loss enabled: {clam_num_instances} top chunks, "
+                           f"instance_input_dim={instance_input_dim}, instance_head_dim={clam_instance_hidden_dim}")
+
         # Causal forest (non-neural, trained separately)
         self.causal_forest = CausalForestHead(
             n_estimators=cf_n_estimators,
@@ -618,222 +612,6 @@ class CausalTextForest(nn.Module):
         logger.info(f"  Feature extractor: {self.feature_extractor_type}")
         logger.info(f"  Feature dim: {input_dim}")
         logger.info(f"  Causal forest: {cf_n_estimators} trees, honest={cf_honest}")
-
-    def _create_effect_feature_extractor(
-        self,
-        feature_extractor_type: str,
-        # BERT args
-        bert_model_name: str,
-        bert_projection_dim: Optional[int],
-        bert_max_length: int,
-        bert_dropout: float,
-        bert_freeze_encoder: bool,
-        bert_gradient_checkpointing: bool,
-        # GRU args
-        embedding_dim: int,
-        gru_hidden_dim: int,
-        gru_num_layers: int,
-        gru_dropout: float,
-        gru_bidirectional: bool,
-        gru_attention_dim: Optional[int],
-        gru_projection_dim: Optional[int],
-        max_length: int,
-        min_word_freq: int,
-        max_vocab_size: Optional[int],
-        # Hierarchical Transformer args
-        hier_transformer_sentence_model: str,
-        hier_transformer_freeze_sentence_encoder: bool,
-        hier_transformer_max_chunks: int,
-        hier_transformer_chunk_size: int,
-        hier_transformer_chunk_overlap: int,
-        hier_transformer_num_layers: int,
-        hier_transformer_num_heads: int,
-        hier_transformer_dim: int,
-        hier_transformer_dropout: float,
-        hier_transformer_projection_dim: int,
-        # Gated MIL args
-        gated_mil_sentence_model: str,
-        gated_mil_freeze_sentence_encoder: bool,
-        gated_mil_max_chunks: int,
-        gated_mil_chunk_size: int,
-        gated_mil_chunk_overlap: int,
-        gated_mil_hidden_dim: int,
-        gated_mil_num_confounders: int,
-        gated_mil_dropout: float,
-        gated_mil_projection_dim: int,
-        gated_mil_hierarchical: bool,
-        gated_mil_token_hidden_dim: int,
-        gated_mil_use_mean_pooling: bool,
-        # GRU-Pool args
-        gru_pool_embedding_dim: int,
-        gru_pool_gru_hidden_dim: int,
-        gru_pool_gru_num_layers: int,
-        gru_pool_gru_bidirectional: bool,
-        gru_pool_gru_dropout: float,
-        gru_pool_max_chunks: int,
-        gru_pool_chunk_size: int,
-        gru_pool_chunk_overlap: int,
-        gru_pool_transformer_layers: int,
-        gru_pool_transformer_heads: int,
-        gru_pool_transformer_dim: int,
-        gru_pool_gated_attention_dim: int,
-        gru_pool_projection_dim: int,
-        gru_pool_max_vocab: int,
-        gru_pool_min_word_freq: int,
-        # LLM args
-        llm_model_name: str,
-        llm_max_length: int,
-        llm_projection_dim: Optional[int],
-        llm_dropout: float,
-        llm_gradient_checkpointing: bool,
-        # CNN args
-        cnn_dropout: float,
-        kernel_sizes: List[int],
-        explicit_filter_concepts: Optional[Dict[str, List[str]]],
-        num_kmeans_filters: int,
-        num_random_filters: int,
-        projection_dim: Optional[int],
-        # Numeric features
-        numeric_features_enabled: bool,
-        numeric_embedding_dim: int,
-        numeric_magnitude_bins: int,
-        numeric_type_categories: int,
-    ) -> None:
-        """
-        Create a second independent feature extractor for τ(X) in dual mode.
-
-        This method mirrors the feature extractor instantiation in __init__,
-        creating a separate network that learns representations optimized
-        for treatment effect heterogeneity (via R-loss).
-        """
-        if feature_extractor_type == "bert":
-            self.effect_feature_extractor = BertFeatureExtractor(
-                model_name=bert_model_name,
-                projection_dim=bert_projection_dim,
-                max_length=bert_max_length,
-                dropout=bert_dropout,
-                freeze_encoder=bert_freeze_encoder,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            if bert_gradient_checkpointing:
-                self.effect_feature_extractor.gradient_checkpointing_enable()
-        elif feature_extractor_type == "gru":
-            self.effect_feature_extractor = GRUFeatureExtractor(
-                embedding_dim=embedding_dim,
-                hidden_dim=gru_hidden_dim,
-                num_layers=gru_num_layers,
-                dropout=gru_dropout,
-                bidirectional=gru_bidirectional,
-                attention_dim=gru_attention_dim,
-                projection_dim=gru_projection_dim,
-                max_length=max_length,
-                min_word_freq=min_word_freq,
-                max_vocab_size=max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif feature_extractor_type == "hierarchical_transformer":
-            self.effect_feature_extractor = HierarchicalTransformerExtractor(
-                sentence_encoder_model=hier_transformer_sentence_model,
-                freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
-                max_chunks=hier_transformer_max_chunks,
-                chunk_size=hier_transformer_chunk_size,
-                chunk_overlap=hier_transformer_chunk_overlap,
-                num_transformer_layers=hier_transformer_num_layers,
-                num_attention_heads=hier_transformer_num_heads,
-                transformer_dim=hier_transformer_dim,
-                transformer_dropout=hier_transformer_dropout,
-                projection_dim=hier_transformer_projection_dim,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif feature_extractor_type == "gated_mil_hierarchical":
-            self.effect_feature_extractor = GatedMILHierarchicalExtractor(
-                sentence_encoder_model=gated_mil_sentence_model,
-                freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
-                max_chunks=gated_mil_max_chunks,
-                chunk_size=gated_mil_chunk_size,
-                chunk_overlap=gated_mil_chunk_overlap,
-                mil_hidden_dim=gated_mil_hidden_dim,
-                num_confounders=gated_mil_num_confounders,
-                model_type="dragonnet",  # Use dragonnet style for representation
-                projection_dim=gated_mil_projection_dim,
-                dropout=gated_mil_dropout,
-                hierarchical=gated_mil_hierarchical,
-                token_hidden_dim=gated_mil_token_hidden_dim,
-                use_mean_pooling=gated_mil_use_mean_pooling,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif feature_extractor_type == "gru_pool":
-            self.effect_feature_extractor = GRUPoolExtractor(
-                embedding_dim=gru_pool_embedding_dim,
-                gru_hidden_dim=gru_pool_gru_hidden_dim,
-                gru_num_layers=gru_pool_gru_num_layers,
-                gru_bidirectional=gru_pool_gru_bidirectional,
-                gru_dropout=gru_pool_gru_dropout,
-                max_chunks=gru_pool_max_chunks,
-                chunk_size=gru_pool_chunk_size,
-                chunk_overlap=gru_pool_chunk_overlap,
-                transformer_layers=gru_pool_transformer_layers,
-                transformer_heads=gru_pool_transformer_heads,
-                transformer_dim=gru_pool_transformer_dim,
-                gated_attention_dim=gru_pool_gated_attention_dim,
-                projection_dim=gru_pool_projection_dim,
-                max_vocab_size=gru_pool_max_vocab,
-                min_word_freq=gru_pool_min_word_freq,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif feature_extractor_type == "llm":
-            self.effect_feature_extractor = LLMFeatureExtractor(
-                model_name=llm_model_name,
-                max_length=llm_max_length,
-                projection_dim=llm_projection_dim,
-                dropout=llm_dropout,
-                gradient_checkpointing=llm_gradient_checkpointing,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        elif feature_extractor_type == "cnn":
-            self.effect_feature_extractor = CNNFeatureExtractor(
-                embedding_dim=embedding_dim,
-                kernel_sizes=kernel_sizes,
-                explicit_filter_concepts=explicit_filter_concepts,
-                num_kmeans_filters=num_kmeans_filters,
-                num_random_filters=num_random_filters,
-                projection_dim=projection_dim,
-                dropout=cnn_dropout,
-                max_length=max_length,
-                min_word_freq=min_word_freq,
-                max_vocab_size=max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-        else:
-            raise ValueError(f"Unsupported feature extractor type for dual mode: {feature_extractor_type}")
 
     def forward(
         self,
@@ -869,7 +647,8 @@ class CausalTextForest(nn.Module):
         alpha_propensity: float = 1.0,
         gamma_rlearner: float = 1.0,
         label_smoothing: float = 0.0,
-        stop_grad_propensity: bool = False
+        stop_grad_propensity: bool = False,
+        clam_instance_weight: float = 0.0
     ) -> Dict[str, torch.Tensor]:
         """
         Perform single representation training step.
@@ -885,6 +664,7 @@ class CausalTextForest(nn.Module):
             gamma_rlearner: Weight for R-learner loss (only used if use_rlearner_representation=True)
             label_smoothing: Label smoothing factor
             stop_grad_propensity: If True, detach features before propensity
+            clam_instance_weight: Weight for CLAM instance-level loss (only used if clam_enabled=True)
 
         Returns:
             Dictionary with loss components
@@ -969,9 +749,59 @@ class CausalTextForest(nn.Module):
                 T_residual = treatments - e_X.squeeze(-1)
                 r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
 
-        total_loss = outcome_loss + alpha_propensity * propensity_loss + gamma_rlearner * r_loss
+        # CLAM instance-level loss (if enabled)
+        # Supervises top-attended chunks with document-level labels
+        instance_loss = torch.tensor(0.0, device=self._device)
+        if self.clam_enabled and clam_instance_weight > 0 and self.instance_propensity_head is not None:
+            # Check if feature extractor supports forward_with_instances
+            if hasattr(self.feature_extractor, 'forward_with_instances'):
+                # Get chunk embeddings and attention weights
+                _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
 
-        return {
+                all_top_chunks = []
+                expanded_treatments = []
+                expanded_outcomes = []
+
+                for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                    if chunk_embs.size(0) == 0:
+                        continue
+                    B = min(self.clam_num_instances, chunk_embs.size(0))
+                    top_indices = torch.topk(attn_weights, B).indices
+                    top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
+
+                    all_top_chunks.append(top_chunks)
+                    expanded_treatments.extend([treatments[i]] * B)
+                    expanded_outcomes.extend([outcomes[i]] * B)
+
+                if all_top_chunks:
+                    stacked_chunks = torch.cat(all_top_chunks, dim=0)
+                    exp_treatments = torch.stack(expanded_treatments)
+                    exp_outcomes = torch.stack(expanded_outcomes)
+
+                    # Forward through instance heads
+                    inst_propensity = self.instance_propensity_head(stacked_chunks)
+                    inst_outcome = self.instance_outcome_head(stacked_chunks)
+
+                    # Instance propensity loss
+                    instance_propensity_loss = F.binary_cross_entropy_with_logits(
+                        inst_propensity.squeeze(-1), exp_treatments
+                    )
+
+                    # Instance outcome loss
+                    instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                        inst_outcome.squeeze(-1), exp_outcomes
+                    )
+
+                    instance_loss = instance_outcome_loss + alpha_propensity * instance_propensity_loss
+
+        total_loss = (
+            outcome_loss +
+            alpha_propensity * propensity_loss +
+            gamma_rlearner * r_loss +
+            clam_instance_weight * instance_loss
+        )
+
+        result = {
             'loss': total_loss,
             'outcome_loss': outcome_loss.detach(),
             'propensity_loss': propensity_loss.detach(),
@@ -979,6 +809,11 @@ class CausalTextForest(nn.Module):
             'propensity_logit': propensity_logit.detach(),
             'outcome_logit': outcome_logit.detach()
         }
+
+        if self.clam_enabled:
+            result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
+
+        return result
 
     # Alias for API consistency with CausalText
     def train_step(
@@ -988,6 +823,7 @@ class CausalTextForest(nn.Module):
         gamma_rlearner: float = 1.0,
         label_smoothing: float = 0.0,
         stop_grad_propensity: bool = False,
+        clam_instance_weight: float = 0.0,
         **kwargs  # Ignore extra args like beta_targreg for compatibility
     ) -> Dict[str, torch.Tensor]:
         """Alias for train_representation_step for API consistency."""
@@ -996,7 +832,8 @@ class CausalTextForest(nn.Module):
             alpha_propensity=alpha_propensity,
             gamma_rlearner=gamma_rlearner,
             label_smoothing=label_smoothing,
-            stop_grad_propensity=stop_grad_propensity
+            stop_grad_propensity=stop_grad_propensity,
+            clam_instance_weight=clam_instance_weight
         )
 
     def extract_features(

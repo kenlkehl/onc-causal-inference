@@ -1,8 +1,11 @@
-# cdt/models/mlp_dragonnet.py
+# oracle_experiment_scripts/mlp_dragonnet.py
 """Simple MLP-based DragonNet for categorical/tabular features.
 
 This model is used for condition 6 in the concept-aware experiment:
 training DragonNet on LLM-extracted categorical features only.
+
+Note: This file was moved from cdt/models/mlp_dragonnet.py since it is
+only used by oracle experiment scripts.
 """
 
 import logging
@@ -12,7 +15,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .dragonnet import DragonNet
+from cdt.models import DragonNet
 
 
 logger = logging.getLogger(__name__)

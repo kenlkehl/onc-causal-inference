@@ -22,7 +22,6 @@ cdt/matching/__init__.py
 cdt/matching/propensity_matcher.py
 cdt/models/__init__.py
 cdt/models/bert_extractor.py
-cdt/models/causal_cnn.py
 cdt/models/causal_forest_head.py
 cdt/models/causal_text.py
 cdt/models/causal_text_forest.py
@@ -32,6 +31,7 @@ cdt/models/components.py
 cdt/models/confounder_extractor.py
 cdt/models/dragonnet.py
 cdt/models/explicit_confounder_featurizer.py
+cdt/models/extractor_factory.py
 cdt/models/gated_mil_attention.py
 cdt/models/gated_mil_hierarchical_extractor.py
 cdt/models/gru_extractor.py
@@ -39,9 +39,7 @@ cdt/models/gru_pool_extractor.py
 cdt/models/gru_transformer_mil_extractor.py
 cdt/models/hierarchical_transformer_extractor.py
 cdt/models/llm_extractor.py
-cdt/models/mlp_dragonnet.py
 cdt/models/numeric_features.py
-cdt/models/outcome_heads.py
 cdt/models/outcome_model.py
 cdt/models/propensity_model.py
 cdt/models/rlearner.py

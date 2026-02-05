@@ -8,13 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .cnn_extractor import CNNFeatureExtractor
-from .bert_extractor import BertFeatureExtractor
-from .gru_extractor import GRUFeatureExtractor
-from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
-from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
-from .gru_pool_extractor import GRUPoolExtractor
-from .llm_extractor import LLMFeatureExtractor
+from .extractor_factory import create_feature_extractor
 from ..config import normalize_feature_extractor_type
 
 
@@ -33,11 +27,7 @@ class PropensityNet(nn.Module):
 
         # Shared representation layers (same as DragonNet)
         self.representation_fc1 = nn.Linear(input_dim, representation_dim)
-        # self.representation_fc2 = nn.Linear(representation_dim, representation_dim)
-        # self.representation_fc3 = nn.Linear(representation_dim, representation_dim)
-        # self.representation_fc4 = nn.Linear(representation_dim, representation_dim)
-        # self.representation_fc5 = nn.Linear(representation_dim, representation_dim)
-        self.representation_fc6 = nn.Linear(representation_dim, representation_dim)
+        self.representation_fc2 = nn.Linear(representation_dim, representation_dim)
 
         # Single propensity head (same as DragonNet)
         self.propensity_fc1 = nn.Linear(representation_dim, 1)
@@ -53,11 +43,7 @@ class PropensityNet(nn.Module):
             t_logit: Propensity logits (batch, 1)
         """
         h = F.relu(self.representation_fc1(features))
-        # h = F.relu(self.representation_fc2(h))
-        # h = F.relu(self.representation_fc3(h))
-        # h = F.relu(self.representation_fc4(h))
-        # h = F.relu(self.representation_fc5(h))
-        h = F.elu(self.representation_fc6(h))
+        h = F.elu(self.representation_fc2(h))
 
         t_logit = self.propensity_fc1(h)
 
@@ -281,150 +267,85 @@ class PropensityOnlyModel(nn.Module):
             'representation_dim': representation_dim
         }
 
-        # Initialize feature extractor based on normalized type
-        if self.feature_extractor_type == "bert":
-            self.feature_extractor = BertFeatureExtractor(
-                model_name=bert_model_name,
-                projection_dim=bert_projection_dim,
-                max_length=bert_max_length,
-                dropout=bert_dropout,
-                freeze_encoder=bert_freeze_encoder,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            if bert_gradient_checkpointing:
-                self.feature_extractor.gradient_checkpointing_enable()
-            logger.info(f"Propensity model using BERT feature extractor: {bert_model_name}")
-        elif self.feature_extractor_type == "gru":
-            self.feature_extractor = GRUFeatureExtractor(
-                embedding_dim=gru_embedding_dim,
-                hidden_dim=gru_hidden_dim,
-                num_layers=gru_num_layers,
-                dropout=gru_dropout,
-                bidirectional=gru_bidirectional,
-                attention_dim=gru_attention_dim,
-                projection_dim=gru_projection_dim,
-                max_length=gru_max_length,
-                min_word_freq=gru_min_word_freq,
-                max_vocab_size=gru_max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info("Propensity model using GRU feature extractor")
-        elif self.feature_extractor_type == "hierarchical_transformer":
-            self.feature_extractor = HierarchicalTransformerExtractor(
-                sentence_encoder_model=hier_transformer_sentence_model,
-                freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
-                max_chunks=hier_transformer_max_chunks,
-                chunk_size=hier_transformer_chunk_size,
-                chunk_overlap=hier_transformer_chunk_overlap,
-                num_transformer_layers=hier_transformer_num_layers,
-                num_attention_heads=hier_transformer_num_heads,
-                transformer_dim=hier_transformer_dim,
-                transformer_dropout=hier_transformer_dropout,
-                projection_dim=hier_transformer_projection_dim,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Propensity model using Hierarchical Transformer: {hier_transformer_sentence_model}")
-        elif self.feature_extractor_type == "gru_transformer_mil":
-            # GRU-Transformer-MIL: learned BiGRU + transformer + gated MIL attention
-            self.feature_extractor = GRUTransformerMILExtractor(
-                embedding_dim=gru_mil_embedding_dim,
-                gru_hidden_dim=gru_mil_gru_hidden_dim,
-                gru_num_layers=gru_mil_gru_num_layers,
-                gru_bidirectional=gru_mil_gru_bidirectional,
-                gru_dropout=gru_mil_gru_dropout,
-                max_chunks=gru_mil_max_chunks,
-                chunk_size=gru_mil_chunk_size,
-                chunk_overlap=gru_mil_chunk_overlap,
-                transformer_layers=gru_mil_transformer_layers,
-                transformer_heads=gru_mil_transformer_heads,
-                transformer_dim=gru_mil_transformer_dim,
-                num_confounders=gru_mil_num_confounders,
-                mil_hidden_dim=gru_mil_mil_hidden_dim,
-                projection_dim=gru_mil_projection_dim,
-                max_vocab_size=gru_mil_max_vocab,
-                min_word_freq=gru_mil_min_word_freq,
-                model_type="rlearner",  # Propensity model always uses rlearner-style weighting
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Propensity model using GRU-Transformer-MIL: "
-                       f"GRU {gru_mil_gru_hidden_dim}x{2 if gru_mil_gru_bidirectional else 1}")
-        elif self.feature_extractor_type == "gru_pool":
-            # GRU-Pool: learned BiGRU + transformer + gated attention pooling (no task-specific weighting)
-            self.feature_extractor = GRUPoolExtractor(
-                embedding_dim=gru_pool_embedding_dim,
-                gru_hidden_dim=gru_pool_gru_hidden_dim,
-                gru_num_layers=gru_pool_gru_num_layers,
-                gru_bidirectional=gru_pool_gru_bidirectional,
-                gru_dropout=gru_pool_gru_dropout,
-                max_chunks=gru_pool_max_chunks,
-                chunk_size=gru_pool_chunk_size,
-                chunk_overlap=gru_pool_chunk_overlap,
-                transformer_layers=gru_pool_transformer_layers,
-                transformer_heads=gru_pool_transformer_heads,
-                transformer_dim=gru_pool_transformer_dim,
-                gated_attention_dim=gru_pool_gated_attention_dim,
-                projection_dim=gru_pool_projection_dim,
-                max_vocab_size=gru_pool_max_vocab,
-                min_word_freq=gru_pool_min_word_freq,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Propensity model using GRU-Pool: "
-                       f"GRU {gru_pool_gru_hidden_dim}x{2 if gru_pool_gru_bidirectional else 1}")
-        elif self.feature_extractor_type == "llm":
-            # LLM feature extractor (decoder-only with random init)
-            self.feature_extractor = LLMFeatureExtractor(
-                model_name=llm_model_name,
-                max_length=llm_max_length,
-                projection_dim=llm_projection_dim,
-                dropout=llm_dropout,
-                gradient_checkpointing=llm_gradient_checkpointing,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info(f"Propensity model using LLM: {llm_model_name} (random init)")
-        else:
-            # CNN feature extractor (default)
-            self.feature_extractor = CNNFeatureExtractor(
-                embedding_dim=embedding_dim,
-                kernel_sizes=kernel_sizes,
-                explicit_filter_concepts=explicit_filter_concepts,
-                num_kmeans_filters=num_kmeans_filters,
-                num_random_filters=num_random_filters,
-                projection_dim=projection_dim,
-                dropout=cnn_dropout,
-                max_length=max_length,
-                min_word_freq=min_word_freq,
-                max_vocab_size=max_vocab_size,
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
-                device=self._device
-            )
-            logger.info("Propensity model using CNN feature extractor")
+        # Initialize feature extractor using factory
+        self.feature_extractor = create_feature_extractor(
+            extractor_type=self.feature_extractor_type,
+            device=self._device,
+            model_type="rlearner",  # Propensity model uses rlearner-style weighting for task-specific extractors
+            embedding_dim=embedding_dim,
+            kernel_sizes=kernel_sizes,
+            explicit_filter_concepts=explicit_filter_concepts,
+            num_kmeans_filters=num_kmeans_filters,
+            num_random_filters=num_random_filters,
+            cnn_dropout=cnn_dropout,
+            max_length=max_length,
+            min_word_freq=min_word_freq,
+            max_vocab_size=max_vocab_size,
+            projection_dim=projection_dim,
+            bert_model_name=bert_model_name,
+            bert_max_length=bert_max_length,
+            bert_projection_dim=bert_projection_dim,
+            bert_dropout=bert_dropout,
+            bert_freeze_encoder=bert_freeze_encoder,
+            bert_gradient_checkpointing=bert_gradient_checkpointing,
+            gru_hidden_dim=gru_hidden_dim,
+            gru_num_layers=gru_num_layers,
+            gru_dropout=gru_dropout,
+            gru_bidirectional=gru_bidirectional,
+            gru_attention_dim=gru_attention_dim,
+            gru_projection_dim=gru_projection_dim,
+            hier_transformer_sentence_model=hier_transformer_sentence_model,
+            hier_transformer_freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
+            hier_transformer_max_chunks=hier_transformer_max_chunks,
+            hier_transformer_chunk_size=hier_transformer_chunk_size,
+            hier_transformer_chunk_overlap=hier_transformer_chunk_overlap,
+            hier_transformer_num_layers=hier_transformer_num_layers,
+            hier_transformer_num_heads=hier_transformer_num_heads,
+            hier_transformer_dim=hier_transformer_dim,
+            hier_transformer_dropout=hier_transformer_dropout,
+            hier_transformer_projection_dim=hier_transformer_projection_dim,
+            gru_mil_embedding_dim=gru_mil_embedding_dim,
+            gru_mil_gru_hidden_dim=gru_mil_gru_hidden_dim,
+            gru_mil_gru_num_layers=gru_mil_gru_num_layers,
+            gru_mil_gru_bidirectional=gru_mil_gru_bidirectional,
+            gru_mil_gru_dropout=gru_mil_gru_dropout,
+            gru_mil_max_chunks=gru_mil_max_chunks,
+            gru_mil_chunk_size=gru_mil_chunk_size,
+            gru_mil_chunk_overlap=gru_mil_chunk_overlap,
+            gru_mil_transformer_layers=gru_mil_transformer_layers,
+            gru_mil_transformer_heads=gru_mil_transformer_heads,
+            gru_mil_transformer_dim=gru_mil_transformer_dim,
+            gru_mil_num_confounders=gru_mil_num_confounders,
+            gru_mil_mil_hidden_dim=gru_mil_mil_hidden_dim,
+            gru_mil_projection_dim=gru_mil_projection_dim,
+            gru_mil_max_vocab=gru_mil_max_vocab,
+            gru_mil_min_word_freq=gru_mil_min_word_freq,
+            gru_pool_embedding_dim=gru_pool_embedding_dim,
+            gru_pool_gru_hidden_dim=gru_pool_gru_hidden_dim,
+            gru_pool_gru_num_layers=gru_pool_gru_num_layers,
+            gru_pool_gru_bidirectional=gru_pool_gru_bidirectional,
+            gru_pool_gru_dropout=gru_pool_gru_dropout,
+            gru_pool_max_chunks=gru_pool_max_chunks,
+            gru_pool_chunk_size=gru_pool_chunk_size,
+            gru_pool_chunk_overlap=gru_pool_chunk_overlap,
+            gru_pool_transformer_layers=gru_pool_transformer_layers,
+            gru_pool_transformer_heads=gru_pool_transformer_heads,
+            gru_pool_transformer_dim=gru_pool_transformer_dim,
+            gru_pool_gated_attention_dim=gru_pool_gated_attention_dim,
+            gru_pool_projection_dim=gru_pool_projection_dim,
+            gru_pool_max_vocab=gru_pool_max_vocab,
+            gru_pool_min_word_freq=gru_pool_min_word_freq,
+            llm_model_name=llm_model_name,
+            llm_max_length=llm_max_length,
+            llm_projection_dim=llm_projection_dim,
+            llm_dropout=llm_dropout,
+            llm_gradient_checkpointing=llm_gradient_checkpointing,
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+        )
+        logger.info(f"Propensity model using {self.feature_extractor_type.upper()} feature extractor")
 
         # Propensity network
         input_dim = self.feature_extractor.output_dim

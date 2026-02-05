@@ -1,5 +1,9 @@
-# cdt/models/outcome_heads.py
-"""Lightweight outcome heads for oracle mode - takes confounder_features directly, no representation layers."""
+# oracle_experiment_scripts/outcome_heads.py
+"""Lightweight outcome heads for oracle mode - takes confounder_features directly, no representation layers.
+
+Note: This file was moved from cdt/models/outcome_heads.py since it is
+only used by oracle experiment scripts.
+"""
 
 import torch
 import torch.nn as nn
