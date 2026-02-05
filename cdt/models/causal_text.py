@@ -203,6 +203,8 @@ class CausalText(nn.Module):
         explicit_confounder_output_dim: int = 64,
         explicit_confounder_hidden_dim: int = 128,
         explicit_confounder_dropout: float = 0.1,
+        # R-Learner dual extractor mode
+        rlearner_dual_extractors: bool = False,
     ):
         """
         Initialize causal inference model with CNN, BERT, or GRU feature extractor.
@@ -371,6 +373,7 @@ class CausalText(nn.Module):
             'explicit_confounder_output_dim': explicit_confounder_output_dim,
             'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
             'explicit_confounder_dropout': explicit_confounder_dropout,
+            'rlearner_dual_extractors': rlearner_dual_extractors,
         }
 
         # Store auxiliary dimension
@@ -777,6 +780,188 @@ class CausalText(nn.Module):
                 logger.info(f"CLAM instance-level loss enabled: {clam_num_instances} top chunks, "
                            f"instance_input_dim={instance_input_dim}, instance_head_dim={clam_instance_hidden_dim}")
 
+        # R-Learner dual extractor mode
+        # When enabled, creates a second independent feature extractor for τ(X)
+        # The nuisance extractor (self.feature_extractor) handles e(X) and m(X)
+        # The effect extractor (self.effect_feature_extractor) handles τ(X)
+        self.rlearner_dual_extractors = rlearner_dual_extractors
+        self.effect_feature_extractor = None
+        self.effect_mlp = None
+
+        if rlearner_dual_extractors and model_type == "rlearner":
+            # Create second feature extractor with same architecture
+            # We need to duplicate the extractor instantiation logic
+            if self.feature_extractor_type == "bert":
+                self.effect_feature_extractor = BertFeatureExtractor(
+                    model_name=bert_model_name,
+                    projection_dim=bert_projection_dim,
+                    max_length=bert_max_length,
+                    dropout=bert_dropout,
+                    freeze_encoder=bert_freeze_encoder,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+                if bert_gradient_checkpointing:
+                    self.effect_feature_extractor.gradient_checkpointing_enable()
+            elif self.feature_extractor_type == "gru":
+                self.effect_feature_extractor = GRUFeatureExtractor(
+                    embedding_dim=embedding_dim,
+                    hidden_dim=gru_hidden_dim,
+                    num_layers=gru_num_layers,
+                    dropout=gru_dropout,
+                    bidirectional=gru_bidirectional,
+                    attention_dim=gru_attention_dim,
+                    projection_dim=gru_projection_dim,
+                    max_length=max_length,
+                    min_word_freq=min_word_freq,
+                    max_vocab_size=max_vocab_size,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+            elif self.feature_extractor_type == "gru_pool":
+                self.effect_feature_extractor = GRUPoolExtractor(
+                    embedding_dim=gru_pool_embedding_dim,
+                    gru_hidden_dim=gru_pool_gru_hidden_dim,
+                    gru_num_layers=gru_pool_gru_num_layers,
+                    gru_bidirectional=gru_pool_gru_bidirectional,
+                    gru_dropout=gru_pool_gru_dropout,
+                    max_chunks=gru_pool_max_chunks,
+                    chunk_size=gru_pool_chunk_size,
+                    chunk_overlap=gru_pool_chunk_overlap,
+                    transformer_layers=gru_pool_transformer_layers,
+                    transformer_heads=gru_pool_transformer_heads,
+                    transformer_dim=gru_pool_transformer_dim,
+                    gated_attention_dim=gru_pool_gated_attention_dim,
+                    projection_dim=gru_pool_projection_dim,
+                    max_vocab_size=gru_pool_max_vocab,
+                    min_word_freq=gru_pool_min_word_freq,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+            elif self.feature_extractor_type == "hierarchical_transformer":
+                self.effect_feature_extractor = HierarchicalTransformerExtractor(
+                    sentence_encoder_model=hier_transformer_sentence_model,
+                    freeze_sentence_encoder=hier_transformer_freeze_sentence_encoder,
+                    max_chunks=hier_transformer_max_chunks,
+                    chunk_size=hier_transformer_chunk_size,
+                    chunk_overlap=hier_transformer_chunk_overlap,
+                    num_transformer_layers=hier_transformer_num_layers,
+                    num_attention_heads=hier_transformer_num_heads,
+                    transformer_dim=hier_transformer_dim,
+                    transformer_dropout=hier_transformer_dropout,
+                    projection_dim=hier_transformer_projection_dim,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+            elif self.feature_extractor_type == "gated_mil_hierarchical":
+                self.effect_feature_extractor = GatedMILHierarchicalExtractor(
+                    sentence_encoder_model=gated_mil_sentence_model,
+                    freeze_sentence_encoder=gated_mil_freeze_sentence_encoder,
+                    max_chunks=gated_mil_max_chunks,
+                    chunk_size=gated_mil_chunk_size,
+                    chunk_overlap=gated_mil_chunk_overlap,
+                    mil_hidden_dim=gated_mil_hidden_dim,
+                    num_confounders=gated_mil_num_confounders,
+                    model_type=model_type,
+                    projection_dim=gated_mil_projection_dim,
+                    dropout=gated_mil_dropout,
+                    hierarchical=gated_mil_hierarchical,
+                    token_hidden_dim=gated_mil_token_hidden_dim,
+                    use_mean_pooling=gated_mil_use_mean_pooling,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+            elif self.feature_extractor_type == "gru_transformer_mil":
+                self.effect_feature_extractor = GRUTransformerMILExtractor(
+                    embedding_dim=gru_mil_embedding_dim,
+                    gru_hidden_dim=gru_mil_gru_hidden_dim,
+                    gru_num_layers=gru_mil_gru_num_layers,
+                    gru_bidirectional=gru_mil_gru_bidirectional,
+                    gru_dropout=gru_mil_gru_dropout,
+                    max_chunks=gru_mil_max_chunks,
+                    chunk_size=gru_mil_chunk_size,
+                    chunk_overlap=gru_mil_chunk_overlap,
+                    transformer_layers=gru_mil_transformer_layers,
+                    transformer_heads=gru_mil_transformer_heads,
+                    transformer_dim=gru_mil_transformer_dim,
+                    num_confounders=gru_mil_num_confounders,
+                    mil_hidden_dim=gru_mil_mil_hidden_dim,
+                    projection_dim=gru_mil_projection_dim,
+                    max_vocab_size=gru_mil_max_vocab,
+                    min_word_freq=gru_mil_min_word_freq,
+                    model_type=model_type,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+            elif self.feature_extractor_type == "llm":
+                self.effect_feature_extractor = LLMFeatureExtractor(
+                    model_name=llm_model_name,
+                    max_length=llm_max_length,
+                    projection_dim=llm_projection_dim,
+                    dropout=llm_dropout,
+                    gradient_checkpointing=llm_gradient_checkpointing,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+            else:
+                # CNN feature extractor
+                self.effect_feature_extractor = CNNFeatureExtractor(
+                    embedding_dim=embedding_dim,
+                    kernel_sizes=kernel_sizes,
+                    explicit_filter_concepts=explicit_filter_concepts,
+                    num_kmeans_filters=num_kmeans_filters,
+                    num_random_filters=num_random_filters,
+                    projection_dim=projection_dim,
+                    dropout=cnn_dropout,
+                    max_length=max_length,
+                    min_word_freq=min_word_freq,
+                    max_vocab_size=max_vocab_size,
+                    numeric_features_enabled=numeric_features_enabled,
+                    numeric_embedding_dim=numeric_embedding_dim,
+                    numeric_magnitude_bins=numeric_magnitude_bins,
+                    numeric_type_categories=numeric_type_categories,
+                    device=self._device
+                )
+
+            # Simple MLP for τ(X) - takes effect extractor output, predicts treatment effect
+            # Note: τ is unbounded (can be negative) - no final activation
+            effect_input_dim = self.effect_feature_extractor.output_dim
+            self.effect_mlp = nn.Sequential(
+                nn.Linear(effect_input_dim, causal_head_hidden_outcome_dim),
+                nn.ReLU(),
+                nn.Dropout(causal_head_dropout),
+                nn.Linear(causal_head_hidden_outcome_dim, causal_head_hidden_outcome_dim),
+                nn.ELU(),
+                nn.Dropout(causal_head_dropout),
+                nn.Linear(causal_head_hidden_outcome_dim, 1)  # τ is unbounded
+            )
+
+            logger.info(f"R-Learner dual extractor mode enabled:")
+            logger.info(f"  Nuisance extractor: {self.feature_extractor_type} -> e(X), m(X)")
+            logger.info(f"  Effect extractor: {self.feature_extractor_type} -> τ(X)")
+            logger.info(f"  Effect MLP: {effect_input_dim} -> {causal_head_hidden_outcome_dim} -> 1")
+
         # Move to device
         self.to(self._device)
 
@@ -1085,70 +1270,146 @@ class CausalText(nn.Module):
             treatments_smooth = treatments
             outcomes_smooth = outcomes
 
-        # Extract features
-        features = self.feature_extractor(texts)
+        # Check for dual extractor mode
+        if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
+            # DUAL EXTRACTOR MODE:
+            # - Nuisance extractor (self.feature_extractor) -> e(X), m(X)
+            # - Effect extractor (self.effect_feature_extractor) + effect_mlp -> τ(X)
 
-        # Compute attention entropy loss if enabled and extractor supports it
-        entropy_loss = torch.tensor(0.0, device=self._device)
-        if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
-            # Use forward_with_attention to get entropy
-            _, attention_info = self.feature_extractor.forward_with_attention(texts)
-            entropy_loss = attention_info['attention_entropy']
+            # Nuisance path: extract features for e(X) and m(X)
+            nuisance_features = self.feature_extractor(texts)
 
-        # Concatenate auxiliary features if provided
-        if self.auxiliary_projection is not None and auxiliary_features is not None:
-            aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
-            features = torch.cat([features, aux_projected], dim=1)
+            # Compute attention entropy loss if enabled and extractor supports it
+            entropy_loss = torch.tensor(0.0, device=self._device)
+            if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
+                _, attention_info = self.feature_extractor.forward_with_attention(texts)
+                entropy_loss = attention_info['attention_entropy']
 
-        # Concatenate explicit confounder features if provided
-        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-            features = torch.cat([features, conf_features], dim=1)
+            # Concatenate auxiliary features if provided
+            if self.auxiliary_projection is not None and auxiliary_features is not None:
+                aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+                nuisance_features = torch.cat([nuisance_features, aux_projected], dim=1)
 
-        if stop_grad_propensity:
-            # CRITICAL: Detach features for propensity to prevent propensity
-            # from dominating the representation learning
-            features_detached = features.detach()
+            # Concatenate explicit confounder features if provided
+            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
+                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
+                nuisance_features = torch.cat([nuisance_features, conf_features], dim=1)
 
-            # Forward pass with regular features for outcome/tau
-            m_logit, tau, t_logit, phi = self.net(features)
+            # Nuisance heads: propensity e(X) and marginal outcome m(X)
+            # Note: We use the RLearnerNet's shared layers but only for nuisance functions
+            m_logit, _, t_logit, phi = self.net(nuisance_features)
 
-            # Re-compute propensity with detached features using helper methods
-            phi_detached = self.net.get_representation(features_detached)
-            t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+            # Effect path: extract features for τ(X)
+            effect_features = self.effect_feature_extractor(texts)
 
-            # Loss 1: Propensity loss with DETACHED features
-            propensity_loss = F.binary_cross_entropy_with_logits(
-                t_logit_for_loss.squeeze(-1),
-                treatments_smooth
+            # τ(X) from separate effect MLP
+            tau = self.effect_mlp(effect_features)
+
+            # Handle stop_grad_propensity (detach nuisance features for propensity loss)
+            if stop_grad_propensity:
+                nuisance_features_detached = nuisance_features.detach()
+                phi_detached = self.net.get_representation(nuisance_features_detached)
+                t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit_for_loss.squeeze(-1),
+                    treatments_smooth
+                )
+            else:
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit.squeeze(-1),
+                    treatments_smooth
+                )
+
+            # Loss 2: Marginal outcome loss - BCE for m(X) = E[Y|X]
+            outcome_loss = F.binary_cross_entropy_with_logits(
+                m_logit.squeeze(-1),
+                outcomes_smooth
             )
+
+            # Loss 3: R-learner loss
+            # CRITICAL: Nuisance functions are detached - gradients flow only through τ
+            # In dual mode, τ comes from separate effect extractor + MLP
+            e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
+            m_X = torch.sigmoid(m_logit).detach()
+
+            # Compute residuals
+            Y_residual = outcomes - m_X.squeeze(-1)  # Y - m(X)
+            T_residual = treatments - e_X.squeeze(-1)  # T - e(X)
+
+            # R-loss: E[((Y - m(X)) - tau(X) * (T - e(X)))^2]
+            r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
+
+            # Set features variable for downstream use (CLAM, etc.)
+            features = nuisance_features
+
         else:
-            # Standard forward pass
-            m_logit, tau, t_logit, phi = self.net(features)
+            # STANDARD SINGLE EXTRACTOR MODE
 
-            # Loss 1: Propensity loss - BCE for e(X)
-            propensity_loss = F.binary_cross_entropy_with_logits(
-                t_logit.squeeze(-1),
-                treatments_smooth
+            # Extract features
+            features = self.feature_extractor(texts)
+
+            # Compute attention entropy loss if enabled and extractor supports it
+            entropy_loss = torch.tensor(0.0, device=self._device)
+            if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
+                # Use forward_with_attention to get entropy
+                _, attention_info = self.feature_extractor.forward_with_attention(texts)
+                entropy_loss = attention_info['attention_entropy']
+
+            # Concatenate auxiliary features if provided
+            if self.auxiliary_projection is not None and auxiliary_features is not None:
+                aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+                features = torch.cat([features, aux_projected], dim=1)
+
+            # Concatenate explicit confounder features if provided
+            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
+                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
+                features = torch.cat([features, conf_features], dim=1)
+
+            if stop_grad_propensity:
+                # CRITICAL: Detach features for propensity to prevent propensity
+                # from dominating the representation learning
+                features_detached = features.detach()
+
+                # Forward pass with regular features for outcome/tau
+                m_logit, tau, t_logit, phi = self.net(features)
+
+                # Re-compute propensity with detached features using helper methods
+                phi_detached = self.net.get_representation(features_detached)
+                t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+
+                # Loss 1: Propensity loss with DETACHED features
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit_for_loss.squeeze(-1),
+                    treatments_smooth
+                )
+            else:
+                # Standard forward pass
+                m_logit, tau, t_logit, phi = self.net(features)
+
+                # Loss 1: Propensity loss - BCE for e(X)
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit.squeeze(-1),
+                    treatments_smooth
+                )
+
+            # Loss 2: Marginal outcome loss - BCE for m(X) = E[Y|X]
+            outcome_loss = F.binary_cross_entropy_with_logits(
+                m_logit.squeeze(-1),
+                outcomes_smooth
             )
 
-        # Loss 2: Marginal outcome loss - BCE for m(X) = E[Y|X]
-        outcome_loss = F.binary_cross_entropy_with_logits(
-            m_logit.squeeze(-1),
-            outcomes_smooth
-        )
+            # Loss 3: R-learner loss
+            # CRITICAL: Detach nuisance functions so gradients flow only through tau
+            e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
+            m_X = torch.sigmoid(m_logit).detach()
 
-        # Loss 3: R-learner loss
-        # CRITICAL: Detach nuisance functions so gradients flow only through tau
-        e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
-        m_X = torch.sigmoid(m_logit).detach()
+            # Compute residuals
+            Y_residual = outcomes - m_X.squeeze(-1)  # Y - m(X)
+            T_residual = treatments - e_X.squeeze(-1)  # T - e(X)
 
-        # Compute residuals
-        Y_residual = outcomes - m_X.squeeze(-1)  # Y - m(X)
-        T_residual = treatments - e_X.squeeze(-1)  # T - e(X)
-
-        # R-loss: E[((Y - m(X)) - tau(X) * (T - e(X)))^2]
-        r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
+            # R-loss: E[((Y - m(X)) - tau(X) * (T - e(X)))^2]
+            r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
 
         # CLAM instance-level loss (if enabled)
         instance_loss = torch.tensor(0.0, device=self._device)
@@ -1440,12 +1701,29 @@ class CausalText(nn.Module):
                 y1_logit = y0_logit + tau_logit
                 tau_pred = tau_logit.squeeze(-1)
             elif self.model_type == "rlearner":
-                # RLearnerNet returns: m_logit, tau, t_logit, final_common_layer
-                m_logit, tau, t_logit, final_common_layer = self.net(features)
+                # Check for dual extractor mode
+                if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
+                    # DUAL EXTRACTOR MODE:
+                    # - Nuisance from main extractor + RLearnerNet
+                    # - τ from effect extractor + effect_mlp
+                    m_logit, _, t_logit, final_common_layer = self.net(features)
 
-                m_prob = torch.sigmoid(m_logit).squeeze(-1)  # E[Y|X]
-                tau_val = tau.squeeze(-1)  # τ(X)
-                prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
+                    # Get τ from effect extractor
+                    effect_features = self.effect_feature_extractor(texts)
+                    tau = self.effect_mlp(effect_features)
+
+                    m_prob = torch.sigmoid(m_logit).squeeze(-1)  # E[Y|X]
+                    tau_val = tau.squeeze(-1)  # τ(X)
+                    prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
+
+                else:
+                    # STANDARD MODE:
+                    # RLearnerNet returns: m_logit, tau, t_logit, final_common_layer
+                    m_logit, tau, t_logit, final_common_layer = self.net(features)
+
+                    m_prob = torch.sigmoid(m_logit).squeeze(-1)  # E[Y|X]
+                    tau_val = tau.squeeze(-1)  # τ(X)
+                    prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
 
                 # Derive Y0/Y1 from m and τ for backward compatibility:
                 # From: m = e*y1 + (1-e)*y0 and tau = y1 - y0
@@ -1538,6 +1816,12 @@ class CausalText(nn.Module):
         if hasattr(self.feature_extractor, 'fit_tokenizer'):
             self.feature_extractor.fit_tokenizer(texts)
         # BERT uses pretrained tokenizer, no fitting needed
+
+        # Initialize effect extractor if in dual mode
+        if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
+            if hasattr(self.effect_feature_extractor, 'fit_tokenizer'):
+                self.effect_feature_extractor.fit_tokenizer(texts)
+            logger.info("Effect extractor initialized (dual R-Learner mode)")
 
         # After feature extractor initialization, verify/update CLAM instance head dimensions
         # for gated_mil_hierarchical which has lazy initialization
@@ -1641,6 +1925,15 @@ class CausalText(nn.Module):
         if self.explicit_confounder_featurizer is not None:
             checkpoint['explicit_confounder_featurizer_state'] = self.explicit_confounder_featurizer.get_state()
 
+        # Save effect extractor and effect MLP state if in dual mode
+        if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
+            checkpoint['effect_feature_extractor'] = self.effect_feature_extractor.state_dict()
+            checkpoint['effect_mlp'] = self.effect_mlp.state_dict()
+            if hasattr(self.effect_feature_extractor, 'get_state'):
+                checkpoint['effect_extractor_state'] = self.effect_feature_extractor.get_state()
+            elif hasattr(self.effect_feature_extractor, 'get_tokenizer_state'):
+                checkpoint['effect_tokenizer_state'] = self.effect_feature_extractor.get_tokenizer_state()
+
         if optimizer is not None:
             checkpoint['optimizer_state_dict'] = optimizer.state_dict()
 
@@ -1675,6 +1968,16 @@ class CausalText(nn.Module):
         if model.feature_extractor_type == "cnn" and 'tokenizer_state' in checkpoint:
             model.feature_extractor.load_tokenizer_state(checkpoint['tokenizer_state'])
 
+        # Load effect extractor tokenizer/state BEFORE loading model_state_dict
+        # This ensures embedding layers have correct dimensions
+        if model.rlearner_dual_extractors and model.effect_feature_extractor is not None:
+            if 'effect_tokenizer_state' in checkpoint:
+                if hasattr(model.effect_feature_extractor, 'load_tokenizer_state'):
+                    model.effect_feature_extractor.load_tokenizer_state(checkpoint['effect_tokenizer_state'])
+            elif 'effect_extractor_state' in checkpoint:
+                if hasattr(model.effect_feature_extractor, 'load_state'):
+                    model.effect_feature_extractor.load_state(checkpoint['effect_extractor_state'])
+
         # Load state dict (after tokenizer so embedding has correct size)
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -1689,6 +1992,15 @@ class CausalText(nn.Module):
                     checkpoint['dragonnet'],
                     strict=False
                 )
+            # Load effect extractor weights separately if not using model_state_dict
+            if model.rlearner_dual_extractors and model.effect_feature_extractor is not None:
+                if 'effect_feature_extractor' in checkpoint:
+                    model.effect_feature_extractor.load_state_dict(
+                        checkpoint['effect_feature_extractor'],
+                        strict=False
+                    )
+                if 'effect_mlp' in checkpoint:
+                    model.effect_mlp.load_state_dict(checkpoint['effect_mlp'])
 
         # Load explicit confounder featurizer state if present
         if 'explicit_confounder_featurizer_state' in checkpoint and model.explicit_confounder_featurizer is not None:

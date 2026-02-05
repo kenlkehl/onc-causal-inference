@@ -30,6 +30,9 @@ Usage:
         --device cuda:0 \
         --epochs 15 \
         --save-attention
+
+
+python oracle_experiment_scripts/run_gru_pool_experiment.py --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet --output-dir ../pcori_experiments/gru_pool_rlearner_twobranch_one_confounder --device cuda:0 --epochs 15  --rlearner-dual-extractors  --conditions 4_rlearner_oracle 5_rlearner_realistic 6_rlearner_llm_extracted
 """
 
 import argparse
@@ -93,6 +96,8 @@ class ExperimentConfig:
     transformer_dim: int = 256
     gated_attention_dim: int = 128
     projection_dim: int = 128
+    # R-Learner dual extractor mode (only used when model_type="rlearner")
+    rlearner_dual_extractors: bool = False
 
 
 # Define experimental conditions
@@ -271,7 +276,9 @@ def train_gru_pool_model(
         causal_head_representation_dim=128,
         causal_head_hidden_outcome_dim=64,
         causal_head_dropout=0.2,
-        device=str(device)
+        device=str(device),
+        # R-Learner dual extractor mode
+        rlearner_dual_extractors=config.rlearner_dual_extractors,
     )
 
     # IMPORTANT: Fit tokenizer (learns vocabulary from training texts)
@@ -491,6 +498,7 @@ def run_condition(
     logger.info(f"  Gated attention dim: {config.gated_attention_dim}")
     logger.info(f"  Stop grad propensity: {stop_grad_propensity}")
     logger.info(f"  Attention entropy weight: {attention_entropy_weight}")
+    logger.info(f"  R-Learner dual extractors: {config.rlearner_dual_extractors}")
     logger.info(f"{'='*60}")
 
     # Check if text column exists
@@ -745,6 +753,11 @@ def main():
         default=0.0,
         help="Weight for attention entropy regularization (encourages focused attention)"
     )
+    parser.add_argument(
+        "--rlearner-dual-extractors",
+        action="store_true",
+        help="Use separate feature extractors for nuisance (e,m) and effect (tau) in R-Learner"
+    )
 
     args = parser.parse_args()
 
@@ -768,6 +781,7 @@ def main():
     logger.info(f"  beta_targreg: {args.beta_targreg}")
     logger.info(f"  stop_grad_propensity: {args.stop_grad_propensity}")
     logger.info(f"  attention_entropy_weight: {args.attention_entropy_weight}")
+    logger.info(f"  rlearner_dual_extractors: {args.rlearner_dual_extractors}")
 
     # Load dataset
     df = pd.read_parquet(args.dataset)
@@ -811,7 +825,8 @@ def main():
             transformer_heads=args.transformer_heads,
             transformer_dim=args.transformer_dim,
             gated_attention_dim=args.gated_attention_dim,
-            projection_dim=128
+            projection_dim=128,
+            rlearner_dual_extractors=args.rlearner_dual_extractors,
         )
         conditions.append(new_config)
 
@@ -892,6 +907,7 @@ def main():
         'beta_targreg': args.beta_targreg,
         'stop_grad_propensity': args.stop_grad_propensity,
         'attention_entropy_weight': args.attention_entropy_weight,
+        'rlearner_dual_extractors': args.rlearner_dual_extractors,
         'n_folds': args.n_folds,
         'device': str(device),
         'conditions_run': [c.name for c in conditions if c.name in all_metrics]

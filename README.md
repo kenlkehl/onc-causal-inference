@@ -87,10 +87,22 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | Type | Description | Key output |
 |------|-------------|------------|
 | `causal_forest` | Two-stage: neural features + CausalForestDML | τ with confidence intervals |
-| `rlearner` | Direct τ(X) optimization, detached nuisance functions | τ directly predicts ITE |
+| `rlearner` | Direct τ(X) optimization, detached nuisance functions; optional dual extractor mode | τ directly predicts ITE |
 | `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
 | `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
 | `traditional_logreg` | Logistic regression with treatment as feature | ITE = σ(y\|T=1) - σ(y\|T=0) |
+
+**R-Learner Dual Extractor Mode**: For R-learner, you can optionally enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (τ). This prevents gradient interference between confounder learning and effect modifier learning:
+
+```json
+{
+  "architecture": {
+    "model_type": "rlearner",
+    "feature_extractor_type": "gru_pool",
+    "rlearner_dual_extractors": true
+  }
+}
+```
 
 ## Dataset Requirements
 

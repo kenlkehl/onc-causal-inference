@@ -637,7 +637,9 @@ def _train_single_model(
         causal_head_hidden_outcome_dim=arch_config.causal_head_hidden_outcome_dim,
         causal_head_dropout=getattr(arch_config, 'causal_head_dropout', 0.2),
         device=str(device),
-        model_type=arch_config.model_type
+        model_type=arch_config.model_type,
+        # R-Learner dual extractor mode
+        rlearner_dual_extractors=getattr(arch_config, 'rlearner_dual_extractors', False),
     )
     logger.info(f"Created model with {feature_extractor_type.upper()} feature extractor")
 

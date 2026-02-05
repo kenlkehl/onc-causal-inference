@@ -430,7 +430,9 @@ def _train_cnn_model(
         causal_head_representation_dim=arch_config.causal_head_representation_dim,
         causal_head_hidden_outcome_dim=arch_config.causal_head_hidden_outcome_dim,
         device=str(device),
-        model_type=arch_config.model_type
+        model_type=arch_config.model_type,
+        # R-Learner dual extractor mode
+        rlearner_dual_extractors=getattr(arch_config, 'rlearner_dual_extractors', False),
     )
 
     train_texts = train_df[applied_config.text_column].tolist()

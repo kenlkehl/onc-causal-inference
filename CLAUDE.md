@@ -72,6 +72,28 @@ synthetic_data/            # LLM-based synthetic data generation
 
 **R-Learner advantage**: Nuisance functions (e, m) are detached in R-loss, providing stronger gradient signal for treatment effect modifiers.
 
+**R-Learner Dual Extractor Mode**: When `rlearner_dual_extractors=True`, the R-Learner uses two independent feature extractors:
+
+| Component | Purpose | Training Signal |
+|-----------|---------|-----------------|
+| Nuisance Extractor | e(X), m(X) | Propensity BCE + Outcome BCE |
+| Effect Extractor | τ(X) | R-learner loss only |
+
+This separation prevents gradient interference between confounder learning (nuisance) and effect modifier learning (τ). The effect extractor learns representations optimized specifically for treatment effect heterogeneity.
+
+**Memory Note**: Dual mode approximately doubles feature extraction memory/compute.
+
+**Config:**
+```json
+{
+  "architecture": {
+    "model_type": "rlearner",
+    "feature_extractor_type": "gru_pool",
+    "rlearner_dual_extractors": true
+  }
+}
+```
+
 **Traditional LogReg approach**: Models P(Y|X, T) directly with treatment concatenated as a feature input to the outcome head. At inference, computes counterfactuals by running the outcome head twice with T=0 and T=1. Simpler loss function (outcome + propensity, no targeted regularization needed). Supports `stop_grad_propensity` but off by default.
 
 **Causal Forest approach**: Two-stage method combining neural network feature extraction with econml's CausalForestDML:
@@ -513,6 +535,7 @@ preds = model.predict(texts)
 | `clam_enabled=True` | Enables CLAM instance-level loss (hierarchical extractors) |
 | `clam_instance_weight>0` | Weight for instance-level loss on top-attended chunks |
 | `numeric_features_enabled=True` | Adds magnitude-aware numeric featurization from clinical text |
+| `rlearner_dual_extractors=True` | Uses separate extractors for nuisance (e,m) and effect (τ) in R-Learner |
 
 ## Matching & Analysis
 

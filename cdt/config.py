@@ -369,6 +369,14 @@ class ModelArchitectureConfig:
     clam_num_instances: int = 5  # B: number of top-attended chunks to supervise
     clam_instance_hidden_dim: int = 64  # Hidden dimension for instance causal head (smaller than doc head)
 
+    # R-Learner dual extractor mode
+    # When enabled with model_type="rlearner", uses two independent feature extractors:
+    # - Nuisance extractor: shared for propensity e(X) and marginal outcome m(X)
+    # - Effect extractor: dedicated to treatment effect τ(X)
+    # This prevents gradient interference between confounder learning (nuisance) and
+    # effect modifier learning (τ). Memory note: approximately doubles feature extraction compute.
+    rlearner_dual_extractors: bool = False
+
     # LLM Feature Extractor (decoder-only with last token embedding)
     # Uses architecture from a pretrained model but RANDOM weight initialization
     # Pretrained tokenizer is used; trained entirely from scratch via causal objective
