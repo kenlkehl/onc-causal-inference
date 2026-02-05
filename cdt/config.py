@@ -139,6 +139,14 @@ class CausalForestConfig:
     # Weight for R-learner loss during representation training
     gamma_rlearner: float = 1.0
 
+    # Dual extractor mode for R-learner representation training
+    # When enabled with use_rlearner_representation=True, uses two independent feature extractors:
+    # - Nuisance extractor: for propensity e(X) and marginal outcome m(X)
+    # - Effect extractor: for treatment effect τ(X)
+    # In dual mode, Stage 2 uses the effect extractor's features (optimized for τ)
+    # Memory note: approximately doubles feature extraction compute
+    rlearner_dual_extractors: bool = False
+
 
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """

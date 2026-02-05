@@ -289,6 +289,7 @@ def _create_causal_forest_model(
     # R-learner representation training options
     cf_use_rlearner_representation = getattr(cf_config, 'use_rlearner_representation', False) if cf_config else False
     cf_gamma_rlearner = getattr(cf_config, 'gamma_rlearner', 1.0) if cf_config else 1.0
+    cf_rlearner_dual_extractors = getattr(cf_config, 'rlearner_dual_extractors', False) if cf_config else False
 
     model = CausalTextForest(
         feature_extractor_type=feature_extractor_type,
@@ -370,6 +371,7 @@ def _create_causal_forest_model(
         # R-learner representation training
         cf_use_rlearner_representation=cf_use_rlearner_representation,
         cf_gamma_rlearner=cf_gamma_rlearner,
+        cf_rlearner_dual_extractors=cf_rlearner_dual_extractors,
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),

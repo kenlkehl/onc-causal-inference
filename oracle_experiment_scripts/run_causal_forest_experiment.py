@@ -17,23 +17,35 @@ Experimental Conditions:
 3. LLM-Extracted (llm_structured_text) - LLM extracted confounders as text
 
 Usage:
-    # Basic usage
+    # Basic usage (no R-learner loss)
     python oracle_experiment_scripts/run_causal_forest_experiment.py \
         --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
-        --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest \
+        --output-dir ../pcori_experiments/causal_forest \
         --device cuda:0 \
         --n-folds 5 \
         --cf-n-estimators 100 \
         --epochs 20
 
-    # With R-learner representation training (adds τ head and R-loss to Stage 1)
+    # With R-learner representation training using shared features
+    # (adds τ head and R-loss to Stage 1, same extractor for nuisance and effect)
     python oracle_experiment_scripts/run_causal_forest_experiment.py \
         --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
-        --output-dir ../pcori_experiments/explicit_confounder_experiments_1-19-26/causal_forest_rlearner \
+        --output-dir ../pcori_experiments/causal_forest_rlearner_shared \
         --device cuda:0 \
-        --rlearner \
+        --rlearner-mode shared \
         --gamma-rlearner 1.0 \
-        --cf-n-estimators 500 \
+        --cf-n-estimators 200 \
+        --epochs 20
+
+    # With R-learner representation training using dual extractors
+    # (separate extractors for nuisance e(X),m(X) and effect τ(X))
+    python oracle_experiment_scripts/run_causal_forest_experiment.py \
+        --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
+        --output-dir ../pcori_experiments/causal_forest_rlearner_dual \
+        --device cuda:0 \
+        --rlearner-mode dual \
+        --gamma-rlearner 1.0 \
+        --cf-n-estimators 200 \
         --epochs 20
 
 
@@ -108,23 +120,23 @@ class ExperimentConfig:
 
 # Define experimental conditions
 EXPERIMENT_CONDITIONS = [
-
+    ExperimentConfig(
+        name="1_oracle_patient_prompt",
+        text_column="patient_prompt",
+    ),
     ExperimentConfig(
          name="2_realistic_clinical_text",
          text_column="clinical_text",
+    ),    
+    ExperimentConfig(
+        name="3_llm_extracted",
+        text_column="llm_structured_text", 
     )
 
 
 ]
 
-    # ExperimentConfig(
-    #     name="1_oracle_patient_prompt",
-    #     text_column="patient_prompt",
-    # ),
-    # ExperimentConfig(
-    #     name="3_llm_extracted",
-    #     text_column="llm_structured_text", 
-    # ),
+
 
 class TextDataset(Dataset):
     """Simple dataset for text + labels."""
@@ -248,6 +260,7 @@ def train_causal_forest_model(
     learning_rate: float,
     stop_grad_propensity: bool = False,
     use_rlearner_representation: bool = False,
+    rlearner_dual_extractors: bool = False,
     gamma_rlearner: float = 1.0,
     numeric_features: bool = False
 ) -> Tuple[CausalTextForest, List[Dict]]:
@@ -285,6 +298,7 @@ def train_causal_forest_model(
         # R-learner representation training
         cf_use_rlearner_representation=use_rlearner_representation,
         cf_gamma_rlearner=gamma_rlearner,
+        cf_rlearner_dual_extractors=rlearner_dual_extractors,
         numeric_features_enabled=numeric_features,
         device=str(device)
     )
@@ -470,6 +484,7 @@ def run_condition(
     output_dir: Optional[Path] = None,
     stop_grad_propensity: bool = False,
     use_rlearner_representation: bool = False,
+    rlearner_dual_extractors: bool = False,
     gamma_rlearner: float = 1.0,
     numeric_features: bool = False
 ) -> Tuple[pd.DataFrame, Dict[str, float]]:
@@ -480,9 +495,12 @@ def run_condition(
     logger.info(f"  Causal forest: {config.cf_n_estimators} trees, honest={config.cf_honest}")
     logger.info(f"  GRU-Pool: embed={config.embedding_dim}, hidden={config.gru_hidden_dim}")
     logger.info(f"  Stop grad propensity: {stop_grad_propensity}")
-    logger.info(f"  R-learner representation: {use_rlearner_representation}")
     if use_rlearner_representation:
+        mode_str = "dual extractors" if rlearner_dual_extractors else "shared"
+        logger.info(f"  R-learner representation: {mode_str}")
         logger.info(f"  gamma_rlearner: {gamma_rlearner}")
+    else:
+        logger.info(f"  R-learner representation: none")
     logger.info(f"{'='*60}")
 
     # Check if text column exists
@@ -508,6 +526,7 @@ def run_condition(
             epochs, batch_size, learning_rate,
             stop_grad_propensity=stop_grad_propensity,
             use_rlearner_representation=use_rlearner_representation,
+            rlearner_dual_extractors=rlearner_dual_extractors,
             gamma_rlearner=gamma_rlearner,
             numeric_features=numeric_features
         )
@@ -701,15 +720,20 @@ def main():
         help="Detach features before propensity loss"
     )
     parser.add_argument(
-        "--rlearner",
-        action="store_true",
-        help="Enable R-learner representation training (adds τ head and R-loss to Stage 1)"
+        "--rlearner-mode",
+        type=str,
+        choices=["none", "shared", "dual"],
+        default="none",
+        help="R-learner representation training mode: "
+             "'none' (default) = no R-learner loss, "
+             "'shared' = R-learner loss with shared feature extractor, "
+             "'dual' = R-learner loss with separate extractors for nuisance/effect"
     )
     parser.add_argument(
         "--gamma-rlearner",
         type=float,
         default=1.0,
-        help="Weight for R-learner loss (only used when --rlearner is set)"
+        help="Weight for R-learner loss (only used when --rlearner-mode is 'shared' or 'dual')"
     )
     parser.add_argument(
         "--numeric-features",
@@ -725,6 +749,10 @@ def main():
         args.cf_n_estimators = (args.cf_n_estimators // 4 + 1) * 4
         logger.warning(f"Adjusted cf_n_estimators to {args.cf_n_estimators} (must be divisible by 4)")
 
+    # Parse R-learner mode into flags
+    use_rlearner_representation = args.rlearner_mode in ("shared", "dual")
+    rlearner_dual_extractors = args.rlearner_mode == "dual"
+
     # Setup
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -738,9 +766,11 @@ def main():
     logger.info(f"  Transformer dim: {args.transformer_dim}")
     logger.info(f"  Causal forest: {args.cf_n_estimators} trees")
     logger.info(f"  stop_grad_propensity: {args.stop_grad_propensity}")
-    logger.info(f"  R-learner representation: {args.rlearner}")
-    if args.rlearner:
-        logger.info(f"  gamma_rlearner: {args.gamma_rlearner}")
+    logger.info(f"  R-learner mode: {args.rlearner_mode}")
+    if use_rlearner_representation:
+        logger.info(f"    use_rlearner_representation: True")
+        logger.info(f"    dual_extractors: {rlearner_dual_extractors}")
+        logger.info(f"    gamma_rlearner: {args.gamma_rlearner}")
     logger.info(f"  Numeric features: {args.numeric_features}")
 
     # Load dataset
@@ -807,7 +837,8 @@ def main():
                 learning_rate=args.learning_rate,
                 output_dir=output_dir,
                 stop_grad_propensity=args.stop_grad_propensity,
-                use_rlearner_representation=args.rlearner,
+                use_rlearner_representation=use_rlearner_representation,
+                rlearner_dual_extractors=rlearner_dual_extractors,
                 gamma_rlearner=args.gamma_rlearner,
                 numeric_features=args.numeric_features
             )
@@ -858,7 +889,9 @@ def main():
         'batch_size': args.batch_size,
         'learning_rate': args.learning_rate,
         'stop_grad_propensity': args.stop_grad_propensity,
-        'use_rlearner_representation': args.rlearner,
+        'rlearner_mode': args.rlearner_mode,
+        'use_rlearner_representation': use_rlearner_representation,
+        'rlearner_dual_extractors': rlearner_dual_extractors,
         'gamma_rlearner': args.gamma_rlearner,
         'numeric_features': args.numeric_features,
         'n_folds': args.n_folds,

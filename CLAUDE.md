@@ -442,11 +442,24 @@ Stage 1: Representation Learning (Neural Network)
 ├── Outcome Head: E[Y|X] → BCE loss
 └── [Optional] Effect Head: τ(X) → R-loss (when use_rlearner_representation=True)
 
+Stage 1 with Dual Extractors (when rlearner_dual_extractors=True):
+├── Nuisance Extractor (feature_extractor)
+│   ├── Text → Features_nuisance
+│   ├── Propensity Head → e(X) [BCE loss]
+│   └── Outcome Head → m(X) [BCE loss]
+└── Effect Extractor (effect_feature_extractor)
+    └── Text → Features_effect → effect_mlp → τ(X) [R-loss]
+
 Stage 2: Effect Estimation (Causal Forest)
 ├── Extract learned representations from Stage 1
+│   (In dual mode: uses Effect Extractor features, optimized for τ)
 ├── Fit CausalForestDML on extracted features
 └── Estimate τ(X) = E[Y(1)-Y(0)|X] with confidence intervals
 ```
+
+**Key insight for dual mode**: In dual extractor mode, Stage 2 uses the effect extractor's features
+because they are specifically optimized to capture treatment effect heterogeneity via the R-loss.
+This provides the causal forest with representations that focus on effect modifiers rather than confounders.
 
 ### Causal Forest Parameters
 
@@ -460,10 +473,13 @@ Stage 2: Effect Estimation (Causal Forest)
 | `inference` | Enable confidence intervals | `True` |
 | `use_rlearner_representation` | Add τ head and R-loss to Stage 1 training | `False` |
 | `gamma_rlearner` | Weight for R-learner loss during representation training | `1.0` |
+| `rlearner_dual_extractors` | Use separate extractors for nuisance vs effect (with `use_rlearner_representation`) | `False` |
 
 **Note**: Nuisance functions (propensity and outcome) are estimated using sklearn random forests
 on the neural network's learned features. The neural network's key contribution is the
 learned text representation that captures confounders.
+
+**Memory Note**: Dual extractor mode approximately doubles feature extraction memory/compute.
 
 ### R-Learner Representation Training
 
@@ -507,6 +523,23 @@ config = {
             "inference": True,
             "use_rlearner_representation": True,
             "gamma_rlearner": 1.0
+        }
+    }
+}
+
+# Config with dual extractor mode (separate nuisance and effect extractors)
+config = {
+    "architecture": {
+        "model_type": "causal_forest",
+        "feature_extractor_type": "gru_pool",
+        "causal_forest": {
+            "n_estimators": 200,
+            "min_samples_leaf": 10,
+            "honest": True,
+            "inference": True,
+            "use_rlearner_representation": True,
+            "gamma_rlearner": 1.0,
+            "rlearner_dual_extractors": True
         }
     }
 }
