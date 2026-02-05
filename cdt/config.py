@@ -385,6 +385,15 @@ class ModelArchitectureConfig:
     # effect modifier learning (τ). Memory note: approximately doubles feature extraction compute.
     rlearner_dual_extractors: bool = False
 
+    # Uplift dual extractor mode
+    # When enabled with model_type="uplift", uses two independent feature extractors:
+    # - Nuisance extractor: shared for propensity e(X) and baseline outcome Y0(X)
+    # - Effect extractor: dedicated to treatment effect τ(X)
+    # Y1 is computed as Y0 + τ. This separation prevents gradient interference between
+    # confounder learning (nuisance) and effect modifier learning (τ).
+    # Memory note: approximately doubles feature extraction compute.
+    uplift_dual_extractors: bool = False
+
     # LLM Feature Extractor (decoder-only with last token embedding)
     # Uses architecture from a pretrained model but RANDOM weight initialization
     # Pretrained tokenizer is used; trained entirely from scratch via causal objective

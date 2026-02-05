@@ -94,6 +94,28 @@ This separation prevents gradient interference between confounder learning (nuis
 }
 ```
 
+**Uplift Dual Extractor Mode**: When `uplift_dual_extractors=True`, the Uplift model uses two independent feature extractors:
+
+| Component | Purpose | Training Signal |
+|-----------|---------|-----------------|
+| Nuisance Extractor | e(X), Y0(X) | Propensity BCE + Outcome BCE |
+| Effect Extractor | τ(X) | Outcome loss (Y1 = Y0 + τ) + Targeted regularization |
+
+This separation prevents gradient interference between confounder learning (nuisance) and effect modifier learning (τ). The effect extractor learns representations optimized specifically for treatment effect heterogeneity.
+
+**Memory Note**: Dual mode approximately doubles feature extraction memory/compute.
+
+**Config:**
+```json
+{
+  "architecture": {
+    "model_type": "uplift",
+    "feature_extractor_type": "gru_pool",
+    "uplift_dual_extractors": true
+  }
+}
+```
+
 **Traditional LogReg approach**: Models P(Y|X, T) directly with treatment concatenated as a feature input to the outcome head. At inference, computes counterfactuals by running the outcome head twice with T=0 and T=1. Simpler loss function (outcome + propensity, no targeted regularization needed). Supports `stop_grad_propensity` but off by default.
 
 **Causal Forest approach**: Two-stage method combining neural network feature extraction with econml's CausalForestDML:
@@ -569,6 +591,7 @@ preds = model.predict(texts)
 | `clam_instance_weight>0` | Weight for instance-level loss on top-attended chunks |
 | `numeric_features_enabled=True` | Adds magnitude-aware numeric featurization from clinical text |
 | `rlearner_dual_extractors=True` | Uses separate extractors for nuisance (e,m) and effect (τ) in R-Learner |
+| `uplift_dual_extractors=True` | Uses separate extractors for nuisance (e,Y0) and effect (τ) in Uplift |
 
 ## Matching & Analysis
 

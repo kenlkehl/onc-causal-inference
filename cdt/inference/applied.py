@@ -640,6 +640,8 @@ def _train_single_model(
         model_type=arch_config.model_type,
         # R-Learner dual extractor mode
         rlearner_dual_extractors=getattr(arch_config, 'rlearner_dual_extractors', False),
+        # Uplift dual extractor mode
+        uplift_dual_extractors=getattr(arch_config, 'uplift_dual_extractors', False),
     )
     logger.info(f"Created model with {feature_extractor_type.upper()} feature extractor")
 

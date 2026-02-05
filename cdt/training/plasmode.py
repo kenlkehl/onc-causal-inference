@@ -433,6 +433,8 @@ def _train_cnn_model(
         model_type=arch_config.model_type,
         # R-Learner dual extractor mode
         rlearner_dual_extractors=getattr(arch_config, 'rlearner_dual_extractors', False),
+        # Uplift dual extractor mode
+        uplift_dual_extractors=getattr(arch_config, 'uplift_dual_extractors', False),
     )
 
     train_texts = train_df[applied_config.text_column].tolist()

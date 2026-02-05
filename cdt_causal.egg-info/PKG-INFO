@@ -89,13 +89,16 @@ The best-performing configuration uses a two-stage approach combining neural fea
 Stage 1: Representation Learning (Neural Network)
 ├── GRU-Pool Extractor: Chunk BiGRU + transformer + gated attention
 ├── Propensity Head: P(T=1|X) → BCE loss
-└── Outcome Head: E[Y|X] → BCE loss
+├── Outcome Head: E[Y|X] → BCE loss
+└── [Optional] Effect Head: τ(X) → R-loss (when use_rlearner_representation=True)
 
 Stage 2: Effect Estimation (Causal Forest)
 ├── Extract learned representations from Stage 1
 ├── Fit CausalForestDML on extracted features
 └── Estimate τ(X) = E[Y(1)-Y(0)|X] with confidence intervals
 ```
+
+**Optional: R-Learner Representation Training** - Enable `use_rlearner_representation: true` in the causal forest config to add an R-learner loss during Stage 1, encouraging the neural network to learn representations that capture treatment effect heterogeneity. For even stronger separation, enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions vs treatment effect.
 
 **Key advantages:**
 - **Doubly-robust estimation**: Robust to misspecification of either propensity or outcome model
@@ -126,7 +129,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 
 | Type | Description | Key output |
 |------|-------------|------------|
-| `causal_forest` | Two-stage: neural features + CausalForestDML | τ with confidence intervals |
+| `causal_forest` | Two-stage: neural features + CausalForestDML; optional R-learner representation and dual extractor mode | τ with confidence intervals |
 | `rlearner` | Direct τ(X) optimization, detached nuisance functions; optional dual extractor mode | τ directly predicts ITE |
 | `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
 | `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
@@ -143,6 +146,24 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
   }
 }
 ```
+
+**Causal Forest Dual Extractor Mode**: The two-stage causal forest approach also supports dual extractors when R-learner representation training is enabled. In dual mode, Stage 2 uses features from the effect extractor (optimized for τ via R-loss) rather than the nuisance extractor:
+
+```json
+{
+  "architecture": {
+    "model_type": "causal_forest",
+    "feature_extractor_type": "gru_pool",
+    "causal_forest": {
+      "n_estimators": 200,
+      "use_rlearner_representation": true,
+      "rlearner_dual_extractors": true
+    }
+  }
+}
+```
+
+**Note**: Dual extractor mode approximately doubles feature extraction memory/compute.
 
 ## Dataset Requirements
 
@@ -195,7 +216,9 @@ Example causal forest configuration:
         "n_estimators": 200,
         "min_samples_leaf": 10,
         "honest": true,
-        "inference": true
+        "inference": true,
+        "use_rlearner_representation": false,
+        "rlearner_dual_extractors": false
       }
     },
 

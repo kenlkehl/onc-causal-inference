@@ -205,6 +205,8 @@ class CausalText(nn.Module):
         explicit_confounder_dropout: float = 0.1,
         # R-Learner dual extractor mode
         rlearner_dual_extractors: bool = False,
+        # Uplift dual extractor mode
+        uplift_dual_extractors: bool = False,
     ):
         """
         Initialize causal inference model with CNN, BERT, or GRU feature extractor.
@@ -374,6 +376,7 @@ class CausalText(nn.Module):
             'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
             'explicit_confounder_dropout': explicit_confounder_dropout,
             'rlearner_dual_extractors': rlearner_dual_extractors,
+            'uplift_dual_extractors': uplift_dual_extractors,
         }
 
         # Store auxiliary dimension
@@ -780,15 +783,22 @@ class CausalText(nn.Module):
                 logger.info(f"CLAM instance-level loss enabled: {clam_num_instances} top chunks, "
                            f"instance_input_dim={instance_input_dim}, instance_head_dim={clam_instance_hidden_dim}")
 
-        # R-Learner dual extractor mode
+        # R-Learner and Uplift dual extractor mode
         # When enabled, creates a second independent feature extractor for τ(X)
-        # The nuisance extractor (self.feature_extractor) handles e(X) and m(X)
+        # The nuisance extractor (self.feature_extractor) handles e(X) and m(X)/Y0(X)
         # The effect extractor (self.effect_feature_extractor) handles τ(X)
         self.rlearner_dual_extractors = rlearner_dual_extractors
+        self.uplift_dual_extractors = uplift_dual_extractors
         self.effect_feature_extractor = None
         self.effect_mlp = None
 
-        if rlearner_dual_extractors and model_type == "rlearner":
+        # Check for dual extractor mode (R-Learner or Uplift)
+        dual_mode_enabled = (
+            (rlearner_dual_extractors and model_type == "rlearner") or
+            (uplift_dual_extractors and model_type == "uplift")
+        )
+
+        if dual_mode_enabled:
             # Create second feature extractor with same architecture
             # We need to duplicate the extractor instantiation logic
             if self.feature_extractor_type == "bert":
@@ -957,10 +967,16 @@ class CausalText(nn.Module):
                 nn.Linear(causal_head_hidden_outcome_dim, 1)  # τ is unbounded
             )
 
-            logger.info(f"R-Learner dual extractor mode enabled:")
-            logger.info(f"  Nuisance extractor: {self.feature_extractor_type} -> e(X), m(X)")
-            logger.info(f"  Effect extractor: {self.feature_extractor_type} -> τ(X)")
-            logger.info(f"  Effect MLP: {effect_input_dim} -> {causal_head_hidden_outcome_dim} -> 1")
+            if model_type == "rlearner":
+                logger.info(f"R-Learner dual extractor mode enabled:")
+                logger.info(f"  Nuisance extractor: {self.feature_extractor_type} -> e(X), m(X)")
+                logger.info(f"  Effect extractor: {self.feature_extractor_type} -> τ(X)")
+                logger.info(f"  Effect MLP: {effect_input_dim} -> {causal_head_hidden_outcome_dim} -> 1")
+            else:  # uplift
+                logger.info(f"Uplift dual extractor mode enabled:")
+                logger.info(f"  Nuisance extractor: {self.feature_extractor_type} -> e(X), Y0(X)")
+                logger.info(f"  Effect extractor: {self.feature_extractor_type} -> τ(X)")
+                logger.info(f"  Effect MLP: {effect_input_dim} -> {causal_head_hidden_outcome_dim} -> 1")
 
         # Move to device
         self.to(self._device)
@@ -1065,6 +1081,13 @@ class CausalText(nn.Module):
                 stop_grad_propensity, attention_entropy_weight, clam_instance_weight
             )
 
+        # Dispatch to specialized training step for uplift
+        if self.model_type == "uplift":
+            return self._train_step_uplift(
+                batch, alpha_propensity, beta_targreg, label_smoothing,
+                stop_grad_propensity, attention_entropy_weight, clam_instance_weight
+            )
+
         # Dispatch to specialized training step for traditional_logreg
         if self.model_type == "traditional_logreg":
             return self._train_step_traditional_logreg(
@@ -1072,6 +1095,7 @@ class CausalText(nn.Module):
                 stop_grad_propensity, attention_entropy_weight, clam_instance_weight
             )
 
+        # DragonNet (default)
         texts = batch['texts']
         treatments = batch['treatment']  # (batch,)
         outcomes = batch['outcome']  # (batch,)
@@ -1099,7 +1123,7 @@ class CausalText(nn.Module):
             conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
             features = torch.cat([features, conf_features], dim=1)
 
-        # For DragonNet/UpliftNet: handle stop_grad_propensity
+        # DragonNet: handle stop_grad_propensity
         if stop_grad_propensity:
             # Detach features for propensity computation to prevent propensity
             # from dominating the representation learning
@@ -1110,18 +1134,10 @@ class CausalText(nn.Module):
             t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
 
             # Compute full forward pass with regular features for outcome heads
-            if self.model_type == "uplift":
-                y0_logit, tau_logit, t_logit, phi = self.net(features)
-                y1_logit = y0_logit + tau_logit
-            else:  # dragonnet
-                y0_logit, y1_logit, t_logit, phi = self.net(features)
+            y0_logit, y1_logit, t_logit, phi = self.net(features)
         else:
             # Standard forward pass
-            if self.model_type == "uplift":
-                y0_logit, tau_logit, t_logit, phi = self.net(features)
-                y1_logit = y0_logit + tau_logit
-            else:  # dragonnet
-                y0_logit, y1_logit, t_logit, phi = self.net(features)
+            y0_logit, y1_logit, t_logit, phi = self.net(features)
             t_logit_for_loss = t_logit
 
         # Propensity loss - use t_logit_for_loss (detached features if stop_grad)
@@ -1507,6 +1523,261 @@ class CausalText(nn.Module):
 
         return result
 
+    def _train_step_uplift(
+        self,
+        batch: Dict[str, Any],
+        alpha_propensity: float,
+        beta_targreg: float,
+        label_smoothing: float,
+        stop_grad_propensity: bool = False,
+        attention_entropy_weight: float = 0.0,
+        clam_instance_weight: float = 0.5
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Perform Uplift training step with optional dual extractor mode.
+
+        UpliftNet parametrizes outcomes as:
+        - Y0(X): baseline outcome under control
+        - τ(X): treatment effect
+        - Y1(X) = Y0(X) + τ(X)
+
+        In dual extractor mode:
+        - Nuisance extractor: e(X), Y0(X)
+        - Effect extractor + MLP: τ(X)
+
+        Args:
+            batch: Dictionary with 'texts', 'treatment', 'outcome' keys
+            alpha_propensity: Weight for propensity loss
+            beta_targreg: Weight for targeted regularization
+            label_smoothing: Label smoothing factor
+            stop_grad_propensity: If True, detach features before propensity loss
+            attention_entropy_weight: Weight for attention entropy regularization
+            clam_instance_weight: Weight for CLAM instance-level loss
+
+        Returns:
+            Dictionary with loss components and predictions
+        """
+        texts = batch['texts']
+        treatments = batch['treatment']  # (batch,)
+        outcomes = batch['outcome']  # (batch,)
+        auxiliary_features = batch.get('auxiliary_features', None)
+        explicit_confounder_values = batch.get('explicit_confounder_values', None)
+
+        # Apply label smoothing if enabled
+        if label_smoothing > 0:
+            treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
+            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+        else:
+            treatments_smooth = treatments
+            outcomes_smooth = outcomes
+
+        # Check for dual extractor mode
+        if self.uplift_dual_extractors and self.effect_feature_extractor is not None:
+            # DUAL EXTRACTOR MODE:
+            # - Nuisance extractor (self.feature_extractor) -> e(X), Y0(X)
+            # - Effect extractor (self.effect_feature_extractor) + effect_mlp -> τ(X)
+
+            # Nuisance path: extract features for e(X) and Y0(X)
+            nuisance_features = self.feature_extractor(texts)
+
+            # Compute attention entropy loss if enabled and extractor supports it
+            entropy_loss = torch.tensor(0.0, device=self._device)
+            if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
+                _, attention_info = self.feature_extractor.forward_with_attention(texts)
+                entropy_loss = attention_info['attention_entropy']
+
+            # Concatenate auxiliary features if provided
+            if self.auxiliary_projection is not None and auxiliary_features is not None:
+                aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+                nuisance_features = torch.cat([nuisance_features, aux_projected], dim=1)
+
+            # Concatenate explicit confounder features if provided
+            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
+                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
+                nuisance_features = torch.cat([nuisance_features, conf_features], dim=1)
+
+            # Nuisance heads: propensity e(X) and baseline outcome Y0(X)
+            # UpliftNet returns: y0_logit, tau_logit, t_logit, phi
+            # In dual mode, we ignore tau_logit from UpliftNet and use effect_mlp instead
+            y0_logit, _, t_logit, phi = self.net(nuisance_features)
+
+            # Effect path: extract features for τ(X)
+            effect_features = self.effect_feature_extractor(texts)
+
+            # τ(X) from separate effect MLP
+            tau_logit = self.effect_mlp(effect_features)
+
+            # Y1 = Y0 + τ
+            y1_logit = y0_logit + tau_logit
+
+            # Handle stop_grad_propensity (detach nuisance features for propensity loss)
+            if stop_grad_propensity:
+                nuisance_features_detached = nuisance_features.detach()
+                phi_detached = self.net.get_representation(nuisance_features_detached)
+                t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit_for_loss.squeeze(-1),
+                    treatments_smooth
+                )
+            else:
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit.squeeze(-1),
+                    treatments_smooth
+                )
+
+            # Set features variable for downstream use (CLAM, etc.)
+            features = nuisance_features
+
+        else:
+            # STANDARD SINGLE EXTRACTOR MODE
+
+            # Extract features
+            features = self.feature_extractor(texts)
+
+            # Compute attention entropy loss if enabled and extractor supports it
+            entropy_loss = torch.tensor(0.0, device=self._device)
+            if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
+                _, attention_info = self.feature_extractor.forward_with_attention(texts)
+                entropy_loss = attention_info['attention_entropy']
+
+            # Concatenate auxiliary features if provided
+            if self.auxiliary_projection is not None and auxiliary_features is not None:
+                aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+                features = torch.cat([features, aux_projected], dim=1)
+
+            # Concatenate explicit confounder features if provided
+            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
+                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
+                features = torch.cat([features, conf_features], dim=1)
+
+            if stop_grad_propensity:
+                # Detach features for propensity to prevent propensity from dominating
+                features_detached = features.detach()
+
+                # Forward pass with regular features for outcome/tau
+                y0_logit, tau_logit, t_logit, phi = self.net(features)
+                y1_logit = y0_logit + tau_logit
+
+                # Re-compute propensity with detached features using helper methods
+                phi_detached = self.net.get_representation(features_detached)
+                t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit_for_loss.squeeze(-1),
+                    treatments_smooth
+                )
+            else:
+                # Standard forward pass
+                y0_logit, tau_logit, t_logit, phi = self.net(features)
+                y1_logit = y0_logit + tau_logit
+
+                propensity_loss = F.binary_cross_entropy_with_logits(
+                    t_logit.squeeze(-1),
+                    treatments_smooth
+                )
+
+        # Outcome loss - factual outcome only
+        factual_logit = torch.where(
+            treatments.unsqueeze(1) > 0.5,
+            y1_logit,
+            y0_logit
+        )
+
+        outcome_loss = F.binary_cross_entropy_with_logits(
+            factual_logit.squeeze(-1),
+            outcomes_smooth
+        )
+
+        # Targeted regularization
+        if beta_targreg > 0:
+            with torch.no_grad():
+                propensity = torch.sigmoid(t_logit).clamp(1e-3, 1 - 1e-3)
+                H = (treatments.unsqueeze(1) / propensity) - \
+                    ((1 - treatments.unsqueeze(1)) / (1 - propensity))
+
+            factual_prob = torch.sigmoid(factual_logit)
+            moment = torch.mean((outcomes.unsqueeze(1) - factual_prob) * H)
+            targreg_loss = moment ** 2
+        else:
+            targreg_loss = torch.tensor(0.0, device=self._device)
+
+        # CLAM instance-level loss (if enabled)
+        instance_loss = torch.tensor(0.0, device=self._device)
+        if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
+            # Get chunk embeddings and attention weights
+            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+
+            all_top_chunks = []
+            expanded_treatments = []
+            expanded_outcomes = []
+
+            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                if chunk_embs.size(0) == 0:
+                    continue
+                B = min(self.clam_num_instances, chunk_embs.size(0))
+                top_indices = torch.topk(attn_weights, B).indices
+                top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
+
+                all_top_chunks.append(top_chunks)
+                expanded_treatments.extend([treatments[i]] * B)
+                expanded_outcomes.extend([outcomes[i]] * B)
+
+            if all_top_chunks:
+                stacked_chunks = torch.cat(all_top_chunks, dim=0)
+                exp_treatments = torch.stack(expanded_treatments)
+                exp_outcomes = torch.stack(expanded_outcomes)
+
+                # Forward through instance head (UpliftNet)
+                # UpliftNet returns: y0_logit, tau_logit, t_logit, phi
+                inst_y0, inst_tau, inst_t, _ = self.instance_head(stacked_chunks)
+                inst_y1 = inst_y0 + inst_tau
+
+                # Instance propensity loss
+                instance_propensity_loss = F.binary_cross_entropy_with_logits(
+                    inst_t.squeeze(-1), exp_treatments
+                )
+
+                # Instance outcome loss (factual only)
+                inst_factual = torch.where(
+                    exp_treatments.unsqueeze(1) > 0.5, inst_y1, inst_y0
+                )
+                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                    inst_factual.squeeze(-1), exp_outcomes
+                )
+
+                instance_loss = instance_outcome_loss + alpha_propensity * instance_propensity_loss
+
+        # Total loss
+        total_loss = (
+            outcome_loss +
+            alpha_propensity * propensity_loss +
+            beta_targreg * targreg_loss +
+            attention_entropy_weight * entropy_loss +
+            clam_instance_weight * instance_loss
+        )
+
+        result = {
+            'loss': total_loss,
+            'outcome_loss': outcome_loss.detach(),
+            'propensity_loss': propensity_loss.detach(),
+            'targreg_loss': targreg_loss.detach() if isinstance(targreg_loss, torch.Tensor) else targreg_loss,
+            'y0_logit': y0_logit.detach(),
+            'y1_logit': y1_logit.detach(),
+            't_logit': t_logit.detach(),
+            'tau_logit': tau_logit.detach(),
+        }
+
+        # Add entropy loss if computed
+        if attention_entropy_weight > 0:
+            result['entropy_loss'] = entropy_loss.detach() if isinstance(entropy_loss, torch.Tensor) else entropy_loss
+
+        # Add instance loss if CLAM enabled
+        if self.clam_enabled:
+            result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
+
+        return result
+
     def _train_step_traditional_logreg(
         self,
         batch: Dict[str, Any],
@@ -1697,9 +1968,24 @@ class CausalText(nn.Module):
                 features = torch.cat([features, conf_features], dim=1)
 
             if self.model_type == "uplift":
-                y0_logit, tau_logit, t_logit, final_common_layer = self.net(features)
-                y1_logit = y0_logit + tau_logit
-                tau_pred = tau_logit.squeeze(-1)
+                # Check for dual extractor mode
+                if self.uplift_dual_extractors and self.effect_feature_extractor is not None:
+                    # DUAL EXTRACTOR MODE:
+                    # - Nuisance from main extractor + UpliftNet -> e(X), Y0(X)
+                    # - τ from effect extractor + effect_mlp
+                    y0_logit, _, t_logit, final_common_layer = self.net(features)
+
+                    # Get τ from effect extractor
+                    effect_features = self.effect_feature_extractor(texts)
+                    tau_logit = self.effect_mlp(effect_features)
+
+                    y1_logit = y0_logit + tau_logit
+                    tau_pred = tau_logit.squeeze(-1)
+                else:
+                    # STANDARD MODE
+                    y0_logit, tau_logit, t_logit, final_common_layer = self.net(features)
+                    y1_logit = y0_logit + tau_logit
+                    tau_pred = tau_logit.squeeze(-1)
             elif self.model_type == "rlearner":
                 # Check for dual extractor mode
                 if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
@@ -1817,11 +2103,16 @@ class CausalText(nn.Module):
             self.feature_extractor.fit_tokenizer(texts)
         # BERT uses pretrained tokenizer, no fitting needed
 
-        # Initialize effect extractor if in dual mode
-        if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
+        # Initialize effect extractor if in dual mode (R-Learner or Uplift)
+        dual_mode = (
+            (self.rlearner_dual_extractors and self.model_type == "rlearner") or
+            (self.uplift_dual_extractors and self.model_type == "uplift")
+        )
+        if dual_mode and self.effect_feature_extractor is not None:
             if hasattr(self.effect_feature_extractor, 'fit_tokenizer'):
                 self.effect_feature_extractor.fit_tokenizer(texts)
-            logger.info("Effect extractor initialized (dual R-Learner mode)")
+            mode_name = "R-Learner" if self.model_type == "rlearner" else "Uplift"
+            logger.info(f"Effect extractor initialized (dual {mode_name} mode)")
 
         # After feature extractor initialization, verify/update CLAM instance head dimensions
         # for gated_mil_hierarchical which has lazy initialization
@@ -1925,8 +2216,12 @@ class CausalText(nn.Module):
         if self.explicit_confounder_featurizer is not None:
             checkpoint['explicit_confounder_featurizer_state'] = self.explicit_confounder_featurizer.get_state()
 
-        # Save effect extractor and effect MLP state if in dual mode
-        if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
+        # Save effect extractor and effect MLP state if in dual mode (R-Learner or Uplift)
+        dual_mode = (
+            (self.rlearner_dual_extractors and self.model_type == "rlearner") or
+            (self.uplift_dual_extractors and self.model_type == "uplift")
+        )
+        if dual_mode and self.effect_feature_extractor is not None:
             checkpoint['effect_feature_extractor'] = self.effect_feature_extractor.state_dict()
             checkpoint['effect_mlp'] = self.effect_mlp.state_dict()
             if hasattr(self.effect_feature_extractor, 'get_state'):
@@ -1970,7 +2265,12 @@ class CausalText(nn.Module):
 
         # Load effect extractor tokenizer/state BEFORE loading model_state_dict
         # This ensures embedding layers have correct dimensions
-        if model.rlearner_dual_extractors and model.effect_feature_extractor is not None:
+        # Check for dual mode (R-Learner or Uplift)
+        dual_mode = (
+            (model.rlearner_dual_extractors and model.model_type == "rlearner") or
+            (model.uplift_dual_extractors and model.model_type == "uplift")
+        )
+        if dual_mode and model.effect_feature_extractor is not None:
             if 'effect_tokenizer_state' in checkpoint:
                 if hasattr(model.effect_feature_extractor, 'load_tokenizer_state'):
                     model.effect_feature_extractor.load_tokenizer_state(checkpoint['effect_tokenizer_state'])
@@ -1993,7 +2293,7 @@ class CausalText(nn.Module):
                     strict=False
                 )
             # Load effect extractor weights separately if not using model_state_dict
-            if model.rlearner_dual_extractors and model.effect_feature_extractor is not None:
+            if dual_mode and model.effect_feature_extractor is not None:
                 if 'effect_feature_extractor' in checkpoint:
                     model.effect_feature_extractor.load_state_dict(
                         checkpoint['effect_feature_extractor'],
