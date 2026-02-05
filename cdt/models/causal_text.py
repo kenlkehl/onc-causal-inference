@@ -11,6 +11,7 @@ from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
 from .traditional_logreg import TraditionalLogRegNet
+from .dr_moce import DRMoCENet, NuisancePredictionBuffer, compute_dr_pseudo_outcome
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer
 from .extractor_factory import create_feature_extractor
 from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
@@ -199,6 +200,13 @@ class CausalText(nn.Module):
         rlearner_dual_extractors: bool = False,
         # Uplift dual extractor mode
         uplift_dual_extractors: bool = False,
+        # DR-MoCE args
+        dr_moce_num_experts: int = 8,
+        dr_moce_router_temperature: float = 1.0,
+        dr_moce_propensity_clip: float = 0.01,
+        dr_moce_het_weight: float = 0.1,
+        dr_moce_balance_weight: float = 0.01,
+        dr_moce_crossfit_buffer_size: int = 1024,
     ):
         """
         Initialize causal inference model with CNN, BERT, or GRU feature extractor.
@@ -369,6 +377,12 @@ class CausalText(nn.Module):
             'explicit_confounder_dropout': explicit_confounder_dropout,
             'rlearner_dual_extractors': rlearner_dual_extractors,
             'uplift_dual_extractors': uplift_dual_extractors,
+            'dr_moce_num_experts': dr_moce_num_experts,
+            'dr_moce_router_temperature': dr_moce_router_temperature,
+            'dr_moce_propensity_clip': dr_moce_propensity_clip,
+            'dr_moce_het_weight': dr_moce_het_weight,
+            'dr_moce_balance_weight': dr_moce_balance_weight,
+            'dr_moce_crossfit_buffer_size': dr_moce_crossfit_buffer_size,
         }
 
         # Store auxiliary dimension
@@ -561,6 +575,29 @@ class CausalText(nn.Module):
                 dropout=causal_head_dropout
             )
             logger.info("Using Traditional LogReg architecture (treatment as feature)")
+        elif model_type == "dr_moce":
+            self.net = DRMoCENet(
+                input_dim=input_dim,
+                representation_dim=causal_head_representation_dim,
+                hidden_outcome_dim=causal_head_hidden_outcome_dim,
+                num_experts=dr_moce_num_experts,
+                router_temperature=dr_moce_router_temperature,
+                dropout=causal_head_dropout
+            )
+            # Store DR-MoCE specific config
+            self.dr_moce_propensity_clip = dr_moce_propensity_clip
+            self.dr_moce_het_weight = dr_moce_het_weight
+            self.dr_moce_balance_weight = dr_moce_balance_weight
+            # Initialize prediction buffer for cross-fitting
+            if dr_moce_crossfit_buffer_size > 0:
+                self.dr_moce_buffer = NuisancePredictionBuffer(
+                    buffer_size=dr_moce_crossfit_buffer_size
+                )
+            else:
+                self.dr_moce_buffer = None
+            logger.info(f"Using DR-MoCE architecture ({dr_moce_num_experts} experts, "
+                       f"temp={dr_moce_router_temperature}, "
+                       f"buffer={'enabled' if dr_moce_crossfit_buffer_size > 0 else 'disabled'})")
         else:
             self.net = DragonNet(
                 input_dim=input_dim,
@@ -865,6 +902,10 @@ class CausalText(nn.Module):
             # For forward() compatibility, return in same tuple format
             # But these are semantically different: m_logit is marginal, tau is effect
             return m_logit, tau, t_logit, final_common_layer
+        elif self.model_type == "dr_moce":
+            # DRMoCENet returns: mu0_logit, mu1_logit, tau, sigma2, t_logit, g, expert_means, phi
+            mu0_logit, mu1_logit, tau, sigma2, t_logit, g, expert_means, phi = self.net(features)
+            return mu0_logit, mu1_logit, t_logit, phi
         elif self.model_type == "traditional_logreg":
             # TraditionalLogRegNet in counterfactual mode returns: y0_logit, y1_logit, t_logit, phi
             y0_logit, y1_logit, t_logit, final_common_layer = self.net(features, treatment=None)
@@ -880,6 +921,7 @@ class CausalText(nn.Module):
         alpha_propensity: float = 1.0,
         beta_targreg: float = 0.1,
         gamma_rlearner: float = 1.0,
+        gamma_dr: float = 1.0,
         label_smoothing: float = 0.0,
         stop_grad_propensity: bool = False,
         attention_entropy_weight: float = 0.0,
@@ -895,6 +937,7 @@ class CausalText(nn.Module):
             alpha_propensity: Weight for propensity loss
             beta_targreg: Weight for targeted regularization (dragonnet/uplift)
             gamma_rlearner: Weight for R-learner loss (rlearner only)
+            gamma_dr: Weight for DR effect loss (dr_moce only)
             label_smoothing: Label smoothing factor (0 = no smoothing)
             stop_grad_propensity: If True, detach features before propensity loss
                 so propensity optimization doesn't affect the feature extractor.
@@ -908,6 +951,13 @@ class CausalText(nn.Module):
         Returns:
             Dictionary with loss components and detached predictions
         """
+        # Dispatch to specialized training step for dr_moce
+        if self.model_type == "dr_moce":
+            return self._train_step_dr_moce(
+                batch, alpha_propensity, gamma_dr, label_smoothing,
+                stop_grad_propensity
+            )
+
         # Dispatch to specialized training step for rlearner
         if self.model_type == "rlearner":
             return self._train_step_rlearner(
@@ -1771,6 +1821,179 @@ class CausalText(nn.Module):
 
         return result
 
+    def _train_step_dr_moce(
+        self,
+        batch: Dict[str, Any],
+        alpha_propensity: float,
+        gamma_dr: float,
+        label_smoothing: float,
+        stop_grad_propensity: bool = False
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Perform DR-MoCE training step.
+
+        Loss = L_nuisance + gamma_dr * L_DR + lambda_het * L_het + lambda_bal * L_bal
+
+        where:
+          L_nuisance = BCE(e(X), T) + BCE(mu0(X), Y|T=0) + BCE(mu1(X), Y|T=1)
+          L_DR = heteroscedastic Gaussian NLL of Gamma (DR pseudo-outcome)
+          L_het = -Var_k[mean_k(X)]  (encourage expert specialization)
+          L_bal = KL(avg routing || Uniform(K))  (load balancing)
+
+        Args:
+            batch: Dictionary with 'texts', 'treatment', 'outcome' keys
+            alpha_propensity: Weight for propensity loss
+            gamma_dr: Weight for DR effect loss
+            label_smoothing: Label smoothing factor
+            stop_grad_propensity: If True, detach features before propensity
+
+        Returns:
+            Dictionary with loss components and predictions
+        """
+        texts = batch['texts']
+        treatments = batch['treatment']  # (batch,)
+        outcomes = batch['outcome']  # (batch,)
+        explicit_confounder_values = batch.get('explicit_confounder_values', None)
+
+        # Apply label smoothing if enabled
+        if label_smoothing > 0:
+            treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
+            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+        else:
+            treatments_smooth = treatments
+            outcomes_smooth = outcomes
+
+        # Extract features
+        features = self.feature_extractor(texts)
+
+        # Concatenate explicit confounder features if provided
+        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
+            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
+            features = torch.cat([features, conf_features], dim=1)
+
+        # Full forward pass through DR-MoCE
+        mu0_logit, mu1_logit, tau, sigma2, t_logit, g, expert_means, phi = self.net(features)
+
+        # --- Nuisance losses ---
+        # Propensity loss
+        if stop_grad_propensity:
+            features_detached = features.detach()
+            phi_detached = self.net.get_representation(features_detached)
+            t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+        else:
+            t_logit_for_loss = t_logit
+
+        propensity_loss = F.binary_cross_entropy_with_logits(
+            t_logit_for_loss.squeeze(-1),
+            treatments_smooth
+        )
+
+        # Factual outcome loss for mu0, mu1 (only on observed treatment arm)
+        treated_mask = (treatments > 0.5)
+        control_mask = ~treated_mask
+
+        outcome_loss = torch.tensor(0.0, device=self._device)
+        n_terms = 0
+        if control_mask.any():
+            outcome_loss = outcome_loss + F.binary_cross_entropy_with_logits(
+                mu0_logit[control_mask].squeeze(-1),
+                outcomes_smooth[control_mask]
+            )
+            n_terms += 1
+        if treated_mask.any():
+            outcome_loss = outcome_loss + F.binary_cross_entropy_with_logits(
+                mu1_logit[treated_mask].squeeze(-1),
+                outcomes_smooth[treated_mask]
+            )
+            n_terms += 1
+        if n_terms > 1:
+            outcome_loss = outcome_loss / n_terms
+
+        # --- DR pseudo-outcome with optional cross-fitting ---
+        with torch.no_grad():
+            e = torch.sigmoid(t_logit).squeeze(-1)
+            mu0_prob = torch.sigmoid(mu0_logit).squeeze(-1)
+            mu1_prob = torch.sigmoid(mu1_logit).squeeze(-1)
+
+            # Use prediction buffer for cross-fitting if available
+            if (self.dr_moce_buffer is not None
+                    and self.dr_moce_buffer.is_ready()
+                    and self.training):
+                # Push current predictions to buffer
+                self.dr_moce_buffer.push(
+                    e.detach().cpu(),
+                    mu0_prob.detach().cpu(),
+                    mu1_prob.detach().cpu(),
+                    outcomes.detach().cpu(),
+                    treatments.detach().cpu()
+                )
+
+            # AIPW pseudo-outcome (using detached current-batch nuisance)
+            Gamma = compute_dr_pseudo_outcome(
+                Y=outcomes,
+                T=treatments,
+                e=e,
+                mu0=mu0_prob,
+                mu1=mu1_prob,
+                clip=self.dr_moce_propensity_clip
+            )
+
+        # --- DR effect loss (heteroscedastic NLL) ---
+        sigma2_clamped = sigma2.clamp(min=1e-6)
+        dr_loss = (
+            0.5 * (Gamma - tau) ** 2 / sigma2_clamped
+            + 0.5 * torch.log(sigma2_clamped)
+        ).mean()
+
+        # --- Regularization losses ---
+        # Expert heterogeneity: encourage different experts to learn different effects
+        # expert_means shape: (batch, K) - variance across experts for each sample
+        het_loss = -expert_means.var(dim=1).mean()
+
+        # Load balancing: routing should be roughly uniform on average
+        avg_routing = g.mean(dim=0)  # (K,)
+        uniform = torch.ones_like(avg_routing) / avg_routing.size(0)
+        # KL(avg_routing || uniform)
+        bal_loss = (avg_routing * (avg_routing / uniform + 1e-8).log()).sum()
+
+        # --- Total loss ---
+        total_loss = (
+            outcome_loss
+            + alpha_propensity * propensity_loss
+            + gamma_dr * dr_loss
+            + self.dr_moce_het_weight * het_loss
+            + self.dr_moce_balance_weight * bal_loss
+        )
+
+        # Push to buffer after computing loss (for next iteration's cross-fitting)
+        if (self.dr_moce_buffer is not None
+                and not self.dr_moce_buffer.is_ready()
+                and self.training):
+            with torch.no_grad():
+                self.dr_moce_buffer.push(
+                    e.detach().cpu(),
+                    mu0_prob.detach().cpu(),
+                    mu1_prob.detach().cpu(),
+                    outcomes.detach().cpu(),
+                    treatments.detach().cpu()
+                )
+
+        # Derive y0/y1 logits for backward-compatible metrics
+        return {
+            'loss': total_loss,
+            'outcome_loss': outcome_loss.detach(),
+            'propensity_loss': propensity_loss.detach(),
+            'dr_loss': dr_loss.detach(),
+            'het_loss': het_loss.detach(),
+            'bal_loss': bal_loss.detach(),
+            'tau': tau.detach(),
+            'sigma2': sigma2.detach(),
+            'y0_logit': mu0_logit.detach(),
+            'y1_logit': mu1_logit.detach(),
+            't_logit': t_logit.detach(),
+            'routing_weights': g.detach(),
+        }
+
     def predict(
         self,
         texts: List[str],
@@ -1801,7 +2024,31 @@ class CausalText(nn.Module):
                 conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
                 features = torch.cat([features, conf_features], dim=1)
 
-            if self.model_type == "uplift":
+            if self.model_type == "dr_moce":
+                # DRMoCENet returns: mu0_logit, mu1_logit, tau, sigma2, t_logit, g, expert_means, phi
+                mu0_logit, mu1_logit, tau, sigma2, t_logit, g, expert_means, phi = self.net(features)
+
+                sigma = torch.sqrt(sigma2.clamp(min=1e-6))
+                y0_prob = torch.sigmoid(mu0_logit).squeeze(-1)
+                y1_prob = torch.sigmoid(mu1_logit).squeeze(-1)
+                propensity = torch.sigmoid(t_logit).squeeze(-1)
+
+                return {
+                    'tau_pred': tau,
+                    'tau_lower': tau - 1.96 * sigma,
+                    'tau_upper': tau + 1.96 * sigma,
+                    'tau_std': sigma,
+                    'y0_prob': y0_prob,
+                    'y1_prob': y1_prob,
+                    'propensity': propensity,
+                    'routing_weights': g,
+                    'y0_logit': mu0_logit.squeeze(-1),
+                    'y1_logit': mu1_logit.squeeze(-1),
+                    't_logit': t_logit.squeeze(-1),
+                    'final_common_layer': phi,
+                }
+
+            elif self.model_type == "uplift":
                 # Check for dual extractor mode
                 if self.uplift_dual_extractors and self.effect_feature_extractor is not None:
                     # DUAL EXTRACTOR MODE:

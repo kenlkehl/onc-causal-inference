@@ -426,6 +426,11 @@ def _process_fold(
     preds_df['pred_y1_prob'] = preds['y1_prob']
     preds_df['pred_ite_prob'] = preds['ite_prob']
     preds_df['pred_propensity_prob'] = preds['propensity_prob']
+    # DR-MoCE confidence intervals
+    if 'tau_lower' in preds:
+        preds_df['pred_tau_lower'] = preds['tau_lower']
+        preds_df['pred_tau_upper'] = preds['tau_upper']
+        preds_df['pred_tau_std'] = preds['tau_std']
     preds_df['cv_fold'] = fold + 1
 
     # Aggressive GPU cleanup to prevent OOM across folds
@@ -511,6 +516,11 @@ def _run_fixed_split_inference(
     results_df['pred_y1_prob'] = preds['y1_prob']
     results_df['pred_ite_prob'] = preds['ite_prob']
     results_df['pred_propensity_prob'] = preds['propensity_prob']
+    # DR-MoCE confidence intervals
+    if 'tau_lower' in preds:
+        results_df['pred_tau_lower'] = preds['tau_lower']
+        results_df['pred_tau_upper'] = preds['tau_upper']
+        results_df['pred_tau_std'] = preds['tau_std']
 
     _save_and_summarize(results_df, output_path)
 
@@ -642,6 +652,13 @@ def _train_single_model(
         rlearner_dual_extractors=getattr(arch_config, 'rlearner_dual_extractors', False),
         # Uplift dual extractor mode
         uplift_dual_extractors=getattr(arch_config, 'uplift_dual_extractors', False),
+        # DR-MoCE args
+        dr_moce_num_experts=getattr(arch_config, 'dr_moce_num_experts', 8),
+        dr_moce_router_temperature=getattr(arch_config, 'dr_moce_router_temperature', 1.0),
+        dr_moce_propensity_clip=getattr(arch_config, 'dr_moce_propensity_clip', 0.01),
+        dr_moce_het_weight=getattr(arch_config, 'dr_moce_het_weight', 0.1),
+        dr_moce_balance_weight=getattr(arch_config, 'dr_moce_balance_weight', 0.01),
+        dr_moce_crossfit_buffer_size=getattr(arch_config, 'dr_moce_crossfit_buffer_size', 1024),
     )
     logger.info(f"Created model with {feature_extractor_type.upper()} feature extractor")
 
@@ -876,6 +893,7 @@ def _train_epoch(
     label_smoothing = getattr(config, 'label_smoothing', 0.0)
     gradient_clip_norm = getattr(config, 'gradient_clip_norm', 0.0)
     gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
+    gamma_dr = getattr(config, 'gamma_dr', 1.0)
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
     clam_instance_weight = getattr(config, 'clam_instance_weight', 0.5)
@@ -893,6 +911,7 @@ def _train_epoch(
             alpha_propensity=config.alpha_propensity,
             beta_targreg=config.beta_targreg,
             gamma_rlearner=gamma_rlearner,
+            gamma_dr=gamma_dr,
             label_smoothing=label_smoothing,
             stop_grad_propensity=stop_grad_propensity,
             attention_entropy_weight=attention_entropy_weight,
@@ -937,6 +956,7 @@ def _eval_epoch(
     all_prop = []
 
     gamma_rlearner = getattr(config, 'gamma_rlearner', 1.0)
+    gamma_dr = getattr(config, 'gamma_dr', 1.0)
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
     clam_instance_weight = getattr(config, 'clam_instance_weight', 0.5)
@@ -951,6 +971,7 @@ def _eval_epoch(
                 alpha_propensity=config.alpha_propensity,
                 beta_targreg=config.beta_targreg,
                 gamma_rlearner=gamma_rlearner,
+                gamma_dr=gamma_dr,
                 stop_grad_propensity=stop_grad_propensity,
                 attention_entropy_weight=attention_entropy_weight,
                 clam_instance_weight=clam_instance_weight
@@ -1012,6 +1033,11 @@ def _generate_predictions(
     all_y0 = []
     all_y1 = []
     all_propensity = []
+    # DR-MoCE CI columns
+    all_tau_lower = []
+    all_tau_upper = []
+    all_tau_std = []
+    is_dr_moce = hasattr(model, 'model_type') and model.model_type == 'dr_moce'
 
     model.eval()
 
@@ -1026,6 +1052,11 @@ def _generate_predictions(
             all_y1.append(preds['y1_logit'].cpu().numpy())
             all_propensity.append(preds['t_logit'].cpu().numpy())
 
+            if is_dr_moce:
+                all_tau_lower.append(preds['tau_lower'].cpu().numpy())
+                all_tau_upper.append(preds['tau_upper'].cpu().numpy())
+                all_tau_std.append(preds['tau_std'].cpu().numpy())
+
     y0_logit = np.concatenate(all_y0)
     y1_logit = np.concatenate(all_y1)
     propensity_logit = np.concatenate(all_propensity)
@@ -1037,12 +1068,19 @@ def _generate_predictions(
     propensity_prob = 1.0 / (1.0 + np.exp(-propensity_logit))
     ite_prob = y1_prob - y0_prob
 
-    return {
+    result = {
         'y0_prob': y0_prob,
         'y1_prob': y1_prob,
         'propensity_prob': propensity_prob,
         'ite_prob': ite_prob
     }
+
+    if is_dr_moce and all_tau_lower:
+        result['tau_lower'] = np.concatenate(all_tau_lower)
+        result['tau_upper'] = np.concatenate(all_tau_upper)
+        result['tau_std'] = np.concatenate(all_tau_std)
+
+    return result
 
 
 def _save_and_summarize(results_df: pd.DataFrame, output_path: Path) -> None:

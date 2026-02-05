@@ -6,6 +6,7 @@ from .dragonnet import DragonNet
 from .uplift import UpliftNet
 from .rlearner import RLearnerNet
 from .traditional_logreg import TraditionalLogRegNet
+from .dr_moce import DRMoCENet, NuisancePredictionBuffer, compute_dr_pseudo_outcome
 from .cnn_extractor import CNNFeatureExtractor, WordTokenizer
 from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor, AttentionPooling
@@ -36,6 +37,9 @@ __all__ = [
     'UpliftNet',
     'RLearnerNet',
     'TraditionalLogRegNet',
+    'DRMoCENet',
+    'NuisancePredictionBuffer',
+    'compute_dr_pseudo_outcome',
     'CNNFeatureExtractor',
     'WordTokenizer',
     'BertFeatureExtractor',

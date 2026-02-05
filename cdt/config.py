@@ -210,7 +210,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 @dataclass
 class ModelArchitectureConfig:
     """Configuration for model architecture."""
-    model_type: str = "dragonnet"  # "dragonnet", "uplift", "rlearner", "traditional_logreg", or "causal_forest"
+    model_type: str = "dragonnet"  # "dragonnet", "uplift", "rlearner", "traditional_logreg", "causal_forest", or "dr_moce"
 
     # Feature extractor type: "cnn", "bert", or "gru"
     feature_extractor_type: str = "cnn"
@@ -394,6 +394,15 @@ class ModelArchitectureConfig:
     # Memory note: approximately doubles feature extraction compute.
     uplift_dual_extractors: bool = False
 
+    # DR-MoCE (Doubly-Robust Mixture of Causal Experts) config
+    # Used when model_type="dr_moce"
+    dr_moce_num_experts: int = 8  # Number of effect expert heads (K)
+    dr_moce_router_temperature: float = 1.0  # Softmax temperature (lower = sharper routing)
+    dr_moce_propensity_clip: float = 0.01  # Clip e(X) to [clip, 1-clip] in pseudo-outcome
+    dr_moce_het_weight: float = 0.1  # Weight for heterogeneity regularization (expert specialization)
+    dr_moce_balance_weight: float = 0.01  # Weight for load balancing loss
+    dr_moce_crossfit_buffer_size: int = 1024  # Nuisance prediction buffer size (0 = disabled)
+
     # LLM Feature Extractor (decoder-only with last token embedding)
     # Uses architecture from a pretrained model but RANDOM weight initialization
     # Pretrained tokenizer is used; trained entirely from scratch via causal objective
@@ -442,6 +451,7 @@ class TrainingConfig:
     alpha_propensity: float = 1.0
     beta_targreg: float = 0.1
     gamma_rlearner: float = 1.0  # Weight for R-learner loss (when model_type="rlearner")
+    gamma_dr: float = 1.0  # Weight for DR effect loss (when model_type="dr_moce")
     # Regularization options
     weight_decay: float = 0.01  # L2 regularization (AdamW decoupled weight decay)
     gradient_clip_norm: float = 1.0  # Max gradient norm (0 to disable)

@@ -435,6 +435,13 @@ def _train_cnn_model(
         rlearner_dual_extractors=getattr(arch_config, 'rlearner_dual_extractors', False),
         # Uplift dual extractor mode
         uplift_dual_extractors=getattr(arch_config, 'uplift_dual_extractors', False),
+        # DR-MoCE args
+        dr_moce_num_experts=getattr(arch_config, 'dr_moce_num_experts', 8),
+        dr_moce_router_temperature=getattr(arch_config, 'dr_moce_router_temperature', 1.0),
+        dr_moce_propensity_clip=getattr(arch_config, 'dr_moce_propensity_clip', 0.01),
+        dr_moce_het_weight=getattr(arch_config, 'dr_moce_het_weight', 0.1),
+        dr_moce_balance_weight=getattr(arch_config, 'dr_moce_balance_weight', 0.01),
+        dr_moce_crossfit_buffer_size=getattr(arch_config, 'dr_moce_crossfit_buffer_size', 1024),
     )
 
     train_texts = train_df[applied_config.text_column].tolist()
@@ -546,6 +553,7 @@ def _train_cnn_model(
 
     # Get gamma_rlearner and advanced training options from config
     gamma_rlearner = getattr(train_config, 'gamma_rlearner', 1.0)
+    gamma_dr = getattr(train_config, 'gamma_dr', 1.0)
     stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(train_config, 'attention_entropy_weight', 0.0)
     clam_instance_weight = getattr(train_config, 'clam_instance_weight', 0.5)
@@ -564,6 +572,7 @@ def _train_cnn_model(
                 alpha_propensity=train_config.alpha_propensity,
                 beta_targreg=train_config.beta_targreg,
                 gamma_rlearner=gamma_rlearner,
+                gamma_dr=gamma_dr,
                 stop_grad_propensity=stop_grad_propensity,
                 attention_entropy_weight=attention_entropy_weight,
                 clam_instance_weight=clam_instance_weight
@@ -586,6 +595,7 @@ def _train_cnn_model(
                     alpha_propensity=train_config.alpha_propensity,
                     beta_targreg=train_config.beta_targreg,
                     gamma_rlearner=gamma_rlearner,
+                    gamma_dr=gamma_dr,
                     stop_grad_propensity=stop_grad_propensity,
                     attention_entropy_weight=attention_entropy_weight,
                     clam_instance_weight=clam_instance_weight
