@@ -995,7 +995,13 @@ class CausalText(nn.Module):
             outcomes_smooth = outcomes
 
         # Extract features
-        features = self.feature_extractor(texts)
+        # Use forward_with_instances when CLAM is active to avoid double forward pass
+        if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
+            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+        else:
+            features = self.feature_extractor(texts)
+            _clam_chunk_embs = None
+            _clam_attn_weights = None
 
         # Concatenate auxiliary features if provided
         if self.auxiliary_projection is not None and auxiliary_features is not None:
@@ -1058,23 +1064,25 @@ class CausalText(nn.Module):
         # CLAM instance-level loss (if enabled)
         instance_loss = torch.tensor(0.0, device=self._device)
         if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
-            # Get chunk embeddings and attention weights
-            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+            # Use pre-computed chunk embeddings from forward_with_instances (avoids double forward pass)
+            chunk_embs_list = _clam_chunk_embs
+            attn_weights_list = _clam_attn_weights
 
             all_top_chunks = []
             expanded_treatments = []
             expanded_outcomes = []
 
-            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
-                if chunk_embs.size(0) == 0:
-                    continue
-                B = min(self.clam_num_instances, chunk_embs.size(0))
-                top_indices = torch.topk(attn_weights, B).indices
-                top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
+            if chunk_embs_list is not None and attn_weights_list is not None:
+                for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                    if chunk_embs.size(0) == 0:
+                        continue
+                    B = min(self.clam_num_instances, chunk_embs.size(0))
+                    top_indices = torch.topk(attn_weights, B).indices
+                    top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
 
-                all_top_chunks.append(top_chunks)
-                expanded_treatments.extend([treatments[i]] * B)
-                expanded_outcomes.extend([outcomes[i]] * B)
+                    all_top_chunks.append(top_chunks)
+                    expanded_treatments.extend([treatments[i]] * B)
+                    expanded_outcomes.extend([outcomes[i]] * B)
 
             if all_top_chunks:
                 stacked_chunks = torch.cat(all_top_chunks, dim=0)
@@ -1177,7 +1185,13 @@ class CausalText(nn.Module):
             # - Effect extractor (self.effect_feature_extractor) + effect_mlp -> τ(X)
 
             # Nuisance path: extract features for e(X) and m(X)
-            nuisance_features = self.feature_extractor(texts)
+            # Use forward_with_instances when CLAM is active to avoid double forward pass
+            if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
+                nuisance_features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+            else:
+                nuisance_features = self.feature_extractor(texts)
+                _clam_chunk_embs = None
+                _clam_attn_weights = None
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1247,7 +1261,13 @@ class CausalText(nn.Module):
             # STANDARD SINGLE EXTRACTOR MODE
 
             # Extract features
-            features = self.feature_extractor(texts)
+            # Use forward_with_instances when CLAM is active to avoid double forward pass
+            if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
+                features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+            else:
+                features = self.feature_extractor(texts)
+                _clam_chunk_embs = None
+                _clam_attn_weights = None
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1314,23 +1334,25 @@ class CausalText(nn.Module):
         # CLAM instance-level loss (if enabled)
         instance_loss = torch.tensor(0.0, device=self._device)
         if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
-            # Get chunk embeddings and attention weights
-            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+            # Use pre-computed chunk embeddings from forward_with_instances (avoids double forward pass)
+            chunk_embs_list = _clam_chunk_embs
+            attn_weights_list = _clam_attn_weights
 
             all_top_chunks = []
             expanded_treatments = []
             expanded_outcomes = []
 
-            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
-                if chunk_embs.size(0) == 0:
-                    continue
-                B = min(self.clam_num_instances, chunk_embs.size(0))
-                top_indices = torch.topk(attn_weights, B).indices
-                top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
+            if chunk_embs_list is not None and attn_weights_list is not None:
+                for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                    if chunk_embs.size(0) == 0:
+                        continue
+                    B = min(self.clam_num_instances, chunk_embs.size(0))
+                    top_indices = torch.topk(attn_weights, B).indices
+                    top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
 
-                all_top_chunks.append(top_chunks)
-                expanded_treatments.extend([treatments[i]] * B)
-                expanded_outcomes.extend([outcomes[i]] * B)
+                    all_top_chunks.append(top_chunks)
+                    expanded_treatments.extend([treatments[i]] * B)
+                    expanded_outcomes.extend([outcomes[i]] * B)
 
             if all_top_chunks:
                 stacked_chunks = torch.cat(all_top_chunks, dim=0)
@@ -1462,7 +1484,13 @@ class CausalText(nn.Module):
             # - Effect extractor (self.effect_feature_extractor) + effect_mlp -> τ(X)
 
             # Nuisance path: extract features for e(X) and Y0(X)
-            nuisance_features = self.feature_extractor(texts)
+            # Use forward_with_instances when CLAM is active to avoid double forward pass
+            if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
+                nuisance_features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+            else:
+                nuisance_features = self.feature_extractor(texts)
+                _clam_chunk_embs = None
+                _clam_attn_weights = None
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1517,7 +1545,13 @@ class CausalText(nn.Module):
             # STANDARD SINGLE EXTRACTOR MODE
 
             # Extract features
-            features = self.feature_extractor(texts)
+            # Use forward_with_instances when CLAM is active to avoid double forward pass
+            if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
+                features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+            else:
+                features = self.feature_extractor(texts)
+                _clam_chunk_embs = None
+                _clam_attn_weights = None
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1589,23 +1623,25 @@ class CausalText(nn.Module):
         # CLAM instance-level loss (if enabled)
         instance_loss = torch.tensor(0.0, device=self._device)
         if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
-            # Get chunk embeddings and attention weights
-            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+            # Use pre-computed chunk embeddings from forward_with_instances (avoids double forward pass)
+            chunk_embs_list = _clam_chunk_embs
+            attn_weights_list = _clam_attn_weights
 
             all_top_chunks = []
             expanded_treatments = []
             expanded_outcomes = []
 
-            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
-                if chunk_embs.size(0) == 0:
-                    continue
-                B = min(self.clam_num_instances, chunk_embs.size(0))
-                top_indices = torch.topk(attn_weights, B).indices
-                top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
+            if chunk_embs_list is not None and attn_weights_list is not None:
+                for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                    if chunk_embs.size(0) == 0:
+                        continue
+                    B = min(self.clam_num_instances, chunk_embs.size(0))
+                    top_indices = torch.topk(attn_weights, B).indices
+                    top_chunks = chunk_embs[top_indices]  # (B, transformer_dim)
 
-                all_top_chunks.append(top_chunks)
-                expanded_treatments.extend([treatments[i]] * B)
-                expanded_outcomes.extend([outcomes[i]] * B)
+                    all_top_chunks.append(top_chunks)
+                    expanded_treatments.extend([treatments[i]] * B)
+                    expanded_outcomes.extend([outcomes[i]] * B)
 
             if all_top_chunks:
                 stacked_chunks = torch.cat(all_top_chunks, dim=0)
@@ -1707,7 +1743,13 @@ class CausalText(nn.Module):
             outcomes_smooth = outcomes
 
         # Extract features
-        features = self.feature_extractor(texts)
+        # Use forward_with_instances when CLAM is active to avoid double forward pass
+        if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
+            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+        else:
+            features = self.feature_extractor(texts)
+            _clam_chunk_embs = None
+            _clam_attn_weights = None
 
         # Compute attention entropy loss if enabled and extractor supports it
         entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1757,23 +1799,25 @@ class CausalText(nn.Module):
         # CLAM instance-level loss (if enabled)
         instance_loss = torch.tensor(0.0, device=self._device)
         if self.clam_enabled and clam_instance_weight > 0 and self.instance_head is not None:
-            # Get chunk embeddings and attention weights
-            _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+            # Use pre-computed chunk embeddings from forward_with_instances (avoids double forward pass)
+            chunk_embs_list = _clam_chunk_embs
+            attn_weights_list = _clam_attn_weights
 
             all_top_chunks = []
             expanded_treatments = []
             expanded_outcomes = []
 
-            for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
-                if chunk_embs.size(0) == 0:
-                    continue
-                B = min(self.clam_num_instances, chunk_embs.size(0))
-                top_indices = torch.topk(attn_weights, B).indices
-                top_chunks = chunk_embs[top_indices]
+            if chunk_embs_list is not None and attn_weights_list is not None:
+                for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
+                    if chunk_embs.size(0) == 0:
+                        continue
+                    B = min(self.clam_num_instances, chunk_embs.size(0))
+                    top_indices = torch.topk(attn_weights, B).indices
+                    top_chunks = chunk_embs[top_indices]
 
-                all_top_chunks.append(top_chunks)
-                expanded_treatments.extend([treatments[i]] * B)
-                expanded_outcomes.extend([outcomes[i]] * B)
+                    all_top_chunks.append(top_chunks)
+                    expanded_treatments.extend([treatments[i]] * B)
+                    expanded_outcomes.extend([outcomes[i]] * B)
 
             if all_top_chunks:
                 stacked_chunks = torch.cat(all_top_chunks, dim=0)

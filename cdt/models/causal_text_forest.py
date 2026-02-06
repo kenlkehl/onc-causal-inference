@@ -683,7 +683,13 @@ class CausalTextForest(nn.Module):
             outcomes_smooth = outcomes
 
         # Extract features from text
-        features = self.feature_extractor(texts)
+        # Use forward_with_instances when CLAM is active to avoid double forward pass
+        if self.clam_enabled and self.instance_propensity_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
+            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+        else:
+            features = self.feature_extractor(texts)
+            _clam_chunk_embs = None
+            _clam_attn_weights = None
 
         # Concatenate explicit confounder features if provided
         if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
@@ -753,15 +759,15 @@ class CausalTextForest(nn.Module):
         # Supervises top-attended chunks with document-level labels
         instance_loss = torch.tensor(0.0, device=self._device)
         if self.clam_enabled and clam_instance_weight > 0 and self.instance_propensity_head is not None:
-            # Check if feature extractor supports forward_with_instances
-            if hasattr(self.feature_extractor, 'forward_with_instances'):
-                # Get chunk embeddings and attention weights
-                _, chunk_embs_list, attn_weights_list = self.feature_extractor.forward_with_instances(texts)
+            # Use pre-computed chunk embeddings from forward_with_instances (avoids double forward pass)
+            chunk_embs_list = _clam_chunk_embs
+            attn_weights_list = _clam_attn_weights
 
-                all_top_chunks = []
-                expanded_treatments = []
-                expanded_outcomes = []
+            all_top_chunks = []
+            expanded_treatments = []
+            expanded_outcomes = []
 
+            if chunk_embs_list is not None and attn_weights_list is not None:
                 for i, (chunk_embs, attn_weights) in enumerate(zip(chunk_embs_list, attn_weights_list)):
                     if chunk_embs.size(0) == 0:
                         continue
@@ -773,26 +779,26 @@ class CausalTextForest(nn.Module):
                     expanded_treatments.extend([treatments[i]] * B)
                     expanded_outcomes.extend([outcomes[i]] * B)
 
-                if all_top_chunks:
-                    stacked_chunks = torch.cat(all_top_chunks, dim=0)
-                    exp_treatments = torch.stack(expanded_treatments)
-                    exp_outcomes = torch.stack(expanded_outcomes)
+            if all_top_chunks:
+                stacked_chunks = torch.cat(all_top_chunks, dim=0)
+                exp_treatments = torch.stack(expanded_treatments)
+                exp_outcomes = torch.stack(expanded_outcomes)
 
-                    # Forward through instance heads
-                    inst_propensity = self.instance_propensity_head(stacked_chunks)
-                    inst_outcome = self.instance_outcome_head(stacked_chunks)
+                # Forward through instance heads
+                inst_propensity = self.instance_propensity_head(stacked_chunks)
+                inst_outcome = self.instance_outcome_head(stacked_chunks)
 
-                    # Instance propensity loss
-                    instance_propensity_loss = F.binary_cross_entropy_with_logits(
-                        inst_propensity.squeeze(-1), exp_treatments
-                    )
+                # Instance propensity loss
+                instance_propensity_loss = F.binary_cross_entropy_with_logits(
+                    inst_propensity.squeeze(-1), exp_treatments
+                )
 
-                    # Instance outcome loss
-                    instance_outcome_loss = F.binary_cross_entropy_with_logits(
-                        inst_outcome.squeeze(-1), exp_outcomes
-                    )
+                # Instance outcome loss
+                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                    inst_outcome.squeeze(-1), exp_outcomes
+                )
 
-                    instance_loss = instance_outcome_loss + alpha_propensity * instance_propensity_loss
+                instance_loss = instance_outcome_loss + alpha_propensity * instance_propensity_loss
 
         total_loss = (
             outcome_loss +

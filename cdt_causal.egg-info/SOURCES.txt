@@ -29,6 +29,7 @@ cdt/models/chunking.py
 cdt/models/cnn_extractor.py
 cdt/models/components.py
 cdt/models/confounder_extractor.py
+cdt/models/dr_moce.py
 cdt/models/dragonnet.py
 cdt/models/explicit_confounder_featurizer.py
 cdt/models/extractor_factory.py

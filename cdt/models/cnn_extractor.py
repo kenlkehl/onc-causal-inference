@@ -98,6 +98,12 @@ class WordTokenizer:
         Returns:
             self for method chaining
         """
+        if len(texts) < 10:
+            logger.warning(
+                f"fit_tokenizer called with only {len(texts)} texts. "
+                f"This may indicate a data loading issue. "
+                f"Expected hundreds or thousands of training texts."
+            )
         logger.info(f"Fitting word tokenizer on {len(texts)} texts...")
 
         # Count word frequencies
