@@ -420,6 +420,9 @@ def compute_metrics(
     corr, pval = stats.pearsonr(pred_ite.flatten(), true_ite.flatten())
     metrics['ite_corr'] = float(corr)
     metrics['ite_corr_pval'] = float(pval)
+    spearman_corr, spearman_pval = stats.spearmanr(pred_ite.flatten(), true_ite.flatten())
+    metrics['ite_spearman_corr'] = float(spearman_corr)
+    metrics['ite_spearman_corr_pval'] = float(spearman_pval)
     metrics['ate_bias'] = float(abs(np.mean(pred_ite) - np.mean(true_ite)))
     metrics['ate_pred'] = float(np.mean(pred_ite))
     metrics['ate_true'] = float(np.mean(true_ite))
@@ -685,7 +688,7 @@ def run_single_fold(
     metrics['fold'] = fold + 1
     metrics.update(match_stats)
 
-    logger.info(f"  Fold {fold + 1}: ITE corr={metrics['ite_corr']:.4f}, ATE bias={metrics['ate_bias']:.4f}")
+    logger.info(f"  Fold {fold + 1}: ITE corr={metrics['ite_corr']:.4f}, ITE rank corr={metrics['ite_spearman_corr']:.4f}, ATE bias={metrics['ate_bias']:.4f}")
 
     # Cleanup
     propensity_model.cpu()
@@ -821,7 +824,7 @@ def _run_single_fold_e2e(
     if history:
         metrics['final_n_matched_pairs'] = history[-1].get('n_matched_pairs', 0)
 
-    logger.info(f"  Fold {fold + 1} (E2E, {chunk_encoder}): ITE corr={metrics['ite_corr']:.4f}, ATE bias={metrics['ate_bias']:.4f}")
+    logger.info(f"  Fold {fold + 1} (E2E, {chunk_encoder}): ITE corr={metrics['ite_corr']:.4f}, ITE rank corr={metrics['ite_spearman_corr']:.4f}, ATE bias={metrics['ate_bias']:.4f}")
 
     # Cleanup
     model.cpu()
@@ -906,7 +909,7 @@ def run_experiment_condition(
         'end_to_end_training': condition.end_to_end_training,
     }
 
-    for col in ['ite_mse', 'ite_mae', 'ite_corr', 'ate_bias', 'propensity_auroc',
+    for col in ['ite_mse', 'ite_mae', 'ite_corr', 'ite_spearman_corr', 'ate_bias', 'propensity_auroc',
                 'y0_mse', 'y1_mse', 'y0_auroc', 'y1_auroc', 'match_rate']:
         if col in metrics_df.columns:
             values = metrics_df[col].dropna()
@@ -921,6 +924,7 @@ def run_experiment_condition(
 
     logger.info(f"\nCondition {condition.name} complete:")
     logger.info(f"  ITE corr: {summary['ite_corr_mean']:.4f} +/- {summary['ite_corr_std']:.4f}")
+    logger.info(f"  ITE rank corr: {summary['ite_spearman_corr_mean']:.4f} +/- {summary['ite_spearman_corr_std']:.4f}")
     logger.info(f"  ATE bias: {summary['ate_bias_mean']:.4f} +/- {summary['ate_bias_std']:.4f}")
     if 'match_rate_mean' in summary and not np.isnan(summary.get('match_rate_mean', np.nan)):
         logger.info(f"  Match rate: {summary['match_rate_mean']:.1%} +/- {summary['match_rate_std']:.1%}")
@@ -1192,7 +1196,7 @@ def main():
 
         # Dynamically select columns that exist
         base_cols = ['condition', 'matching_method', 'matching_algorithm',
-                     'ite_corr_mean', 'ite_corr_std', 'ate_bias_mean']
+                     'ite_corr_mean', 'ite_corr_std', 'ite_spearman_corr_mean', 'ate_bias_mean']
         if 'text_column' in leaderboard.columns:
             base_cols.insert(1, 'text_column')
         if 'chunk_encoder' in leaderboard.columns:

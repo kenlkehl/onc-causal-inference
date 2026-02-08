@@ -13,8 +13,8 @@ confounders affects treatment effect estimation when combined with text features
 Usage:
     # Run full grid with both GPUs
     python oracle_experiment_scripts/run_causal_forest_sample_explicit_confounders_experiment.py \
-        --output-dir ../pcori_experiments/causal_text_forest_sample_explicit_confounders_2-6-26 \
-        --devices cuda:0 cuda:1
+        --output-dir ../pcori_experiments/causal_text_forest_sample_explicit_confounders_2-8-26_fixed_50K \
+        --devices cuda:2 cuda:3 --workers-per-device 25
 
     # Run subset for testing
     python oracle_experiment_scripts/run_causal_forest_sample_explicit_confounders_experiment.py \
@@ -25,7 +25,7 @@ Usage:
     # Resume from checkpoint
     python oracle_experiment_scripts/run_causal_forest_sample_explicit_confounders_experiment.py \
         --output-dir ../pcori_experiments/causal_text_forest_sample_explicit_confounders_2-6-26 \
-        --devices cuda:0 cuda:1 \
+        --devices cuda:0 cuda:1 --workers-per-device 20 \
         --resume
 """
 
@@ -242,6 +242,10 @@ def compute_metrics(
         metrics['ite_corr'] = float(stats.pearsonr(pred_ite, true_ite)[0])
     except:
         metrics['ite_corr'] = np.nan
+    try:
+        metrics['ite_spearman_corr'] = float(stats.spearmanr(pred_ite, true_ite)[0])
+    except:
+        metrics['ite_spearman_corr'] = np.nan
     metrics['ate_bias'] = float(abs(np.mean(pred_ite) - np.mean(true_ite)))
     metrics['ate_pred'] = float(np.mean(pred_ite))
     metrics['ate_true'] = float(np.mean(true_ite))
@@ -553,7 +557,7 @@ def generate_experiment_grid(
     if filter_datasets:
         datasets = [(p, n) for p, n in datasets if n in filter_datasets]
 
-    rlearner_modes = ["none", "shared", "dual"]
+    rlearner_modes = ["shared"]  # no longer trying none or dual
     if filter_rlearner_modes:
         rlearner_modes = [m for m in rlearner_modes if m in filter_rlearner_modes]
 
@@ -853,6 +857,7 @@ def main():
              'use_explicit_confounders', 'num_sampled_confounders']
         ).agg({
             'ite_corr': ['mean', 'std', 'max'],
+            'ite_spearman_corr': ['mean', 'std', 'max'],
             'ite_mse': ['mean', 'std', 'min'],
             'ate_bias': ['mean', 'std', 'min']
         }).round(4)

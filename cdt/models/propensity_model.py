@@ -140,12 +140,13 @@ class PropensityOnlyModel(nn.Module):
         gru_pool_projection_dim: int = 128,
         gru_pool_max_vocab: int = 50000,
         gru_pool_min_word_freq: int = 2,
-        # LLM args (decoder-only with random init)
+        # LLM args
         llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
         llm_max_length: int = 8192,
         llm_projection_dim: Optional[int] = 128,
         llm_dropout: float = 0.1,
         llm_gradient_checkpointing: bool = True,
+        llm_use_pretrained: bool = False,
         # Numeric feature args
         numeric_features_enabled: bool = False,
         numeric_embedding_dim: int = 32,
@@ -260,6 +261,7 @@ class PropensityOnlyModel(nn.Module):
             'llm_projection_dim': llm_projection_dim,
             'llm_dropout': llm_dropout,
             'llm_gradient_checkpointing': llm_gradient_checkpointing,
+            'llm_use_pretrained': llm_use_pretrained,
             'numeric_features_enabled': numeric_features_enabled,
             'numeric_embedding_dim': numeric_embedding_dim,
             'numeric_magnitude_bins': numeric_magnitude_bins,
@@ -340,6 +342,7 @@ class PropensityOnlyModel(nn.Module):
             llm_projection_dim=llm_projection_dim,
             llm_dropout=llm_dropout,
             llm_gradient_checkpointing=llm_gradient_checkpointing,
+            llm_use_pretrained=llm_use_pretrained,
             numeric_features_enabled=numeric_features_enabled,
             numeric_embedding_dim=numeric_embedding_dim,
             numeric_magnitude_bins=numeric_magnitude_bins,
@@ -542,6 +545,7 @@ def create_propensity_model_from_config(
         llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
         llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
         llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
+        llm_use_pretrained=getattr(arch_config, 'llm_use_pretrained', False),
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),

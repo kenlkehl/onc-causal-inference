@@ -2,11 +2,11 @@
 """LLM (decoder-only) feature extractor using last token embedding.
 
 This module implements a feature extractor using a decoder-only LLM architecture
-(e.g., Qwen3-0.6B-Base) that is initialized with RANDOM weights and trained
-entirely from scratch via the supervised causal objective.
+(e.g., Qwen3-0.6B-Base). Supports both random weight initialization (train from
+scratch) and pretrained weight loading (fine-tune) via the `use_pretrained` flag.
 
 Key design choices:
-1. Random weight initialization (no pretrained weights)
+1. Configurable initialization: random weights OR pretrained weights
 2. Pretrained tokenizer (BBPE tokenization from the model)
 3. Last token embedding as document representation (GPT-style)
 4. Left padding for consistent last-token extraction
@@ -17,7 +17,7 @@ Architecture:
          |
     Tokenize with pretrained BBPE tokenizer (left-padded)
          |
-    Randomly-initialized Decoder-only LLM
+    Decoder-only LLM (random init or pretrained)
          |
     Extract last token hidden state from final layer
          |
@@ -41,10 +41,11 @@ logger = logging.getLogger(__name__)
 
 class LLMFeatureExtractor(nn.Module):
     """
-    Decoder-only LLM feature extractor with random weight initialization.
+    Decoder-only LLM feature extractor.
 
     Uses the architecture of a pretrained model (e.g., Qwen/Qwen3-0.6B-Base)
-    but initializes weights randomly. The pretrained tokenizer is used.
+    with either random or pretrained weight initialization. The pretrained
+    tokenizer is always used.
 
     Extracts features by taking the last token's hidden state from the final
     layer, similar to how GPT models are used for classification.
@@ -55,6 +56,7 @@ class LLMFeatureExtractor(nn.Module):
         projection_dim: Output projection dimension (None = use raw hidden size)
         dropout: Dropout rate for projection layers
         gradient_checkpointing: Enable gradient checkpointing for memory efficiency
+        use_pretrained: If True, load pretrained weights; if False, random init
         device: PyTorch device
     """
 
@@ -65,6 +67,7 @@ class LLMFeatureExtractor(nn.Module):
         projection_dim: Optional[int] = 128,
         dropout: float = 0.1,
         gradient_checkpointing: bool = True,
+        use_pretrained: bool = False,
         device: Optional[torch.device] = None,
         numeric_features_enabled: bool = False,
         numeric_embedding_dim: int = 32,
@@ -79,6 +82,7 @@ class LLMFeatureExtractor(nn.Module):
         self._projection_dim = projection_dim
         self._dropout = dropout
         self._gradient_checkpointing = gradient_checkpointing
+        self._use_pretrained = use_pretrained
 
         # Import transformers here to handle import errors gracefully
         try:
@@ -89,16 +93,22 @@ class LLMFeatureExtractor(nn.Module):
                 "Install with: pip install transformers"
             )
 
-        logger.info(f"Initializing LLMFeatureExtractor with {model_name} architecture (random weights)")
+        init_mode = "pretrained weights" if use_pretrained else "random weights"
+        logger.info(f"Initializing LLMFeatureExtractor with {model_name} architecture ({init_mode})")
 
         # Load config from pretrained model
         self._config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
         self._hidden_size = self._config.hidden_size
 
-        # Initialize model with random weights (not pretrained!)
-        # Using from_config instead of from_pretrained gives random initialization
-        logger.info(f"Creating model from config with random weights (hidden_size={self._hidden_size})")
-        self._model = AutoModelForCausalLM.from_config(self._config)
+        # Initialize model
+        if use_pretrained:
+            logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size})")
+            self._model = AutoModelForCausalLM.from_pretrained(
+                model_name, config=self._config, trust_remote_code=True
+            )
+        else:
+            logger.info(f"Creating model from config with random weights (hidden_size={self._hidden_size})")
+            self._model = AutoModelForCausalLM.from_config(self._config)
 
         # Load pretrained tokenizer
         self._tokenizer = AutoTokenizer.from_pretrained(
@@ -157,7 +167,7 @@ class LLMFeatureExtractor(nn.Module):
             )
 
         logger.info(f"LLMFeatureExtractor initialized:")
-        logger.info(f"  Model: {model_name} (random weights)")
+        logger.info(f"  Model: {model_name} ({init_mode})")
         logger.info(f"  Hidden size: {self._hidden_size}")
         logger.info(f"  Max length: {max_length}")
         logger.info(f"  Output dim: {self._output_dim}")
@@ -242,6 +252,7 @@ class LLMFeatureExtractor(nn.Module):
             'projection_dim': self._projection_dim,
             'dropout': self._dropout,
             'gradient_checkpointing': self._gradient_checkpointing,
+            'use_pretrained': self._use_pretrained,
             'hidden_size': self._hidden_size,
             'output_dim': self._output_dim,
         }

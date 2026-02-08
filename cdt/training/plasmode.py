@@ -17,6 +17,7 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
+from scipy import stats as scipy_stats
 from joblib import Parallel, delayed
 
 from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig, normalize_feature_extractor_type
@@ -167,6 +168,7 @@ def run_plasmode_experiments(
             'ate_bias_prob': ['mean', 'std'],
             'ate_rmse_prob': ['mean', 'std'],
             'ite_correlation_prob': ['mean', 'std'],
+            'ite_spearman_correlation_prob': ['mean', 'std'],
         }).round(4)
 
         logger.info("\nSummary by generation mode (probability scale):")
@@ -313,7 +315,8 @@ def _run_single_plasmode_experiment(
     )
 
     logger.info(f"Experiment complete: ATE bias={metrics['ate_bias_prob']:.4f}, "
-                f"ITE corr={metrics['ite_correlation_prob']:.4f}")
+                f"ITE corr={metrics['ite_correlation_prob']:.4f}, "
+                f"ITE rank corr={metrics['ite_spearman_correlation_prob']:.4f}")
 
     metrics['n_train'] = len(train_split_df)
     metrics['n_eval'] = len(eval_split_df)
@@ -415,12 +418,13 @@ def _train_cnn_model(
         clam_enabled=getattr(arch_config, 'clam_enabled', False),
         clam_num_instances=getattr(arch_config, 'clam_num_instances', 5),
         clam_instance_hidden_dim=getattr(arch_config, 'clam_instance_hidden_dim', 64),
-        # LLM args (decoder-only with random init)
+        # LLM args
         llm_model_name=getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base'),
         llm_max_length=getattr(arch_config, 'llm_max_length', 8192),
         llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
         llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
         llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
+        llm_use_pretrained=getattr(arch_config, 'llm_use_pretrained', False),
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
@@ -507,7 +511,8 @@ def _train_cnn_model(
         logger.info(f"Using GRU-Pool feature extractor")
     elif feature_extractor_type == "llm":
         # LLM uses pretrained tokenizer, no fit_tokenizer needed
-        logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} (random init)")
+        init_mode = "pretrained" if getattr(arch_config, 'llm_use_pretrained', False) else "random init"
+        logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} ({init_mode})")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
@@ -1009,8 +1014,10 @@ def _evaluate_plasmode_performance(
     # ITE correlation (probability scale)
     if np.std(true_ite_prob) > 0 and np.std(estimated_ite_prob) > 0:
         ite_correlation_prob = np.corrcoef(true_ite_prob, estimated_ite_prob)[0, 1]
+        ite_spearman_correlation_prob = scipy_stats.spearmanr(true_ite_prob, estimated_ite_prob)[0]
     else:
         ite_correlation_prob = 0.0
+        ite_spearman_correlation_prob = 0.0
 
     return {
         'true_ate_prob': true_ate_prob,
@@ -1018,4 +1025,5 @@ def _evaluate_plasmode_performance(
         'ate_bias_prob': ate_bias_prob,
         'ate_rmse_prob': ate_rmse_prob,
         'ite_correlation_prob': ite_correlation_prob,
+        'ite_spearman_correlation_prob': ite_spearman_correlation_prob,
     }

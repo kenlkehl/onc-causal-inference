@@ -177,6 +177,10 @@ def compute_metrics(
         metrics['ite_corr'] = float(stats.pearsonr(pred_ite, true_ite)[0])
     except:
         metrics['ite_corr'] = np.nan
+    try:
+        metrics['ite_spearman_corr'] = float(stats.spearmanr(pred_ite, true_ite)[0])
+    except:
+        metrics['ite_spearman_corr'] = np.nan
     metrics['ate_bias'] = float(abs(np.mean(pred_ite) - np.mean(true_ite)))
     metrics['ate_pred'] = float(np.mean(pred_ite))
     metrics['ate_true'] = float(np.mean(true_ite))
@@ -783,6 +787,7 @@ def main():
              'text_column', 'clam_enabled', 'use_explicit_confounders']
         ).agg({
             'ite_corr': ['mean', 'std', 'max'],
+            'ite_spearman_corr': ['mean', 'std', 'max'],
             'ite_mse': ['mean', 'std', 'min'],
             'ate_bias': ['mean', 'std', 'min'],
             'ci_coverage': ['mean', 'std'],

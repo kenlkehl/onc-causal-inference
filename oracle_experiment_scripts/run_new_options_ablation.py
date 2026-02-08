@@ -363,7 +363,7 @@ def main():
         # Key metrics to display
         key_cols = [
             "experiment", "stop_grad_propensity", "attention_entropy_weight",
-            "use_mean_pooling", "ite_mse", "ite_corr", "ate_bias", "propensity_auroc"
+            "use_mean_pooling", "ite_mse", "ite_corr", "ite_spearman_corr", "ate_bias", "propensity_auroc"
         ]
         display_cols = [c for c in key_cols if c in results_df.columns]
         logger.info("\n" + results_df[display_cols].to_string(index=False))

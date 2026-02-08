@@ -144,12 +144,13 @@ def create_feature_extractor(
     gru_pool_projection_dim: int = 128,
     gru_pool_max_vocab: int = 50000,
     gru_pool_min_word_freq: int = 2,
-    # LLM Feature Extractor args (decoder-only with random init)
+    # LLM Feature Extractor args
     llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
     llm_max_length: int = 8192,
     llm_projection_dim: Optional[int] = 128,
     llm_dropout: float = 0.1,
     llm_gradient_checkpointing: bool = True,
+    llm_use_pretrained: bool = False,
     # Numeric feature args
     numeric_features_enabled: bool = False,
     numeric_embedding_dim: int = 32,
@@ -427,13 +428,15 @@ def create_feature_extractor(
             projection_dim=llm_projection_dim,
             dropout=llm_dropout,
             gradient_checkpointing=llm_gradient_checkpointing,
+            use_pretrained=llm_use_pretrained,
             numeric_features_enabled=numeric_features_enabled,
             numeric_embedding_dim=numeric_embedding_dim,
             numeric_magnitude_bins=numeric_magnitude_bins,
             numeric_type_categories=numeric_type_categories,
             device=device
         )
-        logger.info(f"Created LLM feature extractor: {llm_model_name} (random init), "
+        init_mode = "pretrained" if llm_use_pretrained else "random init"
+        logger.info(f"Created LLM feature extractor: {llm_model_name} ({init_mode}), "
                    f"max_length={llm_max_length}, projection_dim={llm_projection_dim}")
         return extractor
 
@@ -599,6 +602,7 @@ def create_feature_extractor_from_config(
         llm_projection_dim=config.get('llm_projection_dim', 128),
         llm_dropout=config.get('llm_dropout', 0.1),
         llm_gradient_checkpointing=config.get('llm_gradient_checkpointing', True),
+        llm_use_pretrained=config.get('llm_use_pretrained', False),
         # Numeric args
         numeric_features_enabled=config.get('numeric_features_enabled', False),
         numeric_embedding_dim=config.get('numeric_embedding_dim', 32),

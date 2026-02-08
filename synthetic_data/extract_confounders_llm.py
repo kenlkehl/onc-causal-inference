@@ -555,6 +555,7 @@ class VLLMBatchClientWrapper:
 
         # Check if this is a gpt-oss model that requires harmony format
         is_gpt_oss = "gpt-oss" in self.model_name.lower()
+        use_harmony = False
 
         if is_gpt_oss:
             try:
@@ -576,19 +577,13 @@ class VLLMBatchClientWrapper:
                     "openai-harmony package not found. Install with: pip install openai-harmony. "
                     "Falling back to chat template format."
                 )
-                use_harmony = False
-        else:
-            use_harmony = False
 
-        # Build prompts
-        prompts = []
-        prompt_token_ids = []
+        if use_harmony:
+            # Harmony path: render conversations to token IDs, use generate()
+            prompts = []
 
-        for text in clinical_texts:
-            user_content = build_extraction_prompt(text[:8000], self.confounders)
-
-            if use_harmony:
-                # Use harmony format for gpt-oss models
+            for text in clinical_texts:
+                user_content = build_extraction_prompt(text[:8000], self.confounders)
                 convo = Conversation.from_messages([
                     Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
                     Message.from_role_and_content(
@@ -600,54 +595,33 @@ class VLLMBatchClientWrapper:
                     ),
                     Message.from_role_and_content(Role.USER, user_content),
                 ])
-                prefill_ids = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
-                prompt_token_ids.append(prefill_ids)
-            else:
-                # Use tokenizer chat template for other models
-                tokenizer = self.llm.get_tokenizer()
-                messages = [{"role": "user", "content": user_content}]
-                if hasattr(tokenizer, 'apply_chat_template'):
-                    try:
-                        prompt = tokenizer.apply_chat_template(
-                            messages,
-                            tokenize=False,
-                            add_generation_prompt=True
-                        )
-                    except Exception as e:
-                        logger.warning(f"Failed to apply chat template: {e}, using fallback")
-                        prompt = f"User: {user_content}\n\nAssistant:"
-                else:
-                    prompt = f"User: {user_content}\n\nAssistant:"
-                prompts.append(prompt)
+                token_ids = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
+                prompts.append({"prompt_token_ids": token_ids})
 
-        # Set up sampling params
-        if use_harmony:
             sampling_params = SamplingParams(
                 temperature=temperature,
                 max_tokens=max_tokens,
                 stop_token_ids=stop_token_ids
             )
+
+            logger.info(f"Running vLLM batch inference on {len(prompts)} texts (harmony format)...")
+            outputs = self.llm.generate(prompts, sampling_params=sampling_params)
         else:
-            # For non-harmony models, get stop tokens from tokenizer if available
-            tokenizer = self.llm.get_tokenizer()
-            stop_tokens = []
-            if hasattr(tokenizer, 'eos_token') and tokenizer.eos_token:
-                stop_tokens.append(tokenizer.eos_token)
-            # Add common stop sequences but not \n\n which truncates JSON
-            stop_tokens.extend(["User:"])
+            # Non-harmony path: use LLM.chat() with plain message dicts
+            messages_list = []
+
+            for text in clinical_texts:
+                user_content = build_extraction_prompt(text[:8000], self.confounders)
+                messages_list.append([{"role": "user", "content": user_content}])
+
             sampling_params = SamplingParams(
                 temperature=temperature,
                 max_tokens=max_tokens,
-                stop=stop_tokens
+                stop=["User:"]
             )
 
-        # Run generation with appropriate input format
-        if use_harmony:
-            logger.info(f"Running vLLM batch inference on {len(prompt_token_ids)} texts (harmony format)...")
-            outputs = self.llm.generate(prompt_token_ids=prompt_token_ids, sampling_params=sampling_params)
-        else:
-            logger.info(f"Running vLLM batch inference on {len(prompts)} texts...")
-            outputs = self.llm.generate(prompts, sampling_params)
+            logger.info(f"Running vLLM batch chat inference on {len(messages_list)} texts...")
+            outputs = self.llm.chat(messages_list, sampling_params=sampling_params)
 
         results = []
         raw_responses = []

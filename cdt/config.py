@@ -404,13 +404,13 @@ class ModelArchitectureConfig:
     dr_moce_crossfit_buffer_size: int = 1024  # Nuisance prediction buffer size (0 = disabled)
 
     # LLM Feature Extractor (decoder-only with last token embedding)
-    # Uses architecture from a pretrained model but RANDOM weight initialization
-    # Pretrained tokenizer is used; trained entirely from scratch via causal objective
+    # Pretrained tokenizer is always used
     llm_model_name: str = "Qwen/Qwen3-0.6B-Base"  # HuggingFace model name for architecture/tokenizer
     llm_max_length: int = 8192  # Max sequence length (up to 32768 for Qwen3)
     llm_projection_dim: Optional[int] = 128  # Output projection dim (None = use raw hidden size)
     llm_dropout: float = 0.1  # Dropout rate for projection layers
     llm_gradient_checkpointing: bool = True  # Enable gradient checkpointing for memory efficiency
+    llm_use_pretrained: bool = False  # If True, load pretrained weights; if False, random init
 
     # Numeric feature extraction (magnitude-aware number encoding)
     numeric_features_enabled: bool = False  # Enable numeric feature extraction

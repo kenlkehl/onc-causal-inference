@@ -168,12 +168,13 @@ class CausalText(nn.Module):
         gru_pool_projection_dim: int = 128,
         gru_pool_max_vocab: int = 50000,
         gru_pool_min_word_freq: int = 2,
-        # LLM Feature Extractor args (decoder-only with random init)
+        # LLM Feature Extractor args
         llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
         llm_max_length: int = 8192,
         llm_projection_dim: Optional[int] = 128,
         llm_dropout: float = 0.1,
         llm_gradient_checkpointing: bool = True,
+        llm_use_pretrained: bool = False,
         # CLAM instance-level loss args (for GRU-Pool extractor)
         clam_enabled: bool = False,
         clam_num_instances: int = 5,
@@ -359,6 +360,7 @@ class CausalText(nn.Module):
             'llm_projection_dim': llm_projection_dim,
             'llm_dropout': llm_dropout,
             'llm_gradient_checkpointing': llm_gradient_checkpointing,
+            'llm_use_pretrained': llm_use_pretrained,
             'clam_enabled': clam_enabled,
             'clam_num_instances': clam_num_instances,
             'clam_instance_hidden_dim': clam_instance_hidden_dim,
@@ -509,6 +511,7 @@ class CausalText(nn.Module):
             llm_projection_dim=llm_projection_dim,
             llm_dropout=llm_dropout,
             llm_gradient_checkpointing=llm_gradient_checkpointing,
+            llm_use_pretrained=llm_use_pretrained,
             # Numeric args
             numeric_features_enabled=numeric_features_enabled,
             numeric_embedding_dim=numeric_embedding_dim,
@@ -818,6 +821,7 @@ class CausalText(nn.Module):
                 llm_projection_dim=llm_projection_dim,
                 llm_dropout=llm_dropout,
                 llm_gradient_checkpointing=llm_gradient_checkpointing,
+                llm_use_pretrained=llm_use_pretrained,
                 # Numeric args
                 numeric_features_enabled=numeric_features_enabled,
                 numeric_embedding_dim=numeric_embedding_dim,

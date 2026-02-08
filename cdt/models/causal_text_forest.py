@@ -119,12 +119,13 @@ class CausalTextForest(nn.Module):
         gru_pool_projection_dim: int = 128,
         gru_pool_max_vocab: int = 50000,
         gru_pool_min_word_freq: int = 2,
-        # LLM args (decoder-only with random init)
+        # LLM args
         llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
         llm_max_length: int = 8192,
         llm_projection_dim: Optional[int] = 128,
         llm_dropout: float = 0.1,
         llm_gradient_checkpointing: bool = True,
+        llm_use_pretrained: bool = False,
         # Simple heads args
         representation_dim: int = 128,
         hidden_dim: int = 64,
@@ -257,6 +258,7 @@ class CausalTextForest(nn.Module):
             'llm_projection_dim': llm_projection_dim,
             'llm_dropout': llm_dropout,
             'llm_gradient_checkpointing': llm_gradient_checkpointing,
+            'llm_use_pretrained': llm_use_pretrained,
             'representation_dim': representation_dim,
             'hidden_dim': hidden_dim,
             'dropout': dropout,
@@ -390,6 +392,7 @@ class CausalTextForest(nn.Module):
             llm_projection_dim=llm_projection_dim,
             llm_dropout=llm_dropout,
             llm_gradient_checkpointing=llm_gradient_checkpointing,
+            llm_use_pretrained=llm_use_pretrained,
             numeric_features_enabled=numeric_features_enabled,
             numeric_embedding_dim=numeric_embedding_dim,
             numeric_magnitude_bins=numeric_magnitude_bins,
@@ -506,6 +509,7 @@ class CausalTextForest(nn.Module):
                     llm_projection_dim=llm_projection_dim,
                     llm_dropout=llm_dropout,
                     llm_gradient_checkpointing=llm_gradient_checkpointing,
+                    llm_use_pretrained=llm_use_pretrained,
                     numeric_features_enabled=numeric_features_enabled,
                     numeric_embedding_dim=numeric_embedding_dim,
                     numeric_magnitude_bins=numeric_magnitude_bins,

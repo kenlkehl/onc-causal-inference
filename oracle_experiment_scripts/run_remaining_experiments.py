@@ -190,6 +190,7 @@ def compute_metrics(
     metrics['ite_mse'] = mean_squared_error(true_ite, pred_ite)
     metrics['ite_mae'] = mean_absolute_error(true_ite, pred_ite)
     metrics['ite_corr'], _ = stats.pearsonr(pred_ite, true_ite)
+    metrics['ite_spearman_corr'], _ = stats.spearmanr(pred_ite, true_ite)
     metrics['ate_bias'] = abs(np.mean(pred_ite) - np.mean(true_ite))
     metrics['ate_pred'] = np.mean(pred_ite)
     metrics['ate_true'] = np.mean(true_ite)
@@ -938,7 +939,7 @@ def run_single_condition(
         tau_upper=results_df.get('pred_tau_upper', pd.Series([None])).values if 'pred_tau_upper' in results_df.columns else None
     )
 
-    logger.info(f"    Results: ITE Corr={metrics['ite_corr']:.4f}, ATE Bias={metrics['ate_bias']:.4f}")
+    logger.info(f"    Results: ITE Corr={metrics['ite_corr']:.4f}, ITE Rank Corr={metrics['ite_spearman_corr']:.4f}, ATE Bias={metrics['ate_bias']:.4f}")
 
     return results_df, metrics
 
@@ -1007,7 +1008,7 @@ def run_experiment(
         metrics_df.to_csv(exp_dir / "metrics_summary.csv")
 
         logger.info(f"\n  Experiment {exp_name} summary:")
-        logger.info(f"\n{metrics_df[['ite_corr', 'ate_bias', 'propensity_auroc']].to_string()}")
+        logger.info(f"\n{metrics_df[['ite_corr', 'ite_spearman_corr', 'ate_bias', 'propensity_auroc']].to_string()}")
 
     # Save experiment config
     config_info = {
@@ -1187,7 +1188,7 @@ def main():
             logger.info("\n" + "=" * 80)
             logger.info("OVERALL RESULTS SUMMARY")
             logger.info("=" * 80)
-            logger.info(f"\n{summary_df[['experiment', 'condition', 'ite_corr', 'ate_bias']].to_string()}")
+            logger.info(f"\n{summary_df[['experiment', 'condition', 'ite_corr', 'ite_spearman_corr', 'ate_bias']].to_string()}")
 
     # Save run config
     run_config = {

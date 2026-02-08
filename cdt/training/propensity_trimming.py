@@ -287,7 +287,8 @@ def _train_propensity_model(
         logger.info(f"Using GRU-Pool feature extractor")
     elif feature_extractor_type == "llm":
         # LLM uses pretrained tokenizer, no fit_tokenizer needed
-        logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} (random init)")
+        init_mode = "pretrained" if getattr(arch_config, 'llm_use_pretrained', False) else "random init"
+        logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} ({init_mode})")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
