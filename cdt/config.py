@@ -151,7 +151,8 @@ class CausalForestConfig:
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder",
-    "hierarchical_transformer", "gated_mil_hierarchical", "gru_transformer_mil", "gru_pool", or "llm".
+    "hierarchical_transformer", "gated_mil_hierarchical", "gru_transformer_mil",
+    "gru_pool", "bert_cross_chunk", or "llm".
 
     This handles variants like "modernbert" which should be treated as "bert".
 
@@ -160,7 +161,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 
     Returns:
         Normalized type: "cnn", "bert", "gru", "confounder", "hierarchical_transformer",
-        "gated_mil_hierarchical", "gru_transformer_mil", "gru_pool", or "llm"
+        "gated_mil_hierarchical", "gru_transformer_mil", "gru_pool", "bert_cross_chunk", or "llm"
     """
     if feature_type is None:
         return "cnn"
@@ -170,6 +171,10 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
     # Check for LLM extractor (decoder-only with last token embedding)
     if feature_type_lower in ("llm", "gpt", "qwen", "llama", "decoder"):
         return "llm"
+
+    # Check for BERT Cross-Chunk extractor (token-level cross-chunk attention)
+    if feature_type_lower in ("bert_cross_chunk", "cross_chunk", "cross_chunk_bert"):
+        return "bert_cross_chunk"
 
     # Check for GRU-Pool extractor (BiGRU + transformer + gated attention pooling)
     if feature_type_lower in ("gru_pool", "gru_pool_transformer"):
@@ -311,6 +316,21 @@ class ModelArchitectureConfig:
     hier_transformer_dim: int = 256  # Hidden dimension for transformer layers
     hier_transformer_dropout: float = 0.1  # Dropout rate
     hier_transformer_projection_dim: int = 128  # Final output dimension
+
+    # BERT Cross-Chunk extractor (used when feature_extractor_type="bert_cross_chunk")
+    # Token-level cross-chunk attention: each chunk's tokens attend to global [CLS] embeddings
+    # from all other chunks, giving tokens document-wide context
+    bcc_sentence_model: str = "prajjwal1/bert-tiny"  # Chunk encoder model
+    bcc_freeze_sentence_encoder: bool = False  # Whether to freeze BERT (unfrozen for end-to-end fine-tuning)
+    bcc_max_chunks: int = 100  # Maximum chunks per document
+    bcc_chunk_size: int = 128  # Tokens per chunk
+    bcc_chunk_overlap: int = 32  # Overlapping tokens between chunks
+    bcc_num_cross_layers: int = 2  # Number of cross-chunk transformer layers
+    bcc_num_attention_heads: int = 4  # Number of attention heads in cross-chunk layers
+    bcc_cross_chunk_dim: int = 256  # Hidden dimension for cross-chunk transformer
+    bcc_cross_chunk_dropout: float = 0.1  # Dropout in cross-chunk layers
+    bcc_gated_attention_dim: int = 128  # Hidden dimension for gated attention pooling
+    bcc_projection_dim: int = 128  # Final output dimension
 
     # Gated MIL Hierarchical extractor (used when feature_extractor_type="gated_mil_hierarchical")
     # Uses gated MIL attention (tanh * sigmoid gating) with K confounder queries

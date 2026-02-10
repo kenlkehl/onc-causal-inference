@@ -22,6 +22,7 @@ from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
+from .bert_cross_chunk_extractor import BertCrossChunkExtractor
 from .llm_extractor import LLMFeatureExtractor
 from ..config import normalize_feature_extractor_type
 
@@ -144,6 +145,18 @@ def create_feature_extractor(
     gru_pool_projection_dim: int = 128,
     gru_pool_max_vocab: int = 50000,
     gru_pool_min_word_freq: int = 2,
+    # BERT Cross-Chunk args
+    bcc_sentence_model: str = "prajjwal1/bert-tiny",
+    bcc_freeze_sentence_encoder: bool = False,
+    bcc_max_chunks: int = 100,
+    bcc_chunk_size: int = 128,
+    bcc_chunk_overlap: int = 32,
+    bcc_num_cross_layers: int = 2,
+    bcc_num_attention_heads: int = 4,
+    bcc_cross_chunk_dim: int = 256,
+    bcc_cross_chunk_dropout: float = 0.1,
+    bcc_gated_attention_dim: int = 128,
+    bcc_projection_dim: int = 128,
     # LLM Feature Extractor args
     llm_model_name: str = "Qwen/Qwen3-0.6B-Base",
     llm_max_length: int = 8192,
@@ -421,6 +434,30 @@ def create_feature_extractor(
                    f"gated_attention_dim={gru_pool_gated_attention_dim}, projection_dim={gru_pool_projection_dim}")
         return extractor
 
+    elif normalized_type == "bert_cross_chunk":
+        extractor = BertCrossChunkExtractor(
+            sentence_encoder_model=bcc_sentence_model,
+            freeze_sentence_encoder=bcc_freeze_sentence_encoder,
+            max_chunks=bcc_max_chunks,
+            chunk_size=bcc_chunk_size,
+            chunk_overlap=bcc_chunk_overlap,
+            num_cross_layers=bcc_num_cross_layers,
+            num_attention_heads=bcc_num_attention_heads,
+            cross_chunk_dim=bcc_cross_chunk_dim,
+            cross_chunk_dropout=bcc_cross_chunk_dropout,
+            gated_attention_dim=bcc_gated_attention_dim,
+            projection_dim=bcc_projection_dim,
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+            device=device
+        )
+        logger.info(f"Created BERT Cross-Chunk extractor: {bcc_sentence_model}, "
+                   f"{bcc_num_cross_layers} cross-chunk layers, chunk_size={bcc_chunk_size}, "
+                   f"cross_chunk_dim={bcc_cross_chunk_dim}, projection_dim={bcc_projection_dim}")
+        return extractor
+
     elif normalized_type == "llm":
         extractor = LLMFeatureExtractor(
             model_name=llm_model_name,
@@ -596,6 +633,18 @@ def create_feature_extractor_from_config(
         gru_pool_projection_dim=config.get('gru_pool_projection_dim', 128),
         gru_pool_max_vocab=config.get('gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=config.get('gru_pool_min_word_freq', 2),
+        # BERT Cross-Chunk args
+        bcc_sentence_model=config.get('bcc_sentence_model', 'prajjwal1/bert-tiny'),
+        bcc_freeze_sentence_encoder=config.get('bcc_freeze_sentence_encoder', False),
+        bcc_max_chunks=config.get('bcc_max_chunks', 100),
+        bcc_chunk_size=config.get('bcc_chunk_size', 128),
+        bcc_chunk_overlap=config.get('bcc_chunk_overlap', 32),
+        bcc_num_cross_layers=config.get('bcc_num_cross_layers', 2),
+        bcc_num_attention_heads=config.get('bcc_num_attention_heads', 4),
+        bcc_cross_chunk_dim=config.get('bcc_cross_chunk_dim', 256),
+        bcc_cross_chunk_dropout=config.get('bcc_cross_chunk_dropout', 0.1),
+        bcc_gated_attention_dim=config.get('bcc_gated_attention_dim', 128),
+        bcc_projection_dim=config.get('bcc_projection_dim', 128),
         # LLM args
         llm_model_name=config.get('llm_model_name', 'Qwen/Qwen3-0.6B-Base'),
         llm_max_length=config.get('llm_max_length', 8192),

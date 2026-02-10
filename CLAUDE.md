@@ -29,6 +29,7 @@ cdt/
 │   ├── chunking.py                       # Token-based text chunking utilities
 │   ├── confounder_extractor.py           # Perceiver-style sparse attention
 │   ├── hierarchical_transformer_extractor.py
+│   ├── bert_cross_chunk_extractor.py
 │   ├── gated_mil_hierarchical_extractor.py
 │   ├── gru_transformer_mil_extractor.py
 │   ├── gru_pool_extractor.py
@@ -53,6 +54,7 @@ synthetic_data/            # LLM-based synthetic data generation
 | `gru` | BiGRU + attention, O(N) | Yes | Required |
 | `confounder` | Perceiver-style sparse cross-attention, K latent confounders | Yes | GRU mode only |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
+| `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling (single vector) | Yes | Required |
@@ -211,6 +213,25 @@ Perceiver-style with K learnable latent queries and sparse attention (entmax).
 
 Key params: `confounder_num_latents`, `confounder_sparse_alpha` (1.5=entmax15), `confounder_explicit_texts`
 
+### BERT Cross-Chunk (`bert_cross_chunk_extractor.py`)
+Token-level cross-chunk attention: BERT encodes chunks, then cross-chunk transformer layers
+let each chunk's tokens attend to [CLS] embeddings from ALL other chunks.
+
+| Stage | Component | Description |
+|-------|-----------|-------------|
+| Pass 1 | BERT per chunk | [CLS] embeddings + token hidden states |
+| Pass 2 | Cross-chunk transformer | Tokens attend to global [CLS]s + local tokens |
+| Intra-chunk | AttentionPooling | Collapses enriched tokens into chunk vectors |
+| Aggregation | GatedAttentionPooling | Single document vector via tanh×sigmoid gating |
+
+Key params: `bcc_sentence_model`, `bcc_max_chunks`, `bcc_chunk_size`, `bcc_chunk_overlap`,
+`bcc_num_cross_layers`, `bcc_num_attention_heads`, `bcc_cross_chunk_dim`, `bcc_gated_attention_dim`,
+`bcc_projection_dim`
+
+Advantage over HierarchicalTransformer: tokens see context from other chunks via global embeddings.
+
+Interpretability: `interpret_attention()`, `get_attention_weights()`
+
 ### Gated MIL (`gated_mil_hierarchical_extractor.py`)
 Gated attention (tanh × sigmoid) with K confounder queries and task-specific weighting.
 
@@ -307,7 +328,7 @@ adds magnitude-aware numeric featurization as a parallel channel to all extracto
 | Strategy | Used By | Method |
 |----------|---------|--------|
 | `NumericEmbedding` (position-aligned) | `cnn`, `gru` | Added to word embeddings at token positions |
-| `NumericFeatureVector` (document-level) | `bert`, `llm`, `gru_pool`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `confounder` | Aggregate histogram merged before output projection |
+| `NumericFeatureVector` (document-level) | `bert`, `llm`, `gru_pool`, `bert_cross_chunk`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `confounder` | Aggregate histogram merged before output projection |
 
 ### Config Parameters
 
@@ -429,6 +450,7 @@ the top-B attended chunks with document-level labels.
 | Extractor | Instance Embedding Dim | Attention Aggregation |
 |-----------|----------------------|----------------------|
 | `gru_pool` | `transformer_dim` (256) | Gated attention weights |
+| `bert_cross_chunk` | `cross_chunk_dim` (256) | Gated attention weights |
 | `hierarchical_transformer` | `transformer_dim` (256) | [POOL] token attention to chunks |
 | `gated_mil_hierarchical` | `sentence_dim` (128 for bert-tiny) | Tau-weighted aggregation across K confounders |
 | `gru_transformer_mil` | `transformer_dim` (256) | Tau-weighted aggregation across K confounders |
@@ -633,7 +655,7 @@ output_dir/
 | Main model | `cdt/models/causal_text.py` |
 | Causal forest model | `cdt/models/causal_text_forest.py`, `cdt/models/causal_forest_head.py` |
 | Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
-| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `llm_extractor.py` |
+| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `bert_cross_chunk_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `llm_extractor.py` |
 | Numeric features | `cdt/models/numeric_features.py` |
 | Explicit confounders | `cdt/extraction/explicit_confounders.py`, `cdt/extraction/cache.py`, `cdt/models/explicit_confounder_featurizer.py` |
 | Text chunking | `cdt/models/chunking.py` |
@@ -683,7 +705,7 @@ When adding a new feature extractor type, update ALL of the following files:
 
 - **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale)
 - **Tokenizer**: Required for `cnn`, `gru`, `confounder` with GRU mode, `gru_transformer_mil`, `gru_pool`
-- **Long docs**: Use `confounder`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, or `llm`
+- **Long docs**: Use `confounder`, `hierarchical_transformer`, `bert_cross_chunk`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, or `llm`
 - **Interpretability**: `interpret_filters()` (CNN), `interpret_attention()` (others)
 - **R-Learner vs DragonNet**: R-Learner for heterogeneous treatment effects; DragonNet for general use
 - **LLM extractor**: Random init, pretrained tokenizer, up to 32K context, use small batch sizes

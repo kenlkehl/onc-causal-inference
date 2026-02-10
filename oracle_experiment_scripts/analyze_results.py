@@ -7,7 +7,7 @@ a comprehensive analysis. It is designed to be re-run as experiments progress.
 Usage:
     python analyze_results.py [--results-dir DIR] [--output FILE]
 
-    # Default: looks in ./results/, writes to ./results_analysis.txt
+    # Default: looks in ./results/, writes to ./results/results_analysis.txt
     ./analyze_results.py               # uses shebang
     python analyze_results.py           # or explicit python
 
@@ -22,6 +22,10 @@ KEY METRICS:
 - ite_corr (Pearson correlation of predicted vs true ITE): PRIMARY metric.
   Higher is better. This measures how well the model ranks individuals by
   treatment effect. Values above 0.5 are good; above 0.6 is strong.
+- ite_spearman_corr (Spearman rank correlation of predicted vs true ITE):
+  Non-parametric rank correlation. More robust to outliers and non-linear
+  monotonic relationships. Complements Pearson; large discrepancies between
+  the two suggest non-linear effects or outlier influence.
 - ate_bias (|mean(pred_ITE) - mean(true_ITE)|): Measures aggregate accuracy.
   Lower is better. Values < 0.05 are acceptable; > 0.1 is concerning.
 - propensity_auroc: How well the model separates treated/untreated. Should be
@@ -253,7 +257,13 @@ def analyze(df: pd.DataFrame) -> list[str]:
         group_summary(df, ["rlearner_mode"]),
         "",
         "Pairwise t-tests on ite_corr:",
-    ] + pairwise_ttest(df, "rlearner_mode", "ite_corr") + [
+    ] + pairwise_ttest(df, "rlearner_mode", "ite_corr")
+    if "ite_spearman_corr" in df.columns:
+        lines += [
+            "",
+            "Pairwise t-tests on ite_spearman_corr:",
+        ] + pairwise_ttest(df, "rlearner_mode", "ite_spearman_corr")
+    lines += [
         "",
         "Pairwise t-tests on ate_bias:",
     ] + pairwise_ttest(df, "rlearner_mode", "ate_bias")
@@ -282,6 +292,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
         "",
         "Pairwise t-tests on ite_corr:",
     ] + pairwise_ttest(df, "use_explicit_confounders", "ite_corr")
+    if "ite_spearman_corr" in df.columns:
+        lines += [
+            "",
+            "Pairwise t-tests on ite_spearman_corr:",
+        ] + pairwise_ttest(df, "use_explicit_confounders", "ite_spearman_corr")
     output.extend(section("3. BY EXPLICIT CONFOUNDERS (overall)", lines))
 
     # ---------------------------------------------------------------
@@ -301,6 +316,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
             "",
             "Pairwise t-tests on ite_corr:",
         ] + pairwise_ttest(shared_df, "use_explicit_confounders", "ite_corr")
+        if "ite_spearman_corr" in shared_df.columns:
+            lines += [
+                "",
+                "Pairwise t-tests on ite_spearman_corr:",
+            ] + pairwise_ttest(shared_df, "use_explicit_confounders", "ite_spearman_corr")
     else:
         lines = ["No shared-mode experiments yet."]
     output.extend(
@@ -318,6 +338,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
         "",
         "Pairwise t-tests on ite_corr:",
     ] + pairwise_ttest(df, "clam_enabled", "ite_corr")
+    if "ite_spearman_corr" in df.columns:
+        lines += [
+            "",
+            "Pairwise t-tests on ite_spearman_corr:",
+        ] + pairwise_ttest(df, "clam_enabled", "ite_spearman_corr")
     output.extend(section("5. BY CLAM", lines))
 
     # ---------------------------------------------------------------
@@ -343,9 +368,16 @@ def analyze(df: pd.DataFrame) -> list[str]:
             )
             lines.extend([
                 "",
-                f"Correlation(num_confounders, ite_corr): r={r:.4f}, p={p:.4f}",
+                f"Pearson corr(num_confounders, ite_corr): r={r:.4f}, p={p:.4f}",
                 "  (Negative r = more confounders -> worse performance)",
             ])
+            if "ite_spearman_corr" in conf_df.columns:
+                r_sp, p_sp = scipy_stats.pearsonr(
+                    conf_df["num_confounders"], conf_df["ite_spearman_corr"]
+                )
+                lines.extend([
+                    f"Pearson corr(num_confounders, ite_spearman_corr): r={r_sp:.4f}, p={p_sp:.4f}",
+                ])
     else:
         lines = ["No explicit-confounder experiments yet."]
     output.extend(
@@ -424,15 +456,22 @@ def analyze(df: pd.DataFrame) -> list[str]:
             continue
 
         lines.append(f"\n--- {hp} ---")
-        lines.append(group_summary(df, [hp], ["ite_corr", "ate_bias"]))
+        lines.append(group_summary(df, [hp], ["ite_corr", "ite_spearman_corr", "ate_bias"]))
 
         # Correlation with ite_corr
         valid = df[[hp, "ite_corr"]].dropna()
         if len(valid) >= 3:
             r, p = scipy_stats.pearsonr(valid[hp], valid["ite_corr"])
             lines.append(
-                f"  Correlation({hp}, ite_corr): r={r:.4f}, p={p:.4f}"
+                f"  Pearson corr({hp}, ite_corr): r={r:.4f}, p={p:.4f}"
             )
+        if "ite_spearman_corr" in df.columns:
+            valid_sp = df[[hp, "ite_spearman_corr"]].dropna()
+            if len(valid_sp) >= 3:
+                r_sp, p_sp = scipy_stats.pearsonr(valid_sp[hp], valid_sp["ite_spearman_corr"])
+                lines.append(
+                    f"  Pearson corr({hp}, ite_spearman_corr): r={r_sp:.4f}, p={p_sp:.4f}"
+                )
 
     if not lines:
         lines = ["Insufficient hyperparameter variation in results so far."]
@@ -446,7 +485,7 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # mode (where the extra features confuse the effect extractor).
     # ---------------------------------------------------------------
     lines = [
-        "Mean ITE correlation:",
+        "Mean ITE Pearson correlation:",
         df.pivot_table(
             values="ite_corr",
             index="rlearner_mode",
@@ -455,6 +494,21 @@ def analyze(df: pd.DataFrame) -> list[str]:
         )
         .round(4)
         .to_string(),
+    ]
+    if "ite_spearman_corr" in df.columns:
+        lines += [
+            "",
+            "Mean ITE Spearman correlation:",
+            df.pivot_table(
+                values="ite_spearman_corr",
+                index="rlearner_mode",
+                columns="use_explicit_confounders",
+                aggfunc=["mean", "count"],
+            )
+            .round(4)
+            .to_string(),
+        ]
+    lines += [
         "",
         "Mean ATE bias:",
         df.pivot_table(
@@ -474,7 +528,7 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # 9b. Cross-tabulated: rlearner_mode x clam_enabled
     # ---------------------------------------------------------------
     lines = [
-        "Mean ITE correlation:",
+        "Mean ITE Pearson correlation:",
         df.pivot_table(
             values="ite_corr",
             index="rlearner_mode",
@@ -484,6 +538,19 @@ def analyze(df: pd.DataFrame) -> list[str]:
         .round(4)
         .to_string(),
     ]
+    if "ite_spearman_corr" in df.columns:
+        lines += [
+            "",
+            "Mean ITE Spearman correlation:",
+            df.pivot_table(
+                values="ite_spearman_corr",
+                index="rlearner_mode",
+                columns="clam_enabled",
+                aggfunc=["mean", "count"],
+            )
+            .round(4)
+            .to_string(),
+        ]
     output.extend(
         section("9b. CROSS-TAB: rlearner_mode x clam_enabled", lines)
     )
@@ -492,7 +559,7 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # 9c. Cross-tabulated: dataset_name x rlearner_mode
     # ---------------------------------------------------------------
     lines = [
-        "Mean ITE correlation:",
+        "Mean ITE Pearson correlation:",
         df.pivot_table(
             values="ite_corr",
             index="dataset_name",
@@ -502,6 +569,19 @@ def analyze(df: pd.DataFrame) -> list[str]:
         .round(4)
         .to_string(),
     ]
+    if "ite_spearman_corr" in df.columns:
+        lines += [
+            "",
+            "Mean ITE Spearman correlation:",
+            df.pivot_table(
+                values="ite_spearman_corr",
+                index="dataset_name",
+                columns="rlearner_mode",
+                aggfunc=["mean", "count"],
+            )
+            .round(4)
+            .to_string(),
+        ]
     output.extend(
         section("9c. CROSS-TAB: dataset_name x rlearner_mode", lines)
     )
@@ -638,7 +718,7 @@ def main():
         "--output",
         type=str,
         default=None,
-        help="Output file (default: results_analysis.txt in parent of results-dir)",
+        help="Output file (default: results_analysis.txt inside results-dir)",
     )
     args = parser.parse_args()
 
@@ -646,7 +726,7 @@ def main():
     output_file = (
         Path(args.output).resolve()
         if args.output
-        else results_dir.parent / "results_analysis.txt"
+        else results_dir / "results_analysis.txt"
     )
 
     if not results_dir.exists():

@@ -385,6 +385,18 @@ def _train_cnn_model(
         hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
         hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
         hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
+        # BERT Cross-Chunk args
+        bcc_sentence_model=getattr(arch_config, 'bcc_sentence_model', 'prajjwal1/bert-tiny'),
+        bcc_freeze_sentence_encoder=getattr(arch_config, 'bcc_freeze_sentence_encoder', False),
+        bcc_max_chunks=getattr(arch_config, 'bcc_max_chunks', 100),
+        bcc_chunk_size=getattr(arch_config, 'bcc_chunk_size', 128),
+        bcc_chunk_overlap=getattr(arch_config, 'bcc_chunk_overlap', 32),
+        bcc_num_cross_layers=getattr(arch_config, 'bcc_num_cross_layers', 2),
+        bcc_num_attention_heads=getattr(arch_config, 'bcc_num_attention_heads', 4),
+        bcc_cross_chunk_dim=getattr(arch_config, 'bcc_cross_chunk_dim', 256),
+        bcc_cross_chunk_dropout=getattr(arch_config, 'bcc_cross_chunk_dropout', 0.1),
+        bcc_gated_attention_dim=getattr(arch_config, 'bcc_gated_attention_dim', 128),
+        bcc_projection_dim=getattr(arch_config, 'bcc_projection_dim', 128),
         # Gated MIL Hierarchical args
         gated_mil_sentence_model=getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny'),
         gated_mil_freeze_sentence_encoder=getattr(arch_config, 'gated_mil_freeze_sentence_encoder', True),
@@ -509,6 +521,10 @@ def _train_cnn_model(
         # GRU-Pool: requires fit_tokenizer (learns from scratch)
         model.fit_tokenizer(train_texts)
         logger.info(f"Using GRU-Pool feature extractor")
+    elif feature_extractor_type == "bert_cross_chunk":
+        # BERT Cross-Chunk: trigger lazy initialization (uses pretrained tokenizer)
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        logger.info(f"Using BERT Cross-Chunk feature extractor: {getattr(arch_config, 'bcc_sentence_model', 'prajjwal1/bert-tiny')}")
     elif feature_extractor_type == "llm":
         # LLM uses pretrained tokenizer, no fit_tokenizer needed
         init_mode = "pretrained" if getattr(arch_config, 'llm_use_pretrained', False) else "random init"
@@ -701,6 +717,18 @@ def _train_causal_forest_model(
         hier_transformer_dim=getattr(arch_config, 'hier_transformer_dim', 256),
         hier_transformer_dropout=getattr(arch_config, 'hier_transformer_dropout', 0.1),
         hier_transformer_projection_dim=getattr(arch_config, 'hier_transformer_projection_dim', 128),
+        # BERT Cross-Chunk args
+        bcc_sentence_model=getattr(arch_config, 'bcc_sentence_model', 'prajjwal1/bert-tiny'),
+        bcc_freeze_sentence_encoder=getattr(arch_config, 'bcc_freeze_sentence_encoder', False),
+        bcc_max_chunks=getattr(arch_config, 'bcc_max_chunks', 100),
+        bcc_chunk_size=getattr(arch_config, 'bcc_chunk_size', 128),
+        bcc_chunk_overlap=getattr(arch_config, 'bcc_chunk_overlap', 32),
+        bcc_num_cross_layers=getattr(arch_config, 'bcc_num_cross_layers', 2),
+        bcc_num_attention_heads=getattr(arch_config, 'bcc_num_attention_heads', 4),
+        bcc_cross_chunk_dim=getattr(arch_config, 'bcc_cross_chunk_dim', 256),
+        bcc_cross_chunk_dropout=getattr(arch_config, 'bcc_cross_chunk_dropout', 0.1),
+        bcc_gated_attention_dim=getattr(arch_config, 'bcc_gated_attention_dim', 128),
+        bcc_projection_dim=getattr(arch_config, 'bcc_projection_dim', 128),
         # Gated MIL Hierarchical args
         gated_mil_sentence_model=getattr(arch_config, 'gated_mil_sentence_model', 'prajjwal1/bert-tiny'),
         gated_mil_freeze_sentence_encoder=getattr(arch_config, 'gated_mil_freeze_sentence_encoder', True),

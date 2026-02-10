@@ -79,6 +79,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
+| `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
 | `llm` | Decoder-only LLM (Qwen3) with random init, last token embedding | Yes (32K) | No |
 | `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
 | `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |

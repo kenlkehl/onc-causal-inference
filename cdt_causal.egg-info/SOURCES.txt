@@ -21,6 +21,7 @@ cdt/inference/applied_forest.py
 cdt/matching/__init__.py
 cdt/matching/propensity_matcher.py
 cdt/models/__init__.py
+cdt/models/bert_cross_chunk_extractor.py
 cdt/models/bert_extractor.py
 cdt/models/causal_forest_head.py
 cdt/models/causal_text.py

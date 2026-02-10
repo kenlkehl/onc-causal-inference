@@ -285,6 +285,10 @@ def _train_propensity_model(
         # GRU-Pool: requires fit_tokenizer (learns from scratch)
         model.fit_tokenizer(train_texts)
         logger.info(f"Using GRU-Pool feature extractor")
+    elif feature_extractor_type == "bert_cross_chunk":
+        # BERT Cross-Chunk: trigger lazy initialization (uses pretrained tokenizer)
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        logger.info(f"Using BERT Cross-Chunk feature extractor: {getattr(arch_config, 'bcc_sentence_model', 'prajjwal1/bert-tiny')}")
     elif feature_extractor_type == "llm":
         # LLM uses pretrained tokenizer, no fit_tokenizer needed
         init_mode = "pretrained" if getattr(arch_config, 'llm_use_pretrained', False) else "random init"
