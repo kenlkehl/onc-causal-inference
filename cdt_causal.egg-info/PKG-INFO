@@ -315,6 +315,38 @@ Enable in config:
 
 Disabled by default (`numeric_features_enabled: false`) — no behavior change unless enabled.
 
+### Intra-Batch Contrastive Learning
+
+Optional supervised contrastive loss (SupCon) within similarity clusters improves confounder
+detection by encouraging the model to discriminate treatment/outcome status among similar patients.
+
+**How it works**: Features are clustered via K-means (detached, no gradient), then SupCon loss
+is computed within each cluster using treatment × outcome as 4-class labels. A projection head
+keeps the contrastive space separate from causal head features.
+
+**Why cluster-then-contrast?** Global SupCon would collapse all treated patients' representations
+together, destroying heterogeneity. Intra-cluster contrast targets subtle confounders among
+clinically similar patients.
+
+Enable in config:
+```json
+{
+  "architecture": {
+    "contrastive_enabled": true,
+    "contrastive_num_clusters": 4,
+    "contrastive_temperature": 0.1,
+    "contrastive_label_mode": "joint"
+  },
+  "training": {
+    "contrastive_weight": 0.1
+  }
+}
+```
+
+Key parameters: `contrastive_num_clusters`, `contrastive_temperature`, `contrastive_label_mode` ("treatment", "outcome", or "joint"), `contrastive_weight`
+
+Works with all causal heads and extractors, including dual extractor modes (targets nuisance extractor). Gracefully degrades to zero loss for small batches or uniform-label clusters.
+
 ## Workflow Modes
 
 ### Applied Inference

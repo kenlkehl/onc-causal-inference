@@ -377,6 +377,14 @@ def _create_causal_forest_model(
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
         numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
         numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
+        # Contrastive learning args
+        contrastive_enabled=getattr(arch_config, 'contrastive_enabled', False),
+        contrastive_num_clusters=getattr(arch_config, 'contrastive_num_clusters', 4),
+        contrastive_temperature=getattr(arch_config, 'contrastive_temperature', 0.1),
+        contrastive_label_mode=getattr(arch_config, 'contrastive_label_mode', 'joint'),
+        contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
+        contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
+        contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
         # Device
         device=str(device)
     )
@@ -452,6 +460,7 @@ def _train_representation(
 
     # R-learner representation training: get gamma from model config
     gamma_rlearner = model.cf_gamma_rlearner if model.use_rlearner_representation else 0.0
+    contrastive_weight = getattr(train_config, 'contrastive_weight', 0.1)
 
     for epoch in range(train_config.epochs):
         # Train
@@ -472,7 +481,8 @@ def _train_representation(
                 alpha_propensity=alpha_propensity,
                 gamma_rlearner=gamma_rlearner,
                 label_smoothing=label_smoothing,
-                stop_grad_propensity=stop_grad_propensity
+                stop_grad_propensity=stop_grad_propensity,
+                contrastive_weight=contrastive_weight
             )
 
             losses['loss'].backward()
@@ -515,7 +525,8 @@ def _train_representation(
                     batch,
                     alpha_propensity=alpha_propensity,
                     gamma_rlearner=gamma_rlearner,
-                    stop_grad_propensity=stop_grad_propensity
+                    stop_grad_propensity=stop_grad_propensity,
+                    contrastive_weight=contrastive_weight
                 )
 
                 val_loss += losses['loss'].item()

@@ -638,6 +638,14 @@ def _train_single_model(
         clam_enabled=getattr(arch_config, 'clam_enabled', False),
         clam_num_instances=getattr(arch_config, 'clam_num_instances', 5),
         clam_instance_hidden_dim=getattr(arch_config, 'clam_instance_hidden_dim', 64),
+        # Contrastive learning args
+        contrastive_enabled=getattr(arch_config, 'contrastive_enabled', False),
+        contrastive_num_clusters=getattr(arch_config, 'contrastive_num_clusters', 4),
+        contrastive_temperature=getattr(arch_config, 'contrastive_temperature', 0.1),
+        contrastive_label_mode=getattr(arch_config, 'contrastive_label_mode', 'joint'),
+        contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
+        contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
+        contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
         # LLM args
         llm_model_name=getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base'),
         llm_max_length=getattr(arch_config, 'llm_max_length', 8192),
@@ -916,6 +924,7 @@ def _train_epoch(
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
     clam_instance_weight = getattr(config, 'clam_instance_weight', 0.5)
+    contrastive_weight = getattr(config, 'contrastive_weight', 0.1)
 
     for batch in tqdm(loader, desc="Training", leave=False):
         # Move tensors to device
@@ -934,7 +943,8 @@ def _train_epoch(
             label_smoothing=label_smoothing,
             stop_grad_propensity=stop_grad_propensity,
             attention_entropy_weight=attention_entropy_weight,
-            clam_instance_weight=clam_instance_weight
+            clam_instance_weight=clam_instance_weight,
+            contrastive_weight=contrastive_weight
         )
 
         losses['loss'].backward()
@@ -979,6 +989,7 @@ def _eval_epoch(
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
     clam_instance_weight = getattr(config, 'clam_instance_weight', 0.5)
+    contrastive_weight = getattr(config, 'contrastive_weight', 0.1)
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Validation", leave=False):
@@ -993,7 +1004,8 @@ def _eval_epoch(
                 gamma_dr=gamma_dr,
                 stop_grad_propensity=stop_grad_propensity,
                 attention_entropy_weight=attention_entropy_weight,
-                clam_instance_weight=clam_instance_weight
+                clam_instance_weight=clam_instance_weight,
+                contrastive_weight=contrastive_weight
             )
 
             epoch_loss += losses['loss'].item()

@@ -438,6 +438,17 @@ class ModelArchitectureConfig:
     numeric_magnitude_bins: int = 8  # Number of log-scale magnitude bins
     numeric_type_categories: int = 10  # Number of numeric type categories
 
+    # Intra-batch contrastive learning
+    # Clusters samples by representation similarity, then applies SupCon loss within clusters
+    # to improve confounder detection among similar patients
+    contrastive_enabled: bool = False  # Master switch for contrastive loss
+    contrastive_num_clusters: int = 4  # Number of K-means clusters (K)
+    contrastive_temperature: float = 0.1  # SupCon temperature (lower = sharper)
+    contrastive_label_mode: str = "joint"  # "treatment", "outcome", or "joint" (T*2+Y)
+    contrastive_projection_dim: int = 64  # Projection head output dimension
+    contrastive_min_cluster_size: int = 2  # Minimum samples per cluster
+    contrastive_clustering_method: str = "kmeans"  # "kmeans" or "random"
+
     # Causal head dimensions (applies to all causal heads: DragonNet, RLearner, UpliftNet, etc.)
     causal_head_representation_dim: int = 128
     causal_head_hidden_outcome_dim: int = 64
@@ -481,6 +492,8 @@ class TrainingConfig:
     attention_entropy_weight: float = 0.0  # Weight for attention entropy regularization (encourages focused attention)
     # CLAM instance-level loss weight (only used when clam_enabled=True in architecture config)
     clam_instance_weight: float = 0.5  # Weight for CLAM instance-level loss
+    # Intra-batch contrastive loss weight (only used when contrastive_enabled=True)
+    contrastive_weight: float = 0.1  # Weight for contrastive loss term
 
 
 @dataclass

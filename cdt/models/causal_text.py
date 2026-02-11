@@ -13,6 +13,7 @@ from .rlearner import RLearnerNet
 from .traditional_logreg import TraditionalLogRegNet
 from .dr_moce import DRMoCENet, NuisancePredictionBuffer, compute_dr_pseudo_outcome
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer
+from .intra_batch_contrastive import IntraBatchContrastiveLoss
 from .extractor_factory import create_feature_extractor
 from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
 
@@ -191,6 +192,14 @@ class CausalText(nn.Module):
         clam_enabled: bool = False,
         clam_num_instances: int = 5,
         clam_instance_hidden_dim: int = 64,
+        # Intra-batch contrastive learning args
+        contrastive_enabled: bool = False,
+        contrastive_num_clusters: int = 4,
+        contrastive_temperature: float = 0.1,
+        contrastive_label_mode: str = "joint",
+        contrastive_projection_dim: int = 64,
+        contrastive_min_cluster_size: int = 2,
+        contrastive_clustering_method: str = "kmeans",
         # Causal head args (applies to all causal heads: DragonNet, RLearner, UpliftNet, etc.)
         causal_head_representation_dim: int = 128,
         causal_head_hidden_outcome_dim: int = 64,
@@ -387,6 +396,13 @@ class CausalText(nn.Module):
             'clam_enabled': clam_enabled,
             'clam_num_instances': clam_num_instances,
             'clam_instance_hidden_dim': clam_instance_hidden_dim,
+            'contrastive_enabled': contrastive_enabled,
+            'contrastive_num_clusters': contrastive_num_clusters,
+            'contrastive_temperature': contrastive_temperature,
+            'contrastive_label_mode': contrastive_label_mode,
+            'contrastive_projection_dim': contrastive_projection_dim,
+            'contrastive_min_cluster_size': contrastive_min_cluster_size,
+            'contrastive_clustering_method': contrastive_clustering_method,
             'causal_head_representation_dim': causal_head_representation_dim,
             'causal_head_hidden_outcome_dim': causal_head_hidden_outcome_dim,
             'causal_head_dropout': causal_head_dropout,
@@ -888,6 +904,23 @@ class CausalText(nn.Module):
                 logger.info(f"  Effect extractor: {self.feature_extractor_type} -> τ(X)")
                 logger.info(f"  Effect MLP: {effect_input_dim} -> {causal_head_hidden_outcome_dim} -> 1")
 
+        # Intra-batch contrastive learning module
+        self.contrastive_enabled = contrastive_enabled
+        self.contrastive_loss_module = None
+
+        if contrastive_enabled:
+            self.contrastive_loss_module = IntraBatchContrastiveLoss(
+                feature_dim=self.feature_extractor.output_dim,
+                num_clusters=contrastive_num_clusters,
+                temperature=contrastive_temperature,
+                label_mode=contrastive_label_mode,
+                projection_dim=contrastive_projection_dim,
+                min_cluster_size=contrastive_min_cluster_size,
+                clustering_method=contrastive_clustering_method,
+            )
+            logger.info(f"Intra-batch contrastive loss enabled: K={contrastive_num_clusters}, "
+                       f"mode={contrastive_label_mode}, temp={contrastive_temperature}")
+
         # Move to device
         self.to(self._device)
 
@@ -964,7 +997,8 @@ class CausalText(nn.Module):
         label_smoothing: float = 0.0,
         stop_grad_propensity: bool = False,
         attention_entropy_weight: float = 0.0,
-        clam_instance_weight: float = 0.5
+        clam_instance_weight: float = 0.5,
+        contrastive_weight: float = 0.1
     ) -> Dict[str, torch.Tensor]:
         """
         Perform single training step.
@@ -986,6 +1020,8 @@ class CausalText(nn.Module):
                 gated_mil_hierarchical extractor.
             clam_instance_weight: Weight for CLAM instance-level loss. Only applies
                 when clam_enabled=True and using gru_pool extractor.
+            contrastive_weight: Weight for intra-batch contrastive loss. Only applies
+                when contrastive_enabled=True.
 
         Returns:
             Dictionary with loss components and detached predictions
@@ -994,28 +1030,31 @@ class CausalText(nn.Module):
         if self.model_type == "dr_moce":
             return self._train_step_dr_moce(
                 batch, alpha_propensity, gamma_dr, label_smoothing,
-                stop_grad_propensity
+                stop_grad_propensity, contrastive_weight
             )
 
         # Dispatch to specialized training step for rlearner
         if self.model_type == "rlearner":
             return self._train_step_rlearner(
                 batch, alpha_propensity, gamma_rlearner, label_smoothing,
-                stop_grad_propensity, attention_entropy_weight, clam_instance_weight
+                stop_grad_propensity, attention_entropy_weight, clam_instance_weight,
+                contrastive_weight
             )
 
         # Dispatch to specialized training step for uplift
         if self.model_type == "uplift":
             return self._train_step_uplift(
                 batch, alpha_propensity, beta_targreg, label_smoothing,
-                stop_grad_propensity, attention_entropy_weight, clam_instance_weight
+                stop_grad_propensity, attention_entropy_weight, clam_instance_weight,
+                contrastive_weight
             )
 
         # Dispatch to specialized training step for traditional_logreg
         if self.model_type == "traditional_logreg":
             return self._train_step_traditional_logreg(
                 batch, alpha_propensity, label_smoothing,
-                stop_grad_propensity, attention_entropy_weight, clam_instance_weight
+                stop_grad_propensity, attention_entropy_weight, clam_instance_weight,
+                contrastive_weight
             )
 
         # DragonNet (default)
@@ -1041,6 +1080,11 @@ class CausalText(nn.Module):
             features = self.feature_extractor(texts)
             _clam_chunk_embs = None
             _clam_attn_weights = None
+
+        # Intra-batch contrastive loss (on raw extractor features before concatenation)
+        contrastive_loss = torch.tensor(0.0, device=self._device)
+        if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
+            contrastive_loss = self.contrastive_loss_module(features, treatments, outcomes)
 
         # Concatenate auxiliary features if provided
         if self.auxiliary_projection is not None and auxiliary_features is not None:
@@ -1151,7 +1195,8 @@ class CausalText(nn.Module):
             outcome_loss +
             alpha_propensity * propensity_loss +
             beta_targreg * targreg_loss +
-            clam_instance_weight * instance_loss
+            clam_instance_weight * instance_loss +
+            contrastive_weight * contrastive_loss
         )
 
         result = {
@@ -1167,6 +1212,9 @@ class CausalText(nn.Module):
         if self.clam_enabled:
             result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
 
+        if self.contrastive_enabled:
+            result['contrastive_loss'] = contrastive_loss.detach()
+
         return result
 
     def _train_step_rlearner(
@@ -1177,7 +1225,8 @@ class CausalText(nn.Module):
         label_smoothing: float,
         stop_grad_propensity: bool = False,
         attention_entropy_weight: float = 0.0,
-        clam_instance_weight: float = 0.5
+        clam_instance_weight: float = 0.5,
+        contrastive_weight: float = 0.1
     ) -> Dict[str, torch.Tensor]:
         """
         Perform R-learner training step with three-headed loss.
@@ -1231,6 +1280,11 @@ class CausalText(nn.Module):
                 nuisance_features = self.feature_extractor(texts)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
+
+            # Intra-batch contrastive loss (on nuisance extractor features)
+            contrastive_loss = torch.tensor(0.0, device=self._device)
+            if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
+                contrastive_loss = self.contrastive_loss_module(nuisance_features, treatments, outcomes)
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1307,6 +1361,11 @@ class CausalText(nn.Module):
                 features = self.feature_extractor(texts)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
+
+            # Intra-batch contrastive loss (on raw extractor features)
+            contrastive_loss = torch.tensor(0.0, device=self._device)
+            if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
+                contrastive_loss = self.contrastive_loss_module(features, treatments, outcomes)
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1431,7 +1490,8 @@ class CausalText(nn.Module):
             alpha_propensity * propensity_loss +
             gamma_rlearner * r_loss +
             attention_entropy_weight * entropy_loss +
-            clam_instance_weight * instance_loss
+            clam_instance_weight * instance_loss +
+            contrastive_weight * contrastive_loss
         )
 
         # Derive y0/y1 for backward-compatible metrics
@@ -1462,6 +1522,10 @@ class CausalText(nn.Module):
         if attention_entropy_weight > 0:
             result['entropy_loss'] = entropy_loss.detach() if isinstance(entropy_loss, torch.Tensor) else entropy_loss
 
+        # Add contrastive loss if enabled
+        if self.contrastive_enabled:
+            result['contrastive_loss'] = contrastive_loss.detach()
+
         # Add instance loss if CLAM enabled
         if self.clam_enabled:
             result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
@@ -1476,7 +1540,8 @@ class CausalText(nn.Module):
         label_smoothing: float,
         stop_grad_propensity: bool = False,
         attention_entropy_weight: float = 0.0,
-        clam_instance_weight: float = 0.5
+        clam_instance_weight: float = 0.5,
+        contrastive_weight: float = 0.1
     ) -> Dict[str, torch.Tensor]:
         """
         Perform Uplift training step with optional dual extractor mode.
@@ -1530,6 +1595,11 @@ class CausalText(nn.Module):
                 nuisance_features = self.feature_extractor(texts)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
+
+            # Intra-batch contrastive loss (on nuisance extractor features)
+            contrastive_loss = torch.tensor(0.0, device=self._device)
+            if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
+                contrastive_loss = self.contrastive_loss_module(nuisance_features, treatments, outcomes)
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1591,6 +1661,11 @@ class CausalText(nn.Module):
                 features = self.feature_extractor(texts)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
+
+            # Intra-batch contrastive loss (on raw extractor features)
+            contrastive_loss = torch.tensor(0.0, device=self._device)
+            if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
+                contrastive_loss = self.contrastive_loss_module(features, treatments, outcomes)
 
             # Compute attention entropy loss if enabled and extractor supports it
             entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1713,7 +1788,8 @@ class CausalText(nn.Module):
             alpha_propensity * propensity_loss +
             beta_targreg * targreg_loss +
             attention_entropy_weight * entropy_loss +
-            clam_instance_weight * instance_loss
+            clam_instance_weight * instance_loss +
+            contrastive_weight * contrastive_loss
         )
 
         result = {
@@ -1731,6 +1807,10 @@ class CausalText(nn.Module):
         if attention_entropy_weight > 0:
             result['entropy_loss'] = entropy_loss.detach() if isinstance(entropy_loss, torch.Tensor) else entropy_loss
 
+        # Add contrastive loss if enabled
+        if self.contrastive_enabled:
+            result['contrastive_loss'] = contrastive_loss.detach()
+
         # Add instance loss if CLAM enabled
         if self.clam_enabled:
             result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
@@ -1744,7 +1824,8 @@ class CausalText(nn.Module):
         label_smoothing: float,
         stop_grad_propensity: bool = False,
         attention_entropy_weight: float = 0.0,
-        clam_instance_weight: float = 0.5
+        clam_instance_weight: float = 0.5,
+        contrastive_weight: float = 0.1
     ) -> Dict[str, torch.Tensor]:
         """
         Perform training step for traditional logistic regression head.
@@ -1789,6 +1870,11 @@ class CausalText(nn.Module):
             features = self.feature_extractor(texts)
             _clam_chunk_embs = None
             _clam_attn_weights = None
+
+        # Intra-batch contrastive loss (on raw extractor features)
+        contrastive_loss = torch.tensor(0.0, device=self._device)
+        if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
+            contrastive_loss = self.contrastive_loss_module(features, treatments, outcomes)
 
         # Compute attention entropy loss if enabled and extractor supports it
         entropy_loss = torch.tensor(0.0, device=self._device)
@@ -1883,7 +1969,8 @@ class CausalText(nn.Module):
             outcome_loss +
             alpha_propensity * propensity_loss +
             attention_entropy_weight * entropy_loss +
-            clam_instance_weight * instance_loss
+            clam_instance_weight * instance_loss +
+            contrastive_weight * contrastive_loss
         )
 
         result = {
@@ -1899,6 +1986,9 @@ class CausalText(nn.Module):
         if attention_entropy_weight > 0:
             result['entropy_loss'] = entropy_loss.detach() if isinstance(entropy_loss, torch.Tensor) else entropy_loss
 
+        if self.contrastive_enabled:
+            result['contrastive_loss'] = contrastive_loss.detach()
+
         if self.clam_enabled:
             result['instance_loss'] = instance_loss.detach() if isinstance(instance_loss, torch.Tensor) else instance_loss
 
@@ -1910,7 +2000,8 @@ class CausalText(nn.Module):
         alpha_propensity: float,
         gamma_dr: float,
         label_smoothing: float,
-        stop_grad_propensity: bool = False
+        stop_grad_propensity: bool = False,
+        contrastive_weight: float = 0.1
     ) -> Dict[str, torch.Tensor]:
         """
         Perform DR-MoCE training step.
@@ -1948,6 +2039,11 @@ class CausalText(nn.Module):
 
         # Extract features
         features = self.feature_extractor(texts)
+
+        # Intra-batch contrastive loss (on raw extractor features)
+        contrastive_loss = torch.tensor(0.0, device=self._device)
+        if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
+            contrastive_loss = self.contrastive_loss_module(features, treatments, outcomes)
 
         # Concatenate explicit confounder features if provided
         if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
@@ -2046,6 +2142,7 @@ class CausalText(nn.Module):
             + gamma_dr * dr_loss
             + self.dr_moce_het_weight * het_loss
             + self.dr_moce_balance_weight * bal_loss
+            + contrastive_weight * contrastive_loss
         )
 
         # Push to buffer after computing loss (for next iteration's cross-fitting)
@@ -2062,7 +2159,7 @@ class CausalText(nn.Module):
                 )
 
         # Derive y0/y1 logits for backward-compatible metrics
-        return {
+        result = {
             'loss': total_loss,
             'outcome_loss': outcome_loss.detach(),
             'propensity_loss': propensity_loss.detach(),
@@ -2076,6 +2173,11 @@ class CausalText(nn.Module):
             't_logit': t_logit.detach(),
             'routing_weights': g.detach(),
         }
+
+        if self.contrastive_enabled:
+            result['contrastive_loss'] = contrastive_loss.detach()
+
+        return result
 
     def predict(
         self,

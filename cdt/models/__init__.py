@@ -26,6 +26,7 @@ from .sparse_attention import (
 )
 from .numeric_features import NumericEmbedding, NumericFeatureVector, extract_numeric_patterns
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer, get_raw_confounder_features
+from .intra_batch_contrastive import IntraBatchContrastiveLoss
 from .causal_text import CausalText
 from .propensity_model import PropensityOnlyModel, PropensityNet, create_propensity_model_from_config
 from .extractor_factory import create_feature_extractor, create_feature_extractor_from_config
@@ -63,6 +64,7 @@ __all__ = [
     'top_k_attention',
     'adaptive_top_k',
     'SparseCrossAttention',
+    'IntraBatchContrastiveLoss',
     'CausalText',
     'PropensityOnlyModel',
     'PropensityNet',

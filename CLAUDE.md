@@ -614,6 +614,82 @@ preds = model.predict(texts)
 | `numeric_features_enabled=True` | Adds magnitude-aware numeric featurization from clinical text |
 | `rlearner_dual_extractors=True` | Uses separate extractors for nuisance (e,m) and effect (τ) in R-Learner |
 | `uplift_dual_extractors=True` | Uses separate extractors for nuisance (e,Y0) and effect (τ) in Uplift |
+| `contrastive_enabled=True` | Enables intra-batch contrastive learning for confounder detection |
+| `contrastive_weight>0` | Weight for contrastive loss term (default 0.1) |
+
+## Intra-Batch Contrastive Learning
+
+Supervised contrastive loss (SupCon, Khosla et al. 2020) within similarity clusters improves
+confounder detection by encouraging the model to learn representations that discriminate
+treatment/outcome status among otherwise similar patients.
+
+### How It Works
+
+```
+Text → Extractor → Z (features) → [K-means on detached Z] → Within-cluster SupCon Loss
+                                 → Causal Head → Standard Losses
+
+Total Loss = Standard Loss + contrastive_weight × SupCon Loss
+```
+
+1. **Feature projection**: 2-layer MLP projects features to a contrastive space (SimCLR convention)
+2. **Clustering**: K-means on detached features groups similar patients
+3. **Label construction**: Treatment × outcome creates 4-class labels (joint mode)
+4. **SupCon within clusters**: Contrastive loss computed independently per cluster, averaged
+
+### Why Cluster-Then-Contrast?
+
+Global SupCon would push ALL treated patients' representations together, destroying heterogeneity.
+Intra-cluster contrastive learning targets exactly the subtle confounders: "among clinically similar
+patients, the model should still distinguish treatment/outcome status."
+
+### Config Parameters
+
+**Architecture config** (`ModelArchitectureConfig`):
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `contrastive_enabled` | Enable contrastive learning | `False` |
+| `contrastive_num_clusters` | Number of K-means clusters (K) | `4` |
+| `contrastive_temperature` | SupCon temperature (lower = sharper) | `0.1` |
+| `contrastive_label_mode` | Label construction: "treatment", "outcome", or "joint" | `"joint"` |
+| `contrastive_projection_dim` | Projection head output dimension | `64` |
+| `contrastive_min_cluster_size` | Minimum samples per cluster | `2` |
+| `contrastive_clustering_method` | "kmeans" or "random" | `"kmeans"` |
+
+**Training config** (`TrainingConfig`):
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `contrastive_weight` | Weight for contrastive loss in total loss | `0.1` |
+
+### Dual Extractor Mode
+
+In dual extractor mode (R-Learner or Uplift), contrastive loss targets the **nuisance extractor**
+features, aligned with its role in confounder detection. The effect extractor is not affected.
+
+### Edge Cases
+
+Graceful degradation (contrastive loss = 0, standard losses carry training):
+- Batch too small (< 4 samples)
+- All-same-label clusters (no negative pairs)
+- No valid clusters in batch
+
+### Example Config
+
+```json
+{
+  "architecture": {
+    "contrastive_enabled": true,
+    "contrastive_num_clusters": 4,
+    "contrastive_temperature": 0.1,
+    "contrastive_label_mode": "joint"
+  },
+  "training": {
+    "contrastive_weight": 0.1
+  }
+}
+```
 
 ## Matching & Analysis
 
@@ -670,6 +746,10 @@ output_dir/
 **Optional**: openai (synthetic data), sentence-transformers (confounder), entmax (sparse attention; fallback provided), vllm (explicit confounder extraction)
 
 **Device support**: CUDA (NVIDIA GPUs), MPS (Apple Silicon M1/M2/M3), CPU
+
+## Documentation Maintenance
+
+**IMPORTANT**: When updating `CLAUDE.md`, always update `README.md` accordingly to keep user-facing documentation in sync. CLAUDE.md is the detailed developer reference; README.md is the user-facing overview. Any new feature, training option, or architectural change documented in CLAUDE.md should have a corresponding section or mention in README.md.
 
 ## Adding a New Feature Extractor
 
