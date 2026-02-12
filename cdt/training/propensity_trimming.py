@@ -285,6 +285,11 @@ def _train_propensity_model(
         # GRU-Pool: requires fit_tokenizer (learns from scratch)
         model.fit_tokenizer(train_texts)
         logger.info(f"Using GRU-Pool feature extractor")
+    elif feature_extractor_type == "bert_pool":
+        # BERT Pool: trigger lazy initialization (uses pretrained tokenizer)
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        init_mode = "pretrained" if getattr(arch_config, 'bert_pool_use_pretrained', True) else "random init"
+        logger.info(f"Using BERT Pool feature extractor: {getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny')} ({init_mode})")
     elif feature_extractor_type == "bert_cross_chunk":
         # BERT Cross-Chunk: trigger lazy initialization (uses pretrained tokenizer)
         model.fit_tokenizer(train_texts)  # No-op, triggers init

@@ -19,6 +19,7 @@ from .confounder_extractor import (
     GRUHierarchicalConfounderExtractor
 )
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
+from .bert_pool_extractor import BertPoolExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
@@ -145,6 +146,19 @@ def create_feature_extractor(
     gru_pool_projection_dim: int = 128,
     gru_pool_max_vocab: int = 50000,
     gru_pool_min_word_freq: int = 2,
+    # BERT Pool args
+    bert_pool_sentence_model: str = "prajjwal1/bert-tiny",
+    bert_pool_freeze_sentence_encoder: bool = False,
+    bert_pool_use_pretrained: bool = True,
+    bert_pool_max_chunks: int = 100,
+    bert_pool_chunk_size: int = 128,
+    bert_pool_chunk_overlap: int = 32,
+    bert_pool_transformer_layers: int = 2,
+    bert_pool_transformer_heads: int = 4,
+    bert_pool_transformer_dim: int = 256,
+    bert_pool_transformer_dropout: float = 0.1,
+    bert_pool_gated_attention_dim: int = 128,
+    bert_pool_projection_dim: int = 128,
     # BERT Cross-Chunk args
     bcc_sentence_model: str = "prajjwal1/bert-tiny",
     bcc_freeze_sentence_encoder: bool = False,
@@ -189,6 +203,7 @@ def create_feature_extractor(
             - "gated_mil_hierarchical": Gated MIL hierarchical extractor
             - "gru_transformer_mil": GRU-Transformer-MIL extractor
             - "gru_pool": GRU-Pool extractor
+            - "bert_pool": BERT Pool extractor (BERT [CLS] + transformer + gated pooling)
             - "llm": LLM feature extractor (decoder-only with random init)
         device: PyTorch device to use
         ... (extractor-specific args)
@@ -346,6 +361,33 @@ def create_feature_extractor(
         logger.info(f"Created Hierarchical Transformer extractor: {hier_transformer_sentence_model}, "
                    f"{hier_transformer_num_layers} layers, chunk_size={hier_transformer_chunk_size}, "
                    f"projection_dim={hier_transformer_projection_dim}")
+        return extractor
+
+    elif normalized_type == "bert_pool":
+        extractor = BertPoolExtractor(
+            sentence_encoder_model=bert_pool_sentence_model,
+            freeze_sentence_encoder=bert_pool_freeze_sentence_encoder,
+            use_pretrained=bert_pool_use_pretrained,
+            max_chunks=bert_pool_max_chunks,
+            chunk_size=bert_pool_chunk_size,
+            chunk_overlap=bert_pool_chunk_overlap,
+            num_transformer_layers=bert_pool_transformer_layers,
+            num_attention_heads=bert_pool_transformer_heads,
+            transformer_dim=bert_pool_transformer_dim,
+            transformer_dropout=bert_pool_transformer_dropout,
+            gated_attention_dim=bert_pool_gated_attention_dim,
+            projection_dim=bert_pool_projection_dim,
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+            device=device
+        )
+        init_mode = "pretrained" if bert_pool_use_pretrained else "random init"
+        logger.info(f"Created BERT Pool extractor: {bert_pool_sentence_model} ({init_mode}), "
+                   f"{bert_pool_transformer_layers} transformer layers, "
+                   f"gated_attention_dim={bert_pool_gated_attention_dim}, "
+                   f"projection_dim={bert_pool_projection_dim}")
         return extractor
 
     elif normalized_type == "gated_mil_hierarchical":
@@ -633,6 +675,19 @@ def create_feature_extractor_from_config(
         gru_pool_projection_dim=config.get('gru_pool_projection_dim', 128),
         gru_pool_max_vocab=config.get('gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=config.get('gru_pool_min_word_freq', 2),
+        # BERT Pool args
+        bert_pool_sentence_model=config.get('bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
+        bert_pool_freeze_sentence_encoder=config.get('bert_pool_freeze_sentence_encoder', False),
+        bert_pool_use_pretrained=config.get('bert_pool_use_pretrained', True),
+        bert_pool_max_chunks=config.get('bert_pool_max_chunks', 100),
+        bert_pool_chunk_size=config.get('bert_pool_chunk_size', 128),
+        bert_pool_chunk_overlap=config.get('bert_pool_chunk_overlap', 32),
+        bert_pool_transformer_layers=config.get('bert_pool_transformer_layers', 2),
+        bert_pool_transformer_heads=config.get('bert_pool_transformer_heads', 4),
+        bert_pool_transformer_dim=config.get('bert_pool_transformer_dim', 256),
+        bert_pool_transformer_dropout=config.get('bert_pool_transformer_dropout', 0.1),
+        bert_pool_gated_attention_dim=config.get('bert_pool_gated_attention_dim', 128),
+        bert_pool_projection_dim=config.get('bert_pool_projection_dim', 128),
         # BERT Cross-Chunk args
         bcc_sentence_model=config.get('bcc_sentence_model', 'prajjwal1/bert-tiny'),
         bcc_freeze_sentence_encoder=config.get('bcc_freeze_sentence_encoder', False),

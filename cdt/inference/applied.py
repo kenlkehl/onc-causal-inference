@@ -634,6 +634,19 @@ def _train_single_model(
         gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
         gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # BERT Pool args
+        bert_pool_sentence_model=getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
+        bert_pool_freeze_sentence_encoder=getattr(arch_config, 'bert_pool_freeze_sentence_encoder', False),
+        bert_pool_use_pretrained=getattr(arch_config, 'bert_pool_use_pretrained', True),
+        bert_pool_max_chunks=getattr(arch_config, 'bert_pool_max_chunks', 100),
+        bert_pool_chunk_size=getattr(arch_config, 'bert_pool_chunk_size', 128),
+        bert_pool_chunk_overlap=getattr(arch_config, 'bert_pool_chunk_overlap', 32),
+        bert_pool_transformer_layers=getattr(arch_config, 'bert_pool_transformer_layers', 2),
+        bert_pool_transformer_heads=getattr(arch_config, 'bert_pool_transformer_heads', 4),
+        bert_pool_transformer_dim=getattr(arch_config, 'bert_pool_transformer_dim', 256),
+        bert_pool_transformer_dropout=getattr(arch_config, 'bert_pool_transformer_dropout', 0.1),
+        bert_pool_gated_attention_dim=getattr(arch_config, 'bert_pool_gated_attention_dim', 128),
+        bert_pool_projection_dim=getattr(arch_config, 'bert_pool_projection_dim', 128),
         # CLAM instance-level loss args
         clam_enabled=getattr(arch_config, 'clam_enabled', False),
         clam_num_instances=getattr(arch_config, 'clam_num_instances', 5),
@@ -748,6 +761,12 @@ def _train_single_model(
         logger.info(f"Using GRU-Pool feature extractor: "
                    f"GRU {getattr(arch_config, 'gru_pool_gru_hidden_dim', 128)}x{2 if getattr(arch_config, 'gru_pool_gru_bidirectional', True) else 1}, "
                    f"{getattr(arch_config, 'gru_pool_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "bert_pool":
+        # BERT Pool: trigger lazy initialization (uses pretrained tokenizer)
+        model.fit_tokenizer(train_texts)  # No-op, triggers init
+        init_mode = "pretrained" if getattr(arch_config, 'bert_pool_use_pretrained', True) else "random init"
+        logger.info(f"Using BERT Pool feature extractor: {getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny')} ({init_mode}), "
+                   f"{getattr(arch_config, 'bert_pool_transformer_layers', 2)} transformer layers")
     elif feature_extractor_type == "bert_cross_chunk":
         # BERT Cross-Chunk: trigger lazy initialization (uses pretrained tokenizer)
         model.fit_tokenizer(train_texts)  # No-op, triggers init

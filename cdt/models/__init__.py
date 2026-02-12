@@ -12,6 +12,7 @@ from .bert_extractor import BertFeatureExtractor
 from .gru_extractor import GRUFeatureExtractor, AttentionPooling
 from .confounder_extractor import ConfounderExtractor, HierarchicalConfounderExtractor, GRUHierarchicalConfounderExtractor
 from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
+from .bert_pool_extractor import BertPoolExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor, GatedAttentionPooling
@@ -51,6 +52,7 @@ __all__ = [
     'HierarchicalConfounderExtractor',
     'GRUHierarchicalConfounderExtractor',
     'HierarchicalTransformerExtractor',
+    'BertPoolExtractor',
     'GatedMILHierarchicalExtractor',
     'GRUTransformerMILExtractor',
     'GRUPoolExtractor',

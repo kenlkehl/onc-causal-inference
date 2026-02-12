@@ -76,11 +76,12 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | Type | Description | Long docs | fit_tokenizer |
 |------|-------------|-----------|---------------|
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling | Yes | Required |
+| `bert_pool` | Chunk BERT [CLS] + transformer + gated attention pooling | Yes | No |
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
 | `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
-| `llm` | Decoder-only LLM (Qwen3) with random init, last token embedding | Yes (32K) | No |
+| `llm` | Decoder-only LLM (Qwen3) with random init or pretrained, last token embedding | Yes (32K) | No |
 | `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
 | `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
 | `gru` | BiGRU + attention | Yes | Required |
@@ -219,6 +220,18 @@ Key parameters: `gru_mil_num_confounders`, `gru_mil_chunk_size`
 Uses pretrained BERT for chunk encoding with gated MIL attention and K confounder queries.
 
 Key parameters: `gated_mil_num_confounders`, `gated_mil_sentence_model`
+
+### BERT Pool
+
+Like Hierarchical Transformer but with gated attention pooling instead of [POOL] token, BERT unfrozen by default, and optional random weight initialization.
+
+```
+Long Clinical Text → Token-based Chunking → BERT [CLS] per Chunk
+    → Transformer Cross-Chunk Context → Gated Attention Pooling
+    → Single Document Vector → Causal Head
+```
+
+Key parameters: `bert_pool_sentence_model`, `bert_pool_use_pretrained`, `bert_pool_transformer_layers`, `bert_pool_gated_attention_dim`
 
 ### Hierarchical Transformer
 
