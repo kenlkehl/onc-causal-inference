@@ -285,6 +285,23 @@ def _train_propensity_model(
         # GRU-Pool: requires fit_tokenizer (learns from scratch)
         model.fit_tokenizer(train_texts)
         logger.info(f"Using GRU-Pool feature extractor")
+    elif feature_extractor_type == "conv_pool":
+        # Conv-Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info("Using Dilated Conv Pool feature extractor")
+        logger.info(f"  Conv dim: {getattr(arch_config, 'conv_pool_conv_dim', 256)}, "
+                   f"kernel_size: {getattr(arch_config, 'conv_pool_kernel_size', 3)}, "
+                   f"blocks: {getattr(arch_config, 'conv_pool_num_blocks', 4)}, "
+                   f"{getattr(arch_config, 'conv_pool_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "conv1d_transformer_hybrid":
+        # Conv1d-Transformer Hybrid: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info("Using Conv1d-Transformer Hybrid feature extractor")
+        logger.info(f"  Conv dim: {getattr(arch_config, 'c1d_hybrid_conv_dim', 256)}, "
+                   f"kernel_size: {getattr(arch_config, 'c1d_hybrid_kernel_size', 3)}, "
+                   f"blocks: {getattr(arch_config, 'c1d_hybrid_num_blocks', 4)}, "
+                   f"max_length: {getattr(arch_config, 'c1d_hybrid_max_length', 8192)}, "
+                   f"{getattr(arch_config, 'c1d_hybrid_transformer_layers', 2)} transformer layers")
     elif feature_extractor_type == "bert_pool":
         # BERT Pool: trigger lazy initialization (uses pretrained tokenizer)
         model.fit_tokenizer(train_texts)  # No-op, triggers init

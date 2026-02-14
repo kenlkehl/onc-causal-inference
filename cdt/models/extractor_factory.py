@@ -23,6 +23,8 @@ from .bert_pool_extractor import BertPoolExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
+from .conv_pool_extractor import DilatedConvPoolExtractor
+from .conv1d_transformer_hybrid_extractor import Conv1dTransformerHybridExtractor
 from .bert_cross_chunk_extractor import BertCrossChunkExtractor
 from .llm_extractor import LLMFeatureExtractor
 from ..config import normalize_feature_extractor_type
@@ -146,6 +148,39 @@ def create_feature_extractor(
     gru_pool_projection_dim: int = 128,
     gru_pool_max_vocab: int = 50000,
     gru_pool_min_word_freq: int = 2,
+    # Conv-Pool args (dilated convolution variant of GRU-Pool)
+    conv_pool_embedding_dim: int = 128,
+    conv_pool_conv_dim: int = 256,
+    conv_pool_kernel_size: int = 3,
+    conv_pool_num_blocks: int = 4,
+    conv_pool_dropout: float = 0.1,
+    conv_pool_max_chunks: int = 100,
+    conv_pool_chunk_size: int = 128,
+    conv_pool_chunk_overlap: int = 32,
+    conv_pool_transformer_layers: int = 2,
+    conv_pool_transformer_heads: int = 4,
+    conv_pool_transformer_dim: int = 256,
+    conv_pool_transformer_dropout: float = 0.1,
+    conv_pool_gated_attention_dim: int = 128,
+    conv_pool_projection_dim: int = 128,
+    conv_pool_max_vocab: int = 50000,
+    conv_pool_min_word_freq: int = 2,
+    # Conv1D Transformer Hybrid args (full-document dilated conv + stride downsample + transformer)
+    c1d_hybrid_embedding_dim: int = 128,
+    c1d_hybrid_conv_dim: int = 256,
+    c1d_hybrid_kernel_size: int = 3,
+    c1d_hybrid_num_blocks: int = 4,
+    c1d_hybrid_conv_dropout: float = 0.1,
+    c1d_hybrid_pool_stride: int = 2,
+    c1d_hybrid_max_length: int = 8192,
+    c1d_hybrid_transformer_layers: int = 2,
+    c1d_hybrid_transformer_heads: int = 4,
+    c1d_hybrid_transformer_dim: int = 256,
+    c1d_hybrid_transformer_dropout: float = 0.1,
+    c1d_hybrid_gated_attention_dim: int = 128,
+    c1d_hybrid_projection_dim: int = 128,
+    c1d_hybrid_max_vocab: int = 50000,
+    c1d_hybrid_min_word_freq: int = 2,
     # BERT Pool args
     bert_pool_sentence_model: str = "prajjwal1/bert-tiny",
     bert_pool_freeze_sentence_encoder: bool = False,
@@ -203,6 +238,7 @@ def create_feature_extractor(
             - "gated_mil_hierarchical": Gated MIL hierarchical extractor
             - "gru_transformer_mil": GRU-Transformer-MIL extractor
             - "gru_pool": GRU-Pool extractor
+            - "conv_pool": Dilated Conv Pool extractor (dilated conv + transformer + gated pooling)
             - "bert_pool": BERT Pool extractor (BERT [CLS] + transformer + gated pooling)
             - "llm": LLM feature extractor (decoder-only with random init)
         device: PyTorch device to use
@@ -476,6 +512,70 @@ def create_feature_extractor(
                    f"gated_attention_dim={gru_pool_gated_attention_dim}, projection_dim={gru_pool_projection_dim}")
         return extractor
 
+    elif normalized_type == "conv_pool":
+        extractor = DilatedConvPoolExtractor(
+            embedding_dim=conv_pool_embedding_dim,
+            conv_dim=conv_pool_conv_dim,
+            kernel_size=conv_pool_kernel_size,
+            num_blocks=conv_pool_num_blocks,
+            conv_dropout=conv_pool_dropout,
+            max_chunks=conv_pool_max_chunks,
+            chunk_size=conv_pool_chunk_size,
+            chunk_overlap=conv_pool_chunk_overlap,
+            transformer_layers=conv_pool_transformer_layers,
+            transformer_heads=conv_pool_transformer_heads,
+            transformer_dim=conv_pool_transformer_dim,
+            transformer_dropout=conv_pool_transformer_dropout,
+            gated_attention_dim=conv_pool_gated_attention_dim,
+            projection_dim=conv_pool_projection_dim,
+            max_vocab_size=conv_pool_max_vocab,
+            min_word_freq=conv_pool_min_word_freq,
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+            device=device
+        )
+        dilations = [2 ** i for i in range(conv_pool_num_blocks)]
+        logger.info(f"Created Dilated Conv Pool extractor: "
+                   f"conv_dim={conv_pool_conv_dim}, kernel_size={conv_pool_kernel_size}, "
+                   f"blocks={conv_pool_num_blocks}, dilations={dilations}, "
+                   f"{conv_pool_transformer_layers} transformer layers, "
+                   f"gated_attention_dim={conv_pool_gated_attention_dim}, projection_dim={conv_pool_projection_dim}")
+        return extractor
+
+    elif normalized_type == "conv1d_transformer_hybrid":
+        extractor = Conv1dTransformerHybridExtractor(
+            embedding_dim=c1d_hybrid_embedding_dim,
+            conv_dim=c1d_hybrid_conv_dim,
+            kernel_size=c1d_hybrid_kernel_size,
+            num_blocks=c1d_hybrid_num_blocks,
+            conv_dropout=c1d_hybrid_conv_dropout,
+            pool_stride=c1d_hybrid_pool_stride,
+            max_length=c1d_hybrid_max_length,
+            transformer_layers=c1d_hybrid_transformer_layers,
+            transformer_heads=c1d_hybrid_transformer_heads,
+            transformer_dim=c1d_hybrid_transformer_dim,
+            transformer_dropout=c1d_hybrid_transformer_dropout,
+            gated_attention_dim=c1d_hybrid_gated_attention_dim,
+            projection_dim=c1d_hybrid_projection_dim,
+            max_vocab_size=c1d_hybrid_max_vocab,
+            min_word_freq=c1d_hybrid_min_word_freq,
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+            device=device
+        )
+        total_ds = c1d_hybrid_pool_stride ** c1d_hybrid_num_blocks
+        logger.info(f"Created Conv1D Transformer Hybrid extractor: "
+                   f"conv_dim={c1d_hybrid_conv_dim}, kernel_size={c1d_hybrid_kernel_size}, "
+                   f"blocks={c1d_hybrid_num_blocks}, stride={c1d_hybrid_pool_stride}, "
+                   f"total_downsample={total_ds}x, max_length={c1d_hybrid_max_length}, "
+                   f"{c1d_hybrid_transformer_layers} transformer layers, "
+                   f"projection_dim={c1d_hybrid_projection_dim}")
+        return extractor
+
     elif normalized_type == "bert_cross_chunk":
         extractor = BertCrossChunkExtractor(
             sentence_encoder_model=bcc_sentence_model,
@@ -675,6 +775,39 @@ def create_feature_extractor_from_config(
         gru_pool_projection_dim=config.get('gru_pool_projection_dim', 128),
         gru_pool_max_vocab=config.get('gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=config.get('gru_pool_min_word_freq', 2),
+        # Conv-Pool args
+        conv_pool_embedding_dim=config.get('conv_pool_embedding_dim', 128),
+        conv_pool_conv_dim=config.get('conv_pool_conv_dim', 256),
+        conv_pool_kernel_size=config.get('conv_pool_kernel_size', 3),
+        conv_pool_num_blocks=config.get('conv_pool_num_blocks', 4),
+        conv_pool_dropout=config.get('conv_pool_dropout', 0.1),
+        conv_pool_max_chunks=config.get('conv_pool_max_chunks', 100),
+        conv_pool_chunk_size=config.get('conv_pool_chunk_size', 128),
+        conv_pool_chunk_overlap=config.get('conv_pool_chunk_overlap', 32),
+        conv_pool_transformer_layers=config.get('conv_pool_transformer_layers', 2),
+        conv_pool_transformer_heads=config.get('conv_pool_transformer_heads', 4),
+        conv_pool_transformer_dim=config.get('conv_pool_transformer_dim', 256),
+        conv_pool_transformer_dropout=config.get('conv_pool_transformer_dropout', 0.1),
+        conv_pool_gated_attention_dim=config.get('conv_pool_gated_attention_dim', 128),
+        conv_pool_projection_dim=config.get('conv_pool_projection_dim', 128),
+        conv_pool_max_vocab=config.get('conv_pool_max_vocab', 50000),
+        conv_pool_min_word_freq=config.get('conv_pool_min_word_freq', 2),
+        # Conv1D Transformer Hybrid args
+        c1d_hybrid_embedding_dim=config.get('c1d_hybrid_embedding_dim', 128),
+        c1d_hybrid_conv_dim=config.get('c1d_hybrid_conv_dim', 256),
+        c1d_hybrid_kernel_size=config.get('c1d_hybrid_kernel_size', 3),
+        c1d_hybrid_num_blocks=config.get('c1d_hybrid_num_blocks', 4),
+        c1d_hybrid_conv_dropout=config.get('c1d_hybrid_conv_dropout', 0.1),
+        c1d_hybrid_pool_stride=config.get('c1d_hybrid_pool_stride', 2),
+        c1d_hybrid_max_length=config.get('c1d_hybrid_max_length', 8192),
+        c1d_hybrid_transformer_layers=config.get('c1d_hybrid_transformer_layers', 2),
+        c1d_hybrid_transformer_heads=config.get('c1d_hybrid_transformer_heads', 4),
+        c1d_hybrid_transformer_dim=config.get('c1d_hybrid_transformer_dim', 256),
+        c1d_hybrid_transformer_dropout=config.get('c1d_hybrid_transformer_dropout', 0.1),
+        c1d_hybrid_gated_attention_dim=config.get('c1d_hybrid_gated_attention_dim', 128),
+        c1d_hybrid_projection_dim=config.get('c1d_hybrid_projection_dim', 128),
+        c1d_hybrid_max_vocab=config.get('c1d_hybrid_max_vocab', 50000),
+        c1d_hybrid_min_word_freq=config.get('c1d_hybrid_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=config.get('bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=config.get('bert_pool_freeze_sentence_encoder', False),

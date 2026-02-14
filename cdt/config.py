@@ -152,7 +152,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder",
     "hierarchical_transformer", "gated_mil_hierarchical", "gru_transformer_mil",
-    "gru_pool", "bert_pool", "bert_cross_chunk", or "llm".
+    "gru_pool", "conv_pool", "bert_pool", "bert_cross_chunk", or "llm".
 
     This handles variants like "modernbert" which should be treated as "bert".
 
@@ -161,8 +161,8 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 
     Returns:
         Normalized type: "cnn", "bert", "gru", "confounder", "hierarchical_transformer",
-        "gated_mil_hierarchical", "gru_transformer_mil", "gru_pool", "bert_pool",
-        "bert_cross_chunk", or "llm"
+        "gated_mil_hierarchical", "gru_transformer_mil", "gru_pool", "conv_pool",
+        "bert_pool", "bert_cross_chunk", or "llm"
     """
     if feature_type is None:
         return "cnn"
@@ -180,6 +180,14 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
     # Check for BERT Cross-Chunk extractor (token-level cross-chunk attention)
     if feature_type_lower in ("bert_cross_chunk", "cross_chunk", "cross_chunk_bert"):
         return "bert_cross_chunk"
+
+    # Check for Conv1D Transformer Hybrid extractor (full-document dilated conv + stride downsample + transformer)
+    if feature_type_lower in ("conv1d_transformer_hybrid", "c1d_hybrid", "conv1d_hybrid", "conv_transformer_hybrid"):
+        return "conv1d_transformer_hybrid"
+
+    # Check for Dilated Conv Pool extractor (dilated conv + transformer + gated attention pooling)
+    if feature_type_lower in ("conv_pool", "dilated_conv", "dilated_conv_pool", "tcn_pool"):
+        return "conv_pool"
 
     # Check for GRU-Pool extractor (BiGRU + transformer + gated attention pooling)
     if feature_type_lower in ("gru_pool", "gru_pool_transformer"):
@@ -411,6 +419,47 @@ class ModelArchitectureConfig:
     gru_pool_projection_dim: int = 128  # Final output dimension
     gru_pool_max_vocab: int = 50000  # Maximum vocabulary size
     gru_pool_min_word_freq: int = 2  # Minimum word frequency for vocabulary
+
+    # Dilated Conv Pool extractor (used when feature_extractor_type="conv_pool")
+    # Replaces BiGRU chunk encoding with dilated 1D convolutions, keeping the same
+    # chunking, transformer cross-chunk, and gated attention pooling as gru_pool.
+    # Fully parallelizable within chunks. Requires fit_tokenizer().
+    conv_pool_embedding_dim: int = 128  # Word embedding dimension
+    conv_pool_conv_dim: int = 256  # Conv channel dimension (output of each conv layer)
+    conv_pool_kernel_size: int = 3  # Kernel size for dilated convolutions
+    conv_pool_num_blocks: int = 4  # Number of dilated residual blocks (dilations: 1, 2, ..., 2^(N-1))
+    conv_pool_dropout: float = 0.1  # Dropout rate for conv blocks
+    conv_pool_max_chunks: int = 100  # Maximum chunks per document
+    conv_pool_chunk_size: int = 128  # Tokens per chunk
+    conv_pool_chunk_overlap: int = 32  # Overlapping tokens between chunks
+    conv_pool_transformer_layers: int = 2  # Number of transformer layers for cross-chunk processing
+    conv_pool_transformer_heads: int = 4  # Number of attention heads in transformer
+    conv_pool_transformer_dim: int = 256  # Hidden dimension for transformer layers
+    conv_pool_transformer_dropout: float = 0.1  # Dropout rate for transformer layers
+    conv_pool_gated_attention_dim: int = 128  # Hidden dimension for gated attention pooling
+    conv_pool_projection_dim: int = 128  # Final output dimension
+    conv_pool_max_vocab: int = 50000  # Maximum vocabulary size
+    conv_pool_min_word_freq: int = 2  # Minimum word frequency for vocabulary
+
+    # Conv1D Transformer Hybrid extractor (used when feature_extractor_type="conv1d_transformer_hybrid")
+    # Processes full documents without chunking: dilated conv blocks with stride-based
+    # downsampling reduce sequence length before transformer self-attention.
+    # Requires fit_tokenizer().
+    c1d_hybrid_embedding_dim: int = 128  # Word embedding dimension
+    c1d_hybrid_conv_dim: int = 256  # Conv channel dimension
+    c1d_hybrid_kernel_size: int = 3  # Dilated conv kernel size
+    c1d_hybrid_num_blocks: int = 4  # Number of dilated blocks (dilations 1,2,4,8)
+    c1d_hybrid_conv_dropout: float = 0.1  # Dropout rate for conv blocks
+    c1d_hybrid_pool_stride: int = 2  # Downsample factor per block (total: 2^4=16x)
+    c1d_hybrid_max_length: int = 8192  # Max document length in tokens
+    c1d_hybrid_transformer_layers: int = 2  # Number of transformer layers
+    c1d_hybrid_transformer_heads: int = 4  # Number of attention heads
+    c1d_hybrid_transformer_dim: int = 256  # Transformer hidden dimension
+    c1d_hybrid_transformer_dropout: float = 0.1  # Transformer dropout rate
+    c1d_hybrid_gated_attention_dim: int = 128  # Hidden dim for gated attention pooling
+    c1d_hybrid_projection_dim: int = 128  # Final output dimension
+    c1d_hybrid_max_vocab: int = 50000  # Maximum vocabulary size
+    c1d_hybrid_min_word_freq: int = 2  # Minimum word frequency for vocabulary
 
     # CLAM-style instance-level loss config (for GRU-Pool extractor)
     # CLAM (Lu et al., Nature BME 2021) supervises top-attended chunks with document labels

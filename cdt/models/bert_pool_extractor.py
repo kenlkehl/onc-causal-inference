@@ -4,7 +4,7 @@
 This module implements a hierarchical approach for extracting features from long
 clinical text that combines:
 
-1. Pretrained BERT [CLS] per chunk for chunk encoding (or random init)
+1. Pretrained BERT per chunk: [CLS] token + attention-pooled token embeddings (or random init)
 2. Standard transformer layers for cross-chunk context (chunks attend to each other)
 3. Gated attention pooling (tanh x sigmoid) for final document aggregation
 
@@ -18,7 +18,7 @@ Architecture:
             |
     Split into Overlapping Token Chunks (C chunks)
             |
-    BERT per Chunk -> [CLS] token (C x bert_dim)
+    BERT per Chunk -> [CLS] token + AttentionPooled tokens (C x 2*bert_dim)
             |
     Project to transformer_dim (C x transformer_dim)
             |
@@ -43,6 +43,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .chunking import split_into_chunks_hf
+from .gru_extractor import AttentionPooling
 from .gru_pool_extractor import GatedAttentionPooling
 from .hierarchical_transformer_extractor import InterpretableTransformerLayer
 from .numeric_features import NumericFeatureVector
@@ -61,9 +62,14 @@ class BertPoolExtractor(nn.Module):
     BERT + Transformer + Gated Attention Pooling feature extractor.
 
     Combines:
-    - Pretrained BERT [CLS] per chunk for chunk encoding
+    - Pretrained BERT [CLS] + attention-pooled tokens per chunk for chunk encoding
     - Transformer layers for cross-chunk context
     - Gated attention pooling for final document aggregation
+
+    Each chunk is represented by concatenating BERT's [CLS] token (global summary)
+    with a learned attention-pooled vector over all token hidden states (content-focused
+    weighted average). This gives the model both BERT's global summary and a
+    keyword-sensitive representation.
 
     This produces a single feature vector via gated attention pooling over
     transformer-processed chunk embeddings.
@@ -130,6 +136,7 @@ class BertPoolExtractor(nn.Module):
         self._sentence_encoder = None
         self._tokenizer = None
         self._sentence_dim = None
+        self._chunk_attention = None
         self._input_projection = None
         self._transformer_layer_modules = None
         self._gated_pooling = None
@@ -179,8 +186,14 @@ class BertPoolExtractor(nn.Module):
                 param.requires_grad = False
             logger.info("  Sentence encoder frozen")
 
-        # Input projection: sentence_dim -> transformer_dim
-        self._input_projection = nn.Linear(self._sentence_dim, self._transformer_dim).to(self._device)
+        # Attention pooling over token hidden states within each chunk
+        self._chunk_attention = AttentionPooling(
+            hidden_dim=self._sentence_dim,
+            attention_dim=self._sentence_dim
+        ).to(self._device)
+
+        # Input projection: [CLS] || attn_pooled -> transformer_dim
+        self._input_projection = nn.Linear(2 * self._sentence_dim, self._transformer_dim).to(self._device)
 
         # Positional encoding (sinusoidal)
         self._register_positional_encoding()
@@ -257,19 +270,25 @@ class BertPoolExtractor(nn.Module):
         """Return the transformer hidden dimension (chunk embedding dimension)."""
         return self._transformer_dim
 
-    def _encode_chunks_batch(self, chunks: List[str]) -> torch.Tensor:
+    def _encode_chunks_batch(
+        self, chunks: List[str]
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Encode chunks with BERT, returning [CLS] tokens.
+        Encode chunks with BERT, returning [CLS] tokens, token hidden states,
+        and the attention mask.
 
         Args:
             chunks: List of chunk strings
 
         Returns:
-            Tensor of shape (num_chunks, sentence_dim) containing [CLS] embeddings
+            cls_embeddings: (num_chunks, sentence_dim) [CLS] embeddings
+            token_hidden_states: (num_chunks, seq_len, sentence_dim) all token hidden states
+            attention_mask: (num_chunks, seq_len) 1=valid, 0=pad
         """
         if not chunks:
             self._ensure_initialized()
-            return torch.zeros(0, self._sentence_dim, device=self._device)
+            empty = torch.zeros(0, self._sentence_dim, device=self._device)
+            return empty, torch.zeros(0, 0, self._sentence_dim, device=self._device), torch.zeros(0, 0, device=self._device)
 
         encoded = self._tokenizer(
             chunks,
@@ -289,7 +308,8 @@ class BertPoolExtractor(nn.Module):
             )
 
         # [CLS] token at position 0
-        return outputs.last_hidden_state[:, 0, :]
+        cls_embeddings = outputs.last_hidden_state[:, 0, :]
+        return cls_embeddings, outputs.last_hidden_state, attention_mask
 
     def forward(self, texts: List[str]) -> torch.Tensor:
         """
@@ -317,37 +337,41 @@ class BertPoolExtractor(nn.Module):
                 chunks = [text[:500]]  # Fallback for short/malformed text
 
             # 2. Encode chunks with BERT
-            chunk_embeddings = self._encode_chunks_batch(chunks)  # (C, sentence_dim)
+            cls_embeddings, token_hidden_states, token_attn_mask = self._encode_chunks_batch(chunks)
 
-            if chunk_embeddings.size(0) == 0:
+            if cls_embeddings.size(0) == 0:
                 batch_outputs.append(
                     torch.zeros(self._projection_dim, device=self._device)
                 )
                 continue
 
-            # 3. Project to transformer dim
+            # 3. Attention-pool token hidden states and concatenate with [CLS]
+            attn_pooled = self._chunk_attention(token_hidden_states, token_attn_mask)  # (C, sentence_dim)
+            chunk_embeddings = torch.cat([cls_embeddings, attn_pooled], dim=1)  # (C, 2*sentence_dim)
+
+            # 4. Project to transformer dim
             chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, transformer_dim)
 
-            # 4. Add positional encoding
+            # 5. Add positional encoding
             num_chunks = chunk_embeddings.size(0)
             chunk_embeddings = chunk_embeddings + self._positional_encoding[:num_chunks].to(self._device)
 
-            # 5. Run through transformer layers
+            # 6. Run through transformer layers
             sequence = chunk_embeddings.unsqueeze(0)  # (1, C, transformer_dim)
             for layer in self._transformer_layer_modules:
                 sequence, _ = layer(sequence, return_attention=False)
 
-            # 6. Apply gated attention pooling
+            # 7. Apply gated attention pooling
             pooled, _ = self._gated_pooling(sequence.squeeze(0))  # (transformer_dim,)
 
-            # 6.5. Add numeric features if enabled
+            # 7.5. Add numeric features if enabled
             if self._numeric_features_enabled and self._numeric_feature_vector is not None:
                 numeric_feats = self._numeric_feature_vector([text])  # (1, numeric_dim)
                 pooled = self._numeric_merge(
                     torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
                 ).squeeze(0)
 
-            # 7. Output projection
+            # 8. Output projection
             output = self._output_projection(pooled)  # (projection_dim,)
             batch_outputs.append(output)
 
@@ -391,9 +415,9 @@ class BertPoolExtractor(nn.Module):
                 chunks = [text[:500]]
 
             # 2. Encode chunks with BERT
-            chunk_embeddings = self._encode_chunks_batch(chunks)  # (C, sentence_dim)
+            cls_embeddings, token_hidden_states, token_attn_mask = self._encode_chunks_batch(chunks)
 
-            if chunk_embeddings.size(0) == 0:
+            if cls_embeddings.size(0) == 0:
                 batch_outputs.append(
                     torch.zeros(self._projection_dim, device=self._device)
                 )
@@ -405,14 +429,18 @@ class BertPoolExtractor(nn.Module):
                 )
                 continue
 
-            # 3. Project to transformer dim
+            # 3. Attention-pool token hidden states and concatenate with [CLS]
+            attn_pooled = self._chunk_attention(token_hidden_states, token_attn_mask)  # (C, sentence_dim)
+            chunk_embeddings = torch.cat([cls_embeddings, attn_pooled], dim=1)  # (C, 2*sentence_dim)
+
+            # 4. Project to transformer dim
             chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, transformer_dim)
 
-            # 4. Add positional encoding
+            # 5. Add positional encoding
             num_chunks = chunk_embeddings.size(0)
             chunk_embeddings = chunk_embeddings + self._positional_encoding[:num_chunks].to(self._device)
 
-            # 5. Run through transformer layers
+            # 6. Run through transformer layers
             sequence = chunk_embeddings.unsqueeze(0)  # (1, C, transformer_dim)
             for layer in self._transformer_layer_modules:
                 sequence, _ = layer(sequence, return_attention=False)
@@ -420,17 +448,17 @@ class BertPoolExtractor(nn.Module):
             # Extract transformer-processed chunk embeddings (before pooling)
             transformer_chunk_embs = sequence.squeeze(0)  # (C, transformer_dim)
 
-            # 6. Apply gated attention pooling
+            # 7. Apply gated attention pooling
             pooled, attn_weights = self._gated_pooling(transformer_chunk_embs)  # (transformer_dim,), (C,)
 
-            # 6.5. Add numeric features if enabled
+            # 7.5. Add numeric features if enabled
             if self._numeric_features_enabled and self._numeric_feature_vector is not None:
                 numeric_feats = self._numeric_feature_vector([text])  # (1, numeric_dim)
                 pooled = self._numeric_merge(
                     torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
                 ).squeeze(0)
 
-            # 7. Output projection
+            # 8. Output projection
             output = self._output_projection(pooled)  # (projection_dim,)
             batch_outputs.append(output)
 
@@ -523,9 +551,9 @@ class BertPoolExtractor(nn.Module):
                     chunks = [text[:500]]
 
                 # Encode chunks
-                chunk_embeddings = self._encode_chunks_batch(chunks)
+                cls_embeddings, token_hidden_states, token_attn_mask = self._encode_chunks_batch(chunks)
 
-                if chunk_embeddings.size(0) == 0:
+                if cls_embeddings.size(0) == 0:
                     interpretations.append({
                         'num_chunks': 0,
                         'chunk_attention': [],
@@ -533,6 +561,8 @@ class BertPoolExtractor(nn.Module):
                     })
                     continue
 
+                attn_pooled = self._chunk_attention(token_hidden_states, token_attn_mask)
+                chunk_embeddings = torch.cat([cls_embeddings, attn_pooled], dim=1)
                 chunk_embeddings = self._input_projection(chunk_embeddings)
                 num_chunks = chunk_embeddings.size(0)
                 chunk_embeddings = chunk_embeddings + self._positional_encoding[:num_chunks].to(self._device)
@@ -592,6 +622,8 @@ class BertPoolExtractor(nn.Module):
 
         if self._sentence_encoder is not None:
             self._sentence_encoder = self._sentence_encoder.to(self._device)
+        if self._chunk_attention is not None:
+            self._chunk_attention = self._chunk_attention.to(self._device)
         if self._input_projection is not None:
             self._input_projection = self._input_projection.to(self._device)
         if self._transformer_layer_modules is not None:

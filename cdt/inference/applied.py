@@ -634,6 +634,39 @@ def _train_single_model(
         gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
         gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # Conv-Pool args
+        conv_pool_embedding_dim=getattr(arch_config, 'conv_pool_embedding_dim', 128),
+        conv_pool_conv_dim=getattr(arch_config, 'conv_pool_conv_dim', 256),
+        conv_pool_kernel_size=getattr(arch_config, 'conv_pool_kernel_size', 3),
+        conv_pool_num_blocks=getattr(arch_config, 'conv_pool_num_blocks', 4),
+        conv_pool_dropout=getattr(arch_config, 'conv_pool_dropout', 0.1),
+        conv_pool_max_chunks=getattr(arch_config, 'conv_pool_max_chunks', 100),
+        conv_pool_chunk_size=getattr(arch_config, 'conv_pool_chunk_size', 128),
+        conv_pool_chunk_overlap=getattr(arch_config, 'conv_pool_chunk_overlap', 32),
+        conv_pool_transformer_layers=getattr(arch_config, 'conv_pool_transformer_layers', 2),
+        conv_pool_transformer_heads=getattr(arch_config, 'conv_pool_transformer_heads', 4),
+        conv_pool_transformer_dim=getattr(arch_config, 'conv_pool_transformer_dim', 256),
+        conv_pool_transformer_dropout=getattr(arch_config, 'conv_pool_transformer_dropout', 0.1),
+        conv_pool_gated_attention_dim=getattr(arch_config, 'conv_pool_gated_attention_dim', 128),
+        conv_pool_projection_dim=getattr(arch_config, 'conv_pool_projection_dim', 128),
+        conv_pool_max_vocab=getattr(arch_config, 'conv_pool_max_vocab', 50000),
+        conv_pool_min_word_freq=getattr(arch_config, 'conv_pool_min_word_freq', 2),
+        # Conv1d-Transformer Hybrid args
+        c1d_hybrid_embedding_dim=getattr(arch_config, 'c1d_hybrid_embedding_dim', 128),
+        c1d_hybrid_conv_dim=getattr(arch_config, 'c1d_hybrid_conv_dim', 256),
+        c1d_hybrid_kernel_size=getattr(arch_config, 'c1d_hybrid_kernel_size', 3),
+        c1d_hybrid_num_blocks=getattr(arch_config, 'c1d_hybrid_num_blocks', 4),
+        c1d_hybrid_conv_dropout=getattr(arch_config, 'c1d_hybrid_conv_dropout', 0.1),
+        c1d_hybrid_pool_stride=getattr(arch_config, 'c1d_hybrid_pool_stride', 2),
+        c1d_hybrid_max_length=getattr(arch_config, 'c1d_hybrid_max_length', 8192),
+        c1d_hybrid_transformer_layers=getattr(arch_config, 'c1d_hybrid_transformer_layers', 2),
+        c1d_hybrid_transformer_heads=getattr(arch_config, 'c1d_hybrid_transformer_heads', 4),
+        c1d_hybrid_transformer_dim=getattr(arch_config, 'c1d_hybrid_transformer_dim', 256),
+        c1d_hybrid_transformer_dropout=getattr(arch_config, 'c1d_hybrid_transformer_dropout', 0.1),
+        c1d_hybrid_gated_attention_dim=getattr(arch_config, 'c1d_hybrid_gated_attention_dim', 128),
+        c1d_hybrid_projection_dim=getattr(arch_config, 'c1d_hybrid_projection_dim', 128),
+        c1d_hybrid_max_vocab=getattr(arch_config, 'c1d_hybrid_max_vocab', 50000),
+        c1d_hybrid_min_word_freq=getattr(arch_config, 'c1d_hybrid_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=getattr(arch_config, 'bert_pool_freeze_sentence_encoder', False),
@@ -761,6 +794,23 @@ def _train_single_model(
         logger.info(f"Using GRU-Pool feature extractor: "
                    f"GRU {getattr(arch_config, 'gru_pool_gru_hidden_dim', 128)}x{2 if getattr(arch_config, 'gru_pool_gru_bidirectional', True) else 1}, "
                    f"{getattr(arch_config, 'gru_pool_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "conv_pool":
+        # Conv-Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info("Using Dilated Conv Pool feature extractor")
+        logger.info(f"  Conv dim: {getattr(arch_config, 'conv_pool_conv_dim', 256)}, "
+                   f"kernel_size: {getattr(arch_config, 'conv_pool_kernel_size', 3)}, "
+                   f"blocks: {getattr(arch_config, 'conv_pool_num_blocks', 4)}, "
+                   f"{getattr(arch_config, 'conv_pool_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "conv1d_transformer_hybrid":
+        # Conv1d-Transformer Hybrid: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info("Using Conv1d-Transformer Hybrid feature extractor")
+        logger.info(f"  Conv dim: {getattr(arch_config, 'c1d_hybrid_conv_dim', 256)}, "
+                   f"kernel_size: {getattr(arch_config, 'c1d_hybrid_kernel_size', 3)}, "
+                   f"blocks: {getattr(arch_config, 'c1d_hybrid_num_blocks', 4)}, "
+                   f"max_length: {getattr(arch_config, 'c1d_hybrid_max_length', 8192)}, "
+                   f"{getattr(arch_config, 'c1d_hybrid_transformer_layers', 2)} transformer layers")
     elif feature_extractor_type == "bert_pool":
         # BERT Pool: trigger lazy initialization (uses pretrained tokenizer)
         model.fit_tokenizer(train_texts)  # No-op, triggers init

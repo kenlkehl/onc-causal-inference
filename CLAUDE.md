@@ -34,6 +34,7 @@ cdt/
 │   ├── gated_mil_hierarchical_extractor.py
 │   ├── gru_transformer_mil_extractor.py
 │   ├── gru_pool_extractor.py
+│   ├── conv_pool_extractor.py             # Dilated conv + transformer + gated pooling
 │   ├── dragonnet.py, uplift.py, rlearner.py, traditional_logreg.py  # Causal heads
 │   └── sparse_attention.py               # entmax, top-k attention
 ├── training/plasmode.py   # Plasmode simulation
@@ -59,6 +60,8 @@ synthetic_data/            # LLM-based synthetic data generation
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling (single vector) | Yes | Required |
+| `conv_pool` | Chunk dilated conv + transformer + gated attention pooling (single vector) | Yes | Required |
+| `conv1d_transformer_hybrid` | Full-document dilated conv + stride downsampling + transformer (no chunking) | Yes (8K) | Required |
 | `bert_pool` | Chunk BERT [CLS] + transformer + gated attention pooling | Yes | No |
 | `llm` | Decoder-only LLM (Qwen3) with last token embedding, random init or pretrained | Yes (32K) | No |
 
@@ -287,6 +290,52 @@ Requires `fit_tokenizer()` since it learns vocabulary from scratch.
 
 Interpretability: `interpret_attention()`, `get_attention_weights()`
 
+### Conv Pool (`conv_pool_extractor.py`)
+Drop-in replacement for GRU-Pool that swaps BiGRU chunk encoding with dilated 1D convolutions.
+Same chunking, transformer cross-chunk, and gated attention pooling. Fully parallelizable within chunks.
+
+| Stage | Component | Description |
+|-------|-----------|-------------|
+| Chunk encoding | Dilated conv stack + attention | Residual blocks with dilation 1,2,4,8 pool tokens |
+| Cross-chunk | Transformer | Adds positional info and cross-chunk context |
+| Aggregation | Gated attention pooling | Single document vector via tanh×sigmoid gating |
+
+Key params: `conv_pool_embedding_dim`, `conv_pool_conv_dim`, `conv_pool_kernel_size`,
+`conv_pool_num_blocks`, `conv_pool_transformer_layers`, `conv_pool_gated_attention_dim`,
+`conv_pool_chunk_size`
+
+Requires `fit_tokenizer()` since it learns vocabulary from scratch.
+
+Interpretability: `interpret_attention()`, `get_attention_weights()`
+
+### Conv1d-Transformer Hybrid (`conv1d_transformer_hybrid_extractor.py`)
+Processes full documents (up to 8192 tokens) without chunking. Uses dilated convolutions with
+learned stride-based downsampling that reduces sequence length by 2x per block. After 4 blocks,
+8192 tokens become 512 positions, making transformer self-attention practical over the whole
+document without artificial chunk boundaries.
+
+| Stage | Component | Description |
+|-------|-----------|-------------|
+| Embedding | Word embedding + projection | 128 → 256 dim |
+| Conv blocks | DilatedResidualBlock + StrideDownsample | 4 blocks, dilation 1,2,4,8, stride 2 |
+| Transformer | InterpretableTransformerLayer | Self-attention over downsampled positions |
+| Aggregation | GatedAttentionPooling | Single document vector via tanh×sigmoid gating |
+
+Key differences from `conv_pool`:
+- **No chunking**: Processes full document as a single sequence
+- **Stride downsampling**: Learned Conv1d(stride=2) reduces sequence length between blocks
+- **Cross-boundary context**: Convolutions see context across what would be chunk boundaries
+- **Batch processing**: All docs padded to same length (vs conv_pool's per-doc loop)
+
+Key params: `c1d_hybrid_embedding_dim`, `c1d_hybrid_conv_dim`, `c1d_hybrid_kernel_size`,
+`c1d_hybrid_num_blocks`, `c1d_hybrid_pool_stride`, `c1d_hybrid_max_length`,
+`c1d_hybrid_transformer_layers`, `c1d_hybrid_transformer_heads`, `c1d_hybrid_transformer_dim`,
+`c1d_hybrid_gated_attention_dim`, `c1d_hybrid_projection_dim`
+
+Requires `fit_tokenizer()` since it learns vocabulary from scratch.
+
+Interpretability: `interpret_attention()`, `get_attention_weights()`
+
 ### BERT Pool (`bert_pool_extractor.py`)
 BERT [CLS] per chunk + transformer cross-chunk context + gated attention pooling.
 Like `hierarchical_transformer` but with gated pooling instead of [POOL] token aggregation,
@@ -361,7 +410,7 @@ adds magnitude-aware numeric featurization as a parallel channel to all extracto
 | Strategy | Used By | Method |
 |----------|---------|--------|
 | `NumericEmbedding` (position-aligned) | `cnn`, `gru` | Added to word embeddings at token positions |
-| `NumericFeatureVector` (document-level) | `bert`, `llm`, `gru_pool`, `bert_pool`, `bert_cross_chunk`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `confounder` | Aggregate histogram merged before output projection |
+| `NumericFeatureVector` (document-level) | `bert`, `llm`, `gru_pool`, `conv_pool`, `conv1d_transformer_hybrid`, `bert_pool`, `bert_cross_chunk`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `confounder` | Aggregate histogram merged before output projection |
 
 ### Config Parameters
 
@@ -483,6 +532,8 @@ the top-B attended chunks with document-level labels.
 | Extractor | Instance Embedding Dim | Attention Aggregation |
 |-----------|----------------------|----------------------|
 | `gru_pool` | `transformer_dim` (256) | Gated attention weights |
+| `conv_pool` | `transformer_dim` (256) | Gated attention weights |
+| `conv1d_transformer_hybrid` | `transformer_dim` (256) | Gated attention weights |
 | `bert_pool` | `transformer_dim` (256) | Gated attention weights |
 | `bert_cross_chunk` | `cross_chunk_dim` (256) | Gated attention weights |
 | `hierarchical_transformer` | `transformer_dim` (256) | [POOL] token attention to chunks |
@@ -765,7 +816,7 @@ output_dir/
 | Main model | `cdt/models/causal_text.py` |
 | Causal forest model | `cdt/models/causal_text_forest.py`, `cdt/models/causal_forest_head.py` |
 | Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
-| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `bert_pool_extractor.py`, `bert_cross_chunk_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `llm_extractor.py` |
+| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `bert_pool_extractor.py`, `bert_cross_chunk_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `conv_pool_extractor.py`, `conv1d_transformer_hybrid_extractor.py`, `llm_extractor.py` |
 | Numeric features | `cdt/models/numeric_features.py` |
 | Explicit confounders | `cdt/extraction/explicit_confounders.py`, `cdt/extraction/cache.py`, `cdt/models/explicit_confounder_featurizer.py` |
 | Text chunking | `cdt/models/chunking.py` |
@@ -818,8 +869,8 @@ When adding a new feature extractor type, update ALL of the following files:
 ## Quick Reference
 
 - **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale)
-- **Tokenizer**: Required for `cnn`, `gru`, `confounder` with GRU mode, `gru_transformer_mil`, `gru_pool`
-- **Long docs**: Use `confounder`, `hierarchical_transformer`, `bert_pool`, `bert_cross_chunk`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, or `llm`
+- **Tokenizer**: Required for `cnn`, `gru`, `confounder` with GRU mode, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `conv1d_transformer_hybrid`
+- **Long docs**: Use `confounder`, `hierarchical_transformer`, `bert_pool`, `bert_cross_chunk`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `conv1d_transformer_hybrid`, or `llm`
 - **Interpretability**: `interpret_filters()` (CNN), `interpret_attention()` (others)
 - **R-Learner vs DragonNet**: R-Learner for heterogeneous treatment effects; DragonNet for general use
 - **LLM extractor**: Random init, pretrained tokenizer, up to 32K context, use small batch sizes

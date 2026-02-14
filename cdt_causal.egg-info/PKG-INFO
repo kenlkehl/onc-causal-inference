@@ -116,11 +116,14 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | Type | Description | Long docs | fit_tokenizer |
 |------|-------------|-----------|---------------|
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling | Yes | Required |
+| `conv_pool` | Chunk dilated conv + transformer + gated attention pooling | Yes | Required |
+| `conv1d_transformer_hybrid` | Full-document dilated conv + stride downsampling + transformer (no chunking) | Yes (8K) | Required |
+| `bert_pool` | Chunk BERT [CLS] + transformer + gated attention pooling | Yes | No |
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
 | `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
-| `llm` | Decoder-only LLM (Qwen3) with random init, last token embedding | Yes (32K) | No |
+| `llm` | Decoder-only LLM (Qwen3) with random init or pretrained, last token embedding | Yes (32K) | No |
 | `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
 | `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
 | `gru` | BiGRU + attention | Yes | Required |
@@ -248,6 +251,32 @@ Long Clinical Text → Token-based Chunking → BiGRU per Chunk
 
 Key parameters: `gru_pool_chunk_size`, `gru_pool_transformer_layers`, `gru_pool_gated_attention_dim`
 
+### Conv Pool (Dilated Convolutions)
+
+Drop-in replacement for GRU-Pool that replaces BiGRU chunk encoding with a stack of dilated 1D convolutions. Uses exponentially increasing dilation rates (1, 2, 4, 8) for multi-scale pattern detection within each chunk. Fully parallelizable unlike sequential GRU.
+
+```
+Long Clinical Text → Token-based Chunking → Dilated Conv Stack per Chunk
+    → Transformer Cross-Chunk Context → Gated Attention Pooling
+    → Single Document Vector → Causal Head
+```
+
+Key parameters: `conv_pool_conv_dim`, `conv_pool_kernel_size`, `conv_pool_num_blocks`, `conv_pool_chunk_size`
+
+### Conv1d-Transformer Hybrid (Full-Document)
+
+Eliminates chunking entirely by processing full documents (up to 8192 tokens) through dilated convolutions with learned stride-based downsampling. Each block reduces sequence length by 2x, so after 4 blocks, 8192 tokens become 512 positions—making transformer self-attention practical over the whole document without artificial chunk boundaries.
+
+```
+Raw Text → Word Embedding → Projection
+    → [Dilated Conv Block + Stride Downsample (2x)] × 4
+    → 8192 → 4096 → 2048 → 1024 → 512 positions
+    → Transformer Self-Attention → Gated Attention Pooling
+    → Single Document Vector → Causal Head
+```
+
+Key parameters: `c1d_hybrid_conv_dim`, `c1d_hybrid_kernel_size`, `c1d_hybrid_num_blocks`, `c1d_hybrid_max_length`, `c1d_hybrid_pool_stride`, `c1d_hybrid_transformer_layers`
+
 ### GRU-Transformer-MIL
 
 Similar to GRU-Pool but uses K confounder queries with task-specific weighting (propensity, tau, outcome can weight confounders differently).
@@ -259,6 +288,18 @@ Key parameters: `gru_mil_num_confounders`, `gru_mil_chunk_size`
 Uses pretrained BERT for chunk encoding with gated MIL attention and K confounder queries.
 
 Key parameters: `gated_mil_num_confounders`, `gated_mil_sentence_model`
+
+### BERT Pool
+
+Like Hierarchical Transformer but with gated attention pooling instead of [POOL] token, BERT unfrozen by default, and optional random weight initialization.
+
+```
+Long Clinical Text → Token-based Chunking → BERT [CLS] per Chunk
+    → Transformer Cross-Chunk Context → Gated Attention Pooling
+    → Single Document Vector → Causal Head
+```
+
+Key parameters: `bert_pool_sentence_model`, `bert_pool_use_pretrained`, `bert_pool_transformer_layers`, `bert_pool_gated_attention_dim`
 
 ### Hierarchical Transformer
 

@@ -1,31 +1,31 @@
 #!/usr/bin/env python
-"""Causal forest grid experiment with BERT Pool extractor.
+"""Causal forest grid experiment with Dilated Conv Pool extractor.
 
-Tests the bert_pool feature extractor (BERT [CLS] + transformer + gated attention
-pooling) in the causal forest pipeline. Mirrors the structure of
-run_causal_forest_sample_explicit_confounders_experiment.py but:
-  - Uses bert_pool instead of gru_pool
-  - Adds use_pretrained (True/False for bert-tiny) to the hyperparameter grid
-  - Uses a linear LR scheduler with warmup (better for BERT-based models)
-  - No fit_tokenizer() needed (pretrained HF tokenizer)
+Tests the conv_pool feature extractor (dilated 1D convolutions + transformer +
+gated attention pooling) in the causal forest pipeline. Mirrors the structure of
+run_causal_forest_bert_pooler.py but:
+  - Uses conv_pool instead of bert_pool
+  - Adds conv_dim, num_blocks, kernel_size to the hyperparameter grid
+  - Requires fit_tokenizer() (learns vocabulary from scratch)
+  - No pretrained weights (trains from scratch)
 
 Output is compatible with analyze_results.py.
 
 Usage:
     # Run full grid with both GPUs
-    python oracle_experiment_scripts/run_causal_forest_bert_pooler.py \
-        --output-dir ../pcori_experiments/causal_text_forest_bert_pool \
+    python oracle_experiment_scripts/run_causal_forest_dilated_cnn_pooler.py \
+        --output-dir ../pcori_experiments/causal_text_forest_conv_pool \
         --devices cuda:2 cuda:3 --workers-per-device 25
 
     # Run subset for testing
-    python oracle_experiment_scripts/run_causal_forest_bert_pooler.py \
-        --output-dir ../pcori_experiments/causal_text_forest_bert_pool \
+    python oracle_experiment_scripts/run_causal_forest_dilated_cnn_pooler.py \
+        --output-dir ../pcori_experiments/causal_text_forest_conv_pool \
         --devices cuda:0 \
         --max-experiments 10
 
     # Resume from checkpoint
-    python oracle_experiment_scripts/run_causal_forest_bert_pooler.py \
-        --output-dir ../pcori_experiments/causal_text_forest_bert_pool \
+    python oracle_experiment_scripts/run_causal_forest_dilated_cnn_pooler.py \
+        --output-dir ../pcori_experiments/causal_text_forest_conv_pool \
         --devices cuda:0 cuda:1 --workers-per-device 20 \
         --resume
 """
@@ -53,7 +53,6 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score, mean_squared_error, mean_absolute_error
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from transformers import get_linear_schedule_with_warmup
 
 # Add project root to path
 import sys
@@ -87,24 +86,27 @@ class ExperimentConfig:
     sampled_confounder_names: List[str] = field(default_factory=list)
     confounder_sample_seed: int = 0
 
-    # BERT Pool hyperparameters
-    use_pretrained: bool = True
+    # Conv Pool hyperparameters (grid search)
+    conv_dim: int = 256
+    num_blocks: int = 4
+    kernel_size: int = 3
     transformer_layers: int = 2
     transformer_heads: int = 4
     transformer_dim: int = 256
     projection_dim: int = 128
 
     # Fixed parameters
-    sentence_model: str = "prajjwal1/bert-tiny"
-    freeze_sentence_encoder: bool = False
+    embedding_dim: int = 128
+    conv_dropout: float = 0.1
     gated_attention_dim: int = 128
     chunk_size: int = 128
     chunk_overlap: int = 32
     max_chunks: int = 100
+    max_vocab: int = 50000
+    min_word_freq: int = 2
     epochs: int = 30
     batch_size: int = 8
     learning_rate: float = 1e-4
-    warmup_fraction: float = 0.1
     n_folds: int = 5
     cf_n_estimators: int = 200
     cf_min_samples_leaf: int = 5
@@ -315,21 +317,25 @@ def run_single_experiment(
         train_df = df.iloc[train_idx]
         test_df = df.iloc[test_idx]
 
-        # Create model with bert_pool extractor
+        # Create model with conv_pool extractor
         model = CausalTextForest(
-            feature_extractor_type="bert_pool",
-            bert_pool_sentence_model=config.sentence_model,
-            bert_pool_freeze_sentence_encoder=config.freeze_sentence_encoder,
-            bert_pool_use_pretrained=config.use_pretrained,
-            bert_pool_max_chunks=config.max_chunks,
-            bert_pool_chunk_size=config.chunk_size,
-            bert_pool_chunk_overlap=config.chunk_overlap,
-            bert_pool_transformer_layers=config.transformer_layers,
-            bert_pool_transformer_heads=config.transformer_heads,
-            bert_pool_transformer_dim=config.transformer_dim,
-            bert_pool_transformer_dropout=0.1,
-            bert_pool_gated_attention_dim=config.gated_attention_dim,
-            bert_pool_projection_dim=config.projection_dim,
+            feature_extractor_type="conv_pool",
+            conv_pool_embedding_dim=config.embedding_dim,
+            conv_pool_conv_dim=config.conv_dim,
+            conv_pool_kernel_size=config.kernel_size,
+            conv_pool_num_blocks=config.num_blocks,
+            conv_pool_dropout=config.conv_dropout,
+            conv_pool_max_chunks=config.max_chunks,
+            conv_pool_chunk_size=config.chunk_size,
+            conv_pool_chunk_overlap=config.chunk_overlap,
+            conv_pool_transformer_layers=config.transformer_layers,
+            conv_pool_transformer_heads=config.transformer_heads,
+            conv_pool_transformer_dim=config.transformer_dim,
+            conv_pool_transformer_dropout=0.1,
+            conv_pool_gated_attention_dim=config.gated_attention_dim,
+            conv_pool_projection_dim=config.projection_dim,
+            conv_pool_max_vocab=config.max_vocab,
+            conv_pool_min_word_freq=config.min_word_freq,
             representation_dim=128,
             hidden_dim=64,
             dropout=0.2,
@@ -347,8 +353,7 @@ def run_single_experiment(
             device=str(device)
         )
 
-        # No fit_tokenizer needed for bert_pool (uses pretrained HF tokenizer)
-        # Just trigger lazy initialization
+        # fit_tokenizer is required for conv_pool (learns vocabulary from scratch)
         train_texts = train_df[text_column].tolist()
         model.fit_tokenizer(train_texts)
 
@@ -379,21 +384,22 @@ def run_single_experiment(
         )
 
         train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_text_batch, num_workers=12
+            train_dataset, batch_size=batch_size, shuffle=True, collate_fn=collate_text_batch
         )
         test_loader = DataLoader(
             test_dataset, batch_size=batch_size, shuffle=False, collate_fn=collate_text_batch
         )
 
-        # Training with linear LR scheduler (warmup + linear decay)
+        # Training with AdamW + linear LR decay
         optimizer = torch.optim.AdamW(model.parameters(), lr=config.learning_rate, weight_decay=0.01)
 
+        # Linear decay schedule (no warmup needed for from-scratch training)
         num_training_steps = config.epochs * len(train_loader)
-        num_warmup_steps = int(num_training_steps * config.warmup_fraction)
-        scheduler = get_linear_schedule_with_warmup(
+        scheduler = torch.optim.lr_scheduler.LinearLR(
             optimizer,
-            num_warmup_steps=num_warmup_steps,
-            num_training_steps=num_training_steps
+            start_factor=1.0,
+            end_factor=0.1,
+            total_iters=num_training_steps
         )
 
         best_val_loss = float('inf')
@@ -421,7 +427,7 @@ def run_single_experiment(
                 losses['loss'].backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
-                scheduler.step()  # Step per batch for linear schedule
+                scheduler.step()
                 train_loss += losses['loss'].item()
 
             # Validation
@@ -552,8 +558,10 @@ def generate_experiment_grid(
     clam_options = [False, True]
     explicit_confounder_options = [False, True]
 
-    # BERT Pool hyperparameter grid
-    use_pretrained_options = [True, False]
+    # Conv Pool hyperparameter grid
+    conv_dim_options = [128, 256]
+    num_blocks_options = [2, 4]
+    kernel_size_options = [3, 5]
     transformer_layers_options = [1, 2, 4]
     transformer_heads_options = [2, 4, 8]
     transformer_dim_options = [128, 256]
@@ -573,10 +581,10 @@ def generate_experiment_grid(
     for (dataset_path, dataset_name), rlearner_mode, clam, explicit_conf in itertools.product(
         datasets, rlearner_modes, clam_options, explicit_confounder_options
     ):
-        for pretrained, trans_layers, trans_heads, trans_dim, proj_dim in itertools.product(
-            use_pretrained_options, transformer_layers_options,
-            transformer_heads_options, transformer_dim_options,
-            projection_dim_options
+        for c_dim, n_blocks, k_size, trans_layers, trans_heads, trans_dim, proj_dim in itertools.product(
+            conv_dim_options, num_blocks_options, kernel_size_options,
+            transformer_layers_options, transformer_heads_options,
+            transformer_dim_options, projection_dim_options
         ):
             # Ensure transformer_dim is divisible by transformer_heads
             if trans_dim % trans_heads != 0:
@@ -591,8 +599,9 @@ def generate_experiment_grid(
                     continue
 
                 # Deterministic seed from the other grid params
-                seed_str = (f"{dataset_name}_{rlearner_mode}_{clam}_{pretrained}_"
-                           f"{trans_layers}_{trans_heads}_{trans_dim}_{proj_dim}_{sample_counter}")
+                seed_str = (f"{dataset_name}_{rlearner_mode}_{clam}_{c_dim}_"
+                           f"{n_blocks}_{k_size}_{trans_layers}_{trans_heads}_"
+                           f"{trans_dim}_{proj_dim}_{sample_counter}")
                 sample_seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
                 rng = random.Random(sample_seed)
 
@@ -612,7 +621,9 @@ def generate_experiment_grid(
                 use_explicit_confounders=explicit_conf,
                 sampled_confounder_names=sampled_names,
                 confounder_sample_seed=sample_seed,
-                use_pretrained=pretrained,
+                conv_dim=c_dim,
+                num_blocks=n_blocks,
+                kernel_size=k_size,
                 transformer_layers=trans_layers,
                 transformer_heads=trans_heads,
                 transformer_dim=trans_dim,
@@ -662,10 +673,10 @@ def worker_thread(
                     conf_info = ""
                     if config.sampled_confounder_names:
                         conf_info = f" conf={len(config.sampled_confounder_names)}"
-                    pretrained_info = "pre" if config.use_pretrained else "rand"
+                    arch_info = f"d{config.conv_dim}b{config.num_blocks}k{config.kernel_size}"
                     progress_bar.set_postfix_str(
                         f"ITE corr: {metrics.get('ite_corr', 'N/A'):.3f} "
-                        f"[{pretrained_info}]{conf_info}"
+                        f"[{arch_info}]{conf_info}"
                     )
 
         except Exception as e:
@@ -689,12 +700,12 @@ def worker_thread(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Causal forest grid experiment with BERT Pool extractor"
+        description="Causal forest grid experiment with Dilated Conv Pool extractor"
     )
     parser.add_argument(
         "--output-dir", "-o",
         type=str,
-        default="../pcori_experiments/causal_text_forest_bert_pool",
+        default="../pcori_experiments/causal_text_forest_conv_pool",
         help="Output directory for results"
     )
     parser.add_argument(
@@ -767,12 +778,12 @@ def main():
 
     logger.info(f"Generated {len(configs)} experiment configurations")
 
-    # Log pretrained vs random init distribution
-    pretrained_counts = {}
+    # Log architecture distribution
+    arch_counts = {}
     for c in configs:
-        key = "pretrained" if c.use_pretrained else "random_init"
-        pretrained_counts[key] = pretrained_counts.get(key, 0) + 1
-    logger.info(f"BERT init distribution: {pretrained_counts}")
+        key = f"d{c.conv_dim}_b{c.num_blocks}_k{c.kernel_size}"
+        arch_counts[key] = arch_counts.get(key, 0) + 1
+    logger.info(f"Architecture distribution: {arch_counts}")
 
     # Log confounder sampling summary
     conf_counts = {}
@@ -857,7 +868,7 @@ def main():
         # Summary statistics
         group_cols = [
             'dataset_name', 'rlearner_mode', 'clam_enabled',
-            'use_explicit_confounders', 'use_pretrained',
+            'use_explicit_confounders',
         ]
         # Add num_sampled_confounders if present
         if 'num_sampled_confounders' in results_df.columns:
@@ -880,19 +891,21 @@ def main():
         if 'ite_corr' in results_df.columns:
             best = results_df.nlargest(5, 'ite_corr')[
                 ['dataset_name', 'rlearner_mode', 'clam_enabled',
-                 'use_explicit_confounders', 'use_pretrained',
+                 'use_explicit_confounders',
+                 'conv_dim', 'num_blocks', 'kernel_size',
                  'transformer_layers', 'transformer_dim', 'projection_dim',
                  'ite_corr', 'ate_bias']
             ]
             logger.info(f"\nTop 5 configurations by ITE correlation:\n{best.to_string()}")
 
-        # Print pretrained vs random init comparison
-        if 'use_pretrained' in results_df.columns:
-            pretrained_summary = results_df.groupby('use_pretrained').agg({
+        # Print architecture comparison
+        if 'conv_dim' in results_df.columns:
+            arch_summary = results_df.groupby(['conv_dim', 'num_blocks', 'kernel_size']).agg({
                 'ite_corr': ['mean', 'std', 'count'],
                 'ate_bias': ['mean', 'std'],
             }).round(4)
-            logger.info(f"\nPretrained vs Random Init:\n{pretrained_summary.to_string()}")
+            logger.info(f"\nArchitecture comparison (conv_dim x num_blocks x kernel_size):\n"
+                       f"{arch_summary.to_string()}")
     else:
         logger.warning("No successful experiments completed")
 
@@ -906,10 +919,9 @@ def main():
         'epochs': args.epochs,
         'n_folds': args.n_folds,
         'text_column': 'clinical_text',
-        'feature_extractor': 'bert_pool',
-        'sentence_model': 'prajjwal1/bert-tiny',
-        'lr_scheduler': 'linear_with_warmup',
-        'pretrained_distribution': pretrained_counts,
+        'feature_extractor': 'conv_pool',
+        'lr_scheduler': 'linear_decay',
+        'architecture_distribution': arch_counts,
         'confounder_sample_distribution': conf_counts,
     }
     with open(output_dir / "experiment_metadata.json", 'w') as f:
