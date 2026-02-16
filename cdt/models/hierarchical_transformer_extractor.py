@@ -53,7 +53,8 @@ class InterpretableTransformerLayer(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        return_attention: bool = False
+        return_attention: bool = False,
+        key_padding_mask: Optional[torch.Tensor] = None
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Forward pass with optional attention weight extraction.
@@ -61,13 +62,18 @@ class InterpretableTransformerLayer(nn.Module):
         Args:
             x: Input tensor of shape (batch, seq_len, d_model)
             return_attention: Whether to return attention weights
+            key_padding_mask: Optional mask of shape (batch, seq_len) where True means
+                IGNORE that position (follows nn.MultiheadAttention convention).
+                Use (attention_mask == 0) to convert from 1=valid/0=pad convention.
 
         Returns:
             output: Transformed tensor of shape (batch, seq_len, d_model)
             attn_weights: Optional attention weights of shape (batch, seq_len, seq_len)
         """
         # Self-attention with optional weights
-        attn_output, attn_weights = self.self_attn(x, x, x, need_weights=return_attention)
+        attn_output, attn_weights = self.self_attn(
+            x, x, x, need_weights=return_attention, key_padding_mask=key_padding_mask
+        )
         x = self.norm1(x + self.dropout(attn_output))
 
         # Feed-forward
@@ -284,9 +290,134 @@ class HierarchicalTransformerExtractor(nn.Module):
         # [CLS] token at position 0
         return outputs.last_hidden_state[:, 0, :]
 
-    def forward(self, texts: List[str]) -> torch.Tensor:
+    def _encode_and_pool_subbatched(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        max_bert_batch: int = 64
+    ) -> torch.Tensor:
         """
-        Extract features from texts.
+        Encode pre-tokenized chunks through BERT -> [CLS] extraction -> input_projection.
+
+        Sub-batches through BERT to avoid OOM when total_chunks is large.
+
+        Args:
+            input_ids: (total_chunks, seq_len) pre-tokenized input IDs
+            attention_mask: (total_chunks, seq_len) attention mask (1=valid, 0=pad)
+            max_bert_batch: Maximum chunks per BERT forward pass
+
+        Returns:
+            (total_chunks, transformer_dim) projected chunk embeddings
+        """
+        total = input_ids.size(0)
+        all_projected = []
+
+        for start in range(0, total, max_bert_batch):
+            end = min(start + max_bert_batch, total)
+            batch_ids = input_ids[start:end].to(self._device)
+            batch_mask = attention_mask[start:end].to(self._device)
+
+            with torch.set_grad_enabled(not self._freeze):
+                outputs = self._sentence_encoder(
+                    input_ids=batch_ids,
+                    attention_mask=batch_mask
+                )
+
+            # [CLS] token at position 0
+            cls_emb = outputs.last_hidden_state[:, 0, :]  # (sub_B, sentence_dim)
+            projected = self._input_projection(cls_emb)  # (sub_B, transformer_dim)
+            all_projected.append(projected)
+
+        return torch.cat(all_projected, dim=0)  # (total_chunks, transformer_dim)
+
+    def _pad_chunks_to_batch(
+        self,
+        chunk_embeddings: torch.Tensor,
+        doc_chunk_counts: List[int]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Reshape flat chunk embeddings into padded batch tensor with [POOL] token prepended.
+
+        For each document, prepends self._pool_token before the document's chunks.
+        Adds positional encoding to the full sequence ([POOL] + chunks).
+
+        Args:
+            chunk_embeddings: (total_chunks, transformer_dim) flat tensor
+            doc_chunk_counts: List[int] of per-document chunk counts
+
+        Returns:
+            padded: (B, max_C+1, transformer_dim) padded batch tensor (position 0 = [POOL])
+            mask: (B, max_C+1) attention mask (1=valid, 0=pad)
+        """
+        B = len(doc_chunk_counts)
+        max_C = max(doc_chunk_counts)
+        D = chunk_embeddings.size(1)
+
+        # +1 for [POOL] token at position 0
+        padded = torch.zeros(B, max_C + 1, D, device=self._device)
+        mask = torch.zeros(B, max_C + 1, device=self._device)
+
+        offset = 0
+        for i, count in enumerate(doc_chunk_counts):
+            # Position 0: [POOL] token
+            padded[i, 0] = self._pool_token.squeeze(0)
+            mask[i, 0] = 1.0
+
+            # Positions 1..count: chunk embeddings
+            padded[i, 1:count + 1] = chunk_embeddings[offset:offset + count]
+            mask[i, 1:count + 1] = 1.0
+
+            # Add positional encoding to the full sequence ([POOL] + chunks)
+            seq_len = count + 1
+            padded[i, :seq_len] = padded[i, :seq_len] + self._positional_encoding[:seq_len].to(self._device)
+
+            offset += count
+
+        return padded, mask
+
+    def _forward_preprocessed(self, batch: Dict[str, Any]) -> torch.Tensor:
+        """
+        GPU-only forward pass on pre-tokenized batch from HFChunkCollator.
+
+        Args:
+            batch: Dict with 'chunk_input_ids', 'chunk_attention_mask', 'doc_chunk_counts', 'texts'
+
+        Returns:
+            Feature tensor of shape (B, projection_dim)
+        """
+        input_ids = batch['chunk_input_ids']        # (total_chunks, seq_len)
+        attn_mask = batch['chunk_attention_mask']    # (total_chunks, seq_len)
+        doc_chunk_counts = batch['doc_chunk_counts']  # List[int], len B
+        texts = batch['texts']
+
+        # 1. Encode all chunks through BERT -> [CLS] -> input_projection (sub-batched)
+        chunk_embeddings = self._encode_and_pool_subbatched(input_ids, attn_mask)
+
+        # 2. Pad into (B, max_C+1, transformer_dim) with [POOL] prepended + positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 3. Run through transformer layers with key_padding_mask
+        key_padding_mask = (mask == 0)  # True = IGNORE for nn.MultiheadAttention
+        for layer in self._transformer_layers:
+            padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
+
+        # 4. Extract [POOL] output at position 0 for each document
+        pool_outputs = padded[:, 0, :]  # (B, transformer_dim)
+
+        # 5. Add numeric features if enabled
+        if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)  # (B, numeric_dim)
+            pool_outputs = self._numeric_merge(
+                torch.cat([pool_outputs, numeric_feats], dim=1)
+            )
+
+        # 6. Output projection
+        features = self._output_projection(pool_outputs)  # (B, projection_dim)
+        return features
+
+    def _forward_from_texts(self, texts: List[str]) -> torch.Tensor:
+        """
+        Legacy forward path: chunk + tokenize + encode per document.
 
         Args:
             texts: List of document texts
@@ -294,8 +425,6 @@ class HierarchicalTransformerExtractor(nn.Module):
         Returns:
             Feature tensor of shape (batch_size, projection_dim)
         """
-        self._ensure_initialized()
-        batch_size = len(texts)
         batch_outputs = []
 
         for text in texts:
@@ -348,16 +477,104 @@ class HierarchicalTransformerExtractor(nn.Module):
 
         return features
 
-    def forward_with_instances(
+    def forward(self, texts_or_batch) -> torch.Tensor:
+        """
+        Extract features from texts or preprocessed batch.
+
+        Accepts either:
+        - List[str]: Raw text strings (legacy path, chunks + tokenizes internally)
+        - Dict with 'chunk_input_ids': Preprocessed batch from HFChunkCollator
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            Feature tensor of shape (batch_size, projection_dim)
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_input_ids' in texts_or_batch:
+            return self._forward_preprocessed(texts_or_batch)
+        return self._forward_from_texts(texts_or_batch)
+
+    def _forward_with_instances_preprocessed(
+        self,
+        batch: Dict[str, Any]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Batched forward pass returning chunk-level info for CLAM-style instance loss.
+
+        Uses pre-tokenized batch from HFChunkCollator. Returns [POOL] attention weights
+        from the last transformer layer to chunk positions.
+
+        Args:
+            batch: Preprocessed batch dict from HFChunkCollator
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - [POOL] attention weights per doc
+        """
+        input_ids = batch['chunk_input_ids']
+        attn_mask = batch['chunk_attention_mask']
+        doc_chunk_counts = batch['doc_chunk_counts']
+        texts = batch['texts']
+
+        # 1. Encode all chunks through BERT -> [CLS] -> input_projection (sub-batched)
+        chunk_embeddings = self._encode_and_pool_subbatched(input_ids, attn_mask)
+
+        # 2. Pad into (B, max_C+1, transformer_dim) with [POOL] prepended + positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 3. Run through transformer layers with key_padding_mask
+        #    Collect attention from last layer for interpretability
+        key_padding_mask = (mask == 0)
+        attn_weights = None
+        for layer in self._transformer_layers:
+            padded, attn_weights = layer(padded, return_attention=True, key_padding_mask=key_padding_mask)
+
+        # 4. Extract [POOL] output at position 0 and split per-doc
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        for i, count in enumerate(doc_chunk_counts):
+            # [POOL] output for this doc
+            pool_output = padded[i, 0, :]  # (transformer_dim,)
+
+            # Chunk embeddings at positions 1..count (after transformer)
+            transformer_chunk_embs = padded[i, 1:count + 1, :]  # (C_i, transformer_dim)
+
+            # [POOL] attention to chunks from last layer
+            # attn_weights shape: (B, seq_len, seq_len)
+            # Row 0 = attention FROM [POOL], columns 1:count+1 = TO chunks
+            if attn_weights is not None:
+                pool_attention = attn_weights[i, 0, 1:count + 1]  # (C_i,)
+                pool_attention = pool_attention / (pool_attention.sum() + 1e-9)
+            else:
+                pool_attention = torch.ones(count, device=self._device) / count
+
+            # Numeric features
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([texts[i]])  # (1, numeric_dim)
+                pool_output = self._numeric_merge(
+                    torch.cat([pool_output.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
+
+            output = self._output_projection(pool_output.unsqueeze(0)).squeeze(0)  # (projection_dim,)
+            batch_outputs.append(output)
+            chunk_embeddings_list.append(transformer_chunk_embs)
+            attention_weights_list.append(pool_attention)
+
+        doc_features = torch.stack(batch_outputs)  # (B, projection_dim)
+        return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def _forward_with_instances_from_texts(
         self,
         texts: List[str]
     ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
         """
-        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
-
-        This method returns transformer-processed chunk embeddings (before output projection)
-        and the [POOL] token attention weights to chunks, enabling instance-level supervision
-        on top-attended chunks.
+        Legacy forward_with_instances path from raw text strings.
 
         Args:
             texts: List of document texts
@@ -367,7 +584,6 @@ class HierarchicalTransformerExtractor(nn.Module):
             chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - [POOL] attention weights per doc
         """
-        self._ensure_initialized()
         batch_outputs = []
         chunk_embeddings_list = []
         attention_weights_list = []
@@ -446,6 +662,33 @@ class HierarchicalTransformerExtractor(nn.Module):
         doc_features = torch.stack(batch_outputs)  # (B, projection_dim)
 
         return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def forward_with_instances(
+        self,
+        texts_or_batch
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        Accepts either List[str] or preprocessed batch dict.
+
+        This method returns transformer-processed chunk embeddings (before output projection)
+        and the [POOL] token attention weights to chunks, enabling instance-level supervision
+        on top-attended chunks.
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - [POOL] attention weights per doc
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_input_ids' in texts_or_batch:
+            return self._forward_with_instances_preprocessed(texts_or_batch)
+        return self._forward_with_instances_from_texts(texts_or_batch)
 
     def init_extractor(self, texts: List[str]) -> 'HierarchicalTransformerExtractor':
         """

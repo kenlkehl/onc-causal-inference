@@ -214,6 +214,23 @@ class CausalText(nn.Module):
         c1d_hybrid_projection_dim: int = 128,
         c1d_hybrid_max_vocab: int = 50000,
         c1d_hybrid_min_word_freq: int = 2,
+        # Transformer Pool args (learned tokenizer + token transformer + chunk transformer + gated pooling)
+        tp_embedding_dim: int = 128,
+        tp_token_transformer_layers: int = 2,
+        tp_token_transformer_heads: int = 4,
+        tp_token_transformer_dim: int = 256,
+        tp_token_transformer_dropout: float = 0.1,
+        tp_chunk_transformer_layers: int = 2,
+        tp_chunk_transformer_heads: int = 4,
+        tp_chunk_transformer_dim: int = 256,
+        tp_chunk_transformer_dropout: float = 0.1,
+        tp_gated_attention_dim: int = 128,
+        tp_projection_dim: int = 128,
+        tp_chunk_size: int = 128,
+        tp_chunk_overlap: int = 32,
+        tp_max_chunks: int = 100,
+        tp_max_vocab: int = 50000,
+        tp_min_word_freq: int = 2,
         # BERT Pool args
         bert_pool_sentence_model: str = "prajjwal1/bert-tiny",
         bert_pool_freeze_sentence_encoder: bool = False,
@@ -464,6 +481,22 @@ class CausalText(nn.Module):
             'c1d_hybrid_projection_dim': c1d_hybrid_projection_dim,
             'c1d_hybrid_max_vocab': c1d_hybrid_max_vocab,
             'c1d_hybrid_min_word_freq': c1d_hybrid_min_word_freq,
+            'tp_embedding_dim': tp_embedding_dim,
+            'tp_token_transformer_layers': tp_token_transformer_layers,
+            'tp_token_transformer_heads': tp_token_transformer_heads,
+            'tp_token_transformer_dim': tp_token_transformer_dim,
+            'tp_token_transformer_dropout': tp_token_transformer_dropout,
+            'tp_chunk_transformer_layers': tp_chunk_transformer_layers,
+            'tp_chunk_transformer_heads': tp_chunk_transformer_heads,
+            'tp_chunk_transformer_dim': tp_chunk_transformer_dim,
+            'tp_chunk_transformer_dropout': tp_chunk_transformer_dropout,
+            'tp_gated_attention_dim': tp_gated_attention_dim,
+            'tp_projection_dim': tp_projection_dim,
+            'tp_chunk_size': tp_chunk_size,
+            'tp_chunk_overlap': tp_chunk_overlap,
+            'tp_max_chunks': tp_max_chunks,
+            'tp_max_vocab': tp_max_vocab,
+            'tp_min_word_freq': tp_min_word_freq,
             'bert_pool_sentence_model': bert_pool_sentence_model,
             'bert_pool_freeze_sentence_encoder': bert_pool_freeze_sentence_encoder,
             'bert_pool_use_pretrained': bert_pool_use_pretrained,
@@ -678,6 +711,23 @@ class CausalText(nn.Module):
             c1d_hybrid_projection_dim=c1d_hybrid_projection_dim,
             c1d_hybrid_max_vocab=c1d_hybrid_max_vocab,
             c1d_hybrid_min_word_freq=c1d_hybrid_min_word_freq,
+            # Transformer Pool args
+            tp_embedding_dim=tp_embedding_dim,
+            tp_token_transformer_layers=tp_token_transformer_layers,
+            tp_token_transformer_heads=tp_token_transformer_heads,
+            tp_token_transformer_dim=tp_token_transformer_dim,
+            tp_token_transformer_dropout=tp_token_transformer_dropout,
+            tp_chunk_transformer_layers=tp_chunk_transformer_layers,
+            tp_chunk_transformer_heads=tp_chunk_transformer_heads,
+            tp_chunk_transformer_dim=tp_chunk_transformer_dim,
+            tp_chunk_transformer_dropout=tp_chunk_transformer_dropout,
+            tp_gated_attention_dim=tp_gated_attention_dim,
+            tp_projection_dim=tp_projection_dim,
+            tp_chunk_size=tp_chunk_size,
+            tp_chunk_overlap=tp_chunk_overlap,
+            tp_max_chunks=tp_max_chunks,
+            tp_max_vocab=tp_max_vocab,
+            tp_min_word_freq=tp_min_word_freq,
             # BERT Pool args
             bert_pool_sentence_model=bert_pool_sentence_model,
             bert_pool_freeze_sentence_encoder=bert_pool_freeze_sentence_encoder,
@@ -812,6 +862,7 @@ class CausalText(nn.Module):
             "gru_pool": gru_pool_transformer_dim,
             "conv_pool": conv_pool_transformer_dim,
             "conv1d_transformer_hybrid": c1d_hybrid_transformer_dim,
+            "transformer_pool": tp_chunk_transformer_dim,
             "bert_pool": bert_pool_transformer_dim,
             "hierarchical_transformer": hier_transformer_dim,
             "gated_mil_hierarchical": None,  # Needs lazy initialization (sentence_dim from BERT)
@@ -1021,6 +1072,23 @@ class CausalText(nn.Module):
                 conv_pool_projection_dim=conv_pool_projection_dim,
                 conv_pool_max_vocab=conv_pool_max_vocab,
                 conv_pool_min_word_freq=conv_pool_min_word_freq,
+                # Transformer Pool args
+                tp_embedding_dim=tp_embedding_dim,
+                tp_token_transformer_layers=tp_token_transformer_layers,
+                tp_token_transformer_heads=tp_token_transformer_heads,
+                tp_token_transformer_dim=tp_token_transformer_dim,
+                tp_token_transformer_dropout=tp_token_transformer_dropout,
+                tp_chunk_transformer_layers=tp_chunk_transformer_layers,
+                tp_chunk_transformer_heads=tp_chunk_transformer_heads,
+                tp_chunk_transformer_dim=tp_chunk_transformer_dim,
+                tp_chunk_transformer_dropout=tp_chunk_transformer_dropout,
+                tp_gated_attention_dim=tp_gated_attention_dim,
+                tp_projection_dim=tp_projection_dim,
+                tp_chunk_size=tp_chunk_size,
+                tp_chunk_overlap=tp_chunk_overlap,
+                tp_max_chunks=tp_max_chunks,
+                tp_max_vocab=tp_max_vocab,
+                tp_min_word_freq=tp_min_word_freq,
                 # BERT Pool args
                 bert_pool_sentence_model=bert_pool_sentence_model,
                 bert_pool_freeze_sentence_encoder=bert_pool_freeze_sentence_encoder,
@@ -1096,6 +1164,13 @@ class CausalText(nn.Module):
         logger.info(f"  Feature extractor: {self.feature_extractor_type}")
         logger.info(f"  Feature extractor output: {input_dim}")
         logger.info(f"  Device: {self._device}")
+
+    @staticmethod
+    def _get_extractor_input(batch, texts):
+        """Return preprocessed batch if available, otherwise raw texts."""
+        if 'chunk_input_ids' in batch or 'chunk_token_ids' in batch:
+            return batch
+        return texts
 
     def forward(
         self,
@@ -1231,6 +1306,7 @@ class CausalText(nn.Module):
         outcomes = batch['outcome']  # (batch,)
         auxiliary_features = batch.get('auxiliary_features', None)
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing if enabled
         if label_smoothing > 0:
@@ -1243,9 +1319,9 @@ class CausalText(nn.Module):
         # Extract features
         # Use forward_with_instances when CLAM is active to avoid double forward pass
         if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
-            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(extractor_input)
         else:
-            features = self.feature_extractor(texts)
+            features = self.feature_extractor(extractor_input)
             _clam_chunk_embs = None
             _clam_attn_weights = None
 
@@ -1425,6 +1501,7 @@ class CausalText(nn.Module):
         outcomes = batch['outcome']  # (batch,)
         auxiliary_features = batch.get('auxiliary_features', None)
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing if enabled
         if label_smoothing > 0:
@@ -1443,9 +1520,9 @@ class CausalText(nn.Module):
             # Nuisance path: extract features for e(X) and m(X)
             # Use forward_with_instances when CLAM is active to avoid double forward pass
             if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
-                nuisance_features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+                nuisance_features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(extractor_input)
             else:
-                nuisance_features = self.feature_extractor(texts)
+                nuisance_features = self.feature_extractor(extractor_input)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
 
@@ -1475,7 +1552,7 @@ class CausalText(nn.Module):
             m_logit, _, t_logit, phi = self.net(nuisance_features)
 
             # Effect path: extract features for τ(X)
-            effect_features = self.effect_feature_extractor(texts)
+            effect_features = self.effect_feature_extractor(extractor_input)
 
             # τ(X) from separate effect MLP
             tau = self.effect_mlp(effect_features)
@@ -1524,9 +1601,9 @@ class CausalText(nn.Module):
             # Extract features
             # Use forward_with_instances when CLAM is active to avoid double forward pass
             if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
-                features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+                features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(extractor_input)
             else:
-                features = self.feature_extractor(texts)
+                features = self.feature_extractor(extractor_input)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
 
@@ -1740,6 +1817,7 @@ class CausalText(nn.Module):
         outcomes = batch['outcome']  # (batch,)
         auxiliary_features = batch.get('auxiliary_features', None)
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing if enabled
         if label_smoothing > 0:
@@ -1758,9 +1836,9 @@ class CausalText(nn.Module):
             # Nuisance path: extract features for e(X) and Y0(X)
             # Use forward_with_instances when CLAM is active to avoid double forward pass
             if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
-                nuisance_features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+                nuisance_features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(extractor_input)
             else:
-                nuisance_features = self.feature_extractor(texts)
+                nuisance_features = self.feature_extractor(extractor_input)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
 
@@ -1791,7 +1869,7 @@ class CausalText(nn.Module):
             y0_logit, _, t_logit, phi = self.net(nuisance_features)
 
             # Effect path: extract features for τ(X)
-            effect_features = self.effect_feature_extractor(texts)
+            effect_features = self.effect_feature_extractor(extractor_input)
 
             # τ(X) from separate effect MLP
             tau_logit = self.effect_mlp(effect_features)
@@ -1824,9 +1902,9 @@ class CausalText(nn.Module):
             # Extract features
             # Use forward_with_instances when CLAM is active to avoid double forward pass
             if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
-                features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+                features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(extractor_input)
             else:
-                features = self.feature_extractor(texts)
+                features = self.feature_extractor(extractor_input)
                 _clam_chunk_embs = None
                 _clam_attn_weights = None
 
@@ -2021,6 +2099,7 @@ class CausalText(nn.Module):
         outcomes = batch['outcome']  # (batch,)
         auxiliary_features = batch.get('auxiliary_features', None)
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing if enabled
         if label_smoothing > 0:
@@ -2033,9 +2112,9 @@ class CausalText(nn.Module):
         # Extract features
         # Use forward_with_instances when CLAM is active to avoid double forward pass
         if self.clam_enabled and self.instance_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
-            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(extractor_input)
         else:
-            features = self.feature_extractor(texts)
+            features = self.feature_extractor(extractor_input)
             _clam_chunk_embs = None
             _clam_attn_weights = None
 
@@ -2196,6 +2275,7 @@ class CausalText(nn.Module):
         treatments = batch['treatment']  # (batch,)
         outcomes = batch['outcome']  # (batch,)
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing if enabled
         if label_smoothing > 0:
@@ -2206,7 +2286,7 @@ class CausalText(nn.Module):
             outcomes_smooth = outcomes
 
         # Extract features
-        features = self.feature_extractor(texts)
+        features = self.feature_extractor(extractor_input)
 
         # Intra-batch contrastive loss (on raw extractor features)
         contrastive_loss = torch.tensor(0.0, device=self._device)
@@ -2349,7 +2429,7 @@ class CausalText(nn.Module):
 
     def predict(
         self,
-        texts: List[str],
+        texts_or_batch,
         auxiliary_features: Optional[torch.Tensor] = None,
         explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
     ) -> Dict[str, torch.Tensor]:
@@ -2357,15 +2437,26 @@ class CausalText(nn.Module):
         Make predictions for inference.
 
         Args:
-            texts: List of text strings
+            texts_or_batch: List of text strings or preprocessed batch dict from DataLoader
             auxiliary_features: Optional tensor of auxiliary features (batch, auxiliary_dim)
-            explicit_confounder_values: Optional list of dicts with explicit confounder values
+            explicit_confounder_values: Optional list of dicts with explicit confounder values.
+                If texts_or_batch is a batch dict, confounder values are extracted from it
+                automatically (unless explicitly overridden).
 
         Returns:
             Dictionary with prediction outputs
         """
         with torch.no_grad():
-            features = self.feature_extractor(texts)
+            if isinstance(texts_or_batch, dict):
+                texts = texts_or_batch['texts']
+                extractor_input = self._get_extractor_input(texts_or_batch, texts)
+                if explicit_confounder_values is None:
+                    explicit_confounder_values = texts_or_batch.get('explicit_confounder_values', None)
+            else:
+                texts = texts_or_batch
+                extractor_input = texts
+
+            features = self.feature_extractor(extractor_input)
 
             # Concatenate auxiliary features if provided
             if self.auxiliary_projection is not None and auxiliary_features is not None:
@@ -2410,7 +2501,7 @@ class CausalText(nn.Module):
                     y0_logit, _, t_logit, final_common_layer = self.net(features)
 
                     # Get τ from effect extractor
-                    effect_features = self.effect_feature_extractor(texts)
+                    effect_features = self.effect_feature_extractor(extractor_input)
                     tau_logit = self.effect_mlp(effect_features)
 
                     y1_logit = y0_logit + tau_logit
@@ -2429,7 +2520,7 @@ class CausalText(nn.Module):
                     m_logit, _, t_logit, final_common_layer = self.net(features)
 
                     # Get τ from effect extractor
-                    effect_features = self.effect_feature_extractor(texts)
+                    effect_features = self.effect_feature_extractor(extractor_input)
                     tau = self.effect_mlp(effect_features)
 
                     m_prob = torch.sigmoid(m_logit).squeeze(-1)  # E[Y|X]
@@ -2490,21 +2581,29 @@ class CausalText(nn.Module):
 
     def get_features(
         self,
-        texts: List[str],
+        texts_or_batch,
         explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
     ) -> torch.Tensor:
         """
         Extract feature representations from texts.
 
         Args:
-            texts: List of text strings
+            texts_or_batch: List of text strings or preprocessed batch dict from DataLoader
             explicit_confounder_values: Optional list of dicts with explicit confounder values
 
         Returns:
             Feature tensor: (batch, output_dim)
         """
         with torch.no_grad():
-            features = self.feature_extractor(texts)
+            if isinstance(texts_or_batch, dict):
+                texts = texts_or_batch['texts']
+                extractor_input = self._get_extractor_input(texts_or_batch, texts)
+                if explicit_confounder_values is None:
+                    explicit_confounder_values = texts_or_batch.get('explicit_confounder_values', None)
+            else:
+                extractor_input = texts_or_batch
+
+            features = self.feature_extractor(extractor_input)
 
             # Concatenate explicit confounder features if provided
             if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:

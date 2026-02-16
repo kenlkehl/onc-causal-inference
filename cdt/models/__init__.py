@@ -18,6 +18,7 @@ from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor, GatedAttentionPooling
 from .conv_pool_extractor import DilatedConvPoolExtractor
 from .conv1d_transformer_hybrid_extractor import Conv1dTransformerHybridExtractor
+from .transformer_pool_extractor import TransformerPoolExtractor
 from .bert_cross_chunk_extractor import BertCrossChunkExtractor
 from .llm_extractor import LLMFeatureExtractor
 from .gated_mil_attention import GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling
@@ -61,6 +62,7 @@ __all__ = [
     'GatedAttentionPooling',
     'DilatedConvPoolExtractor',
     'Conv1dTransformerHybridExtractor',
+    'TransformerPoolExtractor',
     'BertCrossChunkExtractor',
     'LLMFeatureExtractor',
     'GatedMILAttention',

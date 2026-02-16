@@ -165,6 +165,23 @@ class CausalTextForest(nn.Module):
         c1d_hybrid_projection_dim: int = 128,
         c1d_hybrid_max_vocab: int = 50000,
         c1d_hybrid_min_word_freq: int = 2,
+        # Transformer Pool args (learned tokenizer + token transformer + chunk transformer + gated pooling)
+        tp_embedding_dim: int = 128,
+        tp_token_transformer_layers: int = 2,
+        tp_token_transformer_heads: int = 4,
+        tp_token_transformer_dim: int = 256,
+        tp_token_transformer_dropout: float = 0.1,
+        tp_chunk_transformer_layers: int = 2,
+        tp_chunk_transformer_heads: int = 4,
+        tp_chunk_transformer_dim: int = 256,
+        tp_chunk_transformer_dropout: float = 0.1,
+        tp_gated_attention_dim: int = 128,
+        tp_projection_dim: int = 128,
+        tp_chunk_size: int = 128,
+        tp_chunk_overlap: int = 32,
+        tp_max_chunks: int = 100,
+        tp_max_vocab: int = 50000,
+        tp_min_word_freq: int = 2,
         # BERT Pool args
         bert_pool_sentence_model: str = "prajjwal1/bert-tiny",
         bert_pool_freeze_sentence_encoder: bool = False,
@@ -362,6 +379,22 @@ class CausalTextForest(nn.Module):
             'c1d_hybrid_projection_dim': c1d_hybrid_projection_dim,
             'c1d_hybrid_max_vocab': c1d_hybrid_max_vocab,
             'c1d_hybrid_min_word_freq': c1d_hybrid_min_word_freq,
+            'tp_embedding_dim': tp_embedding_dim,
+            'tp_token_transformer_layers': tp_token_transformer_layers,
+            'tp_token_transformer_heads': tp_token_transformer_heads,
+            'tp_token_transformer_dim': tp_token_transformer_dim,
+            'tp_token_transformer_dropout': tp_token_transformer_dropout,
+            'tp_chunk_transformer_layers': tp_chunk_transformer_layers,
+            'tp_chunk_transformer_heads': tp_chunk_transformer_heads,
+            'tp_chunk_transformer_dim': tp_chunk_transformer_dim,
+            'tp_chunk_transformer_dropout': tp_chunk_transformer_dropout,
+            'tp_gated_attention_dim': tp_gated_attention_dim,
+            'tp_projection_dim': tp_projection_dim,
+            'tp_chunk_size': tp_chunk_size,
+            'tp_chunk_overlap': tp_chunk_overlap,
+            'tp_max_chunks': tp_max_chunks,
+            'tp_max_vocab': tp_max_vocab,
+            'tp_min_word_freq': tp_min_word_freq,
             'bert_pool_sentence_model': bert_pool_sentence_model,
             'bert_pool_freeze_sentence_encoder': bert_pool_freeze_sentence_encoder,
             'bert_pool_use_pretrained': bert_pool_use_pretrained,
@@ -557,6 +590,23 @@ class CausalTextForest(nn.Module):
             c1d_hybrid_projection_dim=c1d_hybrid_projection_dim,
             c1d_hybrid_max_vocab=c1d_hybrid_max_vocab,
             c1d_hybrid_min_word_freq=c1d_hybrid_min_word_freq,
+            # Transformer Pool args
+            tp_embedding_dim=tp_embedding_dim,
+            tp_token_transformer_layers=tp_token_transformer_layers,
+            tp_token_transformer_heads=tp_token_transformer_heads,
+            tp_token_transformer_dim=tp_token_transformer_dim,
+            tp_token_transformer_dropout=tp_token_transformer_dropout,
+            tp_chunk_transformer_layers=tp_chunk_transformer_layers,
+            tp_chunk_transformer_heads=tp_chunk_transformer_heads,
+            tp_chunk_transformer_dim=tp_chunk_transformer_dim,
+            tp_chunk_transformer_dropout=tp_chunk_transformer_dropout,
+            tp_gated_attention_dim=tp_gated_attention_dim,
+            tp_projection_dim=tp_projection_dim,
+            tp_chunk_size=tp_chunk_size,
+            tp_chunk_overlap=tp_chunk_overlap,
+            tp_max_chunks=tp_max_chunks,
+            tp_max_vocab=tp_max_vocab,
+            tp_min_word_freq=tp_min_word_freq,
             bert_pool_sentence_model=bert_pool_sentence_model,
             bert_pool_freeze_sentence_encoder=bert_pool_freeze_sentence_encoder,
             bert_pool_use_pretrained=bert_pool_use_pretrained,
@@ -702,6 +752,23 @@ class CausalTextForest(nn.Module):
                     conv_pool_projection_dim=conv_pool_projection_dim,
                     conv_pool_max_vocab=conv_pool_max_vocab,
                     conv_pool_min_word_freq=conv_pool_min_word_freq,
+                    # Transformer Pool args
+                    tp_embedding_dim=tp_embedding_dim,
+                    tp_token_transformer_layers=tp_token_transformer_layers,
+                    tp_token_transformer_heads=tp_token_transformer_heads,
+                    tp_token_transformer_dim=tp_token_transformer_dim,
+                    tp_token_transformer_dropout=tp_token_transformer_dropout,
+                    tp_chunk_transformer_layers=tp_chunk_transformer_layers,
+                    tp_chunk_transformer_heads=tp_chunk_transformer_heads,
+                    tp_chunk_transformer_dim=tp_chunk_transformer_dim,
+                    tp_chunk_transformer_dropout=tp_chunk_transformer_dropout,
+                    tp_gated_attention_dim=tp_gated_attention_dim,
+                    tp_projection_dim=tp_projection_dim,
+                    tp_chunk_size=tp_chunk_size,
+                    tp_chunk_overlap=tp_chunk_overlap,
+                    tp_max_chunks=tp_max_chunks,
+                    tp_max_vocab=tp_max_vocab,
+                    tp_min_word_freq=tp_min_word_freq,
                     llm_model_name=llm_model_name,
                     llm_max_length=llm_max_length,
                     llm_projection_dim=llm_projection_dim,
@@ -761,6 +828,7 @@ class CausalTextForest(nn.Module):
             "gru_pool": gru_pool_transformer_dim,
             "conv_pool": conv_pool_transformer_dim,
             "conv1d_transformer_hybrid": c1d_hybrid_transformer_dim,
+            "transformer_pool": tp_chunk_transformer_dim,
             "bert_cross_chunk": bcc_cross_chunk_dim,
             "hierarchical_transformer": hier_transformer_dim,
             "gated_mil_hierarchical": None,  # Needs lazy init
@@ -835,16 +903,23 @@ class CausalTextForest(nn.Module):
         logger.info(f"  Feature dim: {input_dim}")
         logger.info(f"  Causal forest: {cf_n_estimators} trees, honest={cf_honest}")
 
+    @staticmethod
+    def _get_extractor_input(batch, texts):
+        """Return preprocessed batch if available, otherwise raw texts."""
+        if 'chunk_input_ids' in batch or 'chunk_token_ids' in batch:
+            return batch
+        return texts
+
     def forward(
         self,
-        texts: List[str],
+        texts_or_batch,
         explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through neural components.
 
         Args:
-            texts: List of text strings
+            texts_or_batch: List of text strings or preprocessed batch dict from DataLoader
             explicit_confounder_values: Optional list of dicts with explicit confounder values
 
         Returns:
@@ -852,7 +927,15 @@ class CausalTextForest(nn.Module):
             propensity_logit: Propensity prediction (batch, 1)
             outcome_logit: Outcome prediction (batch, 1)
         """
-        features = self.feature_extractor(texts)
+        if isinstance(texts_or_batch, dict):
+            texts = texts_or_batch['texts']
+            extractor_input = self._get_extractor_input(texts_or_batch, texts)
+            if explicit_confounder_values is None:
+                explicit_confounder_values = texts_or_batch.get('explicit_confounder_values', None)
+        else:
+            extractor_input = texts_or_batch
+
+        features = self.feature_extractor(extractor_input)
 
         # Concatenate explicit confounder features if provided
         if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
@@ -896,6 +979,7 @@ class CausalTextForest(nn.Module):
         treatments = batch['treatment']
         outcomes = batch['outcome']
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing
         if label_smoothing > 0:
@@ -908,9 +992,9 @@ class CausalTextForest(nn.Module):
         # Extract features from text
         # Use forward_with_instances when CLAM is active to avoid double forward pass
         if self.clam_enabled and self.instance_propensity_head is not None and hasattr(self.feature_extractor, 'forward_with_instances'):
-            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(texts)
+            features, _clam_chunk_embs, _clam_attn_weights = self.feature_extractor.forward_with_instances(extractor_input)
         else:
-            features = self.feature_extractor(texts)
+            features = self.feature_extractor(extractor_input)
             _clam_chunk_embs = None
             _clam_attn_weights = None
 
@@ -955,7 +1039,7 @@ class CausalTextForest(nn.Module):
                 # - Effect extractor (self.effect_feature_extractor) + effect_mlp -> τ(X)
 
                 # Effect path: extract features for τ(X) using separate extractor
-                effect_features = self.effect_feature_extractor(texts)
+                effect_features = self.effect_feature_extractor(extractor_input)
 
                 # Compute τ(X) from effect MLP
                 tau = self.effect_mlp(effect_features)
@@ -1078,7 +1162,7 @@ class CausalTextForest(nn.Module):
 
     def extract_features(
         self,
-        texts: List[str],
+        texts_or_loader,
         batch_size: int = 32,
         explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -1090,21 +1174,25 @@ class CausalTextForest(nn.Module):
         and outcome predictions still come from the nuisance extractor.
 
         Args:
-            texts: List of all text strings
-            batch_size: Batch size for processing
+            texts_or_loader: List of all text strings, or a DataLoader yielding batch dicts
+            batch_size: Batch size for processing (only used when texts_or_loader is a list)
             explicit_confounder_values: Optional list of dicts with confounder values.
                 If provided and explicit_confounder_specs is set, raw confounder features
-                are concatenated to neural features.
+                are concatenated to neural features. Ignored when using DataLoader
+                (confounder values come from batch dicts).
 
         Returns:
             features: Feature matrix (n_samples, feature_dim + confounder_dim)
             propensity: Propensity predictions (n_samples,)
             outcome_pred: Outcome predictions (n_samples,)
         """
+        from torch.utils.data import DataLoader
+
         self.eval()
         all_text_features = []
         all_propensity = []
         all_outcome = []
+        all_conf_values = []
 
         # Determine which extractor to use for features
         # In dual mode, use effect extractor (optimized for τ)
@@ -1114,38 +1202,60 @@ class CausalTextForest(nn.Module):
             self.effect_feature_extractor is not None
         )
 
-        with torch.no_grad():
-            for i in range(0, len(texts), batch_size):
-                batch_texts = texts[i:i + batch_size]
+        if isinstance(texts_or_loader, DataLoader):
+            # DataLoader path: iterate over preprocessed batches
+            with torch.no_grad():
+                for batch in texts_or_loader:
+                    texts = batch['texts']
+                    extractor_input = self._get_extractor_input(batch, texts)
+                    batch_conf_values = batch.get('explicit_confounder_values', None)
 
-                # Get batch slice of confounder values if provided
-                batch_conf_values = None
-                if explicit_confounder_values is not None:
-                    batch_conf_values = explicit_confounder_values[i:i + batch_size]
+                    if use_effect_extractor:
+                        text_features = self.effect_feature_extractor(extractor_input)
+                    else:
+                        text_features = self.feature_extractor(extractor_input)
+                    all_text_features.append(text_features.cpu().numpy())
 
-                # Extract text features for causal forest input
-                # In dual mode: use effect extractor (learned specifically for τ)
-                # In single mode: use nuisance extractor (feature_extractor)
-                if use_effect_extractor:
-                    text_features = self.effect_feature_extractor(batch_texts)
-                else:
-                    text_features = self.feature_extractor(batch_texts)
-                all_text_features.append(text_features.cpu().numpy())
+                    _, prop_logit, outcome_logit = self.forward(
+                        batch,
+                        explicit_confounder_values=batch_conf_values
+                    )
+                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
+                    all_outcome.append(torch.sigmoid(outcome_logit).cpu().numpy())
 
-                # Get propensity/outcome predictions from nuisance extractor (full forward)
-                # These are used for nuisance estimation in causal forest
-                _, prop_logit, outcome_logit = self.forward(
-                    batch_texts,
-                    explicit_confounder_values=batch_conf_values
-                )
-                all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
-                all_outcome.append(torch.sigmoid(outcome_logit).cpu().numpy())
+                    if batch_conf_values is not None:
+                        all_conf_values.extend(batch_conf_values)
+        else:
+            # Raw texts path (backward compatible)
+            texts = texts_or_loader
+            with torch.no_grad():
+                for i in range(0, len(texts), batch_size):
+                    batch_texts = texts[i:i + batch_size]
+
+                    batch_conf_values = None
+                    if explicit_confounder_values is not None:
+                        batch_conf_values = explicit_confounder_values[i:i + batch_size]
+
+                    if use_effect_extractor:
+                        text_features = self.effect_feature_extractor(batch_texts)
+                    else:
+                        text_features = self.feature_extractor(batch_texts)
+                    all_text_features.append(text_features.cpu().numpy())
+
+                    _, prop_logit, outcome_logit = self.forward(
+                        batch_texts,
+                        explicit_confounder_values=batch_conf_values
+                    )
+                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
+                    all_outcome.append(torch.sigmoid(outcome_logit).cpu().numpy())
 
         neural_features = np.vstack(all_text_features)
 
         # Concatenate raw confounder features if provided
-        if explicit_confounder_values is not None and self.explicit_confounder_specs:
-            raw_conf_features = self._get_raw_confounder_features(explicit_confounder_values)
+        # Use collected confounder values from DataLoader batches, or the provided list
+        conf_values_for_raw = all_conf_values if all_conf_values else explicit_confounder_values
+        if conf_values_for_raw is not None and self.explicit_confounder_specs:
+            raw_conf_features = self._get_raw_confounder_features(conf_values_for_raw)
             combined_features = np.hstack([neural_features, raw_conf_features])
         else:
             combined_features = neural_features
@@ -1158,7 +1268,7 @@ class CausalTextForest(nn.Module):
 
     def train_causal_forest(
         self,
-        texts: List[str],
+        texts_or_loader,
         T: np.ndarray,
         Y: np.ndarray,
         batch_size: int = 32,
@@ -1172,10 +1282,10 @@ class CausalTextForest(nn.Module):
         on the neural network's learned features.
 
         Args:
-            texts: List of training texts
+            texts_or_loader: List of training texts, or a DataLoader yielding batch dicts
             T: Treatment indicators
             Y: Outcome indicators
-            batch_size: Batch size for feature extraction
+            batch_size: Batch size for feature extraction (only used with raw texts)
             explicit_confounder_values: Optional list of dicts with confounder values.
                 If provided, raw confounder features are concatenated to neural features.
 
@@ -1184,7 +1294,7 @@ class CausalTextForest(nn.Module):
         """
         logger.info("Extracting features for causal forest training...")
         features, _, _ = self.extract_features(
-            texts, batch_size,
+            texts_or_loader, batch_size,
             explicit_confounder_values=explicit_confounder_values
         )
 
@@ -1204,7 +1314,7 @@ class CausalTextForest(nn.Module):
 
     def predict(
         self,
-        texts: List[str],
+        texts_or_loader,
         batch_size: int = 32,
         return_ci: bool = True,
         alpha: float = 0.05,
@@ -1214,8 +1324,8 @@ class CausalTextForest(nn.Module):
         Predict ITEs using trained causal forest.
 
         Args:
-            texts: List of text strings
-            batch_size: Batch size for feature extraction
+            texts_or_loader: List of text strings, or a DataLoader yielding batch dicts
+            batch_size: Batch size for feature extraction (only used with raw texts)
             return_ci: Whether to return confidence intervals
             alpha: Significance level for confidence intervals
             explicit_confounder_values: Optional list of dicts with confounder values.
@@ -1230,7 +1340,7 @@ class CausalTextForest(nn.Module):
         """
         # Extract features (with raw confounder features if provided)
         features, propensity, outcome_pred = self.extract_features(
-            texts, batch_size,
+            texts_or_loader, batch_size,
             explicit_confounder_values=explicit_confounder_values
         )
 

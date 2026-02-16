@@ -225,17 +225,24 @@ class OutcomeOnlyModel(nn.Module):
         logger.info(f"  Representation dim: {representation_dim}")
         logger.info(f"  Device: {self._device}")
 
-    def forward(self, texts: List[str]) -> torch.Tensor:
+    @staticmethod
+    def _get_extractor_input(batch, texts):
+        """Return preprocessed batch if available, otherwise raw texts."""
+        if 'chunk_input_ids' in batch or 'chunk_token_ids' in batch:
+            return batch
+        return texts
+
+    def forward(self, texts_or_batch) -> torch.Tensor:
         """
         Forward pass through the complete model.
 
         Args:
-            texts: List of text strings
+            texts_or_batch: List of text strings or preprocessed batch dict
 
         Returns:
             y_logit: Outcome logits (batch, 1)
         """
-        features = self.feature_extractor(texts)
+        features = self.feature_extractor(texts_or_batch)
         y_logit = self.outcome_net(features)
         return y_logit
 
@@ -251,9 +258,10 @@ class OutcomeOnlyModel(nn.Module):
         """
         texts = batch['texts']
         outcomes = batch['outcome']  # (batch,)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Forward pass
-        y_logit = self.forward(texts)
+        y_logit = self.forward(extractor_input)
 
         # Binary cross-entropy loss for outcome prediction
         loss = F.binary_cross_entropy_with_logits(
@@ -266,18 +274,23 @@ class OutcomeOnlyModel(nn.Module):
             'y_logit': y_logit.detach()
         }
 
-    def predict(self, texts: List[str]) -> torch.Tensor:
+    def predict(self, texts_or_batch) -> torch.Tensor:
         """
         Predict outcome probabilities.
 
         Args:
-            texts: List of text strings
+            texts_or_batch: List of text strings or preprocessed batch dict from DataLoader
 
         Returns:
             Outcome probabilities (batch,)
         """
         with torch.no_grad():
-            y_logit = self.forward(texts)
+            if isinstance(texts_or_batch, dict):
+                texts = texts_or_batch['texts']
+                extractor_input = self._get_extractor_input(texts_or_batch, texts)
+            else:
+                extractor_input = texts_or_batch
+            y_logit = self.forward(extractor_input)
             outcome_prob = torch.sigmoid(y_logit).squeeze(-1)
             return outcome_prob
 

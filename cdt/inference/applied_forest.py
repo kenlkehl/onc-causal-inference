@@ -19,6 +19,7 @@ from ..models.causal_text_forest import CausalTextForest
 from ..data import (
     ClinicalTextDataset,
     collate_batch,
+    create_collator,
 )
 from ..utils import cuda_cleanup, get_memory_info
 
@@ -145,9 +146,8 @@ def _process_fold_forest(
     model = _create_causal_forest_model(arch_config, device)
     logger.info(f"Created CausalTextForest with {feature_extractor_type.upper()} extractor")
 
-    # Get training texts
+    # Get training texts for tokenizer fitting
     train_texts = train_df[config.text_column].tolist()
-    test_texts = test_df[config.text_column].tolist()
 
     # Fit tokenizer if needed
     model.fit_tokenizer(train_texts)
@@ -159,15 +159,45 @@ def _process_fold_forest(
         model, train_df, test_df, config, device, verbose
     )
 
+    # Create DataLoaders for Stage 2 feature extraction and prediction
+    collator = create_collator(model.feature_extractor)
+    collate_fn = collator if collator is not None else collate_batch
+
+    train_dataset = ClinicalTextDataset(
+        data=train_df,
+        text_column=config.text_column,
+        outcome_column=config.outcome_column,
+        treatment_column=config.treatment_column
+    )
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn
+    )
+
+    test_dataset = ClinicalTextDataset(
+        data=test_df,
+        text_column=config.text_column,
+        outcome_column=config.outcome_column,
+        treatment_column=config.treatment_column
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn
+    )
+
     # Stage 2: Train causal forest
     logger.info("\n--- Stage 2: Training causal forest ---")
     train_T = train_df[config.treatment_column].values
     train_Y = train_df[config.outcome_column].values
-    model.train_causal_forest(train_texts, train_T, train_Y)
+    model.train_causal_forest(train_loader, train_T, train_Y)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
-    preds = model.predict(test_texts, return_ci=True)
+    preds = model.predict(test_loader, return_ci=True)
 
     # Build predictions DataFrame
     preds_df = test_df.copy()
@@ -212,13 +242,13 @@ def _run_fixed_split_inference_forest(
     logger.info(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
     arch_config = config.architecture
+    train_config = config.training
 
     # Create model
     model = _create_causal_forest_model(arch_config, device)
 
-    # Get texts
+    # Get texts for tokenizer fitting
     train_texts = train_df[config.text_column].tolist()
-    test_texts = test_df[config.text_column].tolist()
 
     # Fit tokenizer
     model.fit_tokenizer(train_texts)
@@ -233,17 +263,44 @@ def _run_fixed_split_inference_forest(
     log_path = output_path.parent / "training_log.csv"
     pd.DataFrame(history).to_csv(log_path, index=False)
 
+    # Create DataLoaders for Stage 2 feature extraction and prediction
+    collator = create_collator(model.feature_extractor)
+    collate_fn = collator if collator is not None else collate_batch
+
     # Stage 2: Train causal forest on full train + val
     logger.info("\n--- Stage 2: Training causal forest ---")
     combined_df = pd.concat([train_df, val_df])
-    combined_texts = combined_df[config.text_column].tolist()
+    combined_dataset = ClinicalTextDataset(
+        data=combined_df,
+        text_column=config.text_column,
+        outcome_column=config.outcome_column,
+        treatment_column=config.treatment_column
+    )
+    combined_loader = DataLoader(
+        combined_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn
+    )
     combined_T = combined_df[config.treatment_column].values
     combined_Y = combined_df[config.outcome_column].values
-    model.train_causal_forest(combined_texts, combined_T, combined_Y)
+    model.train_causal_forest(combined_loader, combined_T, combined_Y)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
-    preds = model.predict(test_texts, return_ci=True)
+    test_dataset = ClinicalTextDataset(
+        data=test_df,
+        text_column=config.text_column,
+        outcome_column=config.outcome_column,
+        treatment_column=config.treatment_column
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn
+    )
+    preds = model.predict(test_loader, return_ci=True)
 
     # Build results DataFrame
     results_df = test_df.copy()
@@ -357,6 +414,23 @@ def _create_causal_forest_model(
         gru_pool_projection_dim=getattr(arch_config, 'gru_pool_projection_dim', 128),
         gru_pool_max_vocab=getattr(arch_config, 'gru_pool_max_vocab', 50000),
         gru_pool_min_word_freq=getattr(arch_config, 'gru_pool_min_word_freq', 2),
+        # Transformer Pool args
+        tp_embedding_dim=getattr(arch_config, 'tp_embedding_dim', 128),
+        tp_token_transformer_layers=getattr(arch_config, 'tp_token_transformer_layers', 2),
+        tp_token_transformer_heads=getattr(arch_config, 'tp_token_transformer_heads', 4),
+        tp_token_transformer_dim=getattr(arch_config, 'tp_token_transformer_dim', 256),
+        tp_token_transformer_dropout=getattr(arch_config, 'tp_token_transformer_dropout', 0.1),
+        tp_chunk_transformer_layers=getattr(arch_config, 'tp_chunk_transformer_layers', 2),
+        tp_chunk_transformer_heads=getattr(arch_config, 'tp_chunk_transformer_heads', 4),
+        tp_chunk_transformer_dim=getattr(arch_config, 'tp_chunk_transformer_dim', 256),
+        tp_chunk_transformer_dropout=getattr(arch_config, 'tp_chunk_transformer_dropout', 0.1),
+        tp_gated_attention_dim=getattr(arch_config, 'tp_gated_attention_dim', 128),
+        tp_projection_dim=getattr(arch_config, 'tp_projection_dim', 128),
+        tp_chunk_size=getattr(arch_config, 'tp_chunk_size', 128),
+        tp_chunk_overlap=getattr(arch_config, 'tp_chunk_overlap', 32),
+        tp_max_chunks=getattr(arch_config, 'tp_max_chunks', 100),
+        tp_max_vocab=getattr(arch_config, 'tp_max_vocab', 50000),
+        tp_min_word_freq=getattr(arch_config, 'tp_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=getattr(arch_config, 'bert_pool_freeze_sentence_encoder', False),
@@ -431,18 +505,22 @@ def _train_representation(
         treatment_column=config.treatment_column
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(model.feature_extractor)
+    collate_fn = collator if collator is not None else collate_batch
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=True,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     # Optimizer

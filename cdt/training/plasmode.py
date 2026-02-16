@@ -23,7 +23,7 @@ from joblib import Parallel, delayed
 from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig, normalize_feature_extractor_type
 from ..models.causal_text import CausalText
 from ..models.causal_text_forest import CausalTextForest
-from ..data import ClinicalTextDataset, collate_batch
+from ..data import ClinicalTextDataset, collate_batch, create_collator
 from ..utils import cuda_cleanup, get_memory_info, set_seed
 
 
@@ -459,6 +459,23 @@ def _train_cnn_model(
         c1d_hybrid_projection_dim=getattr(arch_config, 'c1d_hybrid_projection_dim', 128),
         c1d_hybrid_max_vocab=getattr(arch_config, 'c1d_hybrid_max_vocab', 50000),
         c1d_hybrid_min_word_freq=getattr(arch_config, 'c1d_hybrid_min_word_freq', 2),
+        # Transformer Pool args
+        tp_embedding_dim=getattr(arch_config, 'tp_embedding_dim', 128),
+        tp_token_transformer_layers=getattr(arch_config, 'tp_token_transformer_layers', 2),
+        tp_token_transformer_heads=getattr(arch_config, 'tp_token_transformer_heads', 4),
+        tp_token_transformer_dim=getattr(arch_config, 'tp_token_transformer_dim', 256),
+        tp_token_transformer_dropout=getattr(arch_config, 'tp_token_transformer_dropout', 0.1),
+        tp_chunk_transformer_layers=getattr(arch_config, 'tp_chunk_transformer_layers', 2),
+        tp_chunk_transformer_heads=getattr(arch_config, 'tp_chunk_transformer_heads', 4),
+        tp_chunk_transformer_dim=getattr(arch_config, 'tp_chunk_transformer_dim', 256),
+        tp_chunk_transformer_dropout=getattr(arch_config, 'tp_chunk_transformer_dropout', 0.1),
+        tp_gated_attention_dim=getattr(arch_config, 'tp_gated_attention_dim', 128),
+        tp_projection_dim=getattr(arch_config, 'tp_projection_dim', 128),
+        tp_chunk_size=getattr(arch_config, 'tp_chunk_size', 128),
+        tp_chunk_overlap=getattr(arch_config, 'tp_chunk_overlap', 32),
+        tp_max_chunks=getattr(arch_config, 'tp_max_chunks', 100),
+        tp_max_vocab=getattr(arch_config, 'tp_max_vocab', 50000),
+        tp_min_word_freq=getattr(arch_config, 'tp_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=getattr(arch_config, 'bert_pool_freeze_sentence_encoder', False),
@@ -592,6 +609,13 @@ def _train_cnn_model(
                    f"blocks: {getattr(arch_config, 'c1d_hybrid_num_blocks', 4)}, "
                    f"max_length: {getattr(arch_config, 'c1d_hybrid_max_length', 8192)}, "
                    f"{getattr(arch_config, 'c1d_hybrid_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "transformer_pool":
+        # Transformer Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info("Using Transformer Pool feature extractor")
+        logger.info(f"  Token transformer: {getattr(arch_config, 'tp_token_transformer_layers', 2)} layers, "
+                   f"chunk transformer: {getattr(arch_config, 'tp_chunk_transformer_layers', 2)} layers, "
+                   f"chunk_size: {getattr(arch_config, 'tp_chunk_size', 128)}")
     elif feature_extractor_type == "bert_cross_chunk":
         # BERT Cross-Chunk: trigger lazy initialization (uses pretrained tokenizer)
         model.fit_tokenizer(train_texts)  # No-op, triggers init
@@ -619,18 +643,22 @@ def _train_cnn_model(
         treatment_column=applied_config.treatment_column
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
+    collate_fn = collator if collator is not None else collate_batch
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=True,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     optimizer = torch.optim.AdamW(
@@ -806,6 +834,23 @@ def _train_causal_forest_model(
         c1d_hybrid_projection_dim=getattr(arch_config, 'c1d_hybrid_projection_dim', 128),
         c1d_hybrid_max_vocab=getattr(arch_config, 'c1d_hybrid_max_vocab', 50000),
         c1d_hybrid_min_word_freq=getattr(arch_config, 'c1d_hybrid_min_word_freq', 2),
+        # Transformer Pool args
+        tp_embedding_dim=getattr(arch_config, 'tp_embedding_dim', 128),
+        tp_token_transformer_layers=getattr(arch_config, 'tp_token_transformer_layers', 2),
+        tp_token_transformer_heads=getattr(arch_config, 'tp_token_transformer_heads', 4),
+        tp_token_transformer_dim=getattr(arch_config, 'tp_token_transformer_dim', 256),
+        tp_token_transformer_dropout=getattr(arch_config, 'tp_token_transformer_dropout', 0.1),
+        tp_chunk_transformer_layers=getattr(arch_config, 'tp_chunk_transformer_layers', 2),
+        tp_chunk_transformer_heads=getattr(arch_config, 'tp_chunk_transformer_heads', 4),
+        tp_chunk_transformer_dim=getattr(arch_config, 'tp_chunk_transformer_dim', 256),
+        tp_chunk_transformer_dropout=getattr(arch_config, 'tp_chunk_transformer_dropout', 0.1),
+        tp_gated_attention_dim=getattr(arch_config, 'tp_gated_attention_dim', 128),
+        tp_projection_dim=getattr(arch_config, 'tp_projection_dim', 128),
+        tp_chunk_size=getattr(arch_config, 'tp_chunk_size', 128),
+        tp_chunk_overlap=getattr(arch_config, 'tp_chunk_overlap', 32),
+        tp_max_chunks=getattr(arch_config, 'tp_max_chunks', 100),
+        tp_max_vocab=getattr(arch_config, 'tp_max_vocab', 50000),
+        tp_min_word_freq=getattr(arch_config, 'tp_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=getattr(arch_config, 'bert_pool_freeze_sentence_encoder', False),
@@ -905,18 +950,22 @@ def _train_causal_forest_model(
         treatment_column=applied_config.treatment_column
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
+    collate_fn = collator if collator is not None else collate_batch
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=True,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     optimizer = torch.optim.AdamW(
@@ -1001,10 +1050,21 @@ def _train_causal_forest_model(
 
     # Stage 2: Train causal forest on extracted features
     combined_df = pd.concat([train_df, val_df])
-    combined_texts = combined_df[applied_config.text_column].tolist()
+    combined_dataset = ClinicalTextDataset(
+        data=combined_df,
+        text_column=applied_config.text_column,
+        outcome_column=applied_config.outcome_column,
+        treatment_column=applied_config.treatment_column
+    )
+    combined_loader = DataLoader(
+        combined_dataset,
+        batch_size=train_config.batch_size,
+        shuffle=False,
+        collate_fn=collate_fn
+    )
     combined_T = combined_df[applied_config.treatment_column].values
     combined_Y = combined_df[applied_config.outcome_column].values
-    model.train_causal_forest(combined_texts, combined_T, combined_Y)
+    model.train_causal_forest(combined_loader, combined_T, combined_Y)
 
     return model, history
 
@@ -1028,11 +1088,15 @@ def _generate_plasmode_data(
         treatment_column=applied_config.treatment_column
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(generator.feature_extractor, getattr(generator, 'effect_feature_extractor', None))
+    collate_fn = collator if collator is not None else collate_batch
+
     loader = DataLoader(
         dataset,
         batch_size=32,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     generator.eval()
@@ -1099,8 +1163,21 @@ def _predict_cnn_model(
 
     # Handle CausalTextForest separately (uses different prediction API)
     if isinstance(model, CausalTextForest):
-        texts = df[applied_config.text_column].tolist()
-        preds = model.predict(texts, return_ci=False)
+        forest_dataset = ClinicalTextDataset(
+            data=df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        forest_collator = create_collator(model.feature_extractor)
+        forest_collate_fn = forest_collator if forest_collator is not None else collate_batch
+        forest_loader = DataLoader(
+            forest_dataset,
+            batch_size=32,
+            shuffle=False,
+            collate_fn=forest_collate_fn
+        )
+        preds = model.predict(forest_loader, return_ci=False)
         return {
             'y0_prob': preds['pred_y0_prob'],
             'y1_prob': preds['pred_y1_prob'],
@@ -1116,11 +1193,15 @@ def _predict_cnn_model(
         treatment_column=applied_config.treatment_column
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
+    collate_fn = collator if collator is not None else collate_batch
+
     loader = DataLoader(
         dataset,
         batch_size=32,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     model.eval()
@@ -1130,8 +1211,7 @@ def _predict_cnn_model(
 
     with torch.no_grad():
         for batch in loader:
-            texts = batch['texts']
-            preds = model.predict(texts)
+            preds = model.predict(batch)
             all_y0.append(preds['y0_logit'].cpu().numpy())
             all_y1.append(preds['y1_logit'].cpu().numpy())
             all_prop.append(preds['t_logit'].cpu().numpy())

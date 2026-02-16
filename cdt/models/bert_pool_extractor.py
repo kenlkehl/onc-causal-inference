@@ -311,9 +311,125 @@ class BertPoolExtractor(nn.Module):
         cls_embeddings = outputs.last_hidden_state[:, 0, :]
         return cls_embeddings, outputs.last_hidden_state, attention_mask
 
-    def forward(self, texts: List[str]) -> torch.Tensor:
+    def _encode_and_pool_subbatched(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        max_bert_batch: int = 64
+    ) -> torch.Tensor:
         """
-        Extract features from texts.
+        Encode pre-tokenized chunks through BERT + attention pooling + projection.
+
+        Sub-batches through BERT to avoid OOM when total_chunks is large.
+
+        Args:
+            input_ids: (total_chunks, seq_len) pre-tokenized input IDs
+            attention_mask: (total_chunks, seq_len) attention mask (1=valid, 0=pad)
+            max_bert_batch: Maximum chunks per BERT forward pass
+
+        Returns:
+            (total_chunks, transformer_dim) projected chunk embeddings
+        """
+        total = input_ids.size(0)
+        all_projected = []
+
+        for start in range(0, total, max_bert_batch):
+            end = min(start + max_bert_batch, total)
+            batch_ids = input_ids[start:end].to(self._device)
+            batch_mask = attention_mask[start:end].to(self._device)
+
+            with torch.set_grad_enabled(not self._freeze):
+                outputs = self._sentence_encoder(
+                    input_ids=batch_ids,
+                    attention_mask=batch_mask
+                )
+
+            cls_emb = outputs.last_hidden_state[:, 0, :]  # (sub_B, sentence_dim)
+            attn_pooled = self._chunk_attention(
+                outputs.last_hidden_state, batch_mask.float()
+            )  # (sub_B, sentence_dim)
+            chunk_emb = torch.cat([cls_emb, attn_pooled], dim=1)  # (sub_B, 2*sentence_dim)
+            projected = self._input_projection(chunk_emb)  # (sub_B, transformer_dim)
+            all_projected.append(projected)
+
+        return torch.cat(all_projected, dim=0)  # (total_chunks, transformer_dim)
+
+    def _pad_chunks_to_batch(
+        self,
+        chunk_embeddings: torch.Tensor,
+        doc_chunk_counts: List[int]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Reshape flat chunk embeddings into padded batch tensor.
+
+        Args:
+            chunk_embeddings: (total_chunks, D) flat tensor
+            doc_chunk_counts: List[int] of per-document chunk counts
+
+        Returns:
+            padded: (B, max_C, D) padded batch tensor
+            mask: (B, max_C) attention mask (1=valid, 0=pad)
+        """
+        B = len(doc_chunk_counts)
+        max_C = max(doc_chunk_counts)
+        D = chunk_embeddings.size(1)
+
+        padded = torch.zeros(B, max_C, D, device=self._device)
+        mask = torch.zeros(B, max_C, device=self._device)
+
+        offset = 0
+        for i, count in enumerate(doc_chunk_counts):
+            padded[i, :count] = chunk_embeddings[offset:offset + count]
+            mask[i, :count] = 1.0
+            # Add positional encoding
+            padded[i, :count] = padded[i, :count] + self._positional_encoding[:count].to(self._device)
+            offset += count
+
+        return padded, mask
+
+    def _forward_preprocessed(self, batch: Dict[str, Any]) -> torch.Tensor:
+        """
+        GPU-only forward pass on pre-tokenized batch from collator.
+
+        Args:
+            batch: Dict with 'chunk_input_ids', 'chunk_attention_mask', 'doc_chunk_counts', 'texts'
+
+        Returns:
+            Feature tensor of shape (B, projection_dim)
+        """
+        input_ids = batch['chunk_input_ids']        # (total_chunks, seq_len)
+        attn_mask = batch['chunk_attention_mask']    # (total_chunks, seq_len)
+        doc_chunk_counts = batch['doc_chunk_counts']  # List[int], len B
+        texts = batch['texts']
+
+        # 1. Encode all chunks through BERT + pool + project (sub-batched)
+        chunk_embeddings = self._encode_and_pool_subbatched(input_ids, attn_mask)
+
+        # 2. Pad into (B, max_C, transformer_dim) with positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 3. Run through transformer layers with key_padding_mask
+        key_padding_mask = (mask == 0)  # True = IGNORE for nn.MultiheadAttention
+        for layer in self._transformer_layer_modules:
+            padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
+
+        # 4. Apply gated attention pooling (batched)
+        pooled, _ = self._gated_pooling(padded, attention_mask=mask)  # (B, transformer_dim)
+
+        # 5. Add numeric features if enabled
+        if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)  # (B, numeric_dim)
+            pooled = self._numeric_merge(
+                torch.cat([pooled, numeric_feats], dim=1)
+            )
+
+        # 6. Output projection
+        features = self._output_projection(pooled)  # (B, projection_dim)
+        return features
+
+    def _forward_from_texts(self, texts: List[str]) -> torch.Tensor:
+        """
+        Legacy forward path: chunk + tokenize + encode per document.
 
         Args:
             texts: List of document texts
@@ -321,7 +437,6 @@ class BertPoolExtractor(nn.Module):
         Returns:
             Feature tensor of shape (batch_size, projection_dim)
         """
-        self._ensure_initialized()
         batch_outputs = []
 
         for text in texts:
@@ -378,16 +493,88 @@ class BertPoolExtractor(nn.Module):
         # Stack batch
         return torch.stack(batch_outputs)  # (B, projection_dim)
 
-    def forward_with_instances(
+    def forward(self, texts_or_batch) -> torch.Tensor:
+        """
+        Extract features from texts or preprocessed batch.
+
+        Accepts either:
+        - List[str]: Raw text strings (legacy path, chunks + tokenizes internally)
+        - Dict with 'chunk_input_ids': Preprocessed batch from HFChunkCollator
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            Feature tensor of shape (batch_size, projection_dim)
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_input_ids' in texts_or_batch:
+            return self._forward_preprocessed(texts_or_batch)
+        return self._forward_from_texts(texts_or_batch)
+
+    def _forward_with_instances_preprocessed(
+        self,
+        batch: Dict[str, Any]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Batched forward pass returning chunk-level info for CLAM-style instance loss.
+
+        Args:
+            batch: Preprocessed batch dict from HFChunkCollator
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        """
+        input_ids = batch['chunk_input_ids']
+        attn_mask = batch['chunk_attention_mask']
+        doc_chunk_counts = batch['doc_chunk_counts']
+        texts = batch['texts']
+
+        # 1. Encode all chunks through BERT + pool + project (sub-batched)
+        chunk_embeddings = self._encode_and_pool_subbatched(input_ids, attn_mask)
+
+        # 2. Pad into (B, max_C, transformer_dim) with positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 3. Run through transformer layers with key_padding_mask
+        key_padding_mask = (mask == 0)
+        for layer in self._transformer_layer_modules:
+            padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
+
+        # 4. Split back per-doc, apply gated pooling per-doc for CLAM
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        offset = 0
+        for i, count in enumerate(doc_chunk_counts):
+            doc_chunks = padded[i, :count]  # (C_i, transformer_dim)
+            pooled, attn_weights = self._gated_pooling(doc_chunks)  # (transformer_dim,), (C_i,)
+
+            # Numeric features
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([texts[i]])  # (1, numeric_dim)
+                pooled = self._numeric_merge(
+                    torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
+
+            output = self._output_projection(pooled)
+            batch_outputs.append(output)
+            chunk_embeddings_list.append(doc_chunks)
+            attention_weights_list.append(attn_weights)
+
+        doc_features = torch.stack(batch_outputs)
+        return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def _forward_with_instances_from_texts(
         self,
         texts: List[str]
     ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
         """
-        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
-
-        This method returns transformer-processed chunk embeddings (before gated pooling)
-        and their gated attention weights, enabling instance-level supervision on
-        top-attended chunks.
+        Legacy forward_with_instances path from raw text strings.
 
         Args:
             texts: List of document texts
@@ -397,7 +584,6 @@ class BertPoolExtractor(nn.Module):
             chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
         """
-        self._ensure_initialized()
         batch_outputs = []
         chunk_embeddings_list = []
         attention_weights_list = []
@@ -470,6 +656,29 @@ class BertPoolExtractor(nn.Module):
         doc_features = torch.stack(batch_outputs)  # (B, projection_dim)
 
         return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def forward_with_instances(
+        self,
+        texts_or_batch
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        Accepts either List[str] or preprocessed batch dict.
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_input_ids' in texts_or_batch:
+            return self._forward_with_instances_preprocessed(texts_or_batch)
+        return self._forward_with_instances_from_texts(texts_or_batch)
 
     def init_extractor(self, texts: List[str]) -> 'BertPoolExtractor':
         """

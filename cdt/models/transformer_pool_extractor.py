@@ -1,30 +1,34 @@
-# cdt/models/gru_pool_extractor.py
-"""GRU + Transformer + Gated Attention Pooling feature extractor.
+# cdt/models/transformer_pool_extractor.py
+"""Token Transformer + Cross-Chunk Transformer + Gated Attention Pooling feature extractor.
 
 This module implements a hierarchical approach for extracting features from long
 clinical text that combines:
 
-1. Learned word embeddings + BiGRU with simple attention pooling for chunk encoding
+1. Learned word embeddings + small token-level Transformer with attention pooling
+   for chunk encoding (fully parallel, unlike BiGRU)
 2. Standard transformer layers for cross-chunk context (chunks attend to each other)
 3. Gated attention pooling (tanh x sigmoid) for final document aggregation
 
-Unlike gru_transformer_mil which uses K confounder queries and task-specific weighting,
-this extractor produces a single feature vector via gated attention pooling over
-transformer-processed chunk embeddings.
+This is architecturally identical to gru_pool_extractor.py except the chunk encoder
+swaps BiGRU for a token-level Transformer. This gives:
+- Fully parallel within-chunk processing (no sequential bottleneck)
+- Custom word-level tokenization (learned from training data, not BPE)
+- End-to-end training from scratch
 
 Architecture:
     Long Clinical Text
             |
     Split into Overlapping Token Chunks (C chunks)
             |
-    [Per Chunk - Shared BiGRU]
-    Word Embeddings -> BiGRU -> Attention Pooling (C x gru_output_dim)
+    [Per Chunk - Shared Token Transformer]
+    Word Embeddings -> Linear Projection -> + Token PE
+    -> Token Transformer Layer(s) -> Attention Pooling (C x token_transformer_dim)
             |
-    Project to transformer_dim (C x transformer_dim)
+    Project to chunk_transformer_dim (C x chunk_transformer_dim)
             |
-    Add Positional Encoding
+    Add Chunk Positional Encoding
             |
-    Transformer Layer(s) - chunks attend to each other (cross-chunk context)
+    Cross-Chunk Transformer Layer(s) - chunks attend to each other
             |
     Gated Attention Pooling (tanh x sigmoid) -> single vector
             |
@@ -43,6 +47,7 @@ import torch.nn.functional as F
 
 from .cnn_extractor import WordTokenizer
 from .gru_extractor import AttentionPooling
+from .gru_pool_extractor import GatedAttentionPooling
 from .hierarchical_transformer_extractor import InterpretableTransformerLayer
 from .chunking import split_into_chunks_vocab
 from .numeric_features import NumericFeatureVector
@@ -51,112 +56,50 @@ from .numeric_features import NumericFeatureVector
 logger = logging.getLogger(__name__)
 
 
-class GatedAttentionPooling(nn.Module):
+def _create_sinusoidal_pe(max_len: int, d_model: int) -> torch.Tensor:
+    """Create sinusoidal positional encoding."""
+    pe = torch.zeros(max_len, d_model)
+    position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+
+    pe[:, 0::2] = torch.sin(position * div_term)
+    if d_model % 2 == 1:
+        pe[:, 1::2] = torch.cos(position * div_term[:-1])
+    else:
+        pe[:, 1::2] = torch.cos(position * div_term)
+
+    return pe
+
+
+class TransformerPoolExtractor(nn.Module):
     """
-    Gated attention pooling (tanh x sigmoid) for aggregating sequences.
-
-    Used for final document aggregation (chunks -> document vector).
-    The gating mechanism allows learning which chunks to suppress (via sigmoid gate)
-    while extracting content (via tanh).
-
-    Formula:
-        g = tanh(V(h)) * sigmoid(U(h))  # Gated features
-        g' = LayerNorm(g)
-        s = v(W(g'))  # Attention scores
-        w = softmax(s)  # Attention weights
-        output = sum(w * h)  # Weighted sum of original embeddings
-    """
-
-    def __init__(self, hidden_dim: int, attention_dim: Optional[int] = None):
-        """
-        Initialize gated attention pooling.
-
-        Args:
-            hidden_dim: Dimension of input hidden states
-            attention_dim: Dimension of attention hidden layer (default: hidden_dim)
-        """
-        super().__init__()
-        attention_dim = attention_dim or hidden_dim
-
-        # Gating transforms
-        self.V = nn.Linear(hidden_dim, attention_dim)  # tanh branch (content)
-        self.U = nn.Linear(hidden_dim, attention_dim)  # sigmoid branch (gate)
-
-        # Attention computation
-        self.W = nn.Linear(attention_dim, attention_dim, bias=False)
-        self.v = nn.Linear(attention_dim, 1, bias=False)
-
-        self.layer_norm = nn.LayerNorm(attention_dim)
-
-    def forward(
-        self,
-        chunk_embeddings: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Apply gated attention pooling.
-
-        Args:
-            chunk_embeddings: (C, D) or (B, C, D) - transformed chunk embeddings
-            attention_mask: Optional mask for valid chunks (1 = valid, 0 = padding)
-
-        Returns:
-            pooled: (D,) or (B, D) - document representation
-            weights: (C,) or (B, C) - attention weights over chunks
-        """
-        # Gated features: g = tanh(V(h)) * sigmoid(U(h))
-        tanh_branch = torch.tanh(self.V(chunk_embeddings))
-        sigmoid_branch = torch.sigmoid(self.U(chunk_embeddings))
-        gated = tanh_branch * sigmoid_branch
-        gated = self.layer_norm(gated)
-
-        # Attention scores
-        scores = self.v(self.W(gated)).squeeze(-1)
-
-        # Apply mask if provided
-        if attention_mask is not None:
-            scores = scores.masked_fill(attention_mask == 0, -1e9)
-
-        # Softmax and weighted sum
-        weights = F.softmax(scores, dim=-1)
-
-        # Handle both single sample and batch
-        if chunk_embeddings.dim() == 2:
-            pooled = (weights.unsqueeze(-1) * chunk_embeddings).sum(dim=0)
-        else:
-            pooled = torch.bmm(weights.unsqueeze(1), chunk_embeddings).squeeze(1)
-
-        return pooled, weights
-
-
-class GRUPoolExtractor(nn.Module):
-    """
-    BiGRU + transformer + gated pooling feature extractor.
+    Token Transformer + Cross-Chunk Transformer + Gated Attention Pooling extractor.
 
     Combines:
-    - Learned word embeddings + BiGRU + attention for chunk encoding
+    - Learned word embeddings + token-level Transformer + attention for chunk encoding
     - Transformer layers for cross-chunk context
     - Gated attention pooling for final document aggregation
 
-    This produces a single feature vector (not task-specific vectors like gru_transformer_mil).
+    This produces a single feature vector (like gru_pool) but with fully parallel
+    within-chunk processing.
 
     REQUIRES: fit_tokenizer(texts) before use
 
     Args:
         embedding_dim: Word embedding dimension
-        gru_hidden_dim: GRU hidden state dimension per direction
-        gru_num_layers: Number of stacked GRU layers
-        gru_bidirectional: Use bidirectional GRU
-        gru_dropout: Dropout rate for GRU
+        token_transformer_layers: Number of transformer layers within each chunk
+        token_transformer_heads: Number of attention heads within each chunk
+        token_transformer_dim: Hidden dimension for within-chunk transformer
+        token_transformer_dropout: Dropout rate for token transformer
+        chunk_transformer_layers: Number of transformer layers for cross-chunk processing
+        chunk_transformer_heads: Number of attention heads for cross-chunk transformer
+        chunk_transformer_dim: Hidden dimension for cross-chunk transformer
+        chunk_transformer_dropout: Dropout rate for cross-chunk transformer
+        gated_attention_dim: Hidden dimension for gated attention pooling
+        projection_dim: Final output dimension
         max_chunks: Maximum number of chunks to process per document
         chunk_size: Number of tokens per chunk
         chunk_overlap: Number of overlapping tokens between chunks
-        transformer_layers: Number of transformer layers for cross-chunk processing
-        transformer_heads: Number of attention heads in transformer
-        transformer_dim: Hidden dimension for transformer layers
-        transformer_dropout: Dropout rate for transformer layers
-        gated_attention_dim: Hidden dimension for gated attention pooling
-        projection_dim: Final output dimension
         max_vocab_size: Maximum vocabulary size
         min_word_freq: Minimum word frequency for vocabulary inclusion
         device: PyTorch device
@@ -165,19 +108,19 @@ class GRUPoolExtractor(nn.Module):
     def __init__(
         self,
         embedding_dim: int = 128,
-        gru_hidden_dim: int = 128,
-        gru_num_layers: int = 1,
-        gru_bidirectional: bool = True,
-        gru_dropout: float = 0.1,
+        token_transformer_layers: int = 2,
+        token_transformer_heads: int = 4,
+        token_transformer_dim: int = 256,
+        token_transformer_dropout: float = 0.1,
+        chunk_transformer_layers: int = 2,
+        chunk_transformer_heads: int = 4,
+        chunk_transformer_dim: int = 256,
+        chunk_transformer_dropout: float = 0.1,
+        gated_attention_dim: int = 128,
+        projection_dim: int = 128,
         max_chunks: int = 100,
         chunk_size: int = 128,
         chunk_overlap: int = 32,
-        transformer_layers: int = 2,
-        transformer_heads: int = 4,
-        transformer_dim: int = 256,
-        transformer_dropout: float = 0.1,
-        gated_attention_dim: int = 128,
-        projection_dim: int = 128,
         max_vocab_size: int = 50000,
         min_word_freq: int = 2,
         device: Optional[torch.device] = None,
@@ -194,24 +137,21 @@ class GRUPoolExtractor(nn.Module):
         self._numeric_magnitude_bins = numeric_magnitude_bins
         self._numeric_type_categories = numeric_type_categories
         self._embedding_dim = embedding_dim
-        self._gru_hidden_dim = gru_hidden_dim
-        self._gru_num_layers = gru_num_layers
-        self._gru_bidirectional = gru_bidirectional
-        self._gru_dropout = gru_dropout
+        self._token_transformer_layers = token_transformer_layers
+        self._token_transformer_heads = token_transformer_heads
+        self._token_transformer_dim = token_transformer_dim
+        self._token_transformer_dropout = token_transformer_dropout
+        self._chunk_transformer_layers = chunk_transformer_layers
+        self._chunk_transformer_heads = chunk_transformer_heads
+        self._chunk_transformer_dim = chunk_transformer_dim
+        self._chunk_transformer_dropout = chunk_transformer_dropout
+        self._gated_attention_dim = gated_attention_dim
+        self._projection_dim = projection_dim
         self._max_chunks = max_chunks
         self._chunk_size = chunk_size
         self._chunk_overlap = chunk_overlap
-        self._transformer_layers = transformer_layers
-        self._transformer_heads = transformer_heads
-        self._transformer_dim = transformer_dim
-        self._transformer_dropout = transformer_dropout
-        self._gated_attention_dim = gated_attention_dim
-        self._projection_dim = projection_dim
         self._max_vocab_size = max_vocab_size
         self._min_word_freq = min_word_freq
-
-        # GRU output dimension
-        self._gru_output_dim = gru_hidden_dim * (2 if gru_bidirectional else 1)
 
         # Tokenizer (fit during fit_tokenizer)
         self._tokenizer = WordTokenizer(
@@ -223,56 +163,69 @@ class GRUPoolExtractor(nn.Module):
         # Embedding layer (initialized after tokenizer is fitted)
         self._embedding = None
 
-        # BiGRU for chunk encoding
-        self._gru = nn.GRU(
-            input_size=embedding_dim,
-            hidden_size=gru_hidden_dim,
-            num_layers=gru_num_layers,
-            batch_first=True,
-            dropout=gru_dropout if gru_num_layers > 1 else 0,
-            bidirectional=gru_bidirectional
-        )
-
-        # Attention pooling for tokens within chunks (simple attention, not gated)
-        self._chunk_attention = AttentionPooling(
-            hidden_dim=self._gru_output_dim,
-            attention_dim=self._gru_output_dim
-        )
-
-        # Project GRU output to transformer dim
-        self._input_projection = nn.Linear(self._gru_output_dim, transformer_dim)
-
-        # Positional encoding for chunks
-        self._register_positional_encoding()
-
-        # Layer norm after embedding
+        # Embedding normalization
         self._embed_layer_norm = nn.LayerNorm(embedding_dim)
-        self._embed_dropout = nn.Dropout(gru_dropout)
+        self._embed_dropout = nn.Dropout(token_transformer_dropout)
 
-        # Interpretable transformer layers for cross-chunk context
-        self._transformer_layer_modules = nn.ModuleList([
+        # Project embedding to token transformer dim
+        self._embed_projection = nn.Linear(embedding_dim, token_transformer_dim)
+
+        # Token-level positional encoding (for positions within chunks)
+        self.register_buffer(
+            '_token_positional_encoding',
+            _create_sinusoidal_pe(chunk_size, token_transformer_dim)
+        )
+
+        # Token-level transformer layers (within-chunk processing)
+        self._token_transformer_layer_modules = nn.ModuleList([
             InterpretableTransformerLayer(
-                d_model=transformer_dim,
-                nhead=transformer_heads,
-                dim_feedforward=transformer_dim * 4,
-                dropout=transformer_dropout
+                d_model=token_transformer_dim,
+                nhead=token_transformer_heads,
+                dim_feedforward=token_transformer_dim * 4,
+                dropout=token_transformer_dropout
             )
-            for _ in range(transformer_layers)
+            for _ in range(token_transformer_layers)
+        ])
+
+        # Attention pooling for tokens within chunks
+        self._chunk_attention = AttentionPooling(
+            hidden_dim=token_transformer_dim,
+            attention_dim=token_transformer_dim
+        )
+
+        # Project chunk embedding to cross-chunk transformer dim
+        self._input_projection = nn.Linear(token_transformer_dim, chunk_transformer_dim)
+
+        # Chunk-level positional encoding (for chunk positions)
+        self.register_buffer(
+            '_chunk_positional_encoding',
+            _create_sinusoidal_pe(max_chunks, chunk_transformer_dim)
+        )
+
+        # Cross-chunk transformer layers
+        self._chunk_transformer_layer_modules = nn.ModuleList([
+            InterpretableTransformerLayer(
+                d_model=chunk_transformer_dim,
+                nhead=chunk_transformer_heads,
+                dim_feedforward=chunk_transformer_dim * 4,
+                dropout=chunk_transformer_dropout
+            )
+            for _ in range(chunk_transformer_layers)
         ])
 
         # Gated attention pooling for final aggregation
         self._gated_pooling = GatedAttentionPooling(
-            hidden_dim=transformer_dim,
+            hidden_dim=chunk_transformer_dim,
             attention_dim=gated_attention_dim
         )
 
         # Output projection
         self._output_projection = nn.Sequential(
-            nn.Linear(transformer_dim, transformer_dim),
-            nn.LayerNorm(transformer_dim),
+            nn.Linear(chunk_transformer_dim, chunk_transformer_dim),
+            nn.LayerNorm(chunk_transformer_dim),
             nn.GELU(),
-            nn.Dropout(transformer_dropout),
-            nn.Linear(transformer_dim, projection_dim),
+            nn.Dropout(chunk_transformer_dropout),
+            nn.Linear(chunk_transformer_dim, projection_dim),
             nn.LayerNorm(projection_dim)
         )
 
@@ -284,41 +237,24 @@ class GRUPoolExtractor(nn.Module):
                 num_type_categories=numeric_type_categories,
                 output_dim=numeric_embedding_dim
             )
-            # Merge layer: transformer_dim + numeric_dim -> transformer_dim
+            # Merge layer: chunk_transformer_dim + numeric_dim -> chunk_transformer_dim
             self._numeric_merge = nn.Sequential(
-                nn.Linear(transformer_dim + numeric_embedding_dim, transformer_dim),
-                nn.LayerNorm(transformer_dim),
+                nn.Linear(chunk_transformer_dim + numeric_embedding_dim, chunk_transformer_dim),
+                nn.LayerNorm(chunk_transformer_dim),
                 nn.ReLU(),
             )
 
         self._initialized = False
 
-        logger.info(f"GRUPoolExtractor initialized:")
+        logger.info(f"TransformerPoolExtractor initialized:")
         logger.info(f"  Embedding dim: {embedding_dim}")
-        logger.info(f"  GRU hidden dim: {gru_hidden_dim} x {2 if gru_bidirectional else 1}")
-        logger.info(f"  GRU layers: {gru_num_layers}")
-        logger.info(f"  Transformer layers: {transformer_layers}, dim: {transformer_dim}")
-        logger.info(f"  Transformer heads: {transformer_heads}")
+        logger.info(f"  Token transformer: {token_transformer_layers} layers, "
+                     f"{token_transformer_heads} heads, dim={token_transformer_dim}")
+        logger.info(f"  Chunk transformer: {chunk_transformer_layers} layers, "
+                     f"{chunk_transformer_heads} heads, dim={chunk_transformer_dim}")
         logger.info(f"  Max chunks: {max_chunks}, chunk_size: {chunk_size}, overlap: {chunk_overlap}")
         logger.info(f"  Gated attention dim: {gated_attention_dim}")
         logger.info(f"  Projection dim: {projection_dim}")
-
-    def _register_positional_encoding(self):
-        """Create sinusoidal positional encoding for chunks."""
-        max_len = self._max_chunks
-        d_model = self._transformer_dim
-
-        pe = torch.zeros(max_len, d_model)
-        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
-
-        pe[:, 0::2] = torch.sin(position * div_term)
-        if d_model % 2 == 1:
-            pe[:, 1::2] = torch.cos(position * div_term[:-1])
-        else:
-            pe[:, 1::2] = torch.cos(position * div_term)
-
-        self.register_buffer('_positional_encoding', pe)
 
     @property
     def output_dim(self) -> int:
@@ -327,15 +263,15 @@ class GRUPoolExtractor(nn.Module):
 
     @property
     def transformer_dim(self) -> int:
-        """Return the transformer hidden dimension (chunk embedding dimension)."""
-        return self._transformer_dim
+        """Return the chunk transformer hidden dimension (chunk embedding dimension)."""
+        return self._chunk_transformer_dim
 
     @property
     def vocab_size(self) -> int:
         """Return vocabulary size."""
         return self._tokenizer.vocab_size
 
-    def fit_tokenizer(self, texts: List[str]) -> 'GRUPoolExtractor':
+    def fit_tokenizer(self, texts: List[str]) -> 'TransformerPoolExtractor':
         """
         Fit tokenizer on training texts and initialize embedding layer.
 
@@ -369,23 +305,79 @@ class GRUPoolExtractor(nn.Module):
         tokens = re.findall(r'\b\w+\b', text)
         return tokens
 
+    def _encode_chunks_from_tensors(
+        self,
+        chunk_token_ids: torch.Tensor,
+        chunk_lengths: torch.Tensor,
+        max_sub_batch: int = 128
+    ) -> torch.Tensor:
+        """
+        Encode pre-padded chunk tensors through embedding -> token transformer -> attention pooling.
+
+        Sub-batches to avoid OOM when total_chunks is large.
+
+        Args:
+            chunk_token_ids: (total_chunks, max_len) pre-padded token IDs from collator
+            chunk_lengths: (total_chunks,) actual lengths per chunk
+            max_sub_batch: Maximum chunks per forward pass
+
+        Returns:
+            (total_chunks, token_transformer_dim) chunk embeddings
+        """
+        total = chunk_token_ids.size(0)
+        max_len = chunk_token_ids.size(1)
+        all_embeddings = []
+
+        for start in range(0, total, max_sub_batch):
+            end = min(start + max_sub_batch, total)
+            batch_ids = chunk_token_ids[start:end].to(self._device)      # (sub_B, max_len)
+            batch_lens = chunk_lengths[start:end].to(self._device)       # (sub_B,)
+
+            # Build attention mask from lengths
+            sub_B = batch_ids.size(0)
+            attention_mask = torch.arange(max_len, device=self._device).unsqueeze(0).expand(sub_B, -1)
+            attention_mask = (attention_mask < batch_lens.unsqueeze(1)).float()  # (sub_B, max_len)
+
+            # Embed tokens
+            embeddings = self._embedding(batch_ids)  # (sub_B, max_len, embedding_dim)
+            embeddings = self._embed_layer_norm(embeddings)
+            embeddings = self._embed_dropout(embeddings)
+
+            # Project to token transformer dim
+            embeddings = self._embed_projection(embeddings)  # (sub_B, max_len, token_transformer_dim)
+
+            # Add token positional encoding
+            seq_len = embeddings.size(1)
+            embeddings = embeddings + self._token_positional_encoding[:seq_len].to(self._device)
+
+            # Run through token-level transformer layers
+            key_padding_mask = (attention_mask == 0)  # True = IGNORE
+            for layer in self._token_transformer_layer_modules:
+                embeddings, _ = layer(embeddings, return_attention=False, key_padding_mask=key_padding_mask)
+
+            # Attention pooling within each chunk
+            chunk_embs = self._chunk_attention(embeddings, attention_mask)  # (sub_B, token_transformer_dim)
+            all_embeddings.append(chunk_embs)
+
+        return torch.cat(all_embeddings, dim=0)  # (total_chunks, token_transformer_dim)
+
     def _encode_chunks_batch(
         self,
         chunk_ids_list: List[List[int]]
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Encode chunks with BiGRU + attention pooling.
+        Encode chunks with token transformer + attention pooling.
 
         Args:
             chunk_ids_list: List of token ID lists (one per chunk)
 
         Returns:
-            chunk_embeddings: (num_chunks, gru_output_dim)
+            chunk_embeddings: (num_chunks, token_transformer_dim)
             chunk_attention_weights: (num_chunks, max_chunk_len) - attention weights within chunks
         """
         if not chunk_ids_list:
             return (
-                torch.zeros(0, self._gru_output_dim, device=self._device),
+                torch.zeros(0, self._token_transformer_dim, device=self._device),
                 torch.zeros(0, 0, device=self._device)
             )
 
@@ -407,68 +399,29 @@ class GRUPoolExtractor(nn.Module):
         embeddings = self._embed_layer_norm(embeddings)
         embeddings = self._embed_dropout(embeddings)
 
-        # GRU forward
-        gru_output, _ = self._gru(embeddings)  # (num_chunks, max_len, gru_output_dim)
+        # Project to token transformer dim
+        embeddings = self._embed_projection(embeddings)  # (num_chunks, max_len, token_transformer_dim)
+
+        # Add token positional encoding
+        embeddings = embeddings + self._token_positional_encoding[:max_len].to(self._device)
+
+        # Run through token-level transformer layers
+        key_padding_mask = (attention_mask == 0)  # True = IGNORE
+        for layer in self._token_transformer_layer_modules:
+            embeddings, _ = layer(embeddings, return_attention=False, key_padding_mask=key_padding_mask)
 
         # Attention pooling within each chunk
-        chunk_embeddings = self._chunk_attention(gru_output, attention_mask)  # (num_chunks, gru_output_dim)
+        chunk_embeddings = self._chunk_attention(embeddings, attention_mask)  # (num_chunks, token_transformer_dim)
 
         # Get attention weights for interpretability
         with torch.no_grad():
             scores = self._chunk_attention.v(
-                torch.tanh(self._chunk_attention.W(gru_output))
+                torch.tanh(self._chunk_attention.W(embeddings))
             ).squeeze(-1)
             scores = scores.masked_fill(attention_mask == 0, -1e9)
             chunk_attention_weights = F.softmax(scores, dim=1)
 
         return chunk_embeddings, chunk_attention_weights
-
-    def _encode_chunks_from_tensors(
-        self,
-        chunk_token_ids: torch.Tensor,
-        chunk_lengths: torch.Tensor,
-        max_sub_batch: int = 128
-    ) -> torch.Tensor:
-        """
-        Encode pre-padded chunk tensors through embedding -> GRU -> attention pooling.
-
-        Sub-batches to avoid OOM when total_chunks is large.
-
-        Args:
-            chunk_token_ids: (total_chunks, max_len) pre-padded token IDs from collator
-            chunk_lengths: (total_chunks,) actual lengths per chunk
-            max_sub_batch: Maximum chunks per forward pass
-
-        Returns:
-            (total_chunks, gru_output_dim) chunk embeddings
-        """
-        total = chunk_token_ids.size(0)
-        max_len = chunk_token_ids.size(1)
-        all_embeddings = []
-
-        for start in range(0, total, max_sub_batch):
-            end = min(start + max_sub_batch, total)
-            batch_ids = chunk_token_ids[start:end].to(self._device)      # (sub_B, max_len)
-            batch_lens = chunk_lengths[start:end].to(self._device)       # (sub_B,)
-
-            # Build attention mask from lengths
-            sub_B = batch_ids.size(0)
-            attention_mask = torch.arange(max_len, device=self._device).unsqueeze(0).expand(sub_B, -1)
-            attention_mask = (attention_mask < batch_lens.unsqueeze(1)).float()  # (sub_B, max_len)
-
-            # Embed tokens
-            embeddings = self._embedding(batch_ids)  # (sub_B, max_len, embedding_dim)
-            embeddings = self._embed_layer_norm(embeddings)
-            embeddings = self._embed_dropout(embeddings)
-
-            # GRU forward
-            gru_output, _ = self._gru(embeddings)  # (sub_B, max_len, gru_output_dim)
-
-            # Attention pooling within each chunk
-            chunk_embs = self._chunk_attention(gru_output, attention_mask)  # (sub_B, gru_output_dim)
-            all_embeddings.append(chunk_embs)
-
-        return torch.cat(all_embeddings, dim=0)  # (total_chunks, gru_output_dim)
 
     def _pad_chunks_to_batch(
         self,
@@ -483,7 +436,7 @@ class GRUPoolExtractor(nn.Module):
             doc_chunk_counts: List[int] of per-document chunk counts
 
         Returns:
-            padded: (B, max_C, D) padded batch tensor with positional encoding
+            padded: (B, max_C, D) padded batch tensor with chunk positional encoding
             mask: (B, max_C) attention mask (1=valid, 0=pad)
         """
         B = len(doc_chunk_counts)
@@ -497,8 +450,8 @@ class GRUPoolExtractor(nn.Module):
         for i, count in enumerate(doc_chunk_counts):
             padded[i, :count] = chunk_embeddings[offset:offset + count]
             mask[i, :count] = 1.0
-            # Add positional encoding
-            padded[i, :count] = padded[i, :count] + self._positional_encoding[:count].to(self._device)
+            # Add chunk positional encoding
+            padded[i, :count] = padded[i, :count] + self._chunk_positional_encoding[:count].to(self._device)
             offset += count
 
         return padded, mask
@@ -518,24 +471,24 @@ class GRUPoolExtractor(nn.Module):
         doc_chunk_counts = batch['doc_chunk_counts']     # List[int], len B
         texts = batch['texts']
 
-        # 1. Encode all chunks through embedding -> GRU -> attention pooling (sub-batched)
+        # 1. Encode all chunks through token transformer + attention pooling (sub-batched)
         chunk_embeddings = self._encode_chunks_from_tensors(
             chunk_token_ids, chunk_lengths
-        )  # (total_chunks, gru_output_dim)
+        )  # (total_chunks, token_transformer_dim)
 
-        # 2. Project to transformer dim
-        chunk_embeddings = self._input_projection(chunk_embeddings)  # (total_chunks, transformer_dim)
+        # 2. Project to chunk transformer dim
+        chunk_embeddings = self._input_projection(chunk_embeddings)  # (total_chunks, chunk_transformer_dim)
 
-        # 3. Pad into (B, max_C, transformer_dim) with positional encoding
+        # 3. Pad into (B, max_C, chunk_transformer_dim) with chunk positional encoding
         padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
 
-        # 4. Run through transformer layers with key_padding_mask
+        # 4. Run through cross-chunk transformer layers with key_padding_mask
         key_padding_mask = (mask == 0)  # True = IGNORE for nn.MultiheadAttention
-        for layer in self._transformer_layer_modules:
+        for layer in self._chunk_transformer_layer_modules:
             padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
 
         # 5. Apply gated attention pooling (batched)
-        pooled, _ = self._gated_pooling(padded, attention_mask=mask)  # (B, transformer_dim)
+        pooled, _ = self._gated_pooling(padded, attention_mask=mask)  # (B, chunk_transformer_dim)
 
         # 6. Add numeric features if enabled
         if self._numeric_features_enabled and self._numeric_feature_vector is not None:
@@ -571,8 +524,8 @@ class GRUPoolExtractor(nn.Module):
                 max_chunks=self._max_chunks
             )
 
-            # 2. Encode chunks with BiGRU + attention
-            chunk_embeddings, _ = self._encode_chunks_batch(chunks)  # (C, gru_output_dim)
+            # 2. Encode chunks with token transformer + attention
+            chunk_embeddings, _ = self._encode_chunks_batch(chunks)  # (C, token_transformer_dim)
 
             if chunk_embeddings.size(0) == 0:
                 # Fallback for empty text
@@ -581,20 +534,20 @@ class GRUPoolExtractor(nn.Module):
                 )
                 continue
 
-            # 3. Project to transformer dim
-            chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, transformer_dim)
+            # 3. Project to chunk transformer dim
+            chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, chunk_transformer_dim)
 
-            # 4. Add positional encoding
+            # 4. Add chunk positional encoding
             num_chunks = chunk_embeddings.size(0)
-            chunk_embeddings = chunk_embeddings + self._positional_encoding[:num_chunks].to(self._device)
+            chunk_embeddings = chunk_embeddings + self._chunk_positional_encoding[:num_chunks].to(self._device)
 
-            # 5. Run through transformer layers
-            sequence = chunk_embeddings.unsqueeze(0)  # (1, C, transformer_dim)
-            for layer in self._transformer_layer_modules:
+            # 5. Run through cross-chunk transformer layers
+            sequence = chunk_embeddings.unsqueeze(0)  # (1, C, chunk_transformer_dim)
+            for layer in self._chunk_transformer_layer_modules:
                 sequence, _ = layer(sequence, return_attention=False)
 
             # 6. Apply gated attention pooling
-            pooled, _ = self._gated_pooling(sequence.squeeze(0))  # (transformer_dim,)
+            pooled, _ = self._gated_pooling(sequence.squeeze(0))  # (chunk_transformer_dim,)
 
             # 6.5. Add numeric features if enabled
             if self._numeric_features_enabled and self._numeric_feature_vector is not None:
@@ -643,7 +596,7 @@ class GRUPoolExtractor(nn.Module):
 
         Returns:
             doc_features: (B, projection_dim) - document-level features
-            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            chunk_embeddings_list: List of (C_i, chunk_transformer_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
         """
         chunk_token_ids = batch['chunk_token_ids']      # (total_chunks, max_len)
@@ -651,20 +604,20 @@ class GRUPoolExtractor(nn.Module):
         doc_chunk_counts = batch['doc_chunk_counts']     # List[int], len B
         texts = batch['texts']
 
-        # 1. Encode all chunks through embedding -> GRU -> attention pooling (sub-batched)
+        # 1. Encode all chunks through token transformer + attention pooling (sub-batched)
         chunk_embeddings = self._encode_chunks_from_tensors(
             chunk_token_ids, chunk_lengths
-        )  # (total_chunks, gru_output_dim)
+        )  # (total_chunks, token_transformer_dim)
 
-        # 2. Project to transformer dim
-        chunk_embeddings = self._input_projection(chunk_embeddings)  # (total_chunks, transformer_dim)
+        # 2. Project to chunk transformer dim
+        chunk_embeddings = self._input_projection(chunk_embeddings)  # (total_chunks, chunk_transformer_dim)
 
-        # 3. Pad into (B, max_C, transformer_dim) with positional encoding
+        # 3. Pad into (B, max_C, chunk_transformer_dim) with chunk positional encoding
         padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
 
-        # 4. Run through transformer layers with key_padding_mask
+        # 4. Run through cross-chunk transformer layers with key_padding_mask
         key_padding_mask = (mask == 0)  # True = IGNORE for nn.MultiheadAttention
-        for layer in self._transformer_layer_modules:
+        for layer in self._chunk_transformer_layer_modules:
             padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
 
         # 5. Split back per-doc, apply gated pooling per-doc for CLAM
@@ -673,8 +626,8 @@ class GRUPoolExtractor(nn.Module):
         attention_weights_list = []
 
         for i, count in enumerate(doc_chunk_counts):
-            doc_chunks = padded[i, :count]  # (C_i, transformer_dim)
-            pooled, attn_weights = self._gated_pooling(doc_chunks)  # (transformer_dim,), (C_i,)
+            doc_chunks = padded[i, :count]  # (C_i, chunk_transformer_dim)
+            pooled, attn_weights = self._gated_pooling(doc_chunks)  # (chunk_transformer_dim,), (C_i,)
 
             # Numeric features
             if self._numeric_features_enabled and self._numeric_feature_vector is not None:
@@ -703,7 +656,7 @@ class GRUPoolExtractor(nn.Module):
 
         Returns:
             doc_features: (B, projection_dim) - document-level features
-            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            chunk_embeddings_list: List of (C_i, chunk_transformer_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
         """
         batch_outputs = []
@@ -721,8 +674,8 @@ class GRUPoolExtractor(nn.Module):
                 max_chunks=self._max_chunks
             )
 
-            # 2. Encode chunks with BiGRU + attention
-            chunk_embeddings, _ = self._encode_chunks_batch(chunks)  # (C, gru_output_dim)
+            # 2. Encode chunks with token transformer + attention
+            chunk_embeddings, _ = self._encode_chunks_batch(chunks)  # (C, token_transformer_dim)
 
             if chunk_embeddings.size(0) == 0:
                 # Fallback for empty text
@@ -730,30 +683,30 @@ class GRUPoolExtractor(nn.Module):
                     torch.zeros(self._projection_dim, device=self._device)
                 )
                 chunk_embeddings_list.append(
-                    torch.zeros(0, self._transformer_dim, device=self._device)
+                    torch.zeros(0, self._chunk_transformer_dim, device=self._device)
                 )
                 attention_weights_list.append(
                     torch.zeros(0, device=self._device)
                 )
                 continue
 
-            # 3. Project to transformer dim
-            chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, transformer_dim)
+            # 3. Project to chunk transformer dim
+            chunk_embeddings = self._input_projection(chunk_embeddings)  # (C, chunk_transformer_dim)
 
-            # 4. Add positional encoding
+            # 4. Add chunk positional encoding
             num_chunks = chunk_embeddings.size(0)
-            chunk_embeddings = chunk_embeddings + self._positional_encoding[:num_chunks].to(self._device)
+            chunk_embeddings = chunk_embeddings + self._chunk_positional_encoding[:num_chunks].to(self._device)
 
-            # 5. Run through transformer layers
-            sequence = chunk_embeddings.unsqueeze(0)  # (1, C, transformer_dim)
-            for layer in self._transformer_layer_modules:
+            # 5. Run through cross-chunk transformer layers
+            sequence = chunk_embeddings.unsqueeze(0)  # (1, C, chunk_transformer_dim)
+            for layer in self._chunk_transformer_layer_modules:
                 sequence, _ = layer(sequence, return_attention=False)
 
             # Extract transformer-processed chunk embeddings (before pooling)
-            transformer_chunk_embs = sequence.squeeze(0)  # (C, transformer_dim)
+            transformer_chunk_embs = sequence.squeeze(0)  # (C, chunk_transformer_dim)
 
             # 6. Apply gated attention pooling
-            pooled, attn_weights = self._gated_pooling(transformer_chunk_embs)  # (transformer_dim,), (C,)
+            pooled, attn_weights = self._gated_pooling(transformer_chunk_embs)  # (chunk_transformer_dim,), (C,)
 
             # 6.5. Add numeric features if enabled
             if self._numeric_features_enabled and self._numeric_feature_vector is not None:
@@ -784,7 +737,7 @@ class GRUPoolExtractor(nn.Module):
 
         Accepts either List[str] or preprocessed batch dict.
 
-        This method returns transformer-processed chunk embeddings (before gated pooling)
+        This method returns cross-chunk transformer-processed chunk embeddings (before gated pooling)
         and their gated attention weights, enabling instance-level supervision on
         top-attended chunks.
 
@@ -793,7 +746,7 @@ class GRUPoolExtractor(nn.Module):
 
         Returns:
             doc_features: (B, projection_dim) - document-level features
-            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            chunk_embeddings_list: List of (C_i, chunk_transformer_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
         """
         if not self._initialized or self._embedding is None:
@@ -812,19 +765,19 @@ class GRUPoolExtractor(nn.Module):
         """
         return {
             'embedding_dim': self._embedding_dim,
-            'gru_hidden_dim': self._gru_hidden_dim,
-            'gru_num_layers': self._gru_num_layers,
-            'gru_bidirectional': self._gru_bidirectional,
-            'gru_dropout': self._gru_dropout,
+            'token_transformer_layers': self._token_transformer_layers,
+            'token_transformer_heads': self._token_transformer_heads,
+            'token_transformer_dim': self._token_transformer_dim,
+            'token_transformer_dropout': self._token_transformer_dropout,
+            'chunk_transformer_layers': self._chunk_transformer_layers,
+            'chunk_transformer_heads': self._chunk_transformer_heads,
+            'chunk_transformer_dim': self._chunk_transformer_dim,
+            'chunk_transformer_dropout': self._chunk_transformer_dropout,
+            'gated_attention_dim': self._gated_attention_dim,
+            'projection_dim': self._projection_dim,
             'max_chunks': self._max_chunks,
             'chunk_size': self._chunk_size,
             'chunk_overlap': self._chunk_overlap,
-            'transformer_layers': self._transformer_layers,
-            'transformer_heads': self._transformer_heads,
-            'transformer_dim': self._transformer_dim,
-            'transformer_dropout': self._transformer_dropout,
-            'gated_attention_dim': self._gated_attention_dim,
-            'projection_dim': self._projection_dim,
             'max_vocab_size': self._max_vocab_size,
             'min_word_freq': self._min_word_freq,
         }
@@ -889,14 +842,14 @@ class GRUPoolExtractor(nn.Module):
                     })
                     continue
 
-                # Project and add positional encoding
+                # Project and add chunk positional encoding
                 chunk_embeddings = self._input_projection(chunk_embeddings)
                 num_chunks = chunk_embeddings.size(0)
-                chunk_embeddings = chunk_embeddings + self._positional_encoding[:num_chunks].to(self._device)
+                chunk_embeddings = chunk_embeddings + self._chunk_positional_encoding[:num_chunks].to(self._device)
 
-                # Run through transformer
+                # Run through cross-chunk transformer
                 sequence = chunk_embeddings.unsqueeze(0)
-                for layer in self._transformer_layer_modules:
+                for layer in self._chunk_transformer_layer_modules:
                     sequence, _ = layer(sequence, return_attention=False)
 
                 # Get gated attention weights
@@ -966,10 +919,10 @@ class GRUPoolExtractor(nn.Module):
         interpretations = self.interpret_attention(texts, top_k=self._max_chunks)
         return {
             'interpretations': interpretations,
-            'transformer_layers': self._transformer_layers,
-            'transformer_heads': self._transformer_heads,
-            'gru_hidden_dim': self._gru_hidden_dim,
-            'gru_bidirectional': self._gru_bidirectional
+            'token_transformer_layers': self._token_transformer_layers,
+            'token_transformer_heads': self._token_transformer_heads,
+            'chunk_transformer_layers': self._chunk_transformer_layers,
+            'chunk_transformer_heads': self._chunk_transformer_heads,
         }
 
     def to(self, device):

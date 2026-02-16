@@ -185,6 +185,23 @@ class PropensityOnlyModel(nn.Module):
         c1d_hybrid_projection_dim: int = 128,
         c1d_hybrid_max_vocab: int = 50000,
         c1d_hybrid_min_word_freq: int = 2,
+        # Transformer Pool args (learned tokenizer + token transformer + chunk transformer + gated pooling)
+        tp_embedding_dim: int = 128,
+        tp_token_transformer_layers: int = 2,
+        tp_token_transformer_heads: int = 4,
+        tp_token_transformer_dim: int = 256,
+        tp_token_transformer_dropout: float = 0.1,
+        tp_chunk_transformer_layers: int = 2,
+        tp_chunk_transformer_heads: int = 4,
+        tp_chunk_transformer_dim: int = 256,
+        tp_chunk_transformer_dropout: float = 0.1,
+        tp_gated_attention_dim: int = 128,
+        tp_projection_dim: int = 128,
+        tp_chunk_size: int = 128,
+        tp_chunk_overlap: int = 32,
+        tp_max_chunks: int = 100,
+        tp_max_vocab: int = 50000,
+        tp_min_word_freq: int = 2,
         # BERT Pool args
         bert_pool_sentence_model: str = "prajjwal1/bert-tiny",
         bert_pool_freeze_sentence_encoder: bool = False,
@@ -356,6 +373,22 @@ class PropensityOnlyModel(nn.Module):
             'c1d_hybrid_projection_dim': c1d_hybrid_projection_dim,
             'c1d_hybrid_max_vocab': c1d_hybrid_max_vocab,
             'c1d_hybrid_min_word_freq': c1d_hybrid_min_word_freq,
+            'tp_embedding_dim': tp_embedding_dim,
+            'tp_token_transformer_layers': tp_token_transformer_layers,
+            'tp_token_transformer_heads': tp_token_transformer_heads,
+            'tp_token_transformer_dim': tp_token_transformer_dim,
+            'tp_token_transformer_dropout': tp_token_transformer_dropout,
+            'tp_chunk_transformer_layers': tp_chunk_transformer_layers,
+            'tp_chunk_transformer_heads': tp_chunk_transformer_heads,
+            'tp_chunk_transformer_dim': tp_chunk_transformer_dim,
+            'tp_chunk_transformer_dropout': tp_chunk_transformer_dropout,
+            'tp_gated_attention_dim': tp_gated_attention_dim,
+            'tp_projection_dim': tp_projection_dim,
+            'tp_chunk_size': tp_chunk_size,
+            'tp_chunk_overlap': tp_chunk_overlap,
+            'tp_max_chunks': tp_max_chunks,
+            'tp_max_vocab': tp_max_vocab,
+            'tp_min_word_freq': tp_min_word_freq,
             'bert_pool_sentence_model': bert_pool_sentence_model,
             'bert_pool_freeze_sentence_encoder': bert_pool_freeze_sentence_encoder,
             'bert_pool_use_pretrained': bert_pool_use_pretrained,
@@ -491,6 +524,23 @@ class PropensityOnlyModel(nn.Module):
             c1d_hybrid_projection_dim=c1d_hybrid_projection_dim,
             c1d_hybrid_max_vocab=c1d_hybrid_max_vocab,
             c1d_hybrid_min_word_freq=c1d_hybrid_min_word_freq,
+            # Transformer Pool args
+            tp_embedding_dim=tp_embedding_dim,
+            tp_token_transformer_layers=tp_token_transformer_layers,
+            tp_token_transformer_heads=tp_token_transformer_heads,
+            tp_token_transformer_dim=tp_token_transformer_dim,
+            tp_token_transformer_dropout=tp_token_transformer_dropout,
+            tp_chunk_transformer_layers=tp_chunk_transformer_layers,
+            tp_chunk_transformer_heads=tp_chunk_transformer_heads,
+            tp_chunk_transformer_dim=tp_chunk_transformer_dim,
+            tp_chunk_transformer_dropout=tp_chunk_transformer_dropout,
+            tp_gated_attention_dim=tp_gated_attention_dim,
+            tp_projection_dim=tp_projection_dim,
+            tp_chunk_size=tp_chunk_size,
+            tp_chunk_overlap=tp_chunk_overlap,
+            tp_max_chunks=tp_max_chunks,
+            tp_max_vocab=tp_max_vocab,
+            tp_min_word_freq=tp_min_word_freq,
             bert_pool_sentence_model=bert_pool_sentence_model,
             bert_pool_freeze_sentence_encoder=bert_pool_freeze_sentence_encoder,
             bert_pool_use_pretrained=bert_pool_use_pretrained,
@@ -532,17 +582,24 @@ class PropensityOnlyModel(nn.Module):
         logger.info(f"  Representation dim: {representation_dim}")
         logger.info(f"  Device: {self._device}")
 
-    def forward(self, texts: List[str]) -> torch.Tensor:
+    @staticmethod
+    def _get_extractor_input(batch, texts):
+        """Return preprocessed batch if available, otherwise raw texts."""
+        if 'chunk_input_ids' in batch or 'chunk_token_ids' in batch:
+            return batch
+        return texts
+
+    def forward(self, texts_or_batch) -> torch.Tensor:
         """
         Forward pass through the complete model.
 
         Args:
-            texts: List of text strings
+            texts_or_batch: List of text strings or preprocessed batch dict
 
         Returns:
             t_logit: Propensity logits (batch, 1)
         """
-        features = self.feature_extractor(texts)
+        features = self.feature_extractor(texts_or_batch)
         t_logit = self.propensity_net(features)
         return t_logit
 
@@ -558,9 +615,10 @@ class PropensityOnlyModel(nn.Module):
         """
         texts = batch['texts']
         treatments = batch['treatment']  # (batch,)
+        extractor_input = self._get_extractor_input(batch, texts)
 
         # Forward pass
-        t_logit = self.forward(texts)
+        t_logit = self.forward(extractor_input)
 
         # Binary cross-entropy loss for treatment prediction
         loss = F.binary_cross_entropy_with_logits(
@@ -573,18 +631,23 @@ class PropensityOnlyModel(nn.Module):
             't_logit': t_logit.detach()
         }
 
-    def predict(self, texts: List[str]) -> torch.Tensor:
+    def predict(self, texts_or_batch) -> torch.Tensor:
         """
         Predict propensity scores.
 
         Args:
-            texts: List of text strings
+            texts_or_batch: List of text strings or preprocessed batch dict from DataLoader
 
         Returns:
             Propensity probabilities (batch,)
         """
         with torch.no_grad():
-            t_logit = self.forward(texts)
+            if isinstance(texts_or_batch, dict):
+                texts = texts_or_batch['texts']
+                extractor_input = self._get_extractor_input(texts_or_batch, texts)
+            else:
+                extractor_input = texts_or_batch
+            t_logit = self.forward(extractor_input)
             propensity = torch.sigmoid(t_logit).squeeze(-1)
             return propensity
 
@@ -750,6 +813,23 @@ def create_propensity_model_from_config(
         c1d_hybrid_projection_dim=getattr(arch_config, 'c1d_hybrid_projection_dim', 128),
         c1d_hybrid_max_vocab=getattr(arch_config, 'c1d_hybrid_max_vocab', 50000),
         c1d_hybrid_min_word_freq=getattr(arch_config, 'c1d_hybrid_min_word_freq', 2),
+        # Transformer Pool args
+        tp_embedding_dim=getattr(arch_config, 'tp_embedding_dim', 128),
+        tp_token_transformer_layers=getattr(arch_config, 'tp_token_transformer_layers', 2),
+        tp_token_transformer_heads=getattr(arch_config, 'tp_token_transformer_heads', 4),
+        tp_token_transformer_dim=getattr(arch_config, 'tp_token_transformer_dim', 256),
+        tp_token_transformer_dropout=getattr(arch_config, 'tp_token_transformer_dropout', 0.1),
+        tp_chunk_transformer_layers=getattr(arch_config, 'tp_chunk_transformer_layers', 2),
+        tp_chunk_transformer_heads=getattr(arch_config, 'tp_chunk_transformer_heads', 4),
+        tp_chunk_transformer_dim=getattr(arch_config, 'tp_chunk_transformer_dim', 256),
+        tp_chunk_transformer_dropout=getattr(arch_config, 'tp_chunk_transformer_dropout', 0.1),
+        tp_gated_attention_dim=getattr(arch_config, 'tp_gated_attention_dim', 128),
+        tp_projection_dim=getattr(arch_config, 'tp_projection_dim', 128),
+        tp_chunk_size=getattr(arch_config, 'tp_chunk_size', 128),
+        tp_chunk_overlap=getattr(arch_config, 'tp_chunk_overlap', 32),
+        tp_max_chunks=getattr(arch_config, 'tp_max_chunks', 100),
+        tp_max_vocab=getattr(arch_config, 'tp_max_vocab', 50000),
+        tp_min_word_freq=getattr(arch_config, 'tp_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=getattr(arch_config, 'bert_pool_freeze_sentence_encoder', False),

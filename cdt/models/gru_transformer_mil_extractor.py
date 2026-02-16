@@ -35,6 +35,10 @@ Key insight: This architecture learns from scratch, which means:
 - Shared GRU across chunks provides parameter efficiency
 - Transformer cross-chunk layers add global context at chunk level
 
+Supports two forward paths:
+- List[str]: Legacy per-doc chunking + tokenizing (interpret_attention, predict)
+- Dict with 'chunk_token_ids': Preprocessed batch from VocabChunkCollator (training)
+
 References:
 - Ilse et al. (2018): "Attention-based Deep Multiple Instance Learning"
 """
@@ -147,6 +151,7 @@ class GRUTransformerMILExtractor(nn.Module):
         self._model_type = model_type
 
         # Word tokenizer (builds vocabulary from training data)
+        # Exposed as both self.tokenizer (legacy) and self._tokenizer (collator compat)
         self.tokenizer = WordTokenizer(
             max_length=chunk_size,
             min_freq=min_word_freq,
@@ -175,6 +180,11 @@ class GRUTransformerMILExtractor(nn.Module):
         logger.info(f"  MIL hidden dim: {mil_hidden_dim}")
         logger.info(f"  Projection dim: {projection_dim}")
         logger.info(f"  Model type: {model_type}")
+
+    @property
+    def _tokenizer(self):
+        """Alias for VocabChunkCollator compatibility (expects ext._tokenizer)."""
+        return self.tokenizer
 
     def _ensure_initialized(self):
         """Ensure all components are initialized after tokenizer is fitted."""
@@ -380,9 +390,158 @@ class GRUTransformerMILExtractor(nn.Module):
 
         return chunk_embeddings, attention_weights
 
-    def forward(self, texts: List[str]) -> torch.Tensor:
+    # ------------------------------------------------------------------
+    # Preprocessed batch helpers (VocabChunkCollator path)
+    # ------------------------------------------------------------------
+
+    def _encode_chunks_from_tensors(
+        self,
+        chunk_token_ids: torch.Tensor,
+        chunk_lengths: torch.Tensor,
+        max_sub_batch: int = 128
+    ) -> torch.Tensor:
         """
-        Extract features from texts.
+        Encode pre-padded chunk tensors through embedding -> GRU -> attention pooling.
+
+        Sub-batches to avoid OOM when total_chunks is large.
+
+        Args:
+            chunk_token_ids: (total_chunks, max_len) pre-padded token IDs
+            chunk_lengths: (total_chunks,) actual length of each chunk
+            max_sub_batch: Maximum chunks per GRU forward pass
+
+        Returns:
+            (total_chunks, gru_output_dim) chunk representations
+        """
+        total = chunk_token_ids.size(0)
+        max_len = chunk_token_ids.size(1)
+        all_chunk_embs = []
+
+        for start in range(0, total, max_sub_batch):
+            end = min(start + max_sub_batch, total)
+            batch_ids = chunk_token_ids[start:end].to(self._device)     # (sub_B, max_len)
+            batch_lens = chunk_lengths[start:end].to(self._device)      # (sub_B,)
+
+            # Build attention mask from lengths
+            sub_B = batch_ids.size(0)
+            positions = torch.arange(max_len, device=self._device).unsqueeze(0)  # (1, max_len)
+            attention_mask = (positions < batch_lens.unsqueeze(1)).float()  # (sub_B, max_len)
+
+            # Embed tokens
+            embeddings = self._embedding(batch_ids)  # (sub_B, max_len, embedding_dim)
+            embeddings = self._embed_layer_norm(embeddings)
+            embeddings = self._embed_dropout(embeddings)
+
+            # GRU forward pass
+            gru_output, _ = self._gru(embeddings)  # (sub_B, max_len, gru_output_dim)
+
+            # Attention pooling
+            chunk_embs = self._attention_pooling(gru_output, attention_mask)  # (sub_B, gru_output_dim)
+            all_chunk_embs.append(chunk_embs)
+
+        return torch.cat(all_chunk_embs, dim=0)  # (total_chunks, gru_output_dim)
+
+    def _pad_chunks_to_batch(
+        self,
+        chunk_embeddings: torch.Tensor,
+        doc_chunk_counts: List[int]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Reshape flat chunk embeddings into padded batch tensor with positional encoding.
+
+        Args:
+            chunk_embeddings: (total_chunks, D) flat tensor of projected chunk embeddings
+            doc_chunk_counts: List[int] of per-document chunk counts
+
+        Returns:
+            padded: (B, max_C, D) padded batch tensor with positional encoding added
+            mask: (B, max_C) attention mask (1=valid, 0=pad)
+        """
+        B = len(doc_chunk_counts)
+        max_C = max(doc_chunk_counts)
+        D = chunk_embeddings.size(1)
+
+        padded = torch.zeros(B, max_C, D, device=self._device)
+        mask = torch.zeros(B, max_C, device=self._device)
+
+        offset = 0
+        for i, count in enumerate(doc_chunk_counts):
+            padded[i, :count] = chunk_embeddings[offset:offset + count]
+            mask[i, :count] = 1.0
+            # Add positional encoding
+            padded[i, :count] = padded[i, :count] + self._positional_encoding[:count].to(self._device)
+            offset += count
+
+        return padded, mask
+
+    def _forward_preprocessed(self, batch: Dict[str, Any]) -> torch.Tensor:
+        """
+        GPU-only forward pass on pre-tokenized batch from VocabChunkCollator.
+
+        GRU encoding and transformer are batched across all chunks/documents.
+        MIL attention + task weighting remain per-document (variable chunk counts
+        + K confounder queries make true batching impractical without masking
+        complexity that would negate the performance gain).
+
+        Args:
+            batch: Dict with 'chunk_token_ids', 'chunk_lengths', 'doc_chunk_counts', 'texts'
+
+        Returns:
+            Feature tensor of shape (B, projection_dim)
+        """
+        chunk_token_ids = batch['chunk_token_ids']          # (total_chunks, max_len)
+        chunk_lengths = batch['chunk_lengths']               # (total_chunks,)
+        doc_chunk_counts = batch['doc_chunk_counts']         # List[int], len B
+        texts = batch['texts']
+
+        # 1. Encode all chunks through GRU (sub-batched)
+        chunk_gru_embs = self._encode_chunks_from_tensors(
+            chunk_token_ids, chunk_lengths
+        )  # (total_chunks, gru_output_dim)
+
+        # 2. Project to transformer dim
+        chunk_embeddings = self._input_projection(chunk_gru_embs)  # (total_chunks, transformer_dim)
+
+        # 3. Pad into (B, max_C, transformer_dim) with positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 4. Run through transformer layers with key_padding_mask
+        key_padding_mask = (mask == 0)  # True = IGNORE for nn.MultiheadAttention
+        for layer in self._transformer_layer_stack:
+            padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
+
+        # 5. Split back per-doc for MIL attention + task weighting (per-doc operation)
+        batch_outputs = []
+        for i, count in enumerate(doc_chunk_counts):
+            doc_chunks = padded[i, :count]  # (C_i, transformer_dim)
+
+            # Apply gated MIL attention to get K confounders
+            confounders, _ = self._gated_mil_attention(doc_chunks)  # (K, transformer_dim)
+
+            # Apply task-specific weighting
+            prop_repr, task2_repr, task3_repr = self._task_weighting(confounders)
+            # Each is (transformer_dim,)
+
+            combined = torch.cat([prop_repr, task2_repr, task3_repr], dim=0)  # (3 * transformer_dim,)
+            batch_outputs.append(combined)
+
+        # Stack batch
+        batch_outputs = torch.stack(batch_outputs)  # (B, 3 * transformer_dim)
+
+        # 6. Add numeric features if enabled
+        if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)  # (B, numeric_dim)
+            batch_outputs = self._numeric_merge(
+                torch.cat([batch_outputs, numeric_feats], dim=1)
+            )
+
+        # 7. Project to output dimension
+        features = self._output_projection(batch_outputs)  # (B, projection_dim)
+        return features
+
+    def _forward_from_texts(self, texts: List[str]) -> torch.Tensor:
+        """
+        Legacy forward path: chunk + tokenize + encode per document.
 
         Args:
             texts: List of document texts
@@ -390,7 +549,6 @@ class GRUTransformerMILExtractor(nn.Module):
         Returns:
             Feature tensor of shape (batch_size, projection_dim)
         """
-        self._ensure_initialized()
         batch_outputs = []
 
         for text in texts:
@@ -445,6 +603,26 @@ class GRUTransformerMILExtractor(nn.Module):
         features = self._output_projection(batch_outputs)  # (B, projection_dim)
 
         return features
+
+    def forward(self, texts_or_batch) -> torch.Tensor:
+        """
+        Extract features from texts or preprocessed batch.
+
+        Accepts either:
+        - List[str]: Raw text strings (legacy path, chunks + tokenizes internally)
+        - Dict with 'chunk_token_ids': Preprocessed batch from VocabChunkCollator
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            Feature tensor of shape (batch_size, projection_dim)
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_token_ids' in texts_or_batch:
+            return self._forward_preprocessed(texts_or_batch)
+        return self._forward_from_texts(texts_or_batch)
 
     def interpret_attention(
         self,
@@ -548,20 +726,127 @@ class GRUTransformerMILExtractor(nn.Module):
         self._ensure_initialized()
         return self._task_weighting.get_weights()
 
-    def forward_with_instances(
+    def _get_tau_weights(self) -> torch.Tensor:
+        """
+        Get normalized tau weights for aggregating MIL attention across K confounders.
+
+        For R-Learner: uses 'tau' weights (treatment effect modifiers).
+        For DragonNet: uses average of 'y0' and 'y1' weights (potential outcomes).
+
+        Returns:
+            (K,) normalized weight tensor on self._device
+        """
+        task_weights = self._task_weighting.get_weights()
+        if 'tau' in task_weights:
+            tau_weights = torch.tensor(task_weights['tau'], device=self._device, dtype=torch.float32)
+        else:
+            # DragonNet: average of y0 and y1 weights as proxy for treatment effect importance
+            y0_weights = torch.tensor(task_weights['y0'], device=self._device, dtype=torch.float32)
+            y1_weights = torch.tensor(task_weights['y1'], device=self._device, dtype=torch.float32)
+            tau_weights = (y0_weights + y1_weights) / 2
+        return F.softmax(tau_weights, dim=0)  # Normalize to sum to 1
+
+    def _forward_with_instances_preprocessed(
+        self,
+        batch: Dict[str, Any]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Batched forward pass returning chunk-level info for CLAM-style instance loss.
+
+        GRU + transformer are batched; MIL attention + CLAM outputs are per-doc.
+
+        Args:
+            batch: Preprocessed batch dict from VocabChunkCollator
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - tau-weighted attention per doc
+        """
+        chunk_token_ids = batch['chunk_token_ids']
+        chunk_lengths = batch['chunk_lengths']
+        doc_chunk_counts = batch['doc_chunk_counts']
+        texts = batch['texts']
+
+        tau_weights = self._get_tau_weights()
+
+        # 1. Encode all chunks through GRU (sub-batched)
+        chunk_gru_embs = self._encode_chunks_from_tensors(
+            chunk_token_ids, chunk_lengths
+        )  # (total_chunks, gru_output_dim)
+
+        # 2. Project to transformer dim
+        chunk_embeddings = self._input_projection(chunk_gru_embs)  # (total_chunks, transformer_dim)
+
+        # 3. Pad into (B, max_C, transformer_dim) with positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 4. Run through transformer layers with key_padding_mask
+        key_padding_mask = (mask == 0)
+        for layer in self._transformer_layer_stack:
+            padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
+
+        # 5. Split back per-doc for MIL + CLAM outputs
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        for i, count in enumerate(doc_chunk_counts):
+            doc_chunks = padded[i, :count]  # (C_i, transformer_dim)
+
+            if count == 0:
+                batch_outputs.append(
+                    torch.zeros(3 * self._transformer_dim, device=self._device)
+                )
+                chunk_embeddings_list.append(
+                    torch.zeros(0, self._transformer_dim, device=self._device)
+                )
+                attention_weights_list.append(
+                    torch.zeros(0, device=self._device)
+                )
+                continue
+
+            # Store transformer-processed chunk embeddings for CLAM
+            transformer_chunk_embs = doc_chunks.clone()
+
+            # Apply gated MIL attention to get K confounders with attention weights
+            confounders, mil_attn = self._gated_mil_attention(
+                doc_chunks, return_attention=True
+            )  # confounders: (K, transformer_dim), mil_attn: (K, C_i)
+
+            # Aggregate attention using tau weights: (K,) @ (K, C_i) -> (C_i,)
+            aggregated_attention = (tau_weights.unsqueeze(1) * mil_attn).sum(dim=0)
+
+            # Apply task-specific weighting
+            prop_repr, task2_repr, task3_repr = self._task_weighting(confounders)
+
+            combined = torch.cat([prop_repr, task2_repr, task3_repr], dim=0)
+            batch_outputs.append(combined)
+
+            chunk_embeddings_list.append(transformer_chunk_embs)
+            attention_weights_list.append(aggregated_attention)
+
+        # Stack batch
+        batch_outputs = torch.stack(batch_outputs)  # (B, 3 * transformer_dim)
+
+        # 6. Add numeric features if enabled
+        if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)
+            batch_outputs = self._numeric_merge(
+                torch.cat([batch_outputs, numeric_feats], dim=1)
+            )
+
+        # 7. Project to output dimension
+        features = self._output_projection(batch_outputs)  # (B, projection_dim)
+
+        return features, chunk_embeddings_list, attention_weights_list
+
+    def _forward_with_instances_from_texts(
         self,
         texts: List[str]
     ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
         """
-        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
-
-        This method returns transformer-processed chunk embeddings and tau-weighted aggregated
-        attention weights across K confounders, enabling instance-level supervision on
-        top-attended chunks.
-
-        The tau-weighted aggregation uses the task-specific weights for tau (treatment effect)
-        to prioritize confounders most relevant to treatment effect modification. This aligns
-        CLAM supervision with the causal objective.
+        Legacy forward_with_instances path from raw text strings.
 
         Args:
             texts: List of document texts
@@ -571,23 +856,11 @@ class GRUTransformerMILExtractor(nn.Module):
             chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - tau-weighted attention per doc
         """
-        self._ensure_initialized()
         batch_outputs = []
         chunk_embeddings_list = []
         attention_weights_list = []
 
-        # Get tau weights for aggregating attention across K confounders
-        # For R-Learner: use 'tau' weights (treatment effect modifiers)
-        # For DragonNet: use average of 'y0' and 'y1' weights (potential outcomes)
-        task_weights = self._task_weighting.get_weights()
-        if 'tau' in task_weights:
-            tau_weights = torch.tensor(task_weights['tau'], device=self._device, dtype=torch.float32)
-        else:
-            # DragonNet: average of y0 and y1 weights as proxy for treatment effect importance
-            y0_weights = torch.tensor(task_weights['y0'], device=self._device, dtype=torch.float32)
-            y1_weights = torch.tensor(task_weights['y1'], device=self._device, dtype=torch.float32)
-            tau_weights = (y0_weights + y1_weights) / 2
-        tau_weights = F.softmax(tau_weights, dim=0)  # Normalize to sum to 1
+        tau_weights = self._get_tau_weights()
 
         for text in texts:
             # 1. Split into overlapping token chunks
@@ -656,10 +929,48 @@ class GRUTransformerMILExtractor(nn.Module):
         # Stack batch
         batch_outputs = torch.stack(batch_outputs)  # (B, 3 * transformer_dim)
 
+        # Add numeric features if enabled
+        if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)
+            batch_outputs = self._numeric_merge(
+                torch.cat([batch_outputs, numeric_feats], dim=1)
+            )
+
         # 9. Project to output dimension
         features = self._output_projection(batch_outputs)  # (B, projection_dim)
 
         return features, chunk_embeddings_list, attention_weights_list
+
+    def forward_with_instances(
+        self,
+        texts_or_batch
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        This method returns transformer-processed chunk embeddings and tau-weighted aggregated
+        attention weights across K confounders, enabling instance-level supervision on
+        top-attended chunks.
+
+        The tau-weighted aggregation uses the task-specific weights for tau (treatment effect)
+        to prioritize confounders most relevant to treatment effect modification. This aligns
+        CLAM supervision with the causal objective.
+
+        Accepts either List[str] or preprocessed batch dict.
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - tau-weighted attention per doc
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_token_ids' in texts_or_batch:
+            return self._forward_with_instances_preprocessed(texts_or_batch)
+        return self._forward_with_instances_from_texts(texts_or_batch)
 
     def get_attention_weights(self, texts: List[str]) -> Dict[str, Any]:
         """

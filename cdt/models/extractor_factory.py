@@ -25,6 +25,7 @@ from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
 from .gru_pool_extractor import GRUPoolExtractor
 from .conv_pool_extractor import DilatedConvPoolExtractor
 from .conv1d_transformer_hybrid_extractor import Conv1dTransformerHybridExtractor
+from .transformer_pool_extractor import TransformerPoolExtractor
 from .bert_cross_chunk_extractor import BertCrossChunkExtractor
 from .llm_extractor import LLMFeatureExtractor
 from ..config import normalize_feature_extractor_type
@@ -181,6 +182,23 @@ def create_feature_extractor(
     c1d_hybrid_projection_dim: int = 128,
     c1d_hybrid_max_vocab: int = 50000,
     c1d_hybrid_min_word_freq: int = 2,
+    # Transformer Pool args (token transformer + cross-chunk transformer + gated attention pooling)
+    tp_embedding_dim: int = 128,
+    tp_token_transformer_layers: int = 2,
+    tp_token_transformer_heads: int = 4,
+    tp_token_transformer_dim: int = 256,
+    tp_token_transformer_dropout: float = 0.1,
+    tp_chunk_transformer_layers: int = 2,
+    tp_chunk_transformer_heads: int = 4,
+    tp_chunk_transformer_dim: int = 256,
+    tp_chunk_transformer_dropout: float = 0.1,
+    tp_gated_attention_dim: int = 128,
+    tp_projection_dim: int = 128,
+    tp_chunk_size: int = 128,
+    tp_chunk_overlap: int = 32,
+    tp_max_chunks: int = 100,
+    tp_max_vocab: int = 50000,
+    tp_min_word_freq: int = 2,
     # BERT Pool args
     bert_pool_sentence_model: str = "prajjwal1/bert-tiny",
     bert_pool_freeze_sentence_encoder: bool = False,
@@ -576,6 +594,36 @@ def create_feature_extractor(
                    f"projection_dim={c1d_hybrid_projection_dim}")
         return extractor
 
+    elif normalized_type == "transformer_pool":
+        extractor = TransformerPoolExtractor(
+            embedding_dim=tp_embedding_dim,
+            token_transformer_layers=tp_token_transformer_layers,
+            token_transformer_heads=tp_token_transformer_heads,
+            token_transformer_dim=tp_token_transformer_dim,
+            token_transformer_dropout=tp_token_transformer_dropout,
+            chunk_transformer_layers=tp_chunk_transformer_layers,
+            chunk_transformer_heads=tp_chunk_transformer_heads,
+            chunk_transformer_dim=tp_chunk_transformer_dim,
+            chunk_transformer_dropout=tp_chunk_transformer_dropout,
+            gated_attention_dim=tp_gated_attention_dim,
+            projection_dim=tp_projection_dim,
+            max_chunks=tp_max_chunks,
+            chunk_size=tp_chunk_size,
+            chunk_overlap=tp_chunk_overlap,
+            max_vocab_size=tp_max_vocab,
+            min_word_freq=tp_min_word_freq,
+            numeric_features_enabled=numeric_features_enabled,
+            numeric_embedding_dim=numeric_embedding_dim,
+            numeric_magnitude_bins=numeric_magnitude_bins,
+            numeric_type_categories=numeric_type_categories,
+            device=device
+        )
+        logger.info(f"Created Transformer Pool extractor: "
+                   f"token_transformer={tp_token_transformer_layers}L/{tp_token_transformer_heads}H/dim{tp_token_transformer_dim}, "
+                   f"chunk_transformer={tp_chunk_transformer_layers}L/{tp_chunk_transformer_heads}H/dim{tp_chunk_transformer_dim}, "
+                   f"projection_dim={tp_projection_dim}")
+        return extractor
+
     elif normalized_type == "bert_cross_chunk":
         extractor = BertCrossChunkExtractor(
             sentence_encoder_model=bcc_sentence_model,
@@ -808,6 +856,23 @@ def create_feature_extractor_from_config(
         c1d_hybrid_projection_dim=config.get('c1d_hybrid_projection_dim', 128),
         c1d_hybrid_max_vocab=config.get('c1d_hybrid_max_vocab', 50000),
         c1d_hybrid_min_word_freq=config.get('c1d_hybrid_min_word_freq', 2),
+        # Transformer Pool args
+        tp_embedding_dim=config.get('tp_embedding_dim', 128),
+        tp_token_transformer_layers=config.get('tp_token_transformer_layers', 2),
+        tp_token_transformer_heads=config.get('tp_token_transformer_heads', 4),
+        tp_token_transformer_dim=config.get('tp_token_transformer_dim', 256),
+        tp_token_transformer_dropout=config.get('tp_token_transformer_dropout', 0.1),
+        tp_chunk_transformer_layers=config.get('tp_chunk_transformer_layers', 2),
+        tp_chunk_transformer_heads=config.get('tp_chunk_transformer_heads', 4),
+        tp_chunk_transformer_dim=config.get('tp_chunk_transformer_dim', 256),
+        tp_chunk_transformer_dropout=config.get('tp_chunk_transformer_dropout', 0.1),
+        tp_gated_attention_dim=config.get('tp_gated_attention_dim', 128),
+        tp_projection_dim=config.get('tp_projection_dim', 128),
+        tp_chunk_size=config.get('tp_chunk_size', 128),
+        tp_chunk_overlap=config.get('tp_chunk_overlap', 32),
+        tp_max_chunks=config.get('tp_max_chunks', 100),
+        tp_max_vocab=config.get('tp_max_vocab', 50000),
+        tp_min_word_freq=config.get('tp_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=config.get('bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=config.get('bert_pool_freeze_sentence_encoder', False),

@@ -444,9 +444,149 @@ class DilatedConvPoolExtractor(nn.Module):
 
         return chunk_embeddings, chunk_attention_weights
 
-    def forward(self, texts: List[str]) -> torch.Tensor:
+    def _encode_chunks_from_tensors(
+        self,
+        chunk_token_ids: torch.Tensor,
+        chunk_lengths: torch.Tensor,
+        max_sub_batch: int = 128
+    ) -> torch.Tensor:
         """
-        Extract features from texts.
+        Encode pre-padded chunk tensors through conv stack + attention pooling.
+
+        This is the GPU-only equivalent of _encode_chunks_batch, operating on
+        tensors already created by VocabChunkCollator instead of raw token ID lists.
+
+        Args:
+            chunk_token_ids: (total_chunks, max_len) pre-padded token IDs on device
+            chunk_lengths: (total_chunks,) actual lengths per chunk
+            max_sub_batch: Maximum chunks per sub-batch to avoid OOM
+
+        Returns:
+            chunk_embeddings: (total_chunks, conv_dim)
+        """
+        total_chunks = chunk_token_ids.size(0)
+        max_len = chunk_token_ids.size(1)
+
+        # Build attention mask from chunk_lengths
+        positions = torch.arange(max_len, device=chunk_token_ids.device).unsqueeze(0)  # (1, max_len)
+        attention_mask = (positions < chunk_lengths.unsqueeze(1)).float()  # (total_chunks, max_len)
+
+        # Sub-batch to avoid OOM
+        all_embeddings = []
+        for start in range(0, total_chunks, max_sub_batch):
+            end = min(start + max_sub_batch, total_chunks)
+            sub_ids = chunk_token_ids[start:end]      # (sub_B, max_len)
+            sub_mask = attention_mask[start:end]       # (sub_B, max_len)
+
+            # Embed tokens
+            embeddings = self._embedding(sub_ids)  # (sub_B, max_len, embedding_dim)
+            embeddings = self._embed_layer_norm(embeddings)
+            embeddings = self._embed_dropout(embeddings)
+
+            # Project to conv_dim
+            embeddings = self._embed_projection(embeddings)  # (sub_B, max_len, conv_dim)
+
+            # Transpose to channels-first for Conv1d: (sub_B, conv_dim, max_len)
+            conv_input = embeddings.transpose(1, 2)
+
+            # Zero out padded positions before conv
+            conv_input = conv_input * sub_mask.unsqueeze(1)
+
+            # Apply dilated residual blocks
+            for block in self._conv_blocks:
+                conv_input = block(conv_input)
+                # Re-zero padded positions after each block to prevent padding leakage
+                conv_input = conv_input * sub_mask.unsqueeze(1)
+
+            # Transpose back to (sub_B, max_len, conv_dim)
+            conv_output = conv_input.transpose(1, 2)
+
+            # Attention pooling within each chunk
+            chunk_embs = self._chunk_attention(conv_output, sub_mask)  # (sub_B, conv_dim)
+            all_embeddings.append(chunk_embs)
+
+        return torch.cat(all_embeddings, dim=0)  # (total_chunks, conv_dim)
+
+    def _pad_chunks_to_batch(
+        self,
+        chunk_embeddings: torch.Tensor,
+        doc_chunk_counts: List[int]
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Reshape flat chunk embeddings into padded batch tensor with positional encoding.
+
+        Args:
+            chunk_embeddings: (total_chunks, D) flat tensor
+            doc_chunk_counts: List[int] of per-document chunk counts
+
+        Returns:
+            padded: (B, max_C, D) padded batch tensor with positional encoding added
+            mask: (B, max_C) attention mask (1=valid, 0=pad)
+        """
+        B = len(doc_chunk_counts)
+        max_C = max(doc_chunk_counts)
+        D = chunk_embeddings.size(1)
+
+        padded = torch.zeros(B, max_C, D, device=self._device)
+        mask = torch.zeros(B, max_C, device=self._device)
+
+        offset = 0
+        for i, count in enumerate(doc_chunk_counts):
+            padded[i, :count] = chunk_embeddings[offset:offset + count]
+            mask[i, :count] = 1.0
+            # Add positional encoding
+            padded[i, :count] = padded[i, :count] + self._positional_encoding[:count].to(self._device)
+            offset += count
+
+        return padded, mask
+
+    def _forward_preprocessed(self, batch: Dict[str, Any]) -> torch.Tensor:
+        """
+        GPU-only forward pass on pre-tokenized batch from VocabChunkCollator.
+
+        Args:
+            batch: Dict with 'chunk_token_ids', 'chunk_lengths', 'doc_chunk_counts', 'texts'
+
+        Returns:
+            Feature tensor of shape (B, projection_dim)
+        """
+        chunk_token_ids = batch['chunk_token_ids'].to(self._device)     # (total_chunks, max_len)
+        chunk_lengths = batch['chunk_lengths'].to(self._device)         # (total_chunks,)
+        doc_chunk_counts = batch['doc_chunk_counts']                    # List[int], len B
+        texts = batch['texts']
+
+        # 1. Encode all chunks through conv stack + attention pooling (sub-batched)
+        chunk_embeddings = self._encode_chunks_from_tensors(chunk_token_ids, chunk_lengths)
+        # (total_chunks, conv_dim)
+
+        # 2. Project to transformer dim
+        chunk_embeddings = self._input_projection(chunk_embeddings)  # (total_chunks, transformer_dim)
+
+        # 3. Pad into (B, max_C, transformer_dim) with positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 4. Run through transformer layers with key_padding_mask
+        key_padding_mask = (mask == 0)  # True = IGNORE for nn.MultiheadAttention
+        for layer in self._transformer_layer_modules:
+            padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
+
+        # 5. Apply gated attention pooling (batched)
+        pooled, _ = self._gated_pooling(padded, attention_mask=mask)  # (B, transformer_dim)
+
+        # 6. Add numeric features if enabled
+        if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+            numeric_feats = self._numeric_feature_vector(texts)  # (B, numeric_dim)
+            pooled = self._numeric_merge(
+                torch.cat([pooled, numeric_feats], dim=1)
+            )
+
+        # 7. Output projection
+        features = self._output_projection(pooled)  # (B, projection_dim)
+        return features
+
+    def _forward_from_texts(self, texts: List[str]) -> torch.Tensor:
+        """
+        Legacy forward path: chunk + tokenize + encode per document.
 
         Args:
             texts: List of document texts
@@ -454,9 +594,6 @@ class DilatedConvPoolExtractor(nn.Module):
         Returns:
             Feature tensor of shape (batch_size, projection_dim)
         """
-        if not self._initialized or self._embedding is None:
-            raise RuntimeError("Must call fit_tokenizer() before forward()")
-
         batch_outputs = []
 
         for text in texts:
@@ -509,16 +646,91 @@ class DilatedConvPoolExtractor(nn.Module):
         # Stack batch
         return torch.stack(batch_outputs)  # (B, projection_dim)
 
-    def forward_with_instances(
+    def forward(self, texts_or_batch) -> torch.Tensor:
+        """
+        Extract features from texts or preprocessed batch.
+
+        Accepts either:
+        - List[str]: Raw text strings (legacy path, chunks + tokenizes internally)
+        - Dict with 'chunk_token_ids': Preprocessed batch from VocabChunkCollator
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            Feature tensor of shape (batch_size, projection_dim)
+        """
+        if not self._initialized or self._embedding is None:
+            raise RuntimeError("Must call fit_tokenizer() before forward()")
+
+        if isinstance(texts_or_batch, dict) and 'chunk_token_ids' in texts_or_batch:
+            return self._forward_preprocessed(texts_or_batch)
+        return self._forward_from_texts(texts_or_batch)
+
+    def _forward_with_instances_preprocessed(
+        self,
+        batch: Dict[str, Any]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Batched forward pass returning chunk-level info for CLAM-style instance loss.
+
+        Args:
+            batch: Preprocessed batch dict from VocabChunkCollator
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        """
+        chunk_token_ids = batch['chunk_token_ids'].to(self._device)
+        chunk_lengths = batch['chunk_lengths'].to(self._device)
+        doc_chunk_counts = batch['doc_chunk_counts']
+        texts = batch['texts']
+
+        # 1. Encode all chunks through conv stack + attention pooling (sub-batched)
+        chunk_embeddings = self._encode_chunks_from_tensors(chunk_token_ids, chunk_lengths)
+
+        # 2. Project to transformer dim
+        chunk_embeddings = self._input_projection(chunk_embeddings)  # (total_chunks, transformer_dim)
+
+        # 3. Pad into (B, max_C, transformer_dim) with positional encoding
+        padded, mask = self._pad_chunks_to_batch(chunk_embeddings, doc_chunk_counts)
+
+        # 4. Run through transformer layers with key_padding_mask
+        key_padding_mask = (mask == 0)
+        for layer in self._transformer_layer_modules:
+            padded, _ = layer(padded, return_attention=False, key_padding_mask=key_padding_mask)
+
+        # 5. Split back per-doc, apply gated pooling per-doc for CLAM
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        for i, count in enumerate(doc_chunk_counts):
+            doc_chunks = padded[i, :count]  # (C_i, transformer_dim)
+            pooled, attn_weights = self._gated_pooling(doc_chunks)  # (transformer_dim,), (C_i,)
+
+            # Numeric features
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([texts[i]])  # (1, numeric_dim)
+                pooled = self._numeric_merge(
+                    torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
+
+            output = self._output_projection(pooled)
+            batch_outputs.append(output)
+            chunk_embeddings_list.append(doc_chunks)
+            attention_weights_list.append(attn_weights)
+
+        doc_features = torch.stack(batch_outputs)
+        return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def _forward_with_instances_from_texts(
         self,
         texts: List[str]
     ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
         """
-        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
-
-        This method returns transformer-processed chunk embeddings (before gated pooling)
-        and their gated attention weights, enabling instance-level supervision on
-        top-attended chunks.
+        Legacy forward_with_instances path from raw text strings.
 
         Args:
             texts: List of document texts
@@ -528,9 +740,6 @@ class DilatedConvPoolExtractor(nn.Module):
             chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
         """
-        if not self._initialized or self._embedding is None:
-            raise RuntimeError("Must call fit_tokenizer() before forward_with_instances()")
-
         batch_outputs = []
         chunk_embeddings_list = []
         attention_weights_list = []
@@ -599,6 +808,32 @@ class DilatedConvPoolExtractor(nn.Module):
         doc_features = torch.stack(batch_outputs)  # (B, projection_dim)
 
         return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def forward_with_instances(
+        self,
+        texts_or_batch
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        Accepts either:
+        - List[str]: Raw text strings (legacy path)
+        - Dict with 'chunk_token_ids': Preprocessed batch from VocabChunkCollator
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, transformer_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        """
+        if not self._initialized or self._embedding is None:
+            raise RuntimeError("Must call fit_tokenizer() before forward_with_instances()")
+
+        if isinstance(texts_or_batch, dict) and 'chunk_token_ids' in texts_or_batch:
+            return self._forward_with_instances_preprocessed(texts_or_batch)
+        return self._forward_with_instances_from_texts(texts_or_batch)
 
     def get_state(self) -> Dict[str, Any]:
         """

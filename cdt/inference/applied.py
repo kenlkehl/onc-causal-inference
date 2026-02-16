@@ -20,7 +20,8 @@ from ..models.causal_text import CausalText
 from ..data import (
     ClinicalTextDataset,
     collate_batch,
-    load_dataset
+    load_dataset,
+    create_collator
 )
 from ..utils import cuda_cleanup, get_memory_info
 from ..extraction import VLLMConfounderExtractor, ExtractionCache
@@ -667,6 +668,23 @@ def _train_single_model(
         c1d_hybrid_projection_dim=getattr(arch_config, 'c1d_hybrid_projection_dim', 128),
         c1d_hybrid_max_vocab=getattr(arch_config, 'c1d_hybrid_max_vocab', 50000),
         c1d_hybrid_min_word_freq=getattr(arch_config, 'c1d_hybrid_min_word_freq', 2),
+        # Transformer Pool args
+        tp_embedding_dim=getattr(arch_config, 'tp_embedding_dim', 128),
+        tp_token_transformer_layers=getattr(arch_config, 'tp_token_transformer_layers', 2),
+        tp_token_transformer_heads=getattr(arch_config, 'tp_token_transformer_heads', 4),
+        tp_token_transformer_dim=getattr(arch_config, 'tp_token_transformer_dim', 256),
+        tp_token_transformer_dropout=getattr(arch_config, 'tp_token_transformer_dropout', 0.1),
+        tp_chunk_transformer_layers=getattr(arch_config, 'tp_chunk_transformer_layers', 2),
+        tp_chunk_transformer_heads=getattr(arch_config, 'tp_chunk_transformer_heads', 4),
+        tp_chunk_transformer_dim=getattr(arch_config, 'tp_chunk_transformer_dim', 256),
+        tp_chunk_transformer_dropout=getattr(arch_config, 'tp_chunk_transformer_dropout', 0.1),
+        tp_gated_attention_dim=getattr(arch_config, 'tp_gated_attention_dim', 128),
+        tp_projection_dim=getattr(arch_config, 'tp_projection_dim', 128),
+        tp_chunk_size=getattr(arch_config, 'tp_chunk_size', 128),
+        tp_chunk_overlap=getattr(arch_config, 'tp_chunk_overlap', 32),
+        tp_max_chunks=getattr(arch_config, 'tp_max_chunks', 100),
+        tp_max_vocab=getattr(arch_config, 'tp_max_vocab', 50000),
+        tp_min_word_freq=getattr(arch_config, 'tp_min_word_freq', 2),
         # BERT Pool args
         bert_pool_sentence_model=getattr(arch_config, 'bert_pool_sentence_model', 'prajjwal1/bert-tiny'),
         bert_pool_freeze_sentence_encoder=getattr(arch_config, 'bert_pool_freeze_sentence_encoder', False),
@@ -811,6 +829,13 @@ def _train_single_model(
                    f"blocks: {getattr(arch_config, 'c1d_hybrid_num_blocks', 4)}, "
                    f"max_length: {getattr(arch_config, 'c1d_hybrid_max_length', 8192)}, "
                    f"{getattr(arch_config, 'c1d_hybrid_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "transformer_pool":
+        # Transformer Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info("Using Transformer Pool feature extractor")
+        logger.info(f"  Token transformer: {getattr(arch_config, 'tp_token_transformer_layers', 2)} layers, "
+                   f"chunk transformer: {getattr(arch_config, 'tp_chunk_transformer_layers', 2)} layers, "
+                   f"chunk_size: {getattr(arch_config, 'tp_chunk_size', 128)}")
     elif feature_extractor_type == "bert_pool":
         # BERT Pool: trigger lazy initialization (uses pretrained tokenizer)
         model.fit_tokenizer(train_texts)  # No-op, triggers init
@@ -862,19 +887,26 @@ def _train_single_model(
         explicit_confounder_columns=explicit_confounder_columns
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(
+        model.feature_extractor,
+        effect_feature_extractor=getattr(model, 'effect_feature_extractor', None)
+    )
+    collate_fn = collator if collator is not None else collate_batch
+
     # Create data loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.training.batch_size,
         shuffle=True,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.training.batch_size,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     # Optimization
@@ -954,11 +986,18 @@ def _predict_dataset(
         explicit_confounder_columns=explicit_confounder_columns
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(
+        model.feature_extractor,
+        effect_feature_extractor=getattr(model, 'effect_feature_extractor', None)
+    )
+    predict_collate_fn = collator if collator is not None else collate_batch
+
     loader = DataLoader(
         dataset,
         batch_size=config.training.batch_size,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=predict_collate_fn
     )
 
     result = _generate_predictions(model, loader, device)
@@ -1143,10 +1182,7 @@ def _generate_predictions(
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Predicting", leave=False):
-            texts = batch['texts']
-            explicit_confounder_values = batch.get('explicit_confounder_values', None)
-
-            preds = model.predict(texts, explicit_confounder_values=explicit_confounder_values)
+            preds = model.predict(batch)
 
             all_y0.append(preds['y0_logit'].cpu().numpy())
             all_y1.append(preds['y1_logit'].cpu().numpy())

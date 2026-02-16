@@ -446,8 +446,7 @@ def _predict_outcome(
 
     with torch.no_grad():
         for batch in loader:
-            texts = batch['texts']
-            outcome_prob = model.predict(texts)
+            outcome_prob = model.predict(batch)
             all_outcome.append(outcome_prob.cpu().numpy())
 
     outcome_scores = np.concatenate(all_outcome)

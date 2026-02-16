@@ -314,13 +314,136 @@ class BertCrossChunkExtractor(nn.Module):
 
         return cls_embeddings, token_hidden_states, attention_mask
 
+    def _encode_pass1_subbatched(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        max_bert_batch: int = 64
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Sub-batch all pre-tokenized chunks through BERT (Pass 1).
+
+        Processes chunks in sub-batches to avoid OOM when total_chunks is large.
+        Returns raw BERT outputs needed for per-document Pass 2 processing.
+
+        Args:
+            input_ids: (total_chunks, seq_len) pre-tokenized input IDs
+            attention_mask: (total_chunks, seq_len) attention mask (1=valid, 0=pad)
+            max_bert_batch: Maximum chunks per BERT forward pass
+
+        Returns:
+            cls_embeddings: (total_chunks, sentence_dim) [CLS] token embeddings
+            token_hidden_states: (total_chunks, seq_len, sentence_dim) per-token hidden states
+            attention_mask: (total_chunks, seq_len) attention mask passed through
+        """
+        total = input_ids.size(0)
+        all_cls = []
+        all_tokens = []
+
+        for start in range(0, total, max_bert_batch):
+            end = min(start + max_bert_batch, total)
+            batch_ids = input_ids[start:end].to(self._device)
+            batch_mask = attention_mask[start:end].to(self._device)
+
+            with torch.set_grad_enabled(not self._freeze):
+                outputs = self._sentence_encoder(
+                    input_ids=batch_ids,
+                    attention_mask=batch_mask
+                )
+
+            all_cls.append(outputs.last_hidden_state[:, 0, :])  # (sub_B, sentence_dim)
+            all_tokens.append(outputs.last_hidden_state)  # (sub_B, seq_len, sentence_dim)
+
+        cls_embeddings = torch.cat(all_cls, dim=0)  # (total_chunks, sentence_dim)
+        token_hidden_states = torch.cat(all_tokens, dim=0)  # (total_chunks, seq_len, sentence_dim)
+        # Ensure attention_mask is on the right device
+        attention_mask = attention_mask.to(self._device)
+
+        return cls_embeddings, token_hidden_states, attention_mask
+
+    def _process_single_document_from_pass1(
+        self,
+        cls_embs: torch.Tensor,
+        token_states: torch.Tensor,
+        token_mask: torch.Tensor,
+        return_attention: bool = False
+    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
+        """
+        Run Pass 2 (cross-chunk transformer + pooling) for a single document
+        given pre-computed Pass 1 BERT outputs.
+
+        Args:
+            cls_embs: (C, sentence_dim) - [CLS] embeddings from Pass 1
+            token_states: (C, T_padded, sentence_dim) - token hidden states from Pass 1
+            token_mask: (C, T_padded) - attention mask for tokens
+            return_attention: Whether to return attention weights
+
+        Returns:
+            pooled: (cross_chunk_dim,) - document vector
+            chunk_embeddings: (C, cross_chunk_dim) - per-chunk embeddings (if return_attention)
+            gated_weights: (C,) - gated attention weights (if return_attention)
+        """
+        num_chunks = cls_embs.size(0)
+        if num_chunks == 0:
+            pooled = torch.zeros(self._cross_chunk_dim, device=self._device)
+            if return_attention:
+                return pooled, torch.zeros(0, self._cross_chunk_dim, device=self._device), torch.zeros(0, device=self._device)
+            return pooled, None, None
+
+        T_padded = token_states.size(1)
+
+        # 1. Project to cross_chunk_dim
+        global_tokens = self._global_projection(cls_embs)  # (C, cross_chunk_dim)
+        local_tokens = self._token_projection(token_states)  # (C, T_padded, cross_chunk_dim)
+
+        # 2. Add positional encodings
+        global_tokens = global_tokens + self._pe_global[:num_chunks].to(self._device)
+        local_tokens = local_tokens + self._pe_local[:T_padded].to(self._device).unsqueeze(0)
+
+        # 3. Build cross-chunk sequences: for each chunk i, sequence = [globals, local_tokens_i]
+        # Expand globals for all chunks: (C, C, cross_chunk_dim)
+        globals_expanded = global_tokens.unsqueeze(0).expand(num_chunks, -1, -1)
+
+        # Concatenate: (C, C + T_padded, cross_chunk_dim)
+        cross_sequences = torch.cat([globals_expanded, local_tokens], dim=1)
+
+        # Build attention mask: globals are always valid, locals use token_mask
+        global_mask = torch.ones(num_chunks, num_chunks, device=self._device)  # (C, C)
+        # cross_mask: (C, C + T_padded)
+        cross_mask = torch.cat([global_mask, token_mask], dim=1)
+
+        # 4. Run through cross-chunk transformer layers
+        attn_weights = None
+        for layer in self._cross_chunk_layers:
+            cross_sequences, attn_weights = layer(
+                cross_sequences,
+                return_attention=return_attention
+            )
+
+        # 5. Extract local token outputs (positions C: onward)
+        local_outputs = cross_sequences[:, num_chunks:, :]  # (C, T_padded, cross_chunk_dim)
+        local_mask = token_mask  # (C, T_padded)
+
+        # 6. Intra-chunk attention pooling: collapse tokens within each chunk
+        chunk_embeddings = self._intra_chunk_pooling(
+            local_outputs,
+            attention_mask=local_mask
+        )  # (C, cross_chunk_dim)
+
+        # 7. Gated attention pooling over chunks
+        pooled, gated_weights = self._gated_pooling(chunk_embeddings)  # (cross_chunk_dim,), (C,)
+
+        if return_attention:
+            return pooled, chunk_embeddings, gated_weights
+        return pooled, None, None
+
     def _process_single_document(
         self,
         text: str,
         return_attention: bool = False
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[torch.Tensor]]:
         """
-        Process a single document through both passes.
+        Process a single document through both passes (chunk, tokenize, encode, cross-chunk).
 
         Args:
             text: Document text
@@ -344,67 +467,67 @@ class BertCrossChunkExtractor(nn.Module):
 
         # 2. Pass 1: Encode all chunks with BERT
         cls_embs, token_states, token_mask = self._encode_chunks_batch(chunks)
-        # cls_embs: (C, sentence_dim)
-        # token_states: (C, T_padded, sentence_dim)
-        # token_mask: (C, T_padded)
 
-        num_chunks = cls_embs.size(0)
-        if num_chunks == 0:
-            pooled = torch.zeros(self._cross_chunk_dim, device=self._device)
-            if return_attention:
-                return pooled, torch.zeros(0, self._cross_chunk_dim, device=self._device), torch.zeros(0, device=self._device)
-            return pooled, None, None
+        # 3. Pass 2: Cross-chunk transformer + pooling
+        return self._process_single_document_from_pass1(
+            cls_embs, token_states, token_mask, return_attention=return_attention
+        )
 
-        T_padded = token_states.size(1)
+    def _forward_preprocessed(self, batch: Dict[str, Any]) -> torch.Tensor:
+        """
+        GPU-only forward pass on pre-tokenized batch from HFChunkCollator.
 
-        # 3. Project to cross_chunk_dim
-        global_tokens = self._global_projection(cls_embs)  # (C, cross_chunk_dim)
-        local_tokens = self._token_projection(token_states)  # (C, T_padded, cross_chunk_dim)
+        Pass 1 (BERT) is batched across all chunks from all documents via sub-batching.
+        Pass 2 (cross-chunk transformer) stays per-document because different documents
+        have different chunk counts and cross-chunk attention patterns.
 
-        # 4. Add positional encodings
-        global_tokens = global_tokens + self._pe_global[:num_chunks].to(self._device)
-        local_tokens = local_tokens + self._pe_local[:T_padded].to(self._device).unsqueeze(0)
+        Args:
+            batch: Dict with 'chunk_input_ids', 'chunk_attention_mask', 'doc_chunk_counts', 'texts'
 
-        # 5. Build cross-chunk sequences: for each chunk i, sequence = [globals, local_tokens_i]
-        # Expand globals for all chunks: (C, C, cross_chunk_dim)
-        globals_expanded = global_tokens.unsqueeze(0).expand(num_chunks, -1, -1)
+        Returns:
+            Feature tensor of shape (B, projection_dim)
+        """
+        input_ids = batch['chunk_input_ids']          # (total_chunks, seq_len)
+        attn_mask = batch['chunk_attention_mask']      # (total_chunks, seq_len)
+        doc_chunk_counts = batch['doc_chunk_counts']   # List[int], len B
+        texts = batch['texts']
 
-        # Concatenate: (C, C + T_padded, cross_chunk_dim)
-        cross_sequences = torch.cat([globals_expanded, local_tokens], dim=1)
+        # 1. Batched Pass 1: Encode ALL chunks through BERT (sub-batched)
+        all_cls, all_tokens, all_mask = self._encode_pass1_subbatched(input_ids, attn_mask)
+        # all_cls: (total_chunks, sentence_dim)
+        # all_tokens: (total_chunks, seq_len, sentence_dim)
+        # all_mask: (total_chunks, seq_len)
 
-        # Build attention mask: globals are always valid, locals use token_mask
-        global_mask = torch.ones(num_chunks, num_chunks, device=self._device)  # (C, C)
-        # cross_mask: (C, C + T_padded)
-        cross_mask = torch.cat([global_mask, token_mask], dim=1)
+        # 2. Split per-document and run Pass 2 per-document
+        batch_outputs = []
+        offset = 0
+        for i, count in enumerate(doc_chunk_counts):
+            doc_cls = all_cls[offset:offset + count]        # (C_i, sentence_dim)
+            doc_tokens = all_tokens[offset:offset + count]  # (C_i, seq_len, sentence_dim)
+            doc_mask = all_mask[offset:offset + count]      # (C_i, seq_len)
+            offset += count
 
-        # 6. Run through cross-chunk transformer layers
-        attn_weights = None
-        for layer in self._cross_chunk_layers:
-            cross_sequences, attn_weights = layer(
-                cross_sequences,
-                return_attention=return_attention
+            # Pass 2: cross-chunk transformer + pooling (per-document)
+            pooled, _, _ = self._process_single_document_from_pass1(
+                doc_cls, doc_tokens, doc_mask, return_attention=False
             )
 
-        # 7. Extract local token outputs (positions C: onward)
-        local_outputs = cross_sequences[:, num_chunks:, :]  # (C, T_padded, cross_chunk_dim)
-        local_mask = token_mask  # (C, T_padded)
+            # Merge numeric features if enabled
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([texts[i]])  # (1, numeric_dim)
+                pooled = self._numeric_merge(
+                    torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
 
-        # 8. Intra-chunk attention pooling: collapse tokens within each chunk
-        chunk_embeddings = self._intra_chunk_pooling(
-            local_outputs,
-            attention_mask=local_mask
-        )  # (C, cross_chunk_dim)
+            batch_outputs.append(pooled)
 
-        # 9. Gated attention pooling over chunks
-        pooled, gated_weights = self._gated_pooling(chunk_embeddings)  # (cross_chunk_dim,), (C,)
+        batch_outputs = torch.stack(batch_outputs)  # (B, cross_chunk_dim)
+        features = self._output_projection(batch_outputs)  # (B, projection_dim)
+        return features
 
-        if return_attention:
-            return pooled, chunk_embeddings, gated_weights
-        return pooled, None, None
-
-    def forward(self, texts: List[str]) -> torch.Tensor:
+    def _forward_from_texts(self, texts: List[str]) -> torch.Tensor:
         """
-        Extract features from texts.
+        Legacy forward path: chunk + tokenize + encode per document.
 
         Args:
             texts: List of document texts
@@ -412,7 +535,6 @@ class BertCrossChunkExtractor(nn.Module):
         Returns:
             Feature tensor of shape (batch_size, projection_dim)
         """
-        self._ensure_initialized()
         batch_outputs = []
 
         for text in texts:
@@ -431,12 +553,101 @@ class BertCrossChunkExtractor(nn.Module):
         features = self._output_projection(batch_outputs)  # (B, projection_dim)
         return features
 
-    def forward_with_instances(
+    def forward(self, texts_or_batch) -> torch.Tensor:
+        """
+        Extract features from texts or preprocessed batch.
+
+        Accepts either:
+        - List[str]: Raw text strings (legacy path, chunks + tokenizes internally)
+        - Dict with 'chunk_input_ids': Preprocessed batch from HFChunkCollator
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            Feature tensor of shape (batch_size, projection_dim)
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_input_ids' in texts_or_batch:
+            return self._forward_preprocessed(texts_or_batch)
+        return self._forward_from_texts(texts_or_batch)
+
+    def _forward_with_instances_preprocessed(
+        self,
+        batch: Dict[str, Any]
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Batched forward pass returning chunk-level info for CLAM-style instance loss.
+
+        Pass 1 (BERT) is batched across all chunks. Pass 2 stays per-document.
+
+        Args:
+            batch: Preprocessed batch dict from HFChunkCollator
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, cross_chunk_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        """
+        input_ids = batch['chunk_input_ids']
+        attn_mask = batch['chunk_attention_mask']
+        doc_chunk_counts = batch['doc_chunk_counts']
+        texts = batch['texts']
+
+        # 1. Batched Pass 1: Encode ALL chunks through BERT (sub-batched)
+        all_cls, all_tokens, all_mask = self._encode_pass1_subbatched(input_ids, attn_mask)
+
+        # 2. Split per-document and run Pass 2 per-document (with attention for CLAM)
+        batch_outputs = []
+        chunk_embeddings_list = []
+        attention_weights_list = []
+
+        offset = 0
+        for i, count in enumerate(doc_chunk_counts):
+            doc_cls = all_cls[offset:offset + count]
+            doc_tokens = all_tokens[offset:offset + count]
+            doc_mask = all_mask[offset:offset + count]
+            offset += count
+
+            # Pass 2: cross-chunk transformer + pooling (per-document, with attention)
+            pooled, chunk_embs, gated_weights = self._process_single_document_from_pass1(
+                doc_cls, doc_tokens, doc_mask, return_attention=True
+            )
+
+            if chunk_embs is None or chunk_embs.size(0) == 0:
+                batch_outputs.append(
+                    torch.zeros(self._projection_dim, device=self._device)
+                )
+                chunk_embeddings_list.append(
+                    torch.zeros(0, self._cross_chunk_dim, device=self._device)
+                )
+                attention_weights_list.append(
+                    torch.zeros(0, device=self._device)
+                )
+                continue
+
+            # Merge numeric features if enabled
+            if self._numeric_features_enabled and self._numeric_feature_vector is not None:
+                numeric_feats = self._numeric_feature_vector([texts[i]])
+                pooled = self._numeric_merge(
+                    torch.cat([pooled.unsqueeze(0), numeric_feats], dim=1)
+                ).squeeze(0)
+
+            output = self._output_projection(pooled.unsqueeze(0)).squeeze(0)
+            batch_outputs.append(output)
+            chunk_embeddings_list.append(chunk_embs)
+            attention_weights_list.append(gated_weights)
+
+        doc_features = torch.stack(batch_outputs)
+        return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def _forward_with_instances_from_texts(
         self,
         texts: List[str]
     ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
         """
-        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+        Legacy forward_with_instances path from raw text strings.
 
         Args:
             texts: List of document texts
@@ -446,7 +657,6 @@ class BertCrossChunkExtractor(nn.Module):
             chunk_embeddings_list: List of (C_i, cross_chunk_dim) tensors per doc
             attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
         """
-        self._ensure_initialized()
         batch_outputs = []
         chunk_embeddings_list = []
         attention_weights_list = []
@@ -482,6 +692,29 @@ class BertCrossChunkExtractor(nn.Module):
 
         doc_features = torch.stack(batch_outputs)  # (B, projection_dim)
         return doc_features, chunk_embeddings_list, attention_weights_list
+
+    def forward_with_instances(
+        self,
+        texts_or_batch
+    ) -> Tuple[torch.Tensor, List[torch.Tensor], List[torch.Tensor]]:
+        """
+        Forward pass returning document features AND chunk-level info for CLAM-style instance loss.
+
+        Accepts either List[str] or preprocessed batch dict.
+
+        Args:
+            texts_or_batch: List of document texts or preprocessed batch dict
+
+        Returns:
+            doc_features: (B, projection_dim) - document-level features
+            chunk_embeddings_list: List of (C_i, cross_chunk_dim) tensors per doc
+            attention_weights_list: List of (C_i,) tensors - gated attention weights per doc
+        """
+        self._ensure_initialized()
+
+        if isinstance(texts_or_batch, dict) and 'chunk_input_ids' in texts_or_batch:
+            return self._forward_with_instances_preprocessed(texts_or_batch)
+        return self._forward_with_instances_from_texts(texts_or_batch)
 
     def init_extractor(self, texts: List[str]) -> 'BertCrossChunkExtractor':
         """

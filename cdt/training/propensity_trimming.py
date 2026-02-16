@@ -16,7 +16,7 @@ from joblib import Parallel, delayed
 
 from ..config import AppliedInferenceConfig, PropensityTrimmingConfig, normalize_feature_extractor_type
 from ..models.propensity_model import PropensityOnlyModel, create_propensity_model_from_config
-from ..data import ClinicalTextDataset, collate_batch
+from ..data import ClinicalTextDataset, collate_batch, create_collator
 from ..utils import cuda_cleanup, get_memory_info
 
 
@@ -302,6 +302,13 @@ def _train_propensity_model(
                    f"blocks: {getattr(arch_config, 'c1d_hybrid_num_blocks', 4)}, "
                    f"max_length: {getattr(arch_config, 'c1d_hybrid_max_length', 8192)}, "
                    f"{getattr(arch_config, 'c1d_hybrid_transformer_layers', 2)} transformer layers")
+    elif feature_extractor_type == "transformer_pool":
+        # Transformer Pool: requires fit_tokenizer (learns from scratch)
+        model.fit_tokenizer(train_texts)
+        logger.info("Using Transformer Pool feature extractor")
+        logger.info(f"  Token transformer: {getattr(arch_config, 'tp_token_transformer_layers', 2)} layers, "
+                   f"chunk transformer: {getattr(arch_config, 'tp_chunk_transformer_layers', 2)} layers, "
+                   f"chunk_size: {getattr(arch_config, 'tp_chunk_size', 128)}")
     elif feature_extractor_type == "bert_pool":
         # BERT Pool: trigger lazy initialization (uses pretrained tokenizer)
         model.fit_tokenizer(train_texts)  # No-op, triggers init
@@ -334,19 +341,23 @@ def _train_propensity_model(
         treatment_column=config.treatment_column
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(model.feature_extractor)
+    collate_fn = collator if collator is not None else collate_batch
+
     # Create data loaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=trimming_config.propensity_batch_size,
         shuffle=True,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=trimming_config.propensity_batch_size,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     # Optimizer
@@ -480,11 +491,15 @@ def _predict_propensity(
         treatment_column=config.treatment_column
     )
 
+    # Create collator for preprocessing in DataLoader workers
+    collator = create_collator(model.feature_extractor)
+    collate_fn = collator if collator is not None else collate_batch
+
     loader = DataLoader(
         dataset,
         batch_size=config.propensity_trimming.propensity_batch_size,
         shuffle=False,
-        collate_fn=collate_batch
+        collate_fn=collate_fn
     )
 
     model.eval()
@@ -492,8 +507,7 @@ def _predict_propensity(
 
     with torch.no_grad():
         for batch in loader:
-            texts = batch['texts']
-            propensity = model.predict(texts)
+            propensity = model.predict(batch)
             all_propensity.append(propensity.cpu().numpy())
 
     propensity_scores = np.concatenate(all_propensity)

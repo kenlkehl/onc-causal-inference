@@ -9,9 +9,18 @@ from .dataset import (
     validate_dataset
 )
 
+from .collators import (
+    HFChunkCollator,
+    VocabChunkCollator,
+    create_collator,
+)
+
 __all__ = [
     'ClinicalTextDataset',
     'collate_batch',
     'load_dataset',
     'validate_dataset',
+    'HFChunkCollator',
+    'VocabChunkCollator',
+    'create_collator',
 ]

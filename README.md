@@ -77,6 +77,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 |------|-------------|-----------|---------------|
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling | Yes | Required |
 | `conv_pool` | Chunk dilated conv + transformer + gated attention pooling | Yes | Required |
+| `transformer_pool` | Chunk token transformer + cross-chunk transformer + gated attention pooling | Yes | Required |
 | `conv1d_transformer_hybrid` | Full-document dilated conv + stride downsampling + transformer (no chunking) | Yes (8K) | Required |
 | `bert_pool` | Chunk BERT [CLS] + transformer + gated attention pooling | Yes | No |
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
@@ -222,6 +223,18 @@ Long Clinical Text → Token-based Chunking → Dilated Conv Stack per Chunk
 ```
 
 Key parameters: `conv_pool_conv_dim`, `conv_pool_kernel_size`, `conv_pool_num_blocks`, `conv_pool_chunk_size`
+
+### Transformer Pool (Token Transformer)
+
+Drop-in replacement for GRU-Pool that replaces BiGRU chunk encoding with a small token-level Transformer. Uses custom word-level tokenization (same as GRU-Pool) and trains from scratch. Fully parallelizable within chunks unlike sequential GRU.
+
+```
+Long Clinical Text → Token-based Chunking → Token Transformer per Chunk
+    → Transformer Cross-Chunk Context → Gated Attention Pooling
+    → Single Document Vector → Causal Head
+```
+
+Key parameters: `tp_token_transformer_layers`, `tp_token_transformer_dim`, `tp_chunk_transformer_layers`, `tp_chunk_size`
 
 ### Conv1d-Transformer Hybrid (Full-Document)
 

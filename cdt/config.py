@@ -181,6 +181,10 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
     if feature_type_lower in ("bert_cross_chunk", "cross_chunk", "cross_chunk_bert"):
         return "bert_cross_chunk"
 
+    # Check for Transformer Pool extractor (token transformer + cross-chunk transformer + gated attention pooling)
+    if feature_type_lower in ("transformer_pool", "tp", "token_transformer_pool"):
+        return "transformer_pool"
+
     # Check for Conv1D Transformer Hybrid extractor (full-document dilated conv + stride downsample + transformer)
     if feature_type_lower in ("conv1d_transformer_hybrid", "c1d_hybrid", "conv1d_hybrid", "conv_transformer_hybrid"):
         return "conv1d_transformer_hybrid"
@@ -460,6 +464,26 @@ class ModelArchitectureConfig:
     c1d_hybrid_projection_dim: int = 128  # Final output dimension
     c1d_hybrid_max_vocab: int = 50000  # Maximum vocabulary size
     c1d_hybrid_min_word_freq: int = 2  # Minimum word frequency for vocabulary
+
+    # Transformer Pool extractor (used when feature_extractor_type="transformer_pool")
+    # Token-level transformer within chunks + cross-chunk transformer + gated attention pooling.
+    # Learns entirely from scratch (no pretrained encoder) - requires fit_tokenizer().
+    tp_embedding_dim: int = 128  # Word embedding dimension
+    tp_token_transformer_layers: int = 2  # Transformer layers within chunks
+    tp_token_transformer_heads: int = 4  # Attention heads within chunks
+    tp_token_transformer_dim: int = 256  # Hidden dim for within-chunk transformer
+    tp_token_transformer_dropout: float = 0.1  # Dropout for token transformer
+    tp_chunk_transformer_layers: int = 2  # Cross-chunk transformer layers
+    tp_chunk_transformer_heads: int = 4  # Cross-chunk attention heads
+    tp_chunk_transformer_dim: int = 256  # Cross-chunk hidden dim
+    tp_chunk_transformer_dropout: float = 0.1  # Cross-chunk dropout
+    tp_gated_attention_dim: int = 128  # Gated attention pooling dim
+    tp_projection_dim: int = 128  # Final output dimension
+    tp_chunk_size: int = 128  # Tokens per chunk
+    tp_chunk_overlap: int = 32  # Overlap tokens
+    tp_max_chunks: int = 100  # Max chunks per doc
+    tp_max_vocab: int = 50000  # Maximum vocabulary size
+    tp_min_word_freq: int = 2  # Minimum word frequency for vocabulary
 
     # CLAM-style instance-level loss config (for GRU-Pool extractor)
     # CLAM (Lu et al., Nature BME 2021) supervises top-attended chunks with document labels
