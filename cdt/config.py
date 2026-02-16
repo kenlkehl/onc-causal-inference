@@ -148,6 +148,35 @@ class CausalForestConfig:
     rlearner_dual_extractors: bool = False
 
 
+# =============================================================================
+# TF-IDF + CAUSAL FOREST CONFIGURATION
+# =============================================================================
+
+@dataclass
+class TfidfForestConfig:
+    """Configuration for TF-IDF + Causal Forest baseline (model_type="tfidf_forest").
+
+    A non-neural baseline that uses TF-IDF features directly with CausalForestDML.
+    No GPU, no training epochs, no neural network.
+    """
+
+    # TF-IDF vectorizer parameters
+    max_features: int = 10000       # Maximum number of TF-IDF features
+    ngram_range_min: int = 1        # Minimum n-gram size
+    ngram_range_max: int = 2        # Maximum n-gram size
+    min_df: int = 5                 # Minimum document frequency (absolute count)
+    max_df: float = 0.95            # Maximum document frequency (proportion)
+    sublinear_tf: bool = True       # Use sublinear TF scaling (1 + log(tf))
+
+    # Causal forest parameters
+    n_estimators: int = 200         # Number of trees (must be divisible by 4 for econml)
+    max_depth: Optional[int] = None # Maximum tree depth (None = unlimited)
+    min_samples_leaf: int = 10      # Minimum samples per leaf
+    max_features_forest: str = "sqrt"  # Feature subset strategy for splitting
+    honest: bool = True             # Honest estimation (sample splitting within trees)
+    inference: bool = True          # Enable confidence intervals
+
+
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to one of: "cnn", "bert", "gru", "confounder",
@@ -232,7 +261,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 @dataclass
 class ModelArchitectureConfig:
     """Configuration for model architecture."""
-    model_type: str = "dragonnet"  # "dragonnet", "uplift", "rlearner", "traditional_logreg", "causal_forest", or "dr_moce"
+    model_type: str = "dragonnet"  # "dragonnet", "uplift", "rlearner", "traditional_logreg", "causal_forest", "tfidf_forest", or "dr_moce"
 
     # Feature extractor type: "cnn", "bert", or "gru"
     feature_extractor_type: str = "cnn"
@@ -552,6 +581,9 @@ class ModelArchitectureConfig:
     # Causal Forest config (used when model_type="causal_forest")
     causal_forest: CausalForestConfig = field(default_factory=CausalForestConfig)
 
+    # TF-IDF + Causal Forest config (used when model_type="tfidf_forest")
+    tfidf_forest: TfidfForestConfig = field(default_factory=TfidfForestConfig)
+
     def get_num_filters_per_kernel(self) -> int:
         """
         Compute total number of filters per kernel size.
@@ -724,10 +756,12 @@ class ExperimentConfig:
         """Create config from dictionary."""
 
         def parse_architecture_config(arch_data: Dict[str, Any]) -> ModelArchitectureConfig:
-            """Parse architecture config, handling nested causal_forest."""
+            """Parse architecture config, handling nested causal_forest and tfidf_forest."""
+            arch_data = arch_data.copy()
             if 'causal_forest' in arch_data and isinstance(arch_data['causal_forest'], dict):
-                arch_data = arch_data.copy()
                 arch_data['causal_forest'] = CausalForestConfig(**arch_data['causal_forest'])
+            if 'tfidf_forest' in arch_data and isinstance(arch_data['tfidf_forest'], dict):
+                arch_data['tfidf_forest'] = TfidfForestConfig(**arch_data['tfidf_forest'])
             return ModelArchitectureConfig(**arch_data)
 
         def parse_explicit_confounders_config(conf_data: Dict[str, Any]) -> ExplicitConfounderExtractionConfig:

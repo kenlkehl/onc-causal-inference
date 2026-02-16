@@ -99,6 +99,9 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
 | `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
 | `traditional_logreg` | Logistic regression with treatment as feature | ITE = σ(y\|T=1) - σ(y\|T=0) |
+| `tfidf_forest` | TF-IDF features + CausalForestDML (no neural network, no GPU) | τ with confidence intervals |
+
+**TF-IDF Forest Baseline**: A non-neural baseline that uses sklearn `TfidfVectorizer` features directly with `CausalForestDML`. No GPU required. See `example_configs/tfidf_forest_config.json`.
 
 **R-Learner Dual Extractor Mode**: For R-learner, you can optionally enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (τ). This prevents gradient interference between confounder learning and effect modifier learning:
 

@@ -195,6 +195,20 @@ def run_applied_inference(
         )
         return
 
+    # Route to TF-IDF + Causal Forest baseline if model_type is "tfidf_forest"
+    if hasattr(config, 'architecture') and config.architecture.model_type == "tfidf_forest":
+        logger.info("Routing to TF-IDF + Causal Forest baseline pipeline")
+        from .applied_tfidf_forest import run_applied_inference_tfidf_forest
+        run_applied_inference_tfidf_forest(
+            dataset=dataset,
+            config=config,
+            output_path=output_path,
+            device=device,
+            num_workers=num_workers,
+            explicit_confounder_columns=explicit_confounder_columns
+        )
+        return
+
     logger.info("=" * 80)
     logger.info("APPLIED CAUSAL INFERENCE (CNN)")
     logger.info("=" * 80)

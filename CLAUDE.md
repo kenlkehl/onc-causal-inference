@@ -78,6 +78,7 @@ synthetic_data/            # LLM-based synthetic data generation
 | `rlearner` | Direct τ(X) optimization, detached nuisance functions | τ directly predicts ITE |
 | `traditional_logreg` | Traditional logistic regression with treatment as feature | ITE = σ(y\|T=1) - σ(y\|T=0) |
 | `causal_forest` | Two-stage: neural features + econml CausalForestDML | τ with confidence intervals |
+| `tfidf_forest` | TF-IDF features + econml CausalForestDML (no neural network) | τ with confidence intervals |
 
 **R-Learner advantage**: Nuisance functions (e, m) are detached in R-loss, providing stronger gradient signal for treatment effect modifiers.
 
@@ -842,7 +843,7 @@ output_dir/
 | Numeric features | `cdt/models/numeric_features.py` |
 | Explicit confounders | `cdt/extraction/explicit_confounders.py`, `cdt/extraction/cache.py`, `cdt/models/explicit_confounder_featurizer.py` |
 | Text chunking | `cdt/models/chunking.py` |
-| Training | `cdt/inference/applied.py`, `cdt/inference/applied_forest.py` |
+| Training | `cdt/inference/applied.py`, `cdt/inference/applied_forest.py`, `cdt/inference/applied_tfidf_forest.py` |
 | Config | `cdt/config.py` |
 | PSM | `cdt/analysis/psm_analysis.py`, `cdt/matching/propensity_matcher.py` |
 
@@ -895,4 +896,5 @@ When adding a new feature extractor type, update ALL of the following files:
 - **Long docs**: Use `confounder`, `hierarchical_transformer`, `bert_pool`, `bert_cross_chunk`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`, or `llm`
 - **Interpretability**: `interpret_filters()` (CNN), `interpret_attention()` (others)
 - **R-Learner vs DragonNet**: R-Learner for heterogeneous treatment effects; DragonNet for general use
+- **TF-IDF Forest baseline**: `model_type="tfidf_forest"` — no neural network, pure TF-IDF + CausalForestDML
 - **LLM extractor**: Random init, pretrained tokenizer, up to 32K context, use small batch sizes

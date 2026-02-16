@@ -337,15 +337,20 @@ def _train_cnn_model(
     train_config,
     device: torch.device
 ) -> Tuple[Union[CausalText, CausalTextForest], List[Dict[str, Any]]]:
-    """Train a model with CNN, BERT, or Causal Forest.
+    """Train a model with CNN, BERT, Causal Forest, or TF-IDF Forest.
 
-    Dispatches to _train_causal_forest_model for model_type="causal_forest".
+    Dispatches to specialized trainers for model_type="causal_forest" or "tfidf_forest".
     """
     # Check for causal forest model type
     model_type = getattr(arch_config, 'model_type', 'dragonnet')
     if model_type == "causal_forest":
         return _train_causal_forest_model(
             train_df, val_df, applied_config, arch_config, train_config, device
+        )
+
+    if model_type == "tfidf_forest":
+        return _train_tfidf_forest_model(
+            train_df, val_df, applied_config, arch_config
         )
 
     # Get feature extractor type (default to "cnn" for backward compatibility)
@@ -740,6 +745,101 @@ def _train_cnn_model(
     if best_model_state:
         model.load_state_dict(best_model_state)
 
+    return model, history
+
+
+class TfidfForestWrapper:
+    """Lightweight wrapper for TF-IDF + CausalForest, compatible with plasmode predict API."""
+
+    def __init__(self, vectorizer, causal_forest, prop_rf, outcome_rf):
+        self.vectorizer = vectorizer
+        self.causal_forest = causal_forest
+        self.prop_rf = prop_rf
+        self.outcome_rf = outcome_rf
+
+    def predict_from_texts(self, texts):
+        """Predict from raw texts. Returns dict with y0_prob, y1_prob, propensity_prob, ite_prob."""
+        X = self.vectorizer.transform(texts).toarray()
+        cf_preds = self.causal_forest.predict(X, return_ci=False)
+        tau = cf_preds['tau_pred']
+        propensity = self.prop_rf.predict_proba(X)[:, 1]
+        outcome = self.outcome_rf.predict_proba(X)[:, 1]
+        y0 = np.clip(outcome - propensity * tau, 0, 1)
+        y1 = np.clip(outcome + (1 - propensity) * tau, 0, 1)
+        return {
+            'y0_prob': y0,
+            'y1_prob': y1,
+            'propensity_prob': propensity,
+            'ite_prob': tau
+        }
+
+
+def _train_tfidf_forest_model(
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    applied_config: AppliedInferenceConfig,
+    arch_config,
+) -> Tuple[TfidfForestWrapper, List[Dict[str, Any]]]:
+    """Train a TF-IDF + CausalForest model for plasmode experiments.
+
+    No neural network, no GPU. Returns a TfidfForestWrapper.
+    """
+    from ..config import TfidfForestConfig
+    from ..models.causal_forest_head import CausalForestHead
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.ensemble import RandomForestClassifier
+
+    tfidf_config = getattr(arch_config, 'tfidf_forest', TfidfForestConfig())
+
+    # Combine train + val
+    combined_df = pd.concat([train_df, val_df])
+    texts = combined_df[applied_config.text_column].tolist()
+    T = combined_df[applied_config.treatment_column].values
+    Y = combined_df[applied_config.outcome_column].values
+
+    # TF-IDF
+    vectorizer = TfidfVectorizer(
+        max_features=tfidf_config.max_features,
+        ngram_range=(tfidf_config.ngram_range_min, tfidf_config.ngram_range_max),
+        min_df=tfidf_config.min_df,
+        max_df=tfidf_config.max_df,
+        sublinear_tf=tfidf_config.sublinear_tf,
+        dtype=np.float32
+    )
+    X = vectorizer.fit_transform(texts).toarray()
+    logger.info(f"TF-IDF features: {X.shape[1]} (vocab: {len(vectorizer.vocabulary_)})")
+
+    # Fit causal forest
+    forest = CausalForestHead(
+        n_estimators=tfidf_config.n_estimators,
+        max_depth=tfidf_config.max_depth,
+        min_samples_leaf=tfidf_config.min_samples_leaf,
+        max_features=tfidf_config.max_features_forest,
+        honest=tfidf_config.honest,
+        inference=tfidf_config.inference,
+        random_state=42
+    )
+    forest.fit(X, T, Y)
+
+    # Nuisance models
+    prop_rf = RandomForestClassifier(
+        n_estimators=max(50, tfidf_config.n_estimators // 2),
+        max_depth=tfidf_config.max_depth,
+        min_samples_leaf=tfidf_config.min_samples_leaf,
+        random_state=42, n_jobs=-1
+    )
+    prop_rf.fit(X, T)
+
+    outcome_rf = RandomForestClassifier(
+        n_estimators=max(50, tfidf_config.n_estimators // 2),
+        max_depth=tfidf_config.max_depth,
+        min_samples_leaf=tfidf_config.min_samples_leaf,
+        random_state=42, n_jobs=-1
+    )
+    outcome_rf.fit(X, Y)
+
+    model = TfidfForestWrapper(vectorizer, forest, prop_rf, outcome_rf)
+    history = []  # No training epochs
     return model, history
 
 
@@ -1159,7 +1259,12 @@ def _predict_cnn_model(
     applied_config: AppliedInferenceConfig,
     device: torch.device
 ) -> dict:
-    """Generate predictions from CausalText or CausalTextForest model."""
+    """Generate predictions from CausalText, CausalTextForest, or TfidfForestWrapper model."""
+
+    # Handle TfidfForestWrapper (no neural network, no DataLoader)
+    if isinstance(model, TfidfForestWrapper):
+        texts = df[applied_config.text_column].tolist()
+        return model.predict_from_texts(texts)
 
     # Handle CausalTextForest separately (uses different prediction API)
     if isinstance(model, CausalTextForest):
