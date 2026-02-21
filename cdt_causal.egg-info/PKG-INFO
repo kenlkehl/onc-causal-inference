@@ -117,6 +117,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 |------|-------------|-----------|---------------|
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling | Yes | Required |
 | `conv_pool` | Chunk dilated conv + transformer + gated attention pooling | Yes | Required |
+| `transformer_pool` | Chunk token transformer + cross-chunk transformer + gated attention pooling | Yes | Required |
 | `conv1d_transformer_hybrid` | Full-document dilated conv + stride downsampling + transformer (no chunking) | Yes (8K) | Required |
 | `bert_pool` | Chunk BERT [CLS] + transformer + gated attention pooling | Yes | No |
 | `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
@@ -138,6 +139,9 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
 | `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
 | `traditional_logreg` | Logistic regression with treatment as feature | ITE = σ(y\|T=1) - σ(y\|T=0) |
+| `tfidf_forest` | TF-IDF features + CausalForestDML (no neural network, no GPU) | τ with confidence intervals |
+
+**TF-IDF Forest Baseline**: A non-neural baseline that uses sklearn `TfidfVectorizer` features directly with `CausalForestDML`. No GPU required. See `example_configs/tfidf_forest_config.json`.
 
 **R-Learner Dual Extractor Mode**: For R-learner, you can optionally enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (τ). This prevents gradient interference between confounder learning and effect modifier learning:
 
@@ -262,6 +266,18 @@ Long Clinical Text → Token-based Chunking → Dilated Conv Stack per Chunk
 ```
 
 Key parameters: `conv_pool_conv_dim`, `conv_pool_kernel_size`, `conv_pool_num_blocks`, `conv_pool_chunk_size`
+
+### Transformer Pool (Token Transformer)
+
+Drop-in replacement for GRU-Pool that replaces BiGRU chunk encoding with a small token-level Transformer. Uses custom word-level tokenization (same as GRU-Pool) and trains from scratch. Fully parallelizable within chunks unlike sequential GRU.
+
+```
+Long Clinical Text → Token-based Chunking → Token Transformer per Chunk
+    → Transformer Cross-Chunk Context → Gated Attention Pooling
+    → Single Document Vector → Causal Head
+```
+
+Key parameters: `tp_token_transformer_layers`, `tp_token_transformer_dim`, `tp_chunk_transformer_layers`, `tp_chunk_size`
 
 ### Conv1d-Transformer Hybrid (Full-Document)
 

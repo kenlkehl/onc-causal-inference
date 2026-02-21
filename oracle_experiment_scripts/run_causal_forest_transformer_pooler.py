@@ -481,7 +481,7 @@ def generate_experiment_grid(
     if filter_rlearner_modes:
         rlearner_modes = [m for m in rlearner_modes if m in filter_rlearner_modes]
 
-    clam_options = [False, True]
+    clam_options = [False]
     explicit_confounder_options = [False, True]
 
     # Transformer Pool hyperparameter grid

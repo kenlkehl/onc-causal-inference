@@ -9,6 +9,7 @@ cdt/analysis/__init__.py
 cdt/analysis/psm_analysis.py
 cdt/analysis/statistical_analysis.py
 cdt/data/__init__.py
+cdt/data/collators.py
 cdt/data/dataset.py
 cdt/experiments/__init__.py
 cdt/experiments/runner.py
@@ -18,6 +19,7 @@ cdt/extraction/explicit_confounders.py
 cdt/inference/__init__.py
 cdt/inference/applied.py
 cdt/inference/applied_forest.py
+cdt/inference/applied_tfidf_forest.py
 cdt/matching/__init__.py
 cdt/matching/propensity_matcher.py
 cdt/models/__init__.py
@@ -51,8 +53,8 @@ cdt/models/propensity_model.py
 cdt/models/rlearner.py
 cdt/models/sparse_attention.py
 cdt/models/traditional_logreg.py
+cdt/models/transformer_pool_extractor.py
 cdt/models/uplift.py
-cdt/models/.ipynb_checkpoints/conv_pool_extractor-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py
