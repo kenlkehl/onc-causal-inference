@@ -191,14 +191,22 @@ def _generate_confounders(client: LLMClient, clinical_question: str, num_confoun
     )
     
     confounders = response.get("confounders", [])
-    
+
     # Validate structure
     for conf in confounders:
         if "name" not in conf or "type" not in conf:
             raise ValueError(f"Invalid confounder structure: {conf}")
         if conf["type"] == "categorical" and "categories" not in conf:
             raise ValueError(f"Categorical confounder missing categories: {conf}")
-    
+
+    # Enforce count if num_confounders was specified
+    if num_confounders is not None and len(confounders) != num_confounders:
+        logger.warning(
+            f"LLM returned {len(confounders)} confounders but {num_confounders} requested, "
+            f"truncating to first {num_confounders}"
+        )
+        confounders = confounders[:num_confounders]
+
     return confounders
 
 
@@ -423,13 +431,21 @@ def _generate_confounders_vllm(client: 'VLLMBatchClient', clinical_question: str
     )
     
     confounders = response.get("confounders", [])
-    
+
     for conf in confounders:
         if "name" not in conf or "type" not in conf:
             raise ValueError(f"Invalid confounder structure: {conf}")
         if conf["type"] == "categorical" and "categories" not in conf:
             raise ValueError(f"Categorical confounder missing categories: {conf}")
-    
+
+    # Enforce count if num_confounders was specified
+    if num_confounders is not None and len(confounders) != num_confounders:
+        logger.warning(
+            f"LLM returned {len(confounders)} confounders but {num_confounders} requested, "
+            f"truncating to first {num_confounders}"
+        )
+        confounders = confounders[:num_confounders]
+
     return confounders
 
 
