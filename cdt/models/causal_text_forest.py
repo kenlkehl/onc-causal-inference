@@ -242,7 +242,9 @@ class CausalTextForest(nn.Module):
         contrastive_min_cluster_size: int = 2,
         contrastive_clustering_method: str = "kmeans",
         # Device
-        device: str = "cuda:0"
+        device: str = "cuda:0",
+        # Outcome type
+        outcome_type: str = "binary",  # "binary" or "continuous"
     ):
         """
         Initialize two-stage causal text model.
@@ -273,6 +275,7 @@ class CausalTextForest(nn.Module):
             )
 
         self._device = torch.device(device)
+        self.outcome_type = outcome_type
         self.feature_extractor_type = normalize_feature_extractor_type(feature_extractor_type)
 
         # Store config
@@ -444,6 +447,7 @@ class CausalTextForest(nn.Module):
             'contrastive_projection_dim': contrastive_projection_dim,
             'contrastive_min_cluster_size': contrastive_min_cluster_size,
             'contrastive_clustering_method': contrastive_clustering_method,
+            'outcome_type': outcome_type,
         }
 
         # Store explicit confounder output dim for head input calculation
@@ -946,6 +950,18 @@ class CausalTextForest(nn.Module):
         outcome_logit = self.outcome_head(features)
         return features, propensity_logit, outcome_logit
 
+    def _outcome_loss(self, logit, target):
+        """BCE for binary outcomes, MSE for continuous outcomes."""
+        if self.outcome_type == "continuous":
+            return F.mse_loss(logit, target)
+        return F.binary_cross_entropy_with_logits(logit, target)
+
+    def _outcome_activation(self, logit):
+        """Sigmoid for binary outcomes, identity for continuous outcomes."""
+        if self.outcome_type == "continuous":
+            return logit
+        return torch.sigmoid(logit)
+
     def train_representation_step(
         self,
         batch: Dict[str, Any],
@@ -981,10 +997,13 @@ class CausalTextForest(nn.Module):
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
-        # Apply label smoothing
+        # Apply label smoothing (skip outcome smoothing for continuous)
         if label_smoothing > 0:
             treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
-            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            if self.outcome_type == "binary":
+                outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            else:
+                outcomes_smooth = outcomes
         else:
             treatments_smooth = treatments
             outcomes_smooth = outcomes
@@ -1023,7 +1042,7 @@ class CausalTextForest(nn.Module):
             treatments_smooth
         )
 
-        outcome_loss = F.binary_cross_entropy_with_logits(
+        outcome_loss = self._outcome_loss(
             outcome_logit.squeeze(-1),
             outcomes_smooth
         )
@@ -1046,7 +1065,7 @@ class CausalTextForest(nn.Module):
 
                 # Detach nuisance functions - gradients flow only through effect extractor + MLP
                 e_X = torch.sigmoid(propensity_logit).detach().clamp(0.01, 0.99)
-                m_X = torch.sigmoid(outcome_logit).detach()
+                m_X = self._outcome_activation(outcome_logit).detach()
 
                 # R-loss: pseudo-outcome regression
                 Y_residual = outcomes - m_X.squeeze(-1)
@@ -1060,7 +1079,7 @@ class CausalTextForest(nn.Module):
                 # Detach nuisance functions - this is the key to R-learner
                 # Gradients only flow through τ, not through e or m estimates
                 e_X = torch.sigmoid(propensity_logit).detach().clamp(0.01, 0.99)
-                m_X = torch.sigmoid(outcome_logit).detach()
+                m_X = self._outcome_activation(outcome_logit).detach()
 
                 # R-loss: pseudo-outcome regression
                 Y_residual = outcomes - m_X.squeeze(-1)
@@ -1106,7 +1125,7 @@ class CausalTextForest(nn.Module):
                 )
 
                 # Instance outcome loss
-                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                instance_outcome_loss = self._outcome_loss(
                     inst_outcome.squeeze(-1), exp_outcomes
                 )
 
@@ -1221,7 +1240,7 @@ class CausalTextForest(nn.Module):
                         explicit_confounder_values=batch_conf_values
                     )
                     all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
-                    all_outcome.append(torch.sigmoid(outcome_logit).cpu().numpy())
+                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
 
                     if batch_conf_values is not None:
                         all_conf_values.extend(batch_conf_values)
@@ -1247,7 +1266,7 @@ class CausalTextForest(nn.Module):
                         explicit_confounder_values=batch_conf_values
                     )
                     all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
-                    all_outcome.append(torch.sigmoid(outcome_logit).cpu().numpy())
+                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
 
         neural_features = np.vstack(all_text_features)
 
@@ -1360,8 +1379,11 @@ class CausalTextForest(nn.Module):
         # From: m = e*y1 + (1-e)*y0 and tau = y1 - y0
         # Solving: y0 = m - e*tau, y1 = m + (1-e)*tau
         tau = cf_preds['tau_pred']
-        y0_prob = np.clip(outcome_pred - propensity * tau, 0, 1)
-        y1_prob = np.clip(outcome_pred + (1 - propensity) * tau, 0, 1)
+        y0_prob = outcome_pred - propensity * tau
+        y1_prob = outcome_pred + (1 - propensity) * tau
+        if self.outcome_type == "binary":
+            y0_prob = np.clip(y0_prob, 0, 1)
+            y1_prob = np.clip(y1_prob, 0, 1)
 
         result['pred_y0_prob'] = y0_prob
         result['pred_y1_prob'] = y1_prob

@@ -292,6 +292,8 @@ class CausalText(nn.Module):
         dr_moce_het_weight: float = 0.1,
         dr_moce_balance_weight: float = 0.01,
         dr_moce_crossfit_buffer_size: int = 1024,
+        # Outcome type
+        outcome_type: str = "binary",  # "binary" or "continuous"
     ):
         """
         Initialize causal inference model with CNN, BERT, or GRU feature extractor.
@@ -331,6 +333,7 @@ class CausalText(nn.Module):
 
         self._device = torch.device(device)
         self.model_type = model_type
+        self.outcome_type = outcome_type
         # Normalize feature extractor type (e.g., "modernbert" -> "bert")
         self.feature_extractor_type = normalize_feature_extractor_type(feature_extractor_type)
 
@@ -546,6 +549,7 @@ class CausalText(nn.Module):
             'dr_moce_het_weight': dr_moce_het_weight,
             'dr_moce_balance_weight': dr_moce_balance_weight,
             'dr_moce_crossfit_buffer_size': dr_moce_crossfit_buffer_size,
+            'outcome_type': outcome_type,
         }
 
         # Store auxiliary dimension
@@ -1230,6 +1234,18 @@ class CausalText(nn.Module):
 
         return y0_logit, y1_logit, t_logit, final_common_layer
 
+    def _outcome_loss(self, logit, target):
+        """BCE for binary outcomes, MSE for continuous outcomes."""
+        if self.outcome_type == "continuous":
+            return F.mse_loss(logit, target)
+        return F.binary_cross_entropy_with_logits(logit, target)
+
+    def _outcome_activation(self, logit):
+        """Sigmoid for binary outcomes, identity for continuous outcomes."""
+        if self.outcome_type == "continuous":
+            return logit
+        return torch.sigmoid(logit)
+
     def train_step(
         self,
         batch: Dict[str, Any],
@@ -1308,10 +1324,13 @@ class CausalText(nn.Module):
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
-        # Apply label smoothing if enabled
+        # Apply label smoothing if enabled (skip outcome smoothing for continuous)
         if label_smoothing > 0:
             treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
-            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            if self.outcome_type == "binary":
+                outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            else:
+                outcomes_smooth = outcomes
         else:
             treatments_smooth = treatments
             outcomes_smooth = outcomes
@@ -1370,7 +1389,7 @@ class CausalText(nn.Module):
             y0_logit
         )
 
-        outcome_loss = F.binary_cross_entropy_with_logits(
+        outcome_loss = self._outcome_loss(
             factual_logit.squeeze(-1),
             outcomes_smooth
         )
@@ -1382,7 +1401,7 @@ class CausalText(nn.Module):
                 H = (treatments.unsqueeze(1) / propensity) - \
                     ((1 - treatments.unsqueeze(1)) / (1 - propensity))
 
-            factual_prob = torch.sigmoid(factual_logit)
+            factual_prob = self._outcome_activation(factual_logit)
             moment = torch.mean((outcomes.unsqueeze(1) - factual_prob) * H)
             targreg_loss = moment ** 2
         else:
@@ -1428,7 +1447,7 @@ class CausalText(nn.Module):
                 inst_factual = torch.where(
                     exp_treatments.unsqueeze(1) > 0.5, inst_y1, inst_y0
                 )
-                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                instance_outcome_loss = self._outcome_loss(
                     inst_factual.squeeze(-1), exp_outcomes
                 )
 
@@ -1503,10 +1522,13 @@ class CausalText(nn.Module):
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
-        # Apply label smoothing if enabled
+        # Apply label smoothing if enabled (skip outcome smoothing for continuous)
         if label_smoothing > 0:
             treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
-            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            if self.outcome_type == "binary":
+                outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            else:
+                outcomes_smooth = outcomes
         else:
             treatments_smooth = treatments
             outcomes_smooth = outcomes
@@ -1573,8 +1595,8 @@ class CausalText(nn.Module):
                     treatments_smooth
                 )
 
-            # Loss 2: Marginal outcome loss - BCE for m(X) = E[Y|X]
-            outcome_loss = F.binary_cross_entropy_with_logits(
+            # Loss 2: Marginal outcome loss - BCE/MSE for m(X) = E[Y|X]
+            outcome_loss = self._outcome_loss(
                 m_logit.squeeze(-1),
                 outcomes_smooth
             )
@@ -1583,7 +1605,7 @@ class CausalText(nn.Module):
             # CRITICAL: Nuisance functions are detached - gradients flow only through τ
             # In dual mode, τ comes from separate effect extractor + MLP
             e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
-            m_X = torch.sigmoid(m_logit).detach()
+            m_X = self._outcome_activation(m_logit).detach()
 
             # Compute residuals
             Y_residual = outcomes - m_X.squeeze(-1)  # Y - m(X)
@@ -1656,8 +1678,8 @@ class CausalText(nn.Module):
                     treatments_smooth
                 )
 
-            # Loss 2: Marginal outcome loss - BCE for m(X) = E[Y|X]
-            outcome_loss = F.binary_cross_entropy_with_logits(
+            # Loss 2: Marginal outcome loss - BCE/MSE for m(X) = E[Y|X]
+            outcome_loss = self._outcome_loss(
                 m_logit.squeeze(-1),
                 outcomes_smooth
             )
@@ -1665,7 +1687,7 @@ class CausalText(nn.Module):
             # Loss 3: R-learner loss
             # CRITICAL: Detach nuisance functions so gradients flow only through tau
             e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
-            m_X = torch.sigmoid(m_logit).detach()
+            m_X = self._outcome_activation(m_logit).detach()
 
             # Compute residuals
             Y_residual = outcomes - m_X.squeeze(-1)  # Y - m(X)
@@ -1712,13 +1734,13 @@ class CausalText(nn.Module):
                 )
 
                 # Instance marginal outcome loss
-                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                instance_outcome_loss = self._outcome_loss(
                     inst_m.squeeze(-1), exp_outcomes
                 )
 
                 # Instance R-loss (with detached nuisance functions)
                 inst_e = torch.sigmoid(inst_t).detach().clamp(0.01, 0.99)
-                inst_m_prob = torch.sigmoid(inst_m).detach()
+                inst_m_prob = self._outcome_activation(inst_m).detach()
                 inst_Y_residual = exp_outcomes - inst_m_prob.squeeze(-1)
                 inst_T_residual = exp_treatments - inst_e.squeeze(-1)
                 instance_r_loss = ((inst_Y_residual - inst_tau.squeeze(-1) * inst_T_residual) ** 2).mean()
@@ -1743,7 +1765,7 @@ class CausalText(nn.Module):
         # From: m = e*y1 + (1-e)*y0 and tau = y1 - y0
         # Solving: y0 = m - e*tau, y1 = m + (1-e)*tau
         with torch.no_grad():
-            m_prob = torch.sigmoid(m_logit)
+            m_prob = self._outcome_activation(m_logit)
             prop = torch.sigmoid(t_logit)
             tau_val = tau
             y0_logit_approx = m_logit - prop * tau_val
@@ -1819,10 +1841,13 @@ class CausalText(nn.Module):
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
-        # Apply label smoothing if enabled
+        # Apply label smoothing if enabled (skip outcome smoothing for continuous)
         if label_smoothing > 0:
             treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
-            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            if self.outcome_type == "binary":
+                outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            else:
+                outcomes_smooth = outcomes
         else:
             treatments_smooth = treatments
             outcomes_smooth = outcomes
@@ -1962,7 +1987,7 @@ class CausalText(nn.Module):
             y0_logit
         )
 
-        outcome_loss = F.binary_cross_entropy_with_logits(
+        outcome_loss = self._outcome_loss(
             factual_logit.squeeze(-1),
             outcomes_smooth
         )
@@ -1974,7 +1999,7 @@ class CausalText(nn.Module):
                 H = (treatments.unsqueeze(1) / propensity) - \
                     ((1 - treatments.unsqueeze(1)) / (1 - propensity))
 
-            factual_prob = torch.sigmoid(factual_logit)
+            factual_prob = self._outcome_activation(factual_logit)
             moment = torch.mean((outcomes.unsqueeze(1) - factual_prob) * H)
             targreg_loss = moment ** 2
         else:
@@ -2022,7 +2047,7 @@ class CausalText(nn.Module):
                 inst_factual = torch.where(
                     exp_treatments.unsqueeze(1) > 0.5, inst_y1, inst_y0
                 )
-                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                instance_outcome_loss = self._outcome_loss(
                     inst_factual.squeeze(-1), exp_outcomes
                 )
 
@@ -2101,10 +2126,13 @@ class CausalText(nn.Module):
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
-        # Apply label smoothing if enabled
+        # Apply label smoothing if enabled (skip outcome smoothing for continuous)
         if label_smoothing > 0:
             treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
-            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            if self.outcome_type == "binary":
+                outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            else:
+                outcomes_smooth = outcomes
         else:
             treatments_smooth = treatments
             outcomes_smooth = outcomes
@@ -2159,7 +2187,7 @@ class CausalText(nn.Module):
         )
 
         # Outcome loss - factual outcome conditioned on observed treatment
-        outcome_loss = F.binary_cross_entropy_with_logits(
+        outcome_loss = self._outcome_loss(
             y_logit.squeeze(-1),
             outcomes_smooth
         )
@@ -2205,7 +2233,7 @@ class CausalText(nn.Module):
                 )
 
                 # Instance outcome loss
-                instance_outcome_loss = F.binary_cross_entropy_with_logits(
+                instance_outcome_loss = self._outcome_loss(
                     inst_y.squeeze(-1), exp_outcomes
                 )
 
@@ -2277,10 +2305,13 @@ class CausalText(nn.Module):
         explicit_confounder_values = batch.get('explicit_confounder_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
-        # Apply label smoothing if enabled
+        # Apply label smoothing if enabled (skip outcome smoothing for continuous)
         if label_smoothing > 0:
             treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
-            outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            if self.outcome_type == "binary":
+                outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+            else:
+                outcomes_smooth = outcomes
         else:
             treatments_smooth = treatments
             outcomes_smooth = outcomes
@@ -2322,13 +2353,13 @@ class CausalText(nn.Module):
         outcome_loss = torch.tensor(0.0, device=self._device)
         n_terms = 0
         if control_mask.any():
-            outcome_loss = outcome_loss + F.binary_cross_entropy_with_logits(
+            outcome_loss = outcome_loss + self._outcome_loss(
                 mu0_logit[control_mask].squeeze(-1),
                 outcomes_smooth[control_mask]
             )
             n_terms += 1
         if treated_mask.any():
-            outcome_loss = outcome_loss + F.binary_cross_entropy_with_logits(
+            outcome_loss = outcome_loss + self._outcome_loss(
                 mu1_logit[treated_mask].squeeze(-1),
                 outcomes_smooth[treated_mask]
             )
@@ -2339,8 +2370,8 @@ class CausalText(nn.Module):
         # --- DR pseudo-outcome with optional cross-fitting ---
         with torch.no_grad():
             e = torch.sigmoid(t_logit).squeeze(-1)
-            mu0_prob = torch.sigmoid(mu0_logit).squeeze(-1)
-            mu1_prob = torch.sigmoid(mu1_logit).squeeze(-1)
+            mu0_prob = self._outcome_activation(mu0_logit).squeeze(-1)
+            mu1_prob = self._outcome_activation(mu1_logit).squeeze(-1)
 
             # Use prediction buffer for cross-fitting if available
             if (self.dr_moce_buffer is not None
@@ -2473,8 +2504,8 @@ class CausalText(nn.Module):
                 mu0_logit, mu1_logit, tau, sigma2, t_logit, g, expert_means, phi = self.net(features)
 
                 sigma = torch.sqrt(sigma2.clamp(min=1e-6))
-                y0_prob = torch.sigmoid(mu0_logit).squeeze(-1)
-                y1_prob = torch.sigmoid(mu1_logit).squeeze(-1)
+                y0_prob = self._outcome_activation(mu0_logit).squeeze(-1)
+                y1_prob = self._outcome_activation(mu1_logit).squeeze(-1)
                 propensity = torch.sigmoid(t_logit).squeeze(-1)
 
                 return {
@@ -2523,7 +2554,7 @@ class CausalText(nn.Module):
                     effect_features = self.effect_feature_extractor(extractor_input)
                     tau = self.effect_mlp(effect_features)
 
-                    m_prob = torch.sigmoid(m_logit).squeeze(-1)  # E[Y|X]
+                    m_prob = self._outcome_activation(m_logit).squeeze(-1)  # E[Y|X]
                     tau_val = tau.squeeze(-1)  # τ(X)
                     prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
 
@@ -2532,15 +2563,18 @@ class CausalText(nn.Module):
                     # RLearnerNet returns: m_logit, tau, t_logit, final_common_layer
                     m_logit, tau, t_logit, final_common_layer = self.net(features)
 
-                    m_prob = torch.sigmoid(m_logit).squeeze(-1)  # E[Y|X]
+                    m_prob = self._outcome_activation(m_logit).squeeze(-1)  # E[Y|X]
                     tau_val = tau.squeeze(-1)  # τ(X)
                     prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
 
                 # Derive Y0/Y1 from m and τ for backward compatibility:
                 # From: m = e*y1 + (1-e)*y0 and tau = y1 - y0
                 # Solving: y0 = m - e*tau, y1 = m + (1-e)*tau
-                y0_prob = (m_prob - prop * tau_val).clamp(0, 1)
-                y1_prob = (m_prob + (1 - prop) * tau_val).clamp(0, 1)
+                y0_prob = (m_prob - prop * tau_val)
+                y1_prob = (m_prob + (1 - prop) * tau_val)
+                if self.outcome_type == "binary":
+                    y0_prob = y0_prob.clamp(0, 1)
+                    y1_prob = y1_prob.clamp(0, 1)
 
                 return {
                     'y0_prob': y0_prob,
@@ -2552,8 +2586,8 @@ class CausalText(nn.Module):
                     'm_logit': m_logit.squeeze(-1),
                     'final_common_layer': final_common_layer,
                     # Approximate logits for compatibility
-                    'y0_logit': torch.logit(y0_prob.clamp(1e-6, 1 - 1e-6)),
-                    'y1_logit': torch.logit(y1_prob.clamp(1e-6, 1 - 1e-6)),
+                    'y0_logit': torch.logit(y0_prob.clamp(1e-6, 1 - 1e-6)) if self.outcome_type == "binary" else y0_prob,
+                    'y1_logit': torch.logit(y1_prob.clamp(1e-6, 1 - 1e-6)) if self.outcome_type == "binary" else y1_prob,
                 }
             elif self.model_type == "traditional_logreg":
                 # TraditionalLogRegNet in counterfactual mode returns: y0_logit, y1_logit, t_logit, phi
@@ -2563,9 +2597,9 @@ class CausalText(nn.Module):
                 y0_logit, y1_logit, t_logit, final_common_layer = self.net(features)
                 tau_pred = (y1_logit - y0_logit).squeeze(-1)
 
-            # Convert to probabilities
-            y0_prob = torch.sigmoid(y0_logit).squeeze(-1)
-            y1_prob = torch.sigmoid(y1_logit).squeeze(-1)
+            # Convert to probabilities (or identity for continuous)
+            y0_prob = self._outcome_activation(y0_logit).squeeze(-1)
+            y1_prob = self._outcome_activation(y1_logit).squeeze(-1)
             propensity = torch.sigmoid(t_logit).squeeze(-1)
 
             return {

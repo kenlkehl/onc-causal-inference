@@ -163,8 +163,10 @@ cdt run --config config.json --device cpu --workers 1
 |--------|------|-------------|
 | `clinical_text` | string | Clinical narrative |
 | `treatment_indicator` | int | Binary (0/1) |
-| `outcome_indicator` | int | Binary (0/1) |
+| `outcome_indicator` | int/float | Binary (0/1) or continuous |
 | `split` | string | Optional: "train"/"val"/"test" |
+
+Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"continuous"` (MSE loss, no sigmoid). Treatment/propensity is always binary.
 
 ## Training Pattern
 
@@ -196,9 +198,9 @@ for batch in dataloader:
     losses['loss'].backward()
     optimizer.step()
 
-# Predictions
+# Predictions (binary: probabilities, continuous: raw values)
 preds = model.predict(texts)
-ite = preds['y1_prob'] - preds['y0_prob']
+ite = preds['y1_prob'] - preds['y0_prob']  # Works for both outcome types
 ```
 
 See `example_configs/` for complete config files for each extractor type.
@@ -891,7 +893,8 @@ When adding a new feature extractor type, update ALL of the following files:
 
 ## Quick Reference
 
-- **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale)
+- **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale for binary, raw values for continuous)
+- **Outcome type**: `outcome_type="binary"` (BCE + sigmoid) or `"continuous"` (MSE, no sigmoid). Treatment always binary.
 - **Tokenizer**: Required for `cnn`, `gru`, `confounder` with GRU mode, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`
 - **Long docs**: Use `confounder`, `hierarchical_transformer`, `bert_pool`, `bert_cross_chunk`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`, or `llm`
 - **Interpretability**: `interpret_filters()` (CNN), `interpret_attention()` (others)

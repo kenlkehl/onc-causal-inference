@@ -100,7 +100,8 @@ class OutcomeOnlyModel(nn.Module):
         gru_max_vocab_size: Optional[int] = 50000,
         # Outcome network args
         representation_dim: int = 128,
-        device: str = "cuda:0"
+        device: str = "cuda:0",
+        outcome_type: str = "binary",  # "binary" or "continuous"
     ):
         """
         Initialize outcome-only model.
@@ -129,6 +130,7 @@ class OutcomeOnlyModel(nn.Module):
         super().__init__()
 
         self._device = torch.device(device)
+        self.outcome_type = outcome_type
         # Normalize feature extractor type (e.g., "modernbert" -> "bert")
         self.feature_extractor_type = normalize_feature_extractor_type(feature_extractor_type)
 
@@ -263,11 +265,11 @@ class OutcomeOnlyModel(nn.Module):
         # Forward pass
         y_logit = self.forward(extractor_input)
 
-        # Binary cross-entropy loss for outcome prediction
-        loss = F.binary_cross_entropy_with_logits(
-            y_logit.squeeze(-1),
-            outcomes
-        )
+        # Outcome loss: BCE for binary, MSE for continuous
+        if self.outcome_type == "continuous":
+            loss = F.mse_loss(y_logit.squeeze(-1), outcomes)
+        else:
+            loss = F.binary_cross_entropy_with_logits(y_logit.squeeze(-1), outcomes)
 
         return {
             'loss': loss,
@@ -291,6 +293,8 @@ class OutcomeOnlyModel(nn.Module):
             else:
                 extractor_input = texts_or_batch
             y_logit = self.forward(extractor_input)
+            if self.outcome_type == "continuous":
+                return y_logit.squeeze(-1)
             outcome_prob = torch.sigmoid(y_logit).squeeze(-1)
             return outcome_prob
 
@@ -321,7 +325,8 @@ class OutcomeOnlyModel(nn.Module):
 def create_outcome_model_from_config(
     arch_config,
     representation_dim: int,
-    device: torch.device
+    device: torch.device,
+    outcome_type: str = "binary"
 ) -> OutcomeOnlyModel:
     """
     Create an OutcomeOnlyModel from architecture config.
@@ -369,7 +374,8 @@ def create_outcome_model_from_config(
         gru_max_vocab_size=getattr(arch_config, 'gru_max_vocab_size', 50000),
         # Outcome network args
         representation_dim=representation_dim,
-        device=str(device)
+        device=str(device),
+        outcome_type=outcome_type
     )
 
     return model

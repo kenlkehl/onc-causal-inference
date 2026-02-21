@@ -758,6 +758,8 @@ def _train_single_model(
         dr_moce_het_weight=getattr(arch_config, 'dr_moce_het_weight', 0.1),
         dr_moce_balance_weight=getattr(arch_config, 'dr_moce_balance_weight', 0.01),
         dr_moce_crossfit_buffer_size=getattr(arch_config, 'dr_moce_crossfit_buffer_size', 1024),
+        # Outcome type
+        outcome_type=getattr(config, 'outcome_type', 'binary'),
     )
     logger.info(f"Created model with {feature_extractor_type.upper()} feature extractor")
 
@@ -1089,7 +1091,8 @@ def _train_epoch(
         all_y1.append(losses['y1_logit'].detach().cpu())
         all_prop.append(losses['t_logit'].detach().cpu())
 
-    return _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_y0, all_y1, all_prop)
+    return _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_y0, all_y1, all_prop,
+                                  outcome_type=getattr(model, 'outcome_type', 'binary'))
 
 
 def _eval_epoch(
@@ -1138,11 +1141,13 @@ def _eval_epoch(
             all_y1.append(losses['y1_logit'].detach().cpu())
             all_prop.append(losses['t_logit'].detach().cpu())
 
-    return _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_y0, all_y1, all_prop)
+    return _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_y0, all_y1, all_prop,
+                                  outcome_type=getattr(model, 'outcome_type', 'binary'))
 
 
-def _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_y0, all_y1, all_prop):
-    """Helper to compute AUROCs from collected batch outputs."""
+def _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_y0, all_y1, all_prop,
+                           outcome_type='binary'):
+    """Helper to compute AUROCs (binary) or R²/RMSE (continuous) from collected batch outputs."""
     y_true = torch.cat(all_targets).numpy()
     t_true = torch.cat(all_treatments).numpy()
     y0_scores = torch.cat(all_y0).numpy()
@@ -1158,23 +1163,52 @@ def _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_
         except Exception:
             return None
 
-    # AUROC Y0 (on T=0 samples)
-    mask0 = (t_true == 0)
-    auroc_y0 = safe_auc(y_true[mask0], y0_scores[mask0]) if mask0.any() else None
-
-    # AUROC Y1 (on T=1 samples)
-    mask1 = (t_true == 1)
-    auroc_y1 = safe_auc(y_true[mask1], y1_scores[mask1]) if mask1.any() else None
-
-    # AUROC Propensity
+    # AUROC Propensity (always binary)
     auroc_prop = safe_auc(t_true, prop_scores)
 
-    return {
-        'loss': epoch_loss / len(loader),
-        'auroc_y0': auroc_y0,
-        'auroc_y1': auroc_y1,
-        'auroc_prop': auroc_prop
-    }
+    if outcome_type == "continuous":
+        # For continuous outcomes, compute R² and RMSE instead of AUROC
+        from sklearn.metrics import r2_score, mean_squared_error
+        mask0 = (t_true == 0)
+        mask1 = (t_true == 1)
+
+        def safe_r2(y, pred):
+            try:
+                if len(y) < 2:
+                    return None
+                return r2_score(y, pred)
+            except Exception:
+                return None
+
+        r2_y0 = safe_r2(y_true[mask0], y0_scores[mask0]) if mask0.any() else None
+        r2_y1 = safe_r2(y_true[mask1], y1_scores[mask1]) if mask1.any() else None
+
+        # Factual RMSE
+        factual_pred = np.where(t_true == 1, y1_scores, y0_scores)
+        rmse = np.sqrt(mean_squared_error(y_true, factual_pred))
+
+        return {
+            'loss': epoch_loss / len(loader),
+            'auroc_y0': r2_y0,  # R² instead of AUROC (compatible key names)
+            'auroc_y1': r2_y1,
+            'auroc_prop': auroc_prop,
+            'rmse': rmse
+        }
+    else:
+        # AUROC Y0 (on T=0 samples)
+        mask0 = (t_true == 0)
+        auroc_y0 = safe_auc(y_true[mask0], y0_scores[mask0]) if mask0.any() else None
+
+        # AUROC Y1 (on T=1 samples)
+        mask1 = (t_true == 1)
+        auroc_y1 = safe_auc(y_true[mask1], y1_scores[mask1]) if mask1.any() else None
+
+        return {
+            'loss': epoch_loss / len(loader),
+            'auroc_y0': auroc_y0,
+            'auroc_y1': auroc_y1,
+            'auroc_prop': auroc_prop
+        }
 
 
 def _generate_predictions(
@@ -1210,11 +1244,19 @@ def _generate_predictions(
     y0_logit = np.concatenate(all_y0)
     y1_logit = np.concatenate(all_y1)
     propensity_logit = np.concatenate(all_propensity)
-    ite_logit = y1_logit - y0_logit
 
-    # Convert to probabilities using sigmoid
-    y0_prob = 1.0 / (1.0 + np.exp(-y0_logit))
-    y1_prob = 1.0 / (1.0 + np.exp(-y1_logit))
+    outcome_type = getattr(model, 'outcome_type', 'binary')
+
+    if outcome_type == "continuous":
+        # For continuous outcomes, logits ARE the predictions (no sigmoid)
+        y0_prob = y0_logit
+        y1_prob = y1_logit
+    else:
+        # Convert to probabilities using sigmoid
+        y0_prob = 1.0 / (1.0 + np.exp(-y0_logit))
+        y1_prob = 1.0 / (1.0 + np.exp(-y1_logit))
+
+    # Propensity is always binary
     propensity_prob = 1.0 / (1.0 + np.exp(-propensity_logit))
     ite_prob = y1_prob - y0_prob
 
@@ -1241,11 +1283,15 @@ def _save_and_summarize(results_df: pd.DataFrame, output_path: Path) -> None:
     logger.info(f"Predictions saved to: {output_path}")
     logger.info("\nPrediction Summary:")
     logger.info(f"  Samples: {len(results_df)}")
-    logger.info("  Predicted ITE (probability scale):")
-    logger.info(f"    Mean: {results_df['pred_ite_prob'].mean():.4f}")
-    logger.info(f"    Std: {results_df['pred_ite_prob'].std():.4f}")
-    logger.info(f"    Min: {results_df['pred_ite_prob'].min():.4f}")
-    logger.info(f"    Max: {results_df['pred_ite_prob'].max():.4f}")
+
+    # ITE column name varies by outcome type
+    ite_col = 'pred_ite_prob' if 'pred_ite_prob' in results_df.columns else 'pred_ite'
+    scale_label = "probability scale" if ite_col == 'pred_ite_prob' else "predicted"
+    logger.info(f"  Predicted ITE ({scale_label}):")
+    logger.info(f"    Mean: {results_df[ite_col].mean():.4f}")
+    logger.info(f"    Std: {results_df[ite_col].std():.4f}")
+    logger.info(f"    Min: {results_df[ite_col].min():.4f}")
+    logger.info(f"    Max: {results_df[ite_col].max():.4f}")
     logger.info(f"  Mean predicted propensity: {results_df['pred_propensity_prob'].mean():.4f}")
 
 

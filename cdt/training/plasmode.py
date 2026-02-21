@@ -250,14 +250,16 @@ def _run_single_plasmode_experiment(
 
     logger.info(f"Single-split: Training on {len(train_split_df)}, evaluating on {len(eval_split_df)}")
 
-    # Step 1: Train generator
+    # Step 1: Train generator (trained on real data with real outcome type)
+    generator_outcome_type = getattr(applied_config, 'outcome_type', 'binary')
     generator, gen_history = _train_cnn_model(
         train_split_df,
         eval_split_df,
         applied_config,
         plasmode_config.generator_architecture,
         plasmode_config.generator_training,
-        device
+        device,
+        outcome_type=generator_outcome_type
     )
 
     for entry in gen_history:
@@ -277,14 +279,16 @@ def _run_single_plasmode_experiment(
     train_plasmode_df['sim_split'] = 'train'
     eval_plasmode_df['sim_split'] = 'eval'
 
-    # Step 3: Train evaluator on simulated data
+    # Step 3: Train evaluator on simulated data (uses scenario's outcome type)
+    scenario_outcome_type = getattr(scenario, 'outcome_type', 'binary')
     evaluator, eval_history = _train_cnn_model(
         train_plasmode_df,
         eval_plasmode_df,
         applied_config,
         plasmode_config.evaluator_architecture,
         plasmode_config.evaluator_training,
-        device
+        device,
+        outcome_type=scenario_outcome_type
     )
 
     for entry in eval_history:
@@ -335,7 +339,8 @@ def _train_cnn_model(
     applied_config: AppliedInferenceConfig,
     arch_config,
     train_config,
-    device: torch.device
+    device: torch.device,
+    outcome_type: str = "binary"
 ) -> Tuple[Union[CausalText, CausalTextForest], List[Dict[str, Any]]]:
     """Train a model with CNN, BERT, Causal Forest, or TF-IDF Forest.
 
@@ -345,12 +350,14 @@ def _train_cnn_model(
     model_type = getattr(arch_config, 'model_type', 'dragonnet')
     if model_type == "causal_forest":
         return _train_causal_forest_model(
-            train_df, val_df, applied_config, arch_config, train_config, device
+            train_df, val_df, applied_config, arch_config, train_config, device,
+            outcome_type=outcome_type
         )
 
     if model_type == "tfidf_forest":
         return _train_tfidf_forest_model(
-            train_df, val_df, applied_config, arch_config
+            train_df, val_df, applied_config, arch_config,
+            outcome_type=outcome_type
         )
 
     # Get feature extractor type (default to "cnn" for backward compatibility)
@@ -534,6 +541,8 @@ def _train_cnn_model(
         dr_moce_het_weight=getattr(arch_config, 'dr_moce_het_weight', 0.1),
         dr_moce_balance_weight=getattr(arch_config, 'dr_moce_balance_weight', 0.01),
         dr_moce_crossfit_buffer_size=getattr(arch_config, 'dr_moce_crossfit_buffer_size', 1024),
+        # Outcome type
+        outcome_type=outcome_type,
     )
 
     train_texts = train_df[applied_config.text_column].tolist()
@@ -751,11 +760,12 @@ def _train_cnn_model(
 class TfidfForestWrapper:
     """Lightweight wrapper for TF-IDF + CausalForest, compatible with plasmode predict API."""
 
-    def __init__(self, vectorizer, causal_forest, prop_rf, outcome_rf):
+    def __init__(self, vectorizer, causal_forest, prop_rf, outcome_rf, outcome_type="binary"):
         self.vectorizer = vectorizer
         self.causal_forest = causal_forest
         self.prop_rf = prop_rf
         self.outcome_rf = outcome_rf
+        self.outcome_type = outcome_type
 
     def predict_from_texts(self, texts):
         """Predict from raw texts. Returns dict with y0_prob, y1_prob, propensity_prob, ite_prob."""
@@ -763,9 +773,15 @@ class TfidfForestWrapper:
         cf_preds = self.causal_forest.predict(X, return_ci=False)
         tau = cf_preds['tau_pred']
         propensity = self.prop_rf.predict_proba(X)[:, 1]
-        outcome = self.outcome_rf.predict_proba(X)[:, 1]
-        y0 = np.clip(outcome - propensity * tau, 0, 1)
-        y1 = np.clip(outcome + (1 - propensity) * tau, 0, 1)
+        if self.outcome_type == "continuous":
+            outcome = self.outcome_rf.predict(X)
+        else:
+            outcome = self.outcome_rf.predict_proba(X)[:, 1]
+        y0 = outcome - propensity * tau
+        y1 = outcome + (1 - propensity) * tau
+        if self.outcome_type == "binary":
+            y0 = np.clip(y0, 0, 1)
+            y1 = np.clip(y1, 0, 1)
         return {
             'y0_prob': y0,
             'y1_prob': y1,
@@ -779,6 +795,7 @@ def _train_tfidf_forest_model(
     val_df: pd.DataFrame,
     applied_config: AppliedInferenceConfig,
     arch_config,
+    outcome_type: str = "binary"
 ) -> Tuple[TfidfForestWrapper, List[Dict[str, Any]]]:
     """Train a TF-IDF + CausalForest model for plasmode experiments.
 
@@ -787,7 +804,7 @@ def _train_tfidf_forest_model(
     from ..config import TfidfForestConfig
     from ..models.causal_forest_head import CausalForestHead
     from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 
     tfidf_config = getattr(arch_config, 'tfidf_forest', TfidfForestConfig())
 
@@ -830,15 +847,23 @@ def _train_tfidf_forest_model(
     )
     prop_rf.fit(X, T)
 
-    outcome_rf = RandomForestClassifier(
-        n_estimators=max(50, tfidf_config.n_estimators // 2),
-        max_depth=tfidf_config.max_depth,
-        min_samples_leaf=tfidf_config.min_samples_leaf,
-        random_state=42, n_jobs=-1
-    )
+    if outcome_type == "continuous":
+        outcome_rf = RandomForestRegressor(
+            n_estimators=max(50, tfidf_config.n_estimators // 2),
+            max_depth=tfidf_config.max_depth,
+            min_samples_leaf=tfidf_config.min_samples_leaf,
+            random_state=42, n_jobs=-1
+        )
+    else:
+        outcome_rf = RandomForestClassifier(
+            n_estimators=max(50, tfidf_config.n_estimators // 2),
+            max_depth=tfidf_config.max_depth,
+            min_samples_leaf=tfidf_config.min_samples_leaf,
+            random_state=42, n_jobs=-1
+        )
     outcome_rf.fit(X, Y)
 
-    model = TfidfForestWrapper(vectorizer, forest, prop_rf, outcome_rf)
+    model = TfidfForestWrapper(vectorizer, forest, prop_rf, outcome_rf, outcome_type=outcome_type)
     history = []  # No training epochs
     return model, history
 
@@ -849,7 +874,8 @@ def _train_causal_forest_model(
     applied_config: AppliedInferenceConfig,
     arch_config,
     train_config,
-    device: torch.device
+    device: torch.device,
+    outcome_type: str = "binary"
 ) -> Tuple[CausalTextForest, List[Dict[str, Any]]]:
     """Train a CausalTextForest model for plasmode experiments.
 
@@ -1028,7 +1054,8 @@ def _train_causal_forest_model(
         contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
         contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
         contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
-        device=str(device)
+        device=str(device),
+        outcome_type=outcome_type
     )
 
     train_texts = train_df[applied_config.text_column].tolist()
@@ -1230,25 +1257,46 @@ def _generate_plasmode_data(
         # Default: constant ATE
         ite_logit = np.full(len(df), target_ate_logit)
 
-    # Generate Y0 and Y1 (internally using logit space for proper simulation)
-    y0_logit = np.random.randn(len(df)) * scenario.outcome_heterogeneity_scale
-    y0_logit += np.log(scenario.baseline_control_outcome_rate / (1 - scenario.baseline_control_outcome_rate))
-
-    y1_logit = y0_logit + ite_logit
-
-    # Sample outcomes
+    # Determine outcome type for this scenario
+    scenario_outcome_type = getattr(scenario, 'outcome_type', 'binary')
     treatments = df[applied_config.treatment_column].values
-    y0_prob = 1 / (1 + np.exp(-y0_logit))
-    y1_prob = 1 / (1 + np.exp(-y1_logit))
 
-    observed_prob = np.where(treatments == 1, y1_prob, y0_prob)
-    observed_outcome = (np.random.rand(len(df)) < observed_prob).astype(float)
+    if scenario_outcome_type == "continuous":
+        # Continuous outcomes: use logit-space values + Gaussian noise
+        y0_logit = np.random.randn(len(df)) * scenario.outcome_heterogeneity_scale
+        y0_logit += np.log(scenario.baseline_control_outcome_rate / (1 - scenario.baseline_control_outcome_rate))
+        y1_logit = y0_logit + ite_logit
 
-    plasmode_df[applied_config.outcome_column] = observed_outcome
-    # Probability scale ground truth only
-    plasmode_df['true_y0_prob'] = y0_prob
-    plasmode_df['true_y1_prob'] = y1_prob
-    plasmode_df['true_ite_prob'] = y1_prob - y0_prob
+        # For continuous, the "value" is the logit itself (not passed through sigmoid)
+        true_y0 = y0_logit
+        true_y1 = y1_logit
+        true_ite = true_y1 - true_y0
+
+        # Observed outcome = true potential outcome + Gaussian noise
+        observed_value = np.where(treatments == 1, true_y1, true_y0)
+        noise_scale = scenario.outcome_heterogeneity_scale * 0.1  # Small noise
+        observed_outcome = observed_value + np.random.randn(len(df)) * noise_scale
+
+        plasmode_df[applied_config.outcome_column] = observed_outcome
+        plasmode_df['true_y0_prob'] = true_y0
+        plasmode_df['true_y1_prob'] = true_y1
+        plasmode_df['true_ite_prob'] = true_ite
+    else:
+        # Binary outcomes: logit -> sigmoid -> Bernoulli
+        y0_logit = np.random.randn(len(df)) * scenario.outcome_heterogeneity_scale
+        y0_logit += np.log(scenario.baseline_control_outcome_rate / (1 - scenario.baseline_control_outcome_rate))
+        y1_logit = y0_logit + ite_logit
+
+        y0_prob = 1 / (1 + np.exp(-y0_logit))
+        y1_prob = 1 / (1 + np.exp(-y1_logit))
+
+        observed_prob = np.where(treatments == 1, y1_prob, y0_prob)
+        observed_outcome = (np.random.rand(len(df)) < observed_prob).astype(float)
+
+        plasmode_df[applied_config.outcome_column] = observed_outcome
+        plasmode_df['true_y0_prob'] = y0_prob
+        plasmode_df['true_y1_prob'] = y1_prob
+        plasmode_df['true_ite_prob'] = y1_prob - y0_prob
 
     return plasmode_df
 
@@ -1324,11 +1372,19 @@ def _predict_cnn_model(
     y0_logit = np.concatenate(all_y0)
     y1_logit = np.concatenate(all_y1)
     prop_logit = np.concatenate(all_prop)
-    ite_logit = y1_logit - y0_logit
 
-    # Convert to probabilities using sigmoid
-    y0_prob = 1.0 / (1.0 + np.exp(-y0_logit))
-    y1_prob = 1.0 / (1.0 + np.exp(-y1_logit))
+    outcome_type = getattr(model, 'outcome_type', 'binary')
+
+    if outcome_type == "continuous":
+        # For continuous, logits ARE the predictions (no sigmoid)
+        y0_prob = y0_logit
+        y1_prob = y1_logit
+    else:
+        # Convert to probabilities using sigmoid
+        y0_prob = 1.0 / (1.0 + np.exp(-y0_logit))
+        y1_prob = 1.0 / (1.0 + np.exp(-y1_logit))
+
+    # Propensity is always binary
     propensity_prob = 1.0 / (1.0 + np.exp(-prop_logit))
     ite_prob = y1_prob - y0_prob
 

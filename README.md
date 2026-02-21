@@ -141,8 +141,10 @@ CDT expects datasets in Parquet or CSV format:
 |--------|-------------|------|
 | `clinical_text` | Clinical narrative text | string |
 | `treatment_indicator` | Binary treatment (0/1) | int |
-| `outcome_indicator` | Binary outcome (0/1) | int |
+| `outcome_indicator` | Binary (0/1) or continuous outcome | int/float |
 | `split` | "train"/"val"/"test" (optional for CV) | string |
+
+Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"continuous"` (MSE loss, no sigmoid). Treatment/propensity is always binary.
 
 ## Running Experiments
 
@@ -406,9 +408,9 @@ output_dir/
 ```
 
 The `predictions.parquet` contains:
-- `pred_y0_prob`, `pred_y1_prob`: Predicted potential outcomes
+- `pred_y0_prob`, `pred_y1_prob`: Predicted potential outcomes (probabilities for binary, raw values for continuous)
 - `pred_ite_prob`: Individual treatment effect (y1 - y0)
-- `pred_propensity_prob`: Treatment propensity
+- `pred_propensity_prob`: Treatment propensity (always probability)
 - `pred_ite_lower`, `pred_ite_upper`: 95% CI (causal forest only)
 
 ## Dependencies

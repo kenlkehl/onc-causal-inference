@@ -224,7 +224,8 @@ def _train_outcome_model(
     model = create_outcome_model_from_config(
         arch_config=arch_config,
         representation_dim=arch_config.causal_head_representation_dim,
-        device=device
+        device=device,
+        outcome_type=getattr(config, 'outcome_type', 'binary')
     )
 
     train_texts = train_df[config.text_column].tolist()

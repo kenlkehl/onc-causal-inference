@@ -18,6 +18,13 @@ Usage:
 INTERPRETATION NOTES (for generating narrative analysis from output)
 ============================================================================
 
+CONTINUOUS OUTCOMES:
+- When outcome_type="continuous", the same column names are used (true_y0_prob,
+  true_y1_prob, true_ite_prob, pred_y0_prob, pred_y1_prob, pred_ite_prob) but
+  values represent raw outcome values instead of probabilities. All metrics
+  (ite_corr, ate_bias, ite_mse, ci_coverage, etc.) are valid for both types.
+  propensity_auroc is still meaningful since treatment is always binary.
+
 KEY METRICS:
 - ite_corr (Pearson correlation of predicted vs true ITE): PRIMARY metric.
   Higher is better. This measures how well the model ranks individuals by
@@ -215,6 +222,10 @@ def analyze(df: pd.DataFrame) -> list[str]:
         f"R-learner modes: {sorted(df['rlearner_mode'].unique())}",
         f"CLAM enabled: {sorted(df['clam_enabled'].unique())}",
         f"Explicit confounders: {sorted(df['use_explicit_confounders'].unique())}",
+    ]
+    if 'outcome_type' in df.columns:
+        lines.append(f"Outcome types: {sorted(df['outcome_type'].unique())}")
+    lines += [
         "",
         "ITE correlation:    "
         f"mean={fmt(df['ite_corr'].mean())}  "
@@ -444,8 +455,12 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # choices (rlearner_mode, confounders, etc.).
     # ---------------------------------------------------------------
     hp_cols = [
+        # GRU-Pool hyperparameters
         "embedding_dim", "gru_hidden_dim", "gru_num_layers",
         "transformer_layers", "transformer_heads",
+        # Transformer Pool hyperparameters
+        "token_transformer_layers", "token_transformer_heads",
+        "token_transformer_dim", "chunk_transformer_layers",
     ]
     available_hp = [c for c in hp_cols if c in df.columns]
 
@@ -594,11 +609,17 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # a mix, hyperparameters or specific confounders matter more.
     # ---------------------------------------------------------------
     display_cols = [
-        "file", "dataset_name", "rlearner_mode", "clam_enabled",
+        "file", "dataset_name", "outcome_type",
+        "rlearner_mode", "clam_enabled",
         "use_explicit_confounders", "num_confounders",
         "confounder_names_str",
+        # GRU-Pool hyperparameters
         "embedding_dim", "gru_hidden_dim", "gru_num_layers",
         "transformer_layers", "transformer_heads",
+        # Transformer Pool hyperparameters
+        "token_transformer_layers", "token_transformer_heads",
+        "token_transformer_dim", "chunk_transformer_layers",
+        # Metrics
         "ite_corr", "ite_spearman_corr", "ate_bias", "propensity_auroc", "ci_coverage",
     ]
     display_cols = [c for c in display_cols if c in df.columns]
@@ -699,6 +720,12 @@ def analyze(df: pd.DataFrame) -> list[str]:
             margins=True,
         ).to_string(),
     ]
+    if 'outcome_type' in df.columns:
+        lines += [
+            "",
+            "By outcome_type:",
+            df["outcome_type"].value_counts().sort_index().to_string(),
+        ]
     output.extend(section("13. EXPERIMENT COVERAGE / PROGRESS", lines))
 
     return output

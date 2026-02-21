@@ -660,6 +660,7 @@ class OutcomeModelConfig:
 @dataclass
 class PlasmodeConfig:
     """Configuration for plasmode simulation."""
+    outcome_type: str = "binary"  # "binary" or "continuous" (plasmode can override dataset outcome type)
     generation_mode: str = "phi_linear"
     preserve_observed_treatments: bool = True
     baseline_control_outcome_rate: float = 0.20
@@ -676,6 +677,7 @@ class PlasmodeConfig:
 @dataclass
 class AppliedInferenceConfig:
     """Configuration for applied inference on real data."""
+    outcome_type: str = "binary"  # "binary" or "continuous"
     dataset_path: str = ""
     text_column: str = "clinical_text"
     outcome_column: str = "outcome_indicator"
@@ -832,6 +834,18 @@ class ExperimentConfig:
 
         if self.plasmode_experiments.enabled and not self.plasmode_experiments.plasmode_scenarios:
             raise ValueError("plasmode_experiments.plasmode_scenarios cannot be empty when enabled=True")
+
+        # Validate outcome_type
+        valid_outcome_types = {"binary", "continuous"}
+        if self.applied_inference.outcome_type not in valid_outcome_types:
+            raise ValueError(f"applied_inference.outcome_type must be one of {valid_outcome_types}, "
+                           f"got '{self.applied_inference.outcome_type}'")
+
+        # Validate plasmode outcome_type for each scenario
+        for i, scenario in enumerate(self.plasmode_experiments.plasmode_scenarios):
+            if scenario.outcome_type not in valid_outcome_types:
+                raise ValueError(f"plasmode_scenarios[{i}].outcome_type must be one of {valid_outcome_types}, "
+                               f"got '{scenario.outcome_type}'")
 
         # Validate matching config
         if self.applied_inference.matching_analysis.enabled:

@@ -143,7 +143,8 @@ def _process_fold_forest(
     )
 
     # Create model
-    model = _create_causal_forest_model(arch_config, device)
+    outcome_type = getattr(config, 'outcome_type', 'binary')
+    model = _create_causal_forest_model(arch_config, device, outcome_type=outcome_type)
     logger.info(f"Created CausalTextForest with {feature_extractor_type.upper()} extractor")
 
     # Get training texts for tokenizer fitting
@@ -245,7 +246,8 @@ def _run_fixed_split_inference_forest(
     train_config = config.training
 
     # Create model
-    model = _create_causal_forest_model(arch_config, device)
+    outcome_type = getattr(config, 'outcome_type', 'binary')
+    model = _create_causal_forest_model(arch_config, device, outcome_type=outcome_type)
 
     # Get texts for tokenizer fitting
     train_texts = train_df[config.text_column].tolist()
@@ -318,7 +320,8 @@ def _run_fixed_split_inference_forest(
 
 def _create_causal_forest_model(
     arch_config,
-    device: torch.device
+    device: torch.device,
+    outcome_type: str = "binary"
 ) -> CausalTextForest:
     """Create CausalTextForest model from config."""
     feature_extractor_type = normalize_feature_extractor_type(
@@ -473,7 +476,9 @@ def _create_causal_forest_model(
         contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
         contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
         # Device
-        device=str(device)
+        device=str(device),
+        # Outcome type
+        outcome_type=outcome_type
     )
 
     return model
@@ -635,9 +640,13 @@ def _train_representation(
         val_outcome_loss /= len(val_loader)
         val_r_loss /= len(val_loader)
 
-        # Compute AUROCs
+        # Compute metrics
         prop_scores = torch.sigmoid(torch.cat(all_prop_logits)).numpy().flatten()
-        outcome_scores = torch.sigmoid(torch.cat(all_outcome_logits)).numpy().flatten()
+        outcome_type = getattr(model, 'outcome_type', 'binary')
+        if outcome_type == "continuous":
+            outcome_scores = torch.cat(all_outcome_logits).numpy().flatten()
+        else:
+            outcome_scores = torch.sigmoid(torch.cat(all_outcome_logits)).numpy().flatten()
         treatments = torch.cat(all_treatments).numpy()
         outcomes = torch.cat(all_outcomes).numpy()
 
@@ -646,10 +655,17 @@ def _train_representation(
         except:
             val_auroc_prop = None
 
-        try:
-            val_auroc_outcome = roc_auc_score(outcomes, outcome_scores)
-        except:
-            val_auroc_outcome = None
+        if outcome_type == "continuous":
+            from sklearn.metrics import r2_score, mean_squared_error
+            try:
+                val_outcome_metric = r2_score(outcomes, outcome_scores) if len(outcomes) >= 2 else None
+            except:
+                val_outcome_metric = None
+        else:
+            try:
+                val_outcome_metric = roc_auc_score(outcomes, outcome_scores)
+            except:
+                val_outcome_metric = None
 
         epoch_log = {
             'epoch': epoch + 1,
@@ -662,7 +678,7 @@ def _train_representation(
             'val_outcome_loss': val_outcome_loss,
             'val_r_loss': val_r_loss,
             'val_auroc_prop': val_auroc_prop,
-            'val_auroc_outcome': val_auroc_outcome,
+            'val_auroc_outcome': val_outcome_metric,
         }
         history.append(epoch_log)
 
@@ -704,11 +720,15 @@ def _save_and_summarize_forest(results_df: pd.DataFrame, output_path: Path) -> N
     logger.info(f"Predictions saved to: {output_path}")
     logger.info("\nPrediction Summary (Causal Forest):")
     logger.info(f"  Samples: {len(results_df)}")
-    logger.info("  Predicted ITE (τ):")
-    logger.info(f"    Mean (ATE): {results_df['pred_ite_prob'].mean():.4f}")
-    logger.info(f"    Std: {results_df['pred_ite_prob'].std():.4f}")
-    logger.info(f"    Min: {results_df['pred_ite_prob'].min():.4f}")
-    logger.info(f"    Max: {results_df['pred_ite_prob'].max():.4f}")
+
+    # ITE column name varies by outcome type
+    ite_col = 'pred_ite_prob' if 'pred_ite_prob' in results_df.columns else 'pred_ite'
+    scale_label = "probability scale" if ite_col == 'pred_ite_prob' else "predicted"
+    logger.info(f"  Predicted ITE ({scale_label}):")
+    logger.info(f"    Mean (ATE): {results_df[ite_col].mean():.4f}")
+    logger.info(f"    Std: {results_df[ite_col].std():.4f}")
+    logger.info(f"    Min: {results_df[ite_col].min():.4f}")
+    logger.info(f"    Max: {results_df[ite_col].max():.4f}")
 
     if 'pred_ite_lower' in results_df.columns:
         # Report CI coverage stats

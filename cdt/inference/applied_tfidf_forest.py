@@ -20,6 +20,7 @@ from joblib import Parallel, delayed
 
 from ..config import AppliedInferenceConfig, TfidfForestConfig
 from ..models.causal_forest_head import CausalForestHead
+from sklearn.ensemble import RandomForestRegressor
 
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,8 @@ def _process_fold_tfidf(
     tau = cf_preds['tau_pred']
 
     # Step 4: Fit separate propensity and outcome models for y0/y1 derivation
+    outcome_type = getattr(config, 'outcome_type', 'binary')
+
     prop_rf = RandomForestClassifier(
         n_estimators=max(50, tfidf_config.n_estimators // 2),
         max_depth=tfidf_config.max_depth,
@@ -171,20 +174,33 @@ def _process_fold_tfidf(
     prop_rf.fit(X_train, train_T)
     propensity = prop_rf.predict_proba(X_test)[:, 1]
 
-    outcome_rf = RandomForestClassifier(
-        n_estimators=max(50, tfidf_config.n_estimators // 2),
-        max_depth=tfidf_config.max_depth,
-        min_samples_leaf=tfidf_config.min_samples_leaf,
-        random_state=42, n_jobs=-1
-    )
-    outcome_rf.fit(X_train, train_Y)
-    outcome_pred = outcome_rf.predict_proba(X_test)[:, 1]
+    if outcome_type == "continuous":
+        outcome_rf = RandomForestRegressor(
+            n_estimators=max(50, tfidf_config.n_estimators // 2),
+            max_depth=tfidf_config.max_depth,
+            min_samples_leaf=tfidf_config.min_samples_leaf,
+            random_state=42, n_jobs=-1
+        )
+        outcome_rf.fit(X_train, train_Y)
+        outcome_pred = outcome_rf.predict(X_test)
+    else:
+        outcome_rf = RandomForestClassifier(
+            n_estimators=max(50, tfidf_config.n_estimators // 2),
+            max_depth=tfidf_config.max_depth,
+            min_samples_leaf=tfidf_config.min_samples_leaf,
+            random_state=42, n_jobs=-1
+        )
+        outcome_rf.fit(X_train, train_Y)
+        outcome_pred = outcome_rf.predict_proba(X_test)[:, 1]
 
     # Step 5: Derive y0/y1 from tau, propensity, outcome
     # From m = e*y1 + (1-e)*y0 and tau = y1 - y0:
     #   y0 = m - e*tau, y1 = m + (1-e)*tau
-    y0_prob = np.clip(outcome_pred - propensity * tau, 0, 1)
-    y1_prob = np.clip(outcome_pred + (1 - propensity) * tau, 0, 1)
+    y0_prob = outcome_pred - propensity * tau
+    y1_prob = outcome_pred + (1 - propensity) * tau
+    if outcome_type == "binary":
+        y0_prob = np.clip(y0_prob, 0, 1)
+        y1_prob = np.clip(y1_prob, 0, 1)
 
     # Step 6: Build predictions DataFrame
     preds_df = test_df.copy()
@@ -214,16 +230,28 @@ def _process_fold_tfidf(
         fold_metrics['propensity_auroc'] = float(roc_auc_score(test_T, propensity))
     except ValueError:
         fold_metrics['propensity_auroc'] = None
-    try:
-        fold_metrics['outcome_auroc'] = float(roc_auc_score(test_Y, outcome_pred))
-    except ValueError:
-        fold_metrics['outcome_auroc'] = None
+
+    if outcome_type == "continuous":
+        from sklearn.metrics import r2_score, mean_squared_error
+        try:
+            fold_metrics['outcome_r2'] = float(r2_score(test_Y, outcome_pred))
+            fold_metrics['outcome_rmse'] = float(np.sqrt(mean_squared_error(test_Y, outcome_pred)))
+        except:
+            fold_metrics['outcome_r2'] = None
+            fold_metrics['outcome_rmse'] = None
+    else:
+        try:
+            fold_metrics['outcome_auroc'] = float(roc_auc_score(test_Y, outcome_pred))
+        except ValueError:
+            fold_metrics['outcome_auroc'] = None
 
     logger.info(f"  ATE estimate: {fold_metrics['ate_estimate']:.4f}")
     if fold_metrics['propensity_auroc'] is not None:
         logger.info(f"  Propensity AUROC: {fold_metrics['propensity_auroc']:.4f}")
-    if fold_metrics['outcome_auroc'] is not None:
+    if fold_metrics.get('outcome_auroc') is not None:
         logger.info(f"  Outcome AUROC: {fold_metrics['outcome_auroc']:.4f}")
+    if fold_metrics.get('outcome_r2') is not None:
+        logger.info(f"  Outcome R²: {fold_metrics['outcome_r2']:.4f}, RMSE: {fold_metrics['outcome_rmse']:.4f}")
 
     return preds_df, fold_metrics
 
@@ -289,6 +317,8 @@ def _run_fixed_split_inference_tfidf(
     tau = cf_preds['tau_pred']
 
     # Nuisance models
+    outcome_type = getattr(config, 'outcome_type', 'binary')
+
     prop_rf = RandomForestClassifier(
         n_estimators=max(50, tfidf_config.n_estimators // 2),
         max_depth=tfidf_config.max_depth,
@@ -298,17 +328,30 @@ def _run_fixed_split_inference_tfidf(
     prop_rf.fit(X_combined, combined_T)
     propensity = prop_rf.predict_proba(X_test)[:, 1]
 
-    outcome_rf = RandomForestClassifier(
-        n_estimators=max(50, tfidf_config.n_estimators // 2),
-        max_depth=tfidf_config.max_depth,
-        min_samples_leaf=tfidf_config.min_samples_leaf,
-        random_state=42, n_jobs=-1
-    )
-    outcome_rf.fit(X_combined, combined_Y)
-    outcome_pred = outcome_rf.predict_proba(X_test)[:, 1]
+    if outcome_type == "continuous":
+        outcome_rf = RandomForestRegressor(
+            n_estimators=max(50, tfidf_config.n_estimators // 2),
+            max_depth=tfidf_config.max_depth,
+            min_samples_leaf=tfidf_config.min_samples_leaf,
+            random_state=42, n_jobs=-1
+        )
+        outcome_rf.fit(X_combined, combined_Y)
+        outcome_pred = outcome_rf.predict(X_test)
+    else:
+        outcome_rf = RandomForestClassifier(
+            n_estimators=max(50, tfidf_config.n_estimators // 2),
+            max_depth=tfidf_config.max_depth,
+            min_samples_leaf=tfidf_config.min_samples_leaf,
+            random_state=42, n_jobs=-1
+        )
+        outcome_rf.fit(X_combined, combined_Y)
+        outcome_pred = outcome_rf.predict_proba(X_test)[:, 1]
 
-    y0_prob = np.clip(outcome_pred - propensity * tau, 0, 1)
-    y1_prob = np.clip(outcome_pred + (1 - propensity) * tau, 0, 1)
+    y0_prob = outcome_pred - propensity * tau
+    y1_prob = outcome_pred + (1 - propensity) * tau
+    if outcome_type == "binary":
+        y0_prob = np.clip(y0_prob, 0, 1)
+        y1_prob = np.clip(y1_prob, 0, 1)
 
     results_df = test_df.copy()
     results_df['pred_ite_prob'] = tau
@@ -331,11 +374,15 @@ def _save_and_summarize_tfidf(results_df: pd.DataFrame, output_path: Path) -> No
     logger.info(f"\nPredictions saved to: {output_path}")
     logger.info("\nPrediction Summary (TF-IDF + Causal Forest Baseline):")
     logger.info(f"  Samples: {len(results_df)}")
-    logger.info("  Predicted ITE (tau):")
-    logger.info(f"    Mean (ATE): {results_df['pred_ite_prob'].mean():.4f}")
-    logger.info(f"    Std: {results_df['pred_ite_prob'].std():.4f}")
-    logger.info(f"    Min: {results_df['pred_ite_prob'].min():.4f}")
-    logger.info(f"    Max: {results_df['pred_ite_prob'].max():.4f}")
+
+    # ITE column name varies by outcome type
+    ite_col = 'pred_ite_prob' if 'pred_ite_prob' in results_df.columns else 'pred_ite'
+    scale_label = "probability scale" if ite_col == 'pred_ite_prob' else "predicted"
+    logger.info(f"  Predicted ITE ({scale_label}):")
+    logger.info(f"    Mean (ATE): {results_df[ite_col].mean():.4f}")
+    logger.info(f"    Std: {results_df[ite_col].std():.4f}")
+    logger.info(f"    Min: {results_df[ite_col].min():.4f}")
+    logger.info(f"    Max: {results_df[ite_col].max():.4f}")
 
     if 'pred_ite_lower' in results_df.columns:
         significant = (results_df['pred_ite_lower'] > 0) | (results_df['pred_ite_upper'] < 0)
