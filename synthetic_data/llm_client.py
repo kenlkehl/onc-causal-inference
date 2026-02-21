@@ -71,53 +71,70 @@ class LLMClient:
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        max_retries: int = 3,
     ) -> Dict[str, Any]:
         """
-        Generate a JSON response from the LLM.
-        
+        Generate a JSON response from the LLM, retrying on failure.
+
         Attempts to use JSON mode if supported, falls back to parsing.
-        
+        Retries up to max_retries times on parse failures.
+
         Args:
             prompt: User prompt (should request JSON output)
             system_prompt: Optional system prompt
             temperature: Override config temperature
             max_tokens: Override config max_tokens
-            
+            max_retries: Number of attempts before raising (default: 3)
+
         Returns:
             Parsed JSON as dictionary
         """
         # Add JSON instruction to prompt if not present
         if "json" not in prompt.lower():
             prompt = prompt + "\n\nRespond with valid JSON only."
-        
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
-        
-        try:
-            # Try with JSON response format (OpenAI compatible)
-            response = self.client.chat.completions.create(
-                model=self.config.model_name,
-                messages=messages,
-                temperature=temperature if temperature is not None else self.config.temperature,
-                max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
-                response_format={"type": "json_object"},
-            )
-            text = response.choices[0].message.content
-        except Exception as e:
-            # Fall back to regular generation if JSON mode not supported
-            logger.debug(f"JSON mode not supported, falling back to regular generation: {e}")
-            response = self.client.chat.completions.create(
-                model=self.config.model_name,
-                messages=messages,
-                temperature=temperature if temperature is not None else self.config.temperature,
-                max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
-            )
-            text = response.choices[0].message.content
-        
-        # Parse JSON from response
-        return self._parse_json(text)
+
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                try:
+                    # Try with JSON response format (OpenAI compatible)
+                    response = self.client.chat.completions.create(
+                        model=self.config.model_name,
+                        messages=messages,
+                        temperature=temperature if temperature is not None else self.config.temperature,
+                        max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+                        response_format={"type": "json_object"},
+                    )
+                    text = response.choices[0].message.content
+                except Exception as e:
+                    # Fall back to regular generation if JSON mode not supported
+                    logger.debug(f"JSON mode not supported, falling back to regular generation: {e}")
+                    response = self.client.chat.completions.create(
+                        model=self.config.model_name,
+                        messages=messages,
+                        temperature=temperature if temperature is not None else self.config.temperature,
+                        max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+                    )
+                    text = response.choices[0].message.content
+
+                # Parse JSON from response
+                return self._parse_json(text)
+            except (ValueError, json.JSONDecodeError) as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(
+                        f"JSON parse failed (attempt {attempt}/{max_retries}): {e}. Retrying..."
+                    )
+                else:
+                    logger.error(
+                        f"JSON parse failed after {max_retries} attempts: {e}"
+                    )
+        raise last_error
     
     @staticmethod
     def _parse_json(text: str) -> Dict[str, Any]:

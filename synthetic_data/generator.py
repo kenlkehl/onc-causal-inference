@@ -234,8 +234,13 @@ def _validate_equation_coefficients(
     """
     validated = equation.copy()
 
+    # Ensure required keys exist with defaults
+    validated.setdefault("coefficients", {})
+    validated.setdefault("intercept", 0.0)
+    validated.setdefault("interactions", [])
+
     # Filter main coefficients
-    if "coefficients" in validated:
+    if validated["coefficients"]:
         original_coefs = validated["coefficients"]
         filtered_coefs = {}
         for name, value in original_coefs.items():

@@ -163,23 +163,48 @@ class VLLMBatchClient:
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
+        max_retries: int = 3,
     ) -> dict:
-        """Generate a JSON response and parse it."""
+        """Generate a JSON response and parse it, retrying on failure.
+
+        Args:
+            prompt: User prompt
+            system_prompt: Optional system prompt
+            temperature: Override temperature
+            max_tokens: Override max tokens
+            max_retries: Number of attempts before raising (default: 3)
+
+        Returns:
+            Parsed JSON as dictionary
+        """
         import json
         import re
-        
+
         # Add JSON instruction to prompt if not present
         if "json" not in prompt.lower():
             prompt = prompt + "\n\nRespond with valid JSON only."
-        
-        text = self.generate_single(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
-        
-        return self._parse_json(text)
+
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                text = self.generate_single(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                )
+                return self._parse_json(text)
+            except (ValueError, json.JSONDecodeError) as e:
+                last_error = e
+                if attempt < max_retries:
+                    logger.warning(
+                        f"JSON parse failed (attempt {attempt}/{max_retries}): {e}. Retrying..."
+                    )
+                else:
+                    logger.error(
+                        f"JSON parse failed after {max_retries} attempts: {e}"
+                    )
+        raise last_error
     
     @staticmethod
     def _parse_json(text: str) -> dict:
