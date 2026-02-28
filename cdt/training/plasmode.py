@@ -23,7 +23,8 @@ from joblib import Parallel, delayed
 from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeConfig, normalize_feature_extractor_type
 from ..models.causal_text import CausalText
 from ..models.causal_text_forest import CausalTextForest
-from ..data import ClinicalTextDataset, collate_batch, create_collator
+from ..models.hidden_state_cache import HiddenStateCache
+from ..data import ClinicalTextDataset, collate_batch, create_collator, CachedHiddenStateDataset, collate_cached_batch
 from ..utils import cuda_cleanup, get_memory_info, set_seed
 
 
@@ -90,6 +91,63 @@ def run_plasmode_experiments(
 
         logger.info("=" * 80)
 
+    # Pre-compute and cache LLM hidden states for frozen_llm_pooler
+    hidden_state_cache_config = None  # Serializable config for parallel workers
+    # Check both generator and evaluator architectures
+    for arch_label, arch in [("generator", plasmode_config.generator_architecture),
+                              ("evaluator", plasmode_config.evaluator_architecture)]:
+        feat_type = normalize_feature_extractor_type(
+            getattr(arch, 'feature_extractor_type', 'cnn')
+        )
+        if feat_type == "frozen_llm_pooler":
+            flp_freeze = getattr(arch, 'flp_freeze_llm', True)
+            flp_cache_enabled = getattr(arch, 'flp_cache_hidden_states', True)
+
+            if flp_cache_enabled and flp_freeze:
+                # Reset index for consistent cache indexing
+                train_df = train_df.reset_index(drop=True)
+                model_name = getattr(arch, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
+                max_length = getattr(arch, 'flp_max_length', 8192)
+                dataset_path = applied_config.dataset_path
+
+                cache_dir = str(Path(dataset_path).parent / ".cdt_cache")
+                cache = HiddenStateCache(
+                    cache_dir=cache_dir,
+                    model_name=model_name,
+                    max_length=max_length,
+                    dataset_path=dataset_path,
+                )
+
+                all_texts = train_df[applied_config.text_column].tolist()
+                if not cache.is_valid(len(train_df)):
+                    logger.info(f"Pre-computing LLM hidden states for plasmode ({arch_label} arch)...")
+                    batch_size = getattr(plasmode_config.generator_training, 'batch_size', 8)
+                    try:
+                        cache.precompute(all_texts, device, batch_size=batch_size)
+                    except Exception as e:
+                        logger.warning(f"Hidden state caching failed: {e}. Falling back to non-cached mode.")
+                        cache = None
+                else:
+                    logger.info("Reusing existing hidden state cache for plasmode")
+
+                if cache is not None:
+                    # Store serializable config for parallel workers
+                    cache.open()
+                    hidden_state_cache_config = {
+                        'cache_dir': cache_dir,
+                        'model_name': model_name,
+                        'max_length': max_length,
+                        'dataset_path': dataset_path,
+                        'hidden_size': cache.hidden_size,
+                    }
+                    cache.close()
+                break  # Only need one cache (same texts for both architectures)
+            elif flp_cache_enabled and not flp_freeze:
+                logger.warning(
+                    "flp_cache_hidden_states=True but flp_freeze_llm=False. "
+                    "Caching is only supported with frozen LLM. Skipping cache."
+                )
+
     logger.info(f"Using {len(train_df)} samples for plasmode generation base")
     logger.info(f"Running {len(plasmode_config.plasmode_scenarios)} scenarios x {num_repeats} repeats")
 
@@ -128,6 +186,7 @@ def run_plasmode_experiments(
                 'plasmode_config': plasmode_config,
                 'device': task_device,
                 'dataset_dir': dataset_dir,
+                'hidden_state_cache_config': hidden_state_cache_config,
             })
 
     logger.info(f"Starting {len(tasks)} experiments on {num_workers} workers...")
@@ -184,6 +243,7 @@ def _worker_wrapper(task: Dict[str, Any]) -> Optional[Tuple[dict, List[Dict[str,
     scenario = task['scenario']
     dataset_dir = task['dataset_dir']
     plasmode_config = task['plasmode_config']
+    cache_config = task.get('hidden_state_cache_config')
 
     current_seed = random.randint(0, 10000)
     set_seed(current_seed)
@@ -201,6 +261,17 @@ def _worker_wrapper(task: Dict[str, Any]) -> Optional[Tuple[dict, List[Dict[str,
         base_name = f"scenario_{scenario_idx}_repeat_{repeat_idx}_{scenario.generation_mode}"
         save_dataset_path = dataset_dir / f"{base_name}.parquet"
 
+    # Open cache for this worker (each process needs its own handle)
+    hidden_state_cache = None
+    if cache_config is not None:
+        hidden_state_cache = HiddenStateCache(
+            cache_dir=cache_config['cache_dir'],
+            model_name=cache_config['model_name'],
+            max_length=cache_config['max_length'],
+            dataset_path=cache_config['dataset_path'],
+        )
+        hidden_state_cache.open()
+
     try:
         metrics, logs = _run_single_plasmode_experiment(
             train_df=task['train_df'],
@@ -210,6 +281,7 @@ def _worker_wrapper(task: Dict[str, Any]) -> Optional[Tuple[dict, List[Dict[str,
             device=task['device'],
             hyperparams=hyperparams,
             save_dataset_path=save_dataset_path,
+            hidden_state_cache=hidden_state_cache,
         )
 
         metrics['scenario_idx'] = scenario_idx
@@ -224,6 +296,8 @@ def _worker_wrapper(task: Dict[str, Any]) -> Optional[Tuple[dict, List[Dict[str,
         logger.error(f"Scenario {scenario_idx} Repeat {repeat_idx} Failed: {e}", exc_info=True)
         return None
     finally:
+        if hidden_state_cache is not None:
+            hidden_state_cache.close()
         cuda_cleanup()
 
 
@@ -235,16 +309,25 @@ def _run_single_plasmode_experiment(
     device: torch.device,
     hyperparams: Optional[Dict[str, Any]] = None,
     save_dataset_path: Optional[Path] = None,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
 ) -> Tuple[dict, List[Dict[str, Any]]]:
     """Run a single plasmode experiment."""
 
     train_fraction = getattr(plasmode_config, 'train_fraction', 0.8)
     seed = hyperparams.get('seed', 42) if hyperparams else 42
 
+    # Ensure consistent indexing for cache
+    train_df = train_df.reset_index(drop=True)
+
     # Split data
     train_split_df, eval_split_df = train_test_split(
         train_df, train_size=train_fraction, random_state=seed
     )
+
+    # Track original indices for cache before resetting
+    train_cache_indices = train_split_df.index.values if hidden_state_cache is not None else None
+    eval_cache_indices = eval_split_df.index.values if hidden_state_cache is not None else None
+
     train_split_df = train_split_df.reset_index(drop=True)
     eval_split_df = eval_split_df.reset_index(drop=True)
 
@@ -259,7 +342,10 @@ def _run_single_plasmode_experiment(
         plasmode_config.generator_architecture,
         plasmode_config.generator_training,
         device,
-        outcome_type=generator_outcome_type
+        outcome_type=generator_outcome_type,
+        hidden_state_cache=hidden_state_cache,
+        train_indices=train_cache_indices,
+        val_indices=eval_cache_indices
     )
 
     for entry in gen_history:
@@ -270,10 +356,14 @@ def _run_single_plasmode_experiment(
 
     # Step 2: Generate synthetic outcomes
     train_plasmode_df = _generate_plasmode_data(
-        train_split_df, generator, scenario, applied_config, device
+        train_split_df, generator, scenario, applied_config, device,
+        hidden_state_cache=hidden_state_cache,
+        dataset_indices=train_cache_indices
     )
     eval_plasmode_df = _generate_plasmode_data(
-        eval_split_df, generator, scenario, applied_config, device
+        eval_split_df, generator, scenario, applied_config, device,
+        hidden_state_cache=hidden_state_cache,
+        dataset_indices=eval_cache_indices
     )
 
     train_plasmode_df['sim_split'] = 'train'
@@ -288,7 +378,10 @@ def _run_single_plasmode_experiment(
         plasmode_config.evaluator_architecture,
         plasmode_config.evaluator_training,
         device,
-        outcome_type=scenario_outcome_type
+        outcome_type=scenario_outcome_type,
+        hidden_state_cache=hidden_state_cache,
+        train_indices=train_cache_indices,
+        val_indices=eval_cache_indices
     )
 
     for entry in eval_history:
@@ -300,7 +393,11 @@ def _run_single_plasmode_experiment(
     combined_history = gen_history + eval_history
 
     # Step 4: Generate predictions for eval split
-    preds_dict = _predict_cnn_model(evaluator, eval_plasmode_df, applied_config, device)
+    preds_dict = _predict_cnn_model(
+        evaluator, eval_plasmode_df, applied_config, device,
+        hidden_state_cache=hidden_state_cache,
+        dataset_indices=eval_cache_indices
+    )
 
     # Probability scale predictions only
     eval_plasmode_df['estimated_y0_prob'] = preds_dict['y0_prob']
@@ -340,7 +437,10 @@ def _train_cnn_model(
     arch_config,
     train_config,
     device: torch.device,
-    outcome_type: str = "binary"
+    outcome_type: str = "binary",
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    train_indices: Optional[np.ndarray] = None,
+    val_indices: Optional[np.ndarray] = None
 ) -> Tuple[Union[CausalText, CausalTextForest], List[Dict[str, Any]]]:
     """Train a model with CNN, BERT, Causal Forest, or TF-IDF Forest.
 
@@ -351,7 +451,10 @@ def _train_cnn_model(
     if model_type == "causal_forest":
         return _train_causal_forest_model(
             train_df, val_df, applied_config, arch_config, train_config, device,
-            outcome_type=outcome_type
+            outcome_type=outcome_type,
+            hidden_state_cache=hidden_state_cache,
+            train_indices=train_indices,
+            val_indices=val_indices
         )
 
     if model_type == "tfidf_forest":
@@ -520,6 +623,16 @@ def _train_cnn_model(
         llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
         llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
         llm_use_pretrained=getattr(arch_config, 'llm_use_pretrained', False),
+        # Frozen LLM Pooler args
+        flp_model_name=getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        flp_max_length=getattr(arch_config, 'flp_max_length', 8192),
+        flp_freeze_llm=getattr(arch_config, 'flp_freeze_llm', True),
+        flp_gated_attention_dim=getattr(arch_config, 'flp_gated_attention_dim', 128),
+        flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
+        flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
+        flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_skip_llm=(hidden_state_cache is not None),
+        flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
@@ -638,28 +751,48 @@ def _train_cnn_model(
         # LLM uses pretrained tokenizer, no fit_tokenizer needed
         init_mode = "pretrained" if getattr(arch_config, 'llm_use_pretrained', False) else "random init"
         logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} ({init_mode})")
+    elif feature_extractor_type == "frozen_llm_pooler":
+        # Frozen LLM Pooler uses pretrained tokenizer, no fit_tokenizer needed
+        logger.info(f"Using Frozen LLM Pooler feature extractor: {getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')} "
+                   f"({'frozen' if getattr(arch_config, 'flp_freeze_llm', True) else 'trainable'})"
+                   f"{' (cached)' if hidden_state_cache is not None else ''}")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
 
     # Create datasets
-    train_dataset = ClinicalTextDataset(
-        data=train_df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column
-    )
-
-    val_dataset = ClinicalTextDataset(
-        data=val_df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and train_indices is not None:
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column,
+            dataset_indices=train_indices
+        )
+        val_dataset = CachedHiddenStateDataset(
+            data=val_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column,
+            dataset_indices=val_indices
+        )
+        collate_fn = collate_cached_batch
+    else:
+        train_dataset = ClinicalTextDataset(
+            data=train_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        val_dataset = ClinicalTextDataset(
+            data=val_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        # Create collator for preprocessing in DataLoader workers
+        collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
+        collate_fn = collator if collator is not None else collate_batch
 
     train_loader = DataLoader(
         train_dataset,
@@ -701,6 +834,12 @@ def _train_cnn_model(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
             optimizer.zero_grad()
             losses = model.train_step(
                 batch,
@@ -726,6 +865,13 @@ def _train_cnn_model(
             for batch in val_loader:
                 batch['outcome'] = batch['outcome'].to(device)
                 batch['treatment'] = batch['treatment'].to(device)
+
+                # Inject cached hidden states if available
+                if 'cache_indices' in batch and hidden_state_cache is not None:
+                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                    batch['cached_hidden_states'] = hs
+                    batch['cached_attention_mask'] = mask
+
                 losses = model.train_step(
                     batch,
                     alpha_propensity=train_config.alpha_propensity,
@@ -875,7 +1021,10 @@ def _train_causal_forest_model(
     arch_config,
     train_config,
     device: torch.device,
-    outcome_type: str = "binary"
+    outcome_type: str = "binary",
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    train_indices: Optional[np.ndarray] = None,
+    val_indices: Optional[np.ndarray] = None
 ) -> Tuple[CausalTextForest, List[Dict[str, Any]]]:
     """Train a CausalTextForest model for plasmode experiments.
 
@@ -1054,32 +1203,65 @@ def _train_causal_forest_model(
         contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
         contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
         contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
+        # Frozen LLM Pooler args
+        flp_model_name=getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        flp_max_length=getattr(arch_config, 'flp_max_length', 8192),
+        flp_freeze_llm=getattr(arch_config, 'flp_freeze_llm', True),
+        flp_gated_attention_dim=getattr(arch_config, 'flp_gated_attention_dim', 128),
+        flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
+        flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
+        flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_skip_llm=(hidden_state_cache is not None),
+        flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
+        # LLM args
+        llm_model_name=getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        llm_max_length=getattr(arch_config, 'llm_max_length', 8192),
+        llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
+        llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
+        llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
+        llm_use_pretrained=getattr(arch_config, 'llm_use_pretrained', False),
         device=str(device),
         outcome_type=outcome_type
     )
 
     train_texts = train_df[applied_config.text_column].tolist()
     model.fit_tokenizer(train_texts)
-    logger.info(f"Using CausalTextForest with {feature_extractor_type.upper()} extractor")
+    logger.info(f"Using CausalTextForest with {feature_extractor_type.upper()} extractor"
+                f"{' (cached)' if hidden_state_cache is not None else ''}")
 
     # Create datasets
-    train_dataset = ClinicalTextDataset(
-        data=train_df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column
-    )
-
-    val_dataset = ClinicalTextDataset(
-        data=val_df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and train_indices is not None:
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column,
+            dataset_indices=train_indices
+        )
+        val_dataset = CachedHiddenStateDataset(
+            data=val_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column,
+            dataset_indices=val_indices
+        )
+        collate_fn = collate_cached_batch
+    else:
+        train_dataset = ClinicalTextDataset(
+            data=train_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        val_dataset = ClinicalTextDataset(
+            data=val_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        # Create collator for preprocessing in DataLoader workers
+        collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
+        collate_fn = collator if collator is not None else collate_batch
 
     train_loader = DataLoader(
         train_dataset,
@@ -1122,6 +1304,12 @@ def _train_causal_forest_model(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
             optimizer.zero_grad()
             losses = model.train_representation_step(
                 batch,
@@ -1146,6 +1334,13 @@ def _train_causal_forest_model(
             for batch in val_loader:
                 batch['outcome'] = batch['outcome'].to(device)
                 batch['treatment'] = batch['treatment'].to(device)
+
+                # Inject cached hidden states if available
+                if 'cache_indices' in batch and hidden_state_cache is not None:
+                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                    batch['cached_hidden_states'] = hs
+                    batch['cached_attention_mask'] = mask
+
                 losses = model.train_representation_step(
                     batch,
                     alpha_propensity=alpha_propensity,
@@ -1177,18 +1372,35 @@ def _train_causal_forest_model(
 
     # Stage 2: Train causal forest on extracted features
     combined_df = pd.concat([train_df, val_df])
-    combined_dataset = ClinicalTextDataset(
-        data=combined_df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column
-    )
+    if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+        combined_indices = np.concatenate([train_indices, val_indices])
+        combined_dataset = CachedHiddenStateDataset(
+            data=combined_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column,
+            dataset_indices=combined_indices
+        )
+        combined_collate_fn = collate_cached_batch
+    else:
+        combined_dataset = ClinicalTextDataset(
+            data=combined_df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        combined_collate_fn = collate_fn
     combined_loader = DataLoader(
         combined_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=combined_collate_fn
     )
+
+    # Wrap loader with cache injection for Stage 2 feature extraction
+    if hidden_state_cache is not None:
+        combined_loader = _cache_injecting_loader(combined_loader, hidden_state_cache, device)
+
     combined_T = combined_df[applied_config.treatment_column].values
     combined_Y = combined_df[applied_config.outcome_column].values
     model.train_causal_forest(combined_loader, combined_T, combined_Y)
@@ -1196,28 +1408,49 @@ def _train_causal_forest_model(
     return model, history
 
 
+def _cache_injecting_loader(loader, hidden_state_cache, device):
+    """Wrap a DataLoader to inject cached hidden states into batches."""
+    for batch in loader:
+        if 'cache_indices' in batch and hidden_state_cache is not None:
+            hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+            batch['cached_hidden_states'] = hs
+            batch['cached_attention_mask'] = mask
+        yield batch
+
+
 def _generate_plasmode_data(
     df: pd.DataFrame,
     generator: Union[CausalText, CausalTextForest],
     scenario: PlasmodeConfig,
     applied_config: AppliedInferenceConfig,
-    device: torch.device
+    device: torch.device,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    dataset_indices: Optional[np.ndarray] = None
 ) -> pd.DataFrame:
     """Generate synthetic outcomes using the generator model."""
 
     plasmode_df = df.copy()
 
     # Get features from generator
-    dataset = ClinicalTextDataset(
-        data=df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(generator.feature_extractor, getattr(generator, 'effect_feature_extractor', None))
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and dataset_indices is not None:
+        dataset = CachedHiddenStateDataset(
+            data=df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column,
+            dataset_indices=dataset_indices
+        )
+        collate_fn = collate_cached_batch
+    else:
+        dataset = ClinicalTextDataset(
+            data=df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        # Create collator for preprocessing in DataLoader workers
+        collator = create_collator(generator.feature_extractor, getattr(generator, 'effect_feature_extractor', None))
+        collate_fn = collator if collator is not None else collate_batch
 
     loader = DataLoader(
         dataset,
@@ -1231,8 +1464,19 @@ def _generate_plasmode_data(
 
     with torch.no_grad():
         for batch in loader:
-            texts = batch['texts']
-            features = generator.get_features(texts)
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
+            # get_features accepts both text lists and batch dicts
+            if 'cached_hidden_states' in batch:
+                batch['texts'] = batch.get('texts', [])
+                features = generator.get_features(batch)
+            else:
+                texts = batch['texts']
+                features = generator.get_features(texts)
             all_features.append(features.cpu().numpy())
 
     confounder_features = np.concatenate(all_features, axis=0)
@@ -1305,7 +1549,9 @@ def _predict_cnn_model(
     model: Union[CausalText, CausalTextForest],
     df: pd.DataFrame,
     applied_config: AppliedInferenceConfig,
-    device: torch.device
+    device: torch.device,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    dataset_indices: Optional[np.ndarray] = None
 ) -> dict:
     """Generate predictions from CausalText, CausalTextForest, or TfidfForestWrapper model."""
 
@@ -1316,20 +1562,33 @@ def _predict_cnn_model(
 
     # Handle CausalTextForest separately (uses different prediction API)
     if isinstance(model, CausalTextForest):
-        forest_dataset = ClinicalTextDataset(
-            data=df,
-            text_column=applied_config.text_column,
-            outcome_column=applied_config.outcome_column,
-            treatment_column=applied_config.treatment_column
-        )
-        forest_collator = create_collator(model.feature_extractor)
-        forest_collate_fn = forest_collator if forest_collator is not None else collate_batch
+        if hidden_state_cache is not None and dataset_indices is not None:
+            forest_dataset = CachedHiddenStateDataset(
+                data=df,
+                text_column=applied_config.text_column,
+                outcome_column=applied_config.outcome_column,
+                treatment_column=applied_config.treatment_column,
+                dataset_indices=dataset_indices
+            )
+            forest_collate_fn = collate_cached_batch
+        else:
+            forest_dataset = ClinicalTextDataset(
+                data=df,
+                text_column=applied_config.text_column,
+                outcome_column=applied_config.outcome_column,
+                treatment_column=applied_config.treatment_column
+            )
+            forest_collator = create_collator(model.feature_extractor)
+            forest_collate_fn = forest_collator if forest_collator is not None else collate_batch
         forest_loader = DataLoader(
             forest_dataset,
             batch_size=32,
             shuffle=False,
             collate_fn=forest_collate_fn
         )
+        # Wrap with cache injection if needed
+        if hidden_state_cache is not None:
+            forest_loader = _cache_injecting_loader(forest_loader, hidden_state_cache, device)
         preds = model.predict(forest_loader, return_ci=False)
         return {
             'y0_prob': preds['pred_y0_prob'],
@@ -1339,16 +1598,25 @@ def _predict_cnn_model(
         }
 
     # CausalText prediction path
-    dataset = ClinicalTextDataset(
-        data=df,
-        text_column=applied_config.text_column,
-        outcome_column=applied_config.outcome_column,
-        treatment_column=applied_config.treatment_column
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and dataset_indices is not None:
+        dataset = CachedHiddenStateDataset(
+            data=df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column,
+            dataset_indices=dataset_indices
+        )
+        collate_fn = collate_cached_batch
+    else:
+        dataset = ClinicalTextDataset(
+            data=df,
+            text_column=applied_config.text_column,
+            outcome_column=applied_config.outcome_column,
+            treatment_column=applied_config.treatment_column
+        )
+        # Create collator for preprocessing in DataLoader workers
+        collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
+        collate_fn = collator if collator is not None else collate_batch
 
     loader = DataLoader(
         dataset,
@@ -1364,6 +1632,12 @@ def _predict_cnn_model(
 
     with torch.no_grad():
         for batch in loader:
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
             preds = model.predict(batch)
             all_y0.append(preds['y0_logit'].cpu().numpy())
             all_y1.append(preds['y1_logit'].cpu().numpy())

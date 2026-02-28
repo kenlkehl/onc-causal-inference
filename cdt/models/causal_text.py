@@ -251,6 +251,16 @@ class CausalText(nn.Module):
         llm_dropout: float = 0.1,
         llm_gradient_checkpointing: bool = True,
         llm_use_pretrained: bool = False,
+        # Frozen LLM Pooler args
+        flp_model_name: str = "Qwen/Qwen3-0.6B-Base",
+        flp_max_length: int = 8192,
+        flp_freeze_llm: bool = True,
+        flp_gated_attention_dim: int = 128,
+        flp_projection_dim: int = 128,
+        flp_dropout: float = 0.1,
+        flp_gradient_checkpointing: bool = True,
+        flp_skip_llm: bool = False,
+        flp_cached_hidden_size: int = 0,
         # CLAM instance-level loss args (for GRU-Pool extractor)
         clam_enabled: bool = False,
         clam_num_instances: int = 5,
@@ -518,6 +528,15 @@ class CausalText(nn.Module):
             'llm_dropout': llm_dropout,
             'llm_gradient_checkpointing': llm_gradient_checkpointing,
             'llm_use_pretrained': llm_use_pretrained,
+            'flp_model_name': flp_model_name,
+            'flp_max_length': flp_max_length,
+            'flp_freeze_llm': flp_freeze_llm,
+            'flp_gated_attention_dim': flp_gated_attention_dim,
+            'flp_projection_dim': flp_projection_dim,
+            'flp_dropout': flp_dropout,
+            'flp_gradient_checkpointing': flp_gradient_checkpointing,
+            'flp_skip_llm': flp_skip_llm,
+            'flp_cached_hidden_size': flp_cached_hidden_size,
             'clam_enabled': clam_enabled,
             'clam_num_instances': clam_num_instances,
             'clam_instance_hidden_dim': clam_instance_hidden_dim,
@@ -752,6 +771,16 @@ class CausalText(nn.Module):
             llm_dropout=llm_dropout,
             llm_gradient_checkpointing=llm_gradient_checkpointing,
             llm_use_pretrained=llm_use_pretrained,
+            # Frozen LLM Pooler args
+            flp_model_name=flp_model_name,
+            flp_max_length=flp_max_length,
+            flp_freeze_llm=flp_freeze_llm,
+            flp_gated_attention_dim=flp_gated_attention_dim,
+            flp_projection_dim=flp_projection_dim,
+            flp_dropout=flp_dropout,
+            flp_gradient_checkpointing=flp_gradient_checkpointing,
+            flp_skip_llm=flp_skip_llm,
+            flp_cached_hidden_size=flp_cached_hidden_size,
             # Numeric args
             numeric_features_enabled=numeric_features_enabled,
             numeric_embedding_dim=numeric_embedding_dim,
@@ -1113,6 +1142,16 @@ class CausalText(nn.Module):
                 llm_dropout=llm_dropout,
                 llm_gradient_checkpointing=llm_gradient_checkpointing,
                 llm_use_pretrained=llm_use_pretrained,
+                # Frozen LLM Pooler args
+                flp_model_name=flp_model_name,
+                flp_max_length=flp_max_length,
+                flp_freeze_llm=flp_freeze_llm,
+                flp_gated_attention_dim=flp_gated_attention_dim,
+                flp_projection_dim=flp_projection_dim,
+                flp_dropout=flp_dropout,
+                flp_gradient_checkpointing=flp_gradient_checkpointing,
+                flp_skip_llm=flp_skip_llm,
+                flp_cached_hidden_size=flp_cached_hidden_size,
                 # Numeric args
                 numeric_features_enabled=numeric_features_enabled,
                 numeric_embedding_dim=numeric_embedding_dim,
@@ -1172,6 +1211,12 @@ class CausalText(nn.Module):
     @staticmethod
     def _get_extractor_input(batch, texts):
         """Return preprocessed batch if available, otherwise raw texts."""
+        if 'cached_hidden_states' in batch:
+            return {
+                'cached_hidden_states': batch['cached_hidden_states'],
+                'cached_attention_mask': batch['cached_attention_mask'],
+                'texts': texts,
+            }
         if 'chunk_input_ids' in batch or 'chunk_token_ids' in batch:
             return batch
         return texts

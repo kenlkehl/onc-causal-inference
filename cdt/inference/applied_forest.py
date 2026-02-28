@@ -20,7 +20,10 @@ from ..data import (
     ClinicalTextDataset,
     collate_batch,
     create_collator,
+    CachedHiddenStateDataset,
+    collate_cached_batch,
 )
+from ..models.hidden_state_cache import HiddenStateCache
 from ..utils import cuda_cleanup, get_memory_info
 
 
@@ -57,15 +60,67 @@ def run_applied_inference_forest(
     logger.info("=" * 80)
     logger.info("Two-stage approach: Neural feature extraction + Causal Forest")
 
+    # Pre-compute and cache LLM hidden states for frozen_llm_pooler
+    hidden_state_cache = None
+    arch_config = config.architecture
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'gru_pool')
+    )
+    if feature_extractor_type == "frozen_llm_pooler":
+        flp_freeze = getattr(arch_config, 'flp_freeze_llm', True)
+        flp_cache_enabled = getattr(arch_config, 'flp_cache_hidden_states', True)
+
+        if flp_cache_enabled and flp_freeze:
+            dataset_path = config.dataset_path
+            model_name = getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
+            max_length = getattr(arch_config, 'flp_max_length', 8192)
+
+            cache_dir = str(Path(dataset_path).parent / ".cdt_cache")
+            hidden_state_cache = HiddenStateCache(
+                cache_dir=cache_dir,
+                model_name=model_name,
+                max_length=max_length,
+                dataset_path=dataset_path,
+            )
+
+            # Reset index for consistent cache indices
+            dataset = dataset.reset_index(drop=True)
+            all_texts = dataset[config.text_column].tolist()
+
+            if not hidden_state_cache.is_valid(len(dataset)):
+                logger.info("Pre-computing LLM hidden states for caching...")
+                batch_size = config.training.batch_size
+                try:
+                    hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
+                except Exception as e:
+                    logger.warning(f"Hidden state caching failed: {e}. Falling back to non-cached mode.")
+                    hidden_state_cache = None
+            else:
+                logger.info("Reusing existing hidden state cache")
+
+            if hidden_state_cache is not None:
+                hidden_state_cache.open()
+        elif flp_cache_enabled and not flp_freeze:
+            logger.warning(
+                "flp_cache_hidden_states=True but flp_freeze_llm=False. "
+                "Caching is only supported with frozen LLM. Skipping cache."
+            )
+
     # Determine mode
     if config.cv_folds > 1:
         _run_cv_inference_forest(
-            dataset, config, output_path, device, verbose
+            dataset, config, output_path, device, verbose,
+            hidden_state_cache=hidden_state_cache
         )
     else:
         _run_fixed_split_inference_forest(
-            dataset, config, output_path, device, verbose
+            dataset, config, output_path, device, verbose,
+            hidden_state_cache=hidden_state_cache
         )
+
+    # Cleanup cache
+    if hidden_state_cache is not None:
+        hidden_state_cache.close()
 
 
 def _run_cv_inference_forest(
@@ -73,13 +128,14 @@ def _run_cv_inference_forest(
     config: AppliedInferenceConfig,
     output_path: Path,
     device: torch.device,
-    verbose: bool = True
+    verbose: bool = True,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> None:
     """Run K-Fold Cross-Validation inference with causal forest."""
     k = config.cv_folds
     logger.info(f"Starting {k}-Fold Cross-Validation on {len(dataset)} samples")
 
-    # Reset index
+    # Reset index (may already be reset if cache was initialized)
     dataset = dataset.reset_index(drop=True)
 
     kf = KFold(n_splits=k, shuffle=True, random_state=42)
@@ -100,7 +156,10 @@ def _run_cv_inference_forest(
 
         # Train model and get predictions
         preds_df, history = _process_fold_forest(
-            fold, train_df, test_df, config, device, verbose
+            fold, train_df, test_df, config, device, verbose,
+            hidden_state_cache=hidden_state_cache,
+            train_indices=train_idx,
+            test_indices=test_idx
         )
 
         # Add fold info
@@ -131,7 +190,10 @@ def _process_fold_forest(
     test_df: pd.DataFrame,
     config: AppliedInferenceConfig,
     device: torch.device,
-    verbose: bool = True
+    verbose: bool = True,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    train_indices: Optional[np.ndarray] = None,
+    test_indices: Optional[np.ndarray] = None
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """Process a single fold with causal forest."""
     arch_config = config.architecture
@@ -142,10 +204,16 @@ def _process_fold_forest(
         getattr(arch_config, 'feature_extractor_type', 'gru_pool')
     )
 
-    # Create model
+    # Create model (with skip_llm if cache available)
     outcome_type = getattr(config, 'outcome_type', 'binary')
-    model = _create_causal_forest_model(arch_config, device, outcome_type=outcome_type)
+    model = _create_causal_forest_model(
+        arch_config, device, outcome_type=outcome_type,
+        flp_skip_llm=hidden_state_cache is not None,
+        flp_cached_hidden_size=hidden_state_cache.hidden_size if hidden_state_cache is not None else 0
+    )
     logger.info(f"Created CausalTextForest with {feature_extractor_type.upper()} extractor")
+    if hidden_state_cache is not None:
+        logger.info("Using cached hidden states (LLM not loaded)")
 
     # Get training texts for tokenizer fitting
     train_texts = train_df[config.text_column].tolist()
@@ -157,19 +225,45 @@ def _process_fold_forest(
     # Stage 1: Train representation
     logger.info("\n--- Stage 1: Training representation ---")
     history = _train_representation(
-        model, train_df, test_df, config, device, verbose
+        model, train_df, test_df, config, device, verbose,
+        hidden_state_cache=hidden_state_cache,
+        train_indices=train_indices,
+        val_indices=test_indices
     )
 
     # Create DataLoaders for Stage 2 feature extraction and prediction
-    collator = create_collator(model.feature_extractor)
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and train_indices is not None and test_indices is not None:
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=train_indices
+        )
+        test_dataset = CachedHiddenStateDataset(
+            data=test_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=test_indices
+        )
+        collate_fn = collate_cached_batch
+    else:
+        train_dataset = ClinicalTextDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        test_dataset = ClinicalTextDataset(
+            data=test_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        collator = create_collator(model.feature_extractor)
+        collate_fn = collator if collator is not None else collate_batch
 
-    train_dataset = ClinicalTextDataset(
-        data=train_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
@@ -177,12 +271,6 @@ def _process_fold_forest(
         collate_fn=collate_fn
     )
 
-    test_dataset = ClinicalTextDataset(
-        data=test_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
     test_loader = DataLoader(
         test_dataset,
         batch_size=train_config.batch_size,
@@ -190,15 +278,17 @@ def _process_fold_forest(
         collate_fn=collate_fn
     )
 
-    # Stage 2: Train causal forest
+    # Stage 2: Train causal forest (wrap loaders to inject cache if needed)
     logger.info("\n--- Stage 2: Training causal forest ---")
     train_T = train_df[config.treatment_column].values
     train_Y = train_df[config.outcome_column].values
-    model.train_causal_forest(train_loader, train_T, train_Y)
+    train_loader_s2 = _cache_injecting_loader(train_loader, hidden_state_cache, device) if hidden_state_cache is not None else train_loader
+    model.train_causal_forest(train_loader_s2, train_T, train_Y)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
-    preds = model.predict(test_loader, return_ci=True)
+    test_loader_pred = _cache_injecting_loader(test_loader, hidden_state_cache, device) if hidden_state_cache is not None else test_loader
+    preds = model.predict(test_loader_pred, return_ci=True)
 
     # Build predictions DataFrame
     preds_df = test_df.copy()
@@ -230,7 +320,8 @@ def _run_fixed_split_inference_forest(
     config: AppliedInferenceConfig,
     output_path: Path,
     device: torch.device,
-    verbose: bool = True
+    verbose: bool = True,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> None:
     """Run inference using fixed train/val/test splits with causal forest."""
     logger.info("Running Fixed Split Inference (Train/Val/Test)")
@@ -242,12 +333,28 @@ def _run_fixed_split_inference_forest(
 
     logger.info(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
+    # Build index mappings for cache (dataset was reset_index in run_applied_inference_forest)
+    train_indices = None
+    val_indices = None
+    test_indices = None
+    if hidden_state_cache is not None:
+        train_mask = dataset[config.split_column] == 'train'
+        val_mask = dataset[config.split_column] == 'val'
+        test_mask = dataset[config.split_column] == 'test'
+        train_indices = np.where(train_mask)[0]
+        val_indices = np.where(val_mask)[0]
+        test_indices = np.where(test_mask)[0]
+
     arch_config = config.architecture
     train_config = config.training
 
-    # Create model
+    # Create model (with skip_llm if cache available)
     outcome_type = getattr(config, 'outcome_type', 'binary')
-    model = _create_causal_forest_model(arch_config, device, outcome_type=outcome_type)
+    model = _create_causal_forest_model(
+        arch_config, device, outcome_type=outcome_type,
+        flp_skip_llm=hidden_state_cache is not None,
+        flp_cached_hidden_size=hidden_state_cache.hidden_size if hidden_state_cache is not None else 0
+    )
 
     # Get texts for tokenizer fitting
     train_texts = train_df[config.text_column].tolist()
@@ -258,51 +365,80 @@ def _run_fixed_split_inference_forest(
     # Stage 1: Train representation
     logger.info("\n--- Stage 1: Training representation ---")
     history = _train_representation(
-        model, train_df, val_df, config, device, verbose
+        model, train_df, val_df, config, device, verbose,
+        hidden_state_cache=hidden_state_cache,
+        train_indices=train_indices,
+        val_indices=val_indices
     )
 
     # Save training logs
     log_path = output_path.parent / "training_log.csv"
     pd.DataFrame(history).to_csv(log_path, index=False)
 
-    # Create DataLoaders for Stage 2 feature extraction and prediction
-    collator = create_collator(model.feature_extractor)
-    collate_fn = collator if collator is not None else collate_batch
-
     # Stage 2: Train causal forest on full train + val
     logger.info("\n--- Stage 2: Training causal forest ---")
     combined_df = pd.concat([train_df, val_df])
-    combined_dataset = ClinicalTextDataset(
-        data=combined_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
+
+    if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+        combined_indices = np.concatenate([train_indices, val_indices])
+        combined_dataset = CachedHiddenStateDataset(
+            data=combined_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=combined_indices
+        )
+        combined_collate_fn = collate_cached_batch
+    else:
+        combined_dataset = ClinicalTextDataset(
+            data=combined_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        collator = create_collator(model.feature_extractor)
+        combined_collate_fn = collator if collator is not None else collate_batch
+
     combined_loader = DataLoader(
         combined_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=combined_collate_fn
     )
     combined_T = combined_df[config.treatment_column].values
     combined_Y = combined_df[config.outcome_column].values
-    model.train_causal_forest(combined_loader, combined_T, combined_Y)
+    combined_loader_s2 = _cache_injecting_loader(combined_loader, hidden_state_cache, device) if hidden_state_cache is not None else combined_loader
+    model.train_causal_forest(combined_loader_s2, combined_T, combined_Y)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
-    test_dataset = ClinicalTextDataset(
-        data=test_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
+    if hidden_state_cache is not None and test_indices is not None:
+        test_dataset = CachedHiddenStateDataset(
+            data=test_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=test_indices
+        )
+        test_collate_fn = collate_cached_batch
+    else:
+        test_dataset = ClinicalTextDataset(
+            data=test_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        collator = create_collator(model.feature_extractor)
+        test_collate_fn = collator if collator is not None else collate_batch
+
     test_loader = DataLoader(
         test_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=test_collate_fn
     )
-    preds = model.predict(test_loader, return_ci=True)
+    test_loader_pred = _cache_injecting_loader(test_loader, hidden_state_cache, device) if hidden_state_cache is not None else test_loader
+    preds = model.predict(test_loader_pred, return_ci=True)
 
     # Build results DataFrame
     results_df = test_df.copy()
@@ -321,7 +457,9 @@ def _run_fixed_split_inference_forest(
 def _create_causal_forest_model(
     arch_config,
     device: torch.device,
-    outcome_type: str = "binary"
+    outcome_type: str = "binary",
+    flp_skip_llm: bool = False,
+    flp_cached_hidden_size: int = 0
 ) -> CausalTextForest:
     """Create CausalTextForest model from config."""
     feature_extractor_type = normalize_feature_extractor_type(
@@ -447,6 +585,23 @@ def _create_causal_forest_model(
         bert_pool_transformer_dropout=getattr(arch_config, 'bert_pool_transformer_dropout', 0.1),
         bert_pool_gated_attention_dim=getattr(arch_config, 'bert_pool_gated_attention_dim', 128),
         bert_pool_projection_dim=getattr(arch_config, 'bert_pool_projection_dim', 128),
+        # LLM args
+        llm_model_name=getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        llm_max_length=getattr(arch_config, 'llm_max_length', 8192),
+        llm_projection_dim=getattr(arch_config, 'llm_projection_dim', 128),
+        llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
+        llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
+        llm_use_pretrained=getattr(arch_config, 'llm_use_pretrained', False),
+        # Frozen LLM Pooler args
+        flp_model_name=getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        flp_max_length=getattr(arch_config, 'flp_max_length', 8192),
+        flp_freeze_llm=getattr(arch_config, 'flp_freeze_llm', True),
+        flp_gated_attention_dim=getattr(arch_config, 'flp_gated_attention_dim', 128),
+        flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
+        flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
+        flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_skip_llm=flp_skip_llm,
+        flp_cached_hidden_size=flp_cached_hidden_size,
         # Head args
         representation_dim=getattr(arch_config, 'causal_head_representation_dim', 128),
         hidden_dim=getattr(arch_config, 'causal_head_hidden_outcome_dim', 64),
@@ -490,29 +645,47 @@ def _train_representation(
     val_df: pd.DataFrame,
     config: AppliedInferenceConfig,
     device: torch.device,
-    verbose: bool = True
+    verbose: bool = True,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    train_indices: Optional[np.ndarray] = None,
+    val_indices: Optional[np.ndarray] = None
 ) -> List[Dict[str, Any]]:
     """Train representation (Stage 1)."""
     train_config = config.training
 
     # Create datasets
-    train_dataset = ClinicalTextDataset(
-        data=train_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
-
-    val_dataset = ClinicalTextDataset(
-        data=val_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(model.feature_extractor)
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=train_indices
+        )
+        val_dataset = CachedHiddenStateDataset(
+            data=val_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=val_indices
+        )
+        collate_fn = collate_cached_batch
+        logger.info("Using cached hidden state datasets for Stage 1 training")
+    else:
+        train_dataset = ClinicalTextDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        val_dataset = ClinicalTextDataset(
+            data=val_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        collator = create_collator(model.feature_extractor)
+        collate_fn = collator if collator is not None else collate_batch
 
     train_loader = DataLoader(
         train_dataset,
@@ -570,6 +743,12 @@ def _train_representation(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
             optimizer.zero_grad()
 
             losses = model.train_representation_step(
@@ -616,6 +795,12 @@ def _train_representation(
             for batch in tqdm(val_loader, desc="Validation", leave=False, disable=not verbose):
                 batch['outcome'] = batch['outcome'].to(device)
                 batch['treatment'] = batch['treatment'].to(device)
+
+                # Inject cached hidden states if available
+                if 'cache_indices' in batch and hidden_state_cache is not None:
+                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                    batch['cached_hidden_states'] = hs
+                    batch['cached_attention_mask'] = mask
 
                 losses = model.train_representation_step(
                     batch,
@@ -710,6 +895,16 @@ def _train_representation(
     gc.collect()
 
     return history
+
+
+def _cache_injecting_loader(loader, hidden_state_cache, device):
+    """Wrap a DataLoader to inject cached hidden states into each batch."""
+    for batch in loader:
+        if 'cache_indices' in batch and hidden_state_cache is not None:
+            hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+            batch['cached_hidden_states'] = hs
+            batch['cached_attention_mask'] = mask
+        yield batch
 
 
 def _save_and_summarize_forest(results_df: pd.DataFrame, output_path: Path) -> None:

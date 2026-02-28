@@ -21,6 +21,7 @@ from .conv1d_transformer_hybrid_extractor import Conv1dTransformerHybridExtracto
 from .transformer_pool_extractor import TransformerPoolExtractor
 from .bert_cross_chunk_extractor import BertCrossChunkExtractor
 from .llm_extractor import LLMFeatureExtractor
+from .frozen_llm_pooler_extractor import FrozenLLMPoolerExtractor
 from .gated_mil_attention import GatedMILAttention, TaskSpecificConfounderWeighting, TokenLevelGatedPooling
 from .sparse_attention import (
     sparse_softmax,
@@ -31,6 +32,7 @@ from .sparse_attention import (
 from .numeric_features import NumericEmbedding, NumericFeatureVector, extract_numeric_patterns
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer, get_raw_confounder_features
 from .intra_batch_contrastive import IntraBatchContrastiveLoss
+from .hidden_state_cache import HiddenStateCache
 from .causal_text import CausalText
 from .propensity_model import PropensityOnlyModel, PropensityNet, create_propensity_model_from_config
 from .extractor_factory import create_feature_extractor, create_feature_extractor_from_config
@@ -65,6 +67,7 @@ __all__ = [
     'TransformerPoolExtractor',
     'BertCrossChunkExtractor',
     'LLMFeatureExtractor',
+    'FrozenLLMPoolerExtractor',
     'GatedMILAttention',
     'TaskSpecificConfounderWeighting',
     'TokenLevelGatedPooling',
@@ -83,6 +86,7 @@ __all__ = [
     'extract_numeric_patterns',
     'ExplicitConfounderFeaturizer',
     'get_raw_confounder_features',
+    'HiddenStateCache',
     'CausalTextForest',
     'ECONML_AVAILABLE',
     'create_feature_extractor',

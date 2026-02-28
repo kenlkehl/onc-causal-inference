@@ -9,6 +9,7 @@ cdt/analysis/__init__.py
 cdt/analysis/psm_analysis.py
 cdt/analysis/statistical_analysis.py
 cdt/data/__init__.py
+cdt/data/cached_hidden_state_dataset.py
 cdt/data/collators.py
 cdt/data/dataset.py
 cdt/experiments/__init__.py
@@ -39,11 +40,13 @@ cdt/models/dr_moce.py
 cdt/models/dragonnet.py
 cdt/models/explicit_confounder_featurizer.py
 cdt/models/extractor_factory.py
+cdt/models/frozen_llm_pooler_extractor.py
 cdt/models/gated_mil_attention.py
 cdt/models/gated_mil_hierarchical_extractor.py
 cdt/models/gru_extractor.py
 cdt/models/gru_pool_extractor.py
 cdt/models/gru_transformer_mil_extractor.py
+cdt/models/hidden_state_cache.py
 cdt/models/hierarchical_transformer_extractor.py
 cdt/models/intra_batch_contrastive.py
 cdt/models/llm_extractor.py
@@ -55,6 +58,7 @@ cdt/models/sparse_attention.py
 cdt/models/traditional_logreg.py
 cdt/models/transformer_pool_extractor.py
 cdt/models/uplift.py
+cdt/models/.ipynb_checkpoints/llm_extractor-checkpoint.py
 cdt/training/__init__.py
 cdt/training/outcome_training.py
 cdt/training/plasmode.py

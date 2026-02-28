@@ -16,7 +16,8 @@ from joblib import Parallel, delayed
 
 from ..config import AppliedInferenceConfig, PropensityTrimmingConfig, normalize_feature_extractor_type
 from ..models.propensity_model import PropensityOnlyModel, create_propensity_model_from_config
-from ..data import ClinicalTextDataset, collate_batch, create_collator
+from ..models.hidden_state_cache import HiddenStateCache
+from ..data import ClinicalTextDataset, collate_batch, create_collator, CachedHiddenStateDataset, collate_cached_batch
 from ..utils import cuda_cleanup, get_memory_info
 
 
@@ -28,7 +29,8 @@ def train_propensity_model_cv(
     config: AppliedInferenceConfig,
     device: torch.device,
     num_workers: int = 1,
-    gpu_ids: Optional[List[int]] = None
+    gpu_ids: Optional[List[int]] = None,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Train propensity model using k-fold CV to generate out-of-sample scores.
@@ -46,6 +48,7 @@ def train_propensity_model_cv(
         device: PyTorch device
         num_workers: Number of parallel workers
         gpu_ids: List of GPU IDs for parallel processing
+        hidden_state_cache: Optional pre-computed hidden state cache
 
     Returns:
         Tuple of (DataFrame with 'propensity_score_trimming' column, training_log DataFrame)
@@ -77,7 +80,8 @@ def train_propensity_model_cv(
         results = Parallel(n_jobs=num_workers)(
             delayed(_process_propensity_fold)(
                 fold, train_idx, test_idx, dataset, config,
-                devices[fold % len(devices)]
+                devices[fold % len(devices)],
+                hidden_state_cache=hidden_state_cache
             )
             for fold, (train_idx, test_idx) in enumerate(splits)
         )
@@ -86,7 +90,8 @@ def train_propensity_model_cv(
         for fold, (train_idx, test_idx) in enumerate(splits):
             results.append(_process_propensity_fold(
                 fold, train_idx, test_idx, dataset, config,
-                devices[0]
+                devices[0],
+                hidden_state_cache=hidden_state_cache
             ))
 
     # Combine predictions from all folds
@@ -120,7 +125,8 @@ def _process_propensity_fold(
     test_idx: np.ndarray,
     dataset: pd.DataFrame,
     config: AppliedInferenceConfig,
-    device: torch.device
+    device: torch.device,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> Tuple[np.ndarray, np.ndarray, Optional[float], List[Dict[str, Any]]]:
     """
     Process a single fold for propensity model training.
@@ -132,6 +138,7 @@ def _process_propensity_fold(
         dataset: Full dataset
         config: Configuration
         device: PyTorch device
+        hidden_state_cache: Optional pre-computed hidden state cache
 
     Returns:
         Tuple of (test_idx, propensity_scores, auroc, training_history)
@@ -151,7 +158,10 @@ def _process_propensity_fold(
 
     # Train propensity model
     model, fold_history = _train_propensity_model(
-        train_df, test_df, config, trimming_config, arch_config, device
+        train_df, test_df, config, trimming_config, arch_config, device,
+        hidden_state_cache=hidden_state_cache,
+        train_indices=train_idx,
+        val_indices=test_idx
     )
 
     # Add fold number to each history entry
@@ -159,7 +169,11 @@ def _process_propensity_fold(
         entry['fold'] = fold + 1
 
     # Predict on held-out fold
-    propensity_scores = _predict_propensity(model, test_df, config, device)
+    propensity_scores = _predict_propensity(
+        model, test_df, config, device,
+        hidden_state_cache=hidden_state_cache,
+        dataset_indices=test_idx
+    )
 
     # Calculate AUROC if possible
     treatments = test_df[config.treatment_column].values
@@ -198,7 +212,10 @@ def _train_propensity_model(
     config: AppliedInferenceConfig,
     trimming_config: PropensityTrimmingConfig,
     arch_config,
-    device: torch.device
+    device: torch.device,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    train_indices: Optional[np.ndarray] = None,
+    val_indices: Optional[np.ndarray] = None
 ) -> Tuple[PropensityOnlyModel, List[Dict[str, Any]]]:
     """
     Train a propensity-only model.
@@ -210,6 +227,9 @@ def _train_propensity_model(
         trimming_config: Propensity trimming config
         arch_config: Model architecture config
         device: PyTorch device
+        hidden_state_cache: Optional pre-computed hidden state cache
+        train_indices: Cache indices for training data
+        val_indices: Cache indices for validation data
 
     Returns:
         Tuple of (trained PropensityOnlyModel, training_history)
@@ -224,7 +244,9 @@ def _train_propensity_model(
     model = create_propensity_model_from_config(
         arch_config=arch_config,
         representation_dim=arch_config.causal_head_representation_dim,
-        device=device
+        device=device,
+        flp_skip_llm=hidden_state_cache is not None,
+        flp_cached_hidden_size=hidden_state_cache.hidden_size if hidden_state_cache is not None else 0
     )
 
     train_texts = train_df[config.text_column].tolist()
@@ -322,28 +344,47 @@ def _train_propensity_model(
         # LLM uses pretrained tokenizer, no fit_tokenizer needed
         init_mode = "pretrained" if getattr(arch_config, 'llm_use_pretrained', False) else "random init"
         logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} ({init_mode})")
+    elif feature_extractor_type == "frozen_llm_pooler":
+        # Frozen LLM Pooler uses pretrained tokenizer, no fit_tokenizer needed
+        logger.info(f"Using Frozen LLM Pooler feature extractor: {getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')} "
+                   f"({'frozen' if getattr(arch_config, 'flp_freeze_llm', True) else 'trainable'})")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
 
     # Create datasets
-    train_dataset = ClinicalTextDataset(
-        data=train_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
-
-    val_dataset = ClinicalTextDataset(
-        data=val_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(model.feature_extractor)
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=train_indices
+        )
+        val_dataset = CachedHiddenStateDataset(
+            data=val_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=val_indices
+        )
+        collate_fn = collate_cached_batch
+        logger.info("Using cached hidden state datasets for propensity model")
+    else:
+        train_dataset = ClinicalTextDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        val_dataset = ClinicalTextDataset(
+            data=val_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        collator = create_collator(model.feature_extractor)
+        collate_fn = collator if collator is not None else collate_batch
 
     # Create data loaders
     train_loader = DataLoader(
@@ -382,6 +423,12 @@ def _train_propensity_model(
         for batch in train_loader:
             batch['treatment'] = batch['treatment'].to(device)
 
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
             optimizer.zero_grad()
             losses = model.train_step(batch)
             losses['loss'].backward()
@@ -406,6 +453,13 @@ def _train_propensity_model(
         with torch.no_grad():
             for batch in val_loader:
                 batch['treatment'] = batch['treatment'].to(device)
+
+                # Inject cached hidden states if available
+                if 'cache_indices' in batch and hidden_state_cache is not None:
+                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                    batch['cached_hidden_states'] = hs
+                    batch['cached_attention_mask'] = mask
+
                 losses = model.train_step(batch)
                 val_loss += losses['loss'].item()
                 val_preds.append(torch.sigmoid(losses['t_logit']).flatten().cpu().numpy())
@@ -470,7 +524,9 @@ def _predict_propensity(
     model: PropensityOnlyModel,
     df: pd.DataFrame,
     config: AppliedInferenceConfig,
-    device: torch.device
+    device: torch.device,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    dataset_indices: Optional[np.ndarray] = None
 ) -> np.ndarray:
     """
     Predict propensity scores for a dataset.
@@ -480,20 +536,30 @@ def _predict_propensity(
         df: DataFrame with texts
         config: Configuration
         device: PyTorch device
+        hidden_state_cache: Optional pre-computed hidden state cache
+        dataset_indices: Cache indices for this dataset
 
     Returns:
         Array of propensity scores
     """
-    dataset = ClinicalTextDataset(
-        data=df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(model.feature_extractor)
-    collate_fn = collator if collator is not None else collate_batch
+    if hidden_state_cache is not None and dataset_indices is not None:
+        dataset = CachedHiddenStateDataset(
+            data=df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=dataset_indices
+        )
+        collate_fn = collate_cached_batch
+    else:
+        dataset = ClinicalTextDataset(
+            data=df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column
+        )
+        collator = create_collator(model.feature_extractor)
+        collate_fn = collator if collator is not None else collate_batch
 
     loader = DataLoader(
         dataset,
@@ -507,6 +573,12 @@ def _predict_propensity(
 
     with torch.no_grad():
         for batch in loader:
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
             propensity = model.predict(batch)
             all_propensity.append(propensity.cpu().numpy())
 

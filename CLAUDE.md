@@ -24,6 +24,8 @@ cdt/
 │   ├── causal_forest_head.py  # CausalForestDML wrapper
 │   ├── cnn_extractor.py, bert_extractor.py, gru_extractor.py
 │   ├── llm_extractor.py                  # Decoder-only LLM (random init or pretrained)
+│   ├── frozen_llm_pooler_extractor.py    # Frozen LLM + gated attention pooling
+│   ├── hidden_state_cache.py            # Pre-computed hidden state cache for frozen LLM
 │   ├── bert_pool_extractor.py            # BERT [CLS] + transformer + gated attention pooling
 │   ├── numeric_features.py               # Numeric value featurization (magnitude + type)
 │   ├── explicit_confounder_featurizer.py # MLP featurization of extracted confounders
@@ -65,6 +67,7 @@ synthetic_data/            # LLM-based synthetic data generation
 | `transformer_pool` | Chunk token transformer + cross-chunk transformer + gated attention pooling | Yes | Required |
 | `conv1d_transformer_hybrid` | Full-document dilated conv + stride downsampling + transformer (no chunking) | Yes (8K) | Required |
 | `bert_pool` | Chunk BERT [CLS] + transformer + gated attention pooling | Yes | No |
+| `frozen_llm_pooler` | Frozen pretrained LLM + gated attention pooling over all tokens | Yes (32K) | No |
 | `llm` | Decoder-only LLM (Qwen3) with last token embedding, random init or pretrained | Yes (32K) | No |
 
 **Note**: Hierarchical extractors use overlapping token-based chunking (`chunk_size`, `chunk_overlap`) instead of sentence splitting for more consistent context windows.
@@ -386,6 +389,51 @@ No `fit_tokenizer()` required - uses pretrained HF tokenizer.
 
 Interpretability: `interpret_attention()`, `get_attention_weights()`
 
+### Frozen LLM Pooler (`frozen_llm_pooler_extractor.py`)
+Pretrained decoder-only LLM with frozen weights + GatedAttentionPooling over all token hidden states.
+Unlike `llm_extractor.py` which only uses the last token, this extractor pools information from ALL
+tokens via gated attention, producing a richer representation while keeping the LLM frozen.
+
+| Stage | Component | Description |
+|-------|-----------|-------------|
+| Tokenization | Pretrained HF tokenizer | Right-padded (all tokens used with mask) |
+| Backbone | Decoder-only LLM (frozen) | All token hidden states from final layer |
+| Pooling | GatedAttentionPooling | tanh x sigmoid gating + softmax attention |
+| Projection | 2-layer MLP | Linear->LN->GELU->Dropout->Linear->LN |
+
+Key params: `flp_model_name`, `flp_max_length`, `flp_freeze_llm`, `flp_gated_attention_dim`,
+`flp_projection_dim`, `flp_dropout`, `flp_gradient_checkpointing`, `flp_cache_hidden_states`
+
+Key differences from `llm`:
+- **All tokens used**: Gated attention pooling over all hidden states (not just last token)
+- **Right padding**: All tokens contribute via attention mask
+- **Always pretrained**: No random init option
+- **Frozen by default**: Only pooling + projection layers train (~200K params vs 600M total)
+- **Hidden state caching**: When frozen, LLM outputs are cached to disk and reused across folds/experiments
+- **No CLAM support**: No `forward_with_instances()` method
+- **No fit_tokenizer()**: Uses pretrained tokenizer from HuggingFace
+
+**Hidden State Caching** (auto-enabled when `flp_freeze_llm=True`):
+
+When the LLM is frozen, hidden states are deterministic. CDT pre-computes them once for the entire
+dataset, caches to disk as float16 memmap files, and reuses across K-fold CV folds and across
+experiment runs. During training, only the lightweight trainable layers (~200K params) are loaded.
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `flp_cache_hidden_states` | Enable hidden state caching | `True` |
+
+Cache details:
+- **Location**: `{dataset_dir}/.cdt_cache/flp_hidden_states_{hash}/`
+- **Key**: `(model_name, max_length, dataset_path)` — different causal heads, learning rates, fold counts all share the same cache
+- **Format**: `hidden_states.npy` (float16 memmap) + `attention_mask.npy` (uint8 memmap) + `metadata.json`
+- **Padding**: Padded to actual max tokenized length (not max_length) to save disk space
+- **GPU savings**: ~2.4 GB less GPU memory (no LLM loaded during training)
+- **Reuse**: Cache is automatically reused across experiments with the same model/dataset
+- **Disable**: Set `flp_cache_hidden_states: false` in config
+
+No `fit_tokenizer()` required. Interpretability: `interpret_attention()`, `get_attention_weights()` (not available in cached mode)
+
 ### LLM (`llm_extractor.py`)
 Decoder-only LLM (e.g., Qwen3-0.6B-Base) with last token embedding. Supports two initialization modes
 via the `llm_use_pretrained` config flag:
@@ -434,7 +482,7 @@ adds magnitude-aware numeric featurization as a parallel channel to all extracto
 | Strategy | Used By | Method |
 |----------|---------|--------|
 | `NumericEmbedding` (position-aligned) | `cnn`, `gru` | Added to word embeddings at token positions |
-| `NumericFeatureVector` (document-level) | `bert`, `llm`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`, `bert_pool`, `bert_cross_chunk`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `confounder` | Aggregate histogram merged before output projection |
+| `NumericFeatureVector` (document-level) | `bert`, `llm`, `frozen_llm_pooler`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`, `bert_pool`, `bert_cross_chunk`, `hierarchical_transformer`, `gated_mil_hierarchical`, `gru_transformer_mil`, `confounder` | Aggregate histogram merged before output projection |
 
 ### Config Parameters
 
@@ -841,8 +889,9 @@ output_dir/
 | Main model | `cdt/models/causal_text.py` |
 | Causal forest model | `cdt/models/causal_text_forest.py`, `cdt/models/causal_forest_head.py` |
 | Causal heads | `dragonnet.py`, `rlearner.py`, `uplift.py`, `traditional_logreg.py` |
-| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `bert_pool_extractor.py`, `bert_cross_chunk_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `conv_pool_extractor.py`, `transformer_pool_extractor.py`, `conv1d_transformer_hybrid_extractor.py`, `llm_extractor.py` |
+| Extractors | `cnn_extractor.py`, `bert_extractor.py`, `gru_extractor.py`, `confounder_extractor.py`, `hierarchical_transformer_extractor.py`, `bert_pool_extractor.py`, `bert_cross_chunk_extractor.py`, `gated_mil_hierarchical_extractor.py`, `gru_transformer_mil_extractor.py`, `gru_pool_extractor.py`, `conv_pool_extractor.py`, `transformer_pool_extractor.py`, `conv1d_transformer_hybrid_extractor.py`, `frozen_llm_pooler_extractor.py`, `llm_extractor.py` |
 | Numeric features | `cdt/models/numeric_features.py` |
+| Hidden state cache | `cdt/models/hidden_state_cache.py`, `cdt/data/cached_hidden_state_dataset.py` |
 | Explicit confounders | `cdt/extraction/explicit_confounders.py`, `cdt/extraction/cache.py`, `cdt/models/explicit_confounder_featurizer.py` |
 | Text chunking | `cdt/models/chunking.py` |
 | Training | `cdt/inference/applied.py`, `cdt/inference/applied_forest.py`, `cdt/inference/applied_tfidf_forest.py` |
@@ -896,7 +945,7 @@ When adding a new feature extractor type, update ALL of the following files:
 - **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale for binary, raw values for continuous)
 - **Outcome type**: `outcome_type="binary"` (BCE + sigmoid) or `"continuous"` (MSE, no sigmoid). Treatment always binary.
 - **Tokenizer**: Required for `cnn`, `gru`, `confounder` with GRU mode, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`
-- **Long docs**: Use `confounder`, `hierarchical_transformer`, `bert_pool`, `bert_cross_chunk`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`, or `llm`
+- **Long docs**: Use `confounder`, `hierarchical_transformer`, `bert_pool`, `bert_cross_chunk`, `gated_mil_hierarchical`, `gru_transformer_mil`, `gru_pool`, `conv_pool`, `transformer_pool`, `conv1d_transformer_hybrid`, `frozen_llm_pooler`, or `llm`
 - **Interpretability**: `interpret_filters()` (CNN), `interpret_attention()` (others)
 - **R-Learner vs DragonNet**: R-Learner for heterogeneous treatment effects; DragonNet for general use
 - **TF-IDF Forest baseline**: `model_type="tfidf_forest"` — no neural network, pure TF-IDF + CausalForestDML

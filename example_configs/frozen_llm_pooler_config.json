@@ -1,0 +1,58 @@
+{
+  "output_dir": "./cdt_results_frozen_llm_pooler",
+  "seed": 42,
+  "device": "cuda:0",
+  "num_workers": 1,
+
+  "applied_inference": {
+    "dataset_path": "./dataset.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "cv_folds": 5,
+    "architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "frozen_llm_pooler",
+
+      "flp_model_name": "Qwen/Qwen3-0.6B-Base",
+      "flp_max_length": 8192,
+      "flp_freeze_llm": true,
+      "flp_gated_attention_dim": 128,
+      "flp_projection_dim": 128,
+      "flp_dropout": 0.1,
+      "flp_gradient_checkpointing": true,
+      "flp_cache_hidden_states": true,
+
+      "causal_head_representation_dim": 128,
+      "causal_head_hidden_outcome_dim": 64,
+      "causal_head_dropout": 0.2
+    },
+    "training": {
+      "learning_rate": 1e-4,
+      "optimizer": "adamw",
+      "lr_schedule": "linear",
+      "epochs": 20,
+      "batch_size": 2,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.0,
+      "gamma_rlearner": 1.0,
+      "weight_decay": 0.01,
+      "gradient_clip_norm": 1.0,
+      "stop_grad_propensity": false
+    },
+    "propensity_trimming": {
+      "enabled": false,
+      "min_propensity": 0.1,
+      "max_propensity": 0.9,
+      "cv_folds": 5,
+      "propensity_epochs": 20
+    },
+    "matching_analysis": {
+      "enabled": false
+    }
+  },
+
+  "plasmode_experiments": {
+    "enabled": false
+  }
+}

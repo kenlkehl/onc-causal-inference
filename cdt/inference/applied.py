@@ -21,8 +21,11 @@ from ..data import (
     ClinicalTextDataset,
     collate_batch,
     load_dataset,
-    create_collator
+    create_collator,
+    CachedHiddenStateDataset,
+    collate_cached_batch,
 )
+from ..models.hidden_state_cache import HiddenStateCache
 from ..utils import cuda_cleanup, get_memory_info
 from ..extraction import VLLMConfounderExtractor, ExtractionCache
 
@@ -284,21 +287,73 @@ def run_applied_inference(
         logger.info("CONTINUING WITH DRAGONNET TRAINING")
         logger.info("=" * 80)
 
+    # Pre-compute and cache LLM hidden states for frozen_llm_pooler
+    hidden_state_cache = None
+    arch_config = config.architecture
+    feature_extractor_type = normalize_feature_extractor_type(
+        getattr(arch_config, 'feature_extractor_type', 'cnn')
+    )
+    if feature_extractor_type == "frozen_llm_pooler":
+        flp_freeze = getattr(arch_config, 'flp_freeze_llm', True)
+        flp_cache_enabled = getattr(arch_config, 'flp_cache_hidden_states', True)
+
+        if flp_cache_enabled and flp_freeze:
+            dataset_path = config.dataset_path
+            model_name = getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
+            max_length = getattr(arch_config, 'flp_max_length', 8192)
+
+            cache_dir = str(Path(dataset_path).parent / ".cdt_cache")
+            hidden_state_cache = HiddenStateCache(
+                cache_dir=cache_dir,
+                model_name=model_name,
+                max_length=max_length,
+                dataset_path=dataset_path,
+            )
+
+            # Reset index for consistent cache indices
+            dataset = dataset.reset_index(drop=True)
+            all_texts = dataset[config.text_column].tolist()
+
+            if not hidden_state_cache.is_valid(len(dataset)):
+                logger.info("Pre-computing LLM hidden states for caching...")
+                batch_size = config.training.batch_size
+                try:
+                    hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
+                except Exception as e:
+                    logger.warning(f"Hidden state caching failed: {e}. Falling back to non-cached mode.")
+                    hidden_state_cache = None
+            else:
+                logger.info("Reusing existing hidden state cache")
+
+            if hidden_state_cache is not None:
+                hidden_state_cache.open()
+        elif flp_cache_enabled and not flp_freeze:
+            logger.warning(
+                "flp_cache_hidden_states=True but flp_freeze_llm=False. "
+                "Caching is only supported with frozen LLM. Skipping cache."
+            )
+
     # Determine mode
     if config.cv_folds > 1:
         _run_cv_inference(
             dataset, config, output_path, device, gpu_ids, num_workers,
             save_filter_interpretations, filter_interpretation_top_k,
             save_confounder_interpretations, confounder_interpretation_top_k,
-            explicit_confounder_columns=explicit_confounder_columns
+            explicit_confounder_columns=explicit_confounder_columns,
+            hidden_state_cache=hidden_state_cache
         )
     else:
         _run_fixed_split_inference(
             dataset, config, output_path, device,
             save_filter_interpretations, filter_interpretation_top_k,
             save_confounder_interpretations, confounder_interpretation_top_k,
-            explicit_confounder_columns=explicit_confounder_columns
+            explicit_confounder_columns=explicit_confounder_columns,
+            hidden_state_cache=hidden_state_cache
         )
+
+    # Cleanup cache
+    if hidden_state_cache is not None:
+        hidden_state_cache.close()
 
 
 def _run_cv_inference(
@@ -312,7 +367,8 @@ def _run_cv_inference(
     filter_interpretation_top_k: int = 10,
     save_confounder_interpretations: bool = False,
     confounder_interpretation_top_k: int = 5,
-    explicit_confounder_columns: Optional[List[str]] = None
+    explicit_confounder_columns: Optional[List[str]] = None,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> None:
     """Run K-Fold Cross-Validation inference."""
     k = config.cv_folds
@@ -338,7 +394,8 @@ def _run_cv_inference(
             delayed(_process_fold)(
                 fold, train_idx, test_idx, dataset, config,
                 devices[fold % len(devices)],
-                explicit_confounder_columns=explicit_confounder_columns
+                explicit_confounder_columns=explicit_confounder_columns,
+                hidden_state_cache=hidden_state_cache
             )
             for fold, (train_idx, test_idx) in enumerate(splits)
         )
@@ -348,7 +405,8 @@ def _run_cv_inference(
             results.append(_process_fold(
                 fold, train_idx, test_idx, dataset, config,
                 devices[0],
-                explicit_confounder_columns=explicit_confounder_columns
+                explicit_confounder_columns=explicit_confounder_columns,
+                hidden_state_cache=hidden_state_cache
             ))
 
     # Unpack results
@@ -373,7 +431,7 @@ def _run_cv_inference(
         train_df = dataset.iloc[train_idx]
         val_df = dataset.iloc[splits[last_fold][1]]  # Use test as val for this
 
-        # Train a model on the last fold for interpretation
+        # Train a model on the last fold for interpretation (no cache - needs full LLM for interpret_attention)
         model, _ = _train_single_model(train_df, val_df, config, devices[0])
         train_texts = train_df[config.text_column].tolist()
 
@@ -405,7 +463,8 @@ def _process_fold(
     dataset: pd.DataFrame,
     config: AppliedInferenceConfig,
     device: torch.device,
-    explicit_confounder_columns: Optional[List[str]] = None
+    explicit_confounder_columns: Optional[List[str]] = None,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """Process a single fold (can be run in parallel)."""
     # Re-configure logger for worker process
@@ -421,7 +480,10 @@ def _process_fold(
     # 2. Train Model on this fold
     model, history = _train_single_model(
         train_df, test_df, config, device,
-        explicit_confounder_columns=explicit_confounder_columns
+        explicit_confounder_columns=explicit_confounder_columns,
+        hidden_state_cache=hidden_state_cache,
+        train_indices=train_idx,
+        val_indices=test_idx
     )
 
     # Log History
@@ -431,7 +493,9 @@ def _process_fold(
     # 3. Predict on Held-out Test fold
     preds = _predict_dataset(
         model, test_df, config, device,
-        explicit_confounder_columns=explicit_confounder_columns
+        explicit_confounder_columns=explicit_confounder_columns,
+        hidden_state_cache=hidden_state_cache,
+        dataset_indices=test_idx
     )
 
     # 4. Store predictions with indices to reconstruct dataframe
@@ -480,7 +544,8 @@ def _run_fixed_split_inference(
     filter_interpretation_top_k: int = 10,
     save_confounder_interpretations: bool = False,
     confounder_interpretation_top_k: int = 5,
-    explicit_confounder_columns: Optional[List[str]] = None
+    explicit_confounder_columns: Optional[List[str]] = None,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> None:
     """Run inference using fixed train/val/test splits."""
     logger.info("Running Fixed Split Inference (Train/Val/Test)")
@@ -492,10 +557,28 @@ def _run_fixed_split_inference(
 
     logger.info(f"  Train: {len(train_df)}, Val: {len(val_df)}, Test: {len(test_df)}")
 
+    # Build index mappings for cache (dataset was reset_index in run_applied_inference)
+    train_indices = None
+    val_indices = None
+    test_indices = None
+    if hidden_state_cache is not None:
+        # The dataset was reset_index(drop=True) in run_applied_inference,
+        # so the original index positions match the cache positions.
+        # For fixed splits, we need to find each split's indices in the full dataset.
+        train_mask = dataset[config.split_column] == 'train'
+        val_mask = dataset[config.split_column] == 'val'
+        test_mask = dataset[config.split_column] == 'test'
+        train_indices = np.where(train_mask)[0]
+        val_indices = np.where(val_mask)[0]
+        test_indices = np.where(test_mask)[0]
+
     # Train
     model, history = _train_single_model(
         train_df, val_df, config, device,
-        explicit_confounder_columns=explicit_confounder_columns
+        explicit_confounder_columns=explicit_confounder_columns,
+        hidden_state_cache=hidden_state_cache,
+        train_indices=train_indices,
+        val_indices=val_indices
     )
 
     # Save training logs
@@ -522,7 +605,9 @@ def _run_fixed_split_inference(
     logger.info("Generating predictions on test set...")
     preds = _predict_dataset(
         model, test_df, config, device,
-        explicit_confounder_columns=explicit_confounder_columns
+        explicit_confounder_columns=explicit_confounder_columns,
+        hidden_state_cache=hidden_state_cache,
+        dataset_indices=test_indices
     )
 
     # Combine predictions (probability scale, pred_* prefix indicates predicted values)
@@ -545,7 +630,10 @@ def _train_single_model(
     val_df: pd.DataFrame,
     config: AppliedInferenceConfig,
     device: torch.device,
-    explicit_confounder_columns: Optional[List[str]] = None
+    explicit_confounder_columns: Optional[List[str]] = None,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    train_indices: Optional[np.ndarray] = None,
+    val_indices: Optional[np.ndarray] = None
 ) -> Tuple[CausalText, List[Dict[str, Any]]]:
     """Train a single model instance (CNN or BERT feature extractor)."""
     arch_config = config.architecture
@@ -731,6 +819,16 @@ def _train_single_model(
         llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
         llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
         llm_use_pretrained=getattr(arch_config, 'llm_use_pretrained', False),
+        # Frozen LLM Pooler args
+        flp_model_name=getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        flp_max_length=getattr(arch_config, 'flp_max_length', 8192),
+        flp_freeze_llm=getattr(arch_config, 'flp_freeze_llm', True),
+        flp_gated_attention_dim=getattr(arch_config, 'flp_gated_attention_dim', 128),
+        flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
+        flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
+        flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_skip_llm=hidden_state_cache is not None,
+        flp_cached_hidden_size=hidden_state_cache.hidden_size if hidden_state_cache is not None else 0,
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
@@ -867,6 +965,10 @@ def _train_single_model(
         # LLM uses pretrained tokenizer, no fit_tokenizer needed
         init_mode = "pretrained" if getattr(arch_config, 'llm_use_pretrained', False) else "random init"
         logger.info(f"Using LLM feature extractor: {getattr(arch_config, 'llm_model_name', 'Qwen/Qwen3-0.6B-Base')} ({init_mode})")
+    elif feature_extractor_type == "frozen_llm_pooler":
+        # Frozen LLM Pooler uses pretrained tokenizer, no fit_tokenizer needed
+        logger.info(f"Using Frozen LLM Pooler feature extractor: {getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')} "
+                   f"({'frozen' if getattr(arch_config, 'flp_freeze_llm', True) else 'trainable'})")
     else:
         # BERT uses pretrained tokenizer, no fit_tokenizer needed
         logger.info(f"Using BERT feature extractor: {arch_config.bert_model_name}")
@@ -887,28 +989,48 @@ def _train_single_model(
         logger.info(f"Fitted explicit confounder featurizer on {len(train_confounder_values)} training samples")
 
     # Create datasets
-    train_dataset = ClinicalTextDataset(
-        data=train_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column,
-        explicit_confounder_columns=explicit_confounder_columns
-    )
+    if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+        # Cached mode: use CachedHiddenStateDataset with cache indices
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=train_indices,
+            explicit_confounder_columns=explicit_confounder_columns
+        )
+        val_dataset = CachedHiddenStateDataset(
+            data=val_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=val_indices,
+            explicit_confounder_columns=explicit_confounder_columns
+        )
+        collate_fn = collate_cached_batch
+        logger.info("Using cached hidden state datasets (LLM not loaded)")
+    else:
+        train_dataset = ClinicalTextDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            explicit_confounder_columns=explicit_confounder_columns
+        )
+        val_dataset = ClinicalTextDataset(
+            data=val_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            explicit_confounder_columns=explicit_confounder_columns
+        )
 
-    val_dataset = ClinicalTextDataset(
-        data=val_df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column,
-        explicit_confounder_columns=explicit_confounder_columns
-    )
-
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(
-        model.feature_extractor,
-        effect_feature_extractor=getattr(model, 'effect_feature_extractor', None)
-    )
-    collate_fn = collator if collator is not None else collate_batch
+        # Create collator for preprocessing in DataLoader workers
+        collator = create_collator(
+            model.feature_extractor,
+            effect_feature_extractor=getattr(model, 'effect_feature_extractor', None)
+        )
+        collate_fn = collator if collator is not None else collate_batch
 
     # Create data loaders
     train_loader = DataLoader(
@@ -948,10 +1070,12 @@ def _train_single_model(
 
     for epoch in range(train_config.epochs):
         model.train()
-        train_stats = _train_epoch(model, train_loader, optimizer, scheduler, device, train_config)
+        train_stats = _train_epoch(model, train_loader, optimizer, scheduler, device, train_config,
+                                    hidden_state_cache=hidden_state_cache)
 
         model.eval()
-        val_stats = _eval_epoch(model, val_loader, device, train_config)
+        val_stats = _eval_epoch(model, val_loader, device, train_config,
+                                 hidden_state_cache=hidden_state_cache)
 
         # Record history
         epoch_log = {
@@ -991,23 +1115,36 @@ def _predict_dataset(
     df: pd.DataFrame,
     config: AppliedInferenceConfig,
     device: torch.device,
-    explicit_confounder_columns: Optional[List[str]] = None
+    explicit_confounder_columns: Optional[List[str]] = None,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    dataset_indices: Optional[np.ndarray] = None
 ) -> dict:
     """Generate predictions for a dataframe."""
-    dataset = ClinicalTextDataset(
-        data=df,
-        text_column=config.text_column,
-        outcome_column=config.outcome_column,
-        treatment_column=config.treatment_column,
-        explicit_confounder_columns=explicit_confounder_columns
-    )
+    if hidden_state_cache is not None and dataset_indices is not None:
+        dataset = CachedHiddenStateDataset(
+            data=df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=dataset_indices,
+            explicit_confounder_columns=explicit_confounder_columns
+        )
+        predict_collate_fn = collate_cached_batch
+    else:
+        dataset = ClinicalTextDataset(
+            data=df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            explicit_confounder_columns=explicit_confounder_columns
+        )
 
-    # Create collator for preprocessing in DataLoader workers
-    collator = create_collator(
-        model.feature_extractor,
-        effect_feature_extractor=getattr(model, 'effect_feature_extractor', None)
-    )
-    predict_collate_fn = collator if collator is not None else collate_batch
+        # Create collator for preprocessing in DataLoader workers
+        collator = create_collator(
+            model.feature_extractor,
+            effect_feature_extractor=getattr(model, 'effect_feature_extractor', None)
+        )
+        predict_collate_fn = collator if collator is not None else collate_batch
 
     loader = DataLoader(
         dataset,
@@ -1016,7 +1153,8 @@ def _predict_dataset(
         collate_fn=predict_collate_fn
     )
 
-    result = _generate_predictions(model, loader, device)
+    result = _generate_predictions(model, loader, device,
+                                    hidden_state_cache=hidden_state_cache)
 
     del loader, dataset
     gc.collect()
@@ -1030,7 +1168,8 @@ def _train_epoch(
     optimizer: torch.optim.Optimizer,
     scheduler,
     device: torch.device,
-    config
+    config,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> dict:
     """Train for one epoch."""
     epoch_loss = 0.0
@@ -1055,6 +1194,12 @@ def _train_epoch(
         batch['outcome'] = batch['outcome'].to(device)
         batch['treatment'] = batch['treatment'].to(device)
         # 'texts' stays as list of strings
+
+        # Inject cached hidden states if available
+        if 'cache_indices' in batch and hidden_state_cache is not None:
+            hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+            batch['cached_hidden_states'] = hs
+            batch['cached_attention_mask'] = mask
 
         optimizer.zero_grad()
 
@@ -1099,7 +1244,8 @@ def _eval_epoch(
     model: CausalText,
     loader: DataLoader,
     device: torch.device,
-    config
+    config,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> dict:
     """Evaluate for one epoch."""
     epoch_loss = 0.0
@@ -1120,6 +1266,12 @@ def _eval_epoch(
         for batch in tqdm(loader, desc="Validation", leave=False):
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
+
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
 
             losses = model.train_step(
                 batch,
@@ -1214,7 +1366,8 @@ def _compute_epoch_metrics(epoch_loss, loader, all_targets, all_treatments, all_
 def _generate_predictions(
     model: CausalText,
     loader: DataLoader,
-    device: torch.device
+    device: torch.device,
+    hidden_state_cache: Optional[HiddenStateCache] = None
 ) -> dict:
     """Generate predictions on test set."""
     all_y0 = []
@@ -1230,6 +1383,12 @@ def _generate_predictions(
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Predicting", leave=False):
+            # Inject cached hidden states if available
+            if 'cache_indices' in batch and hidden_state_cache is not None:
+                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+                batch['cached_hidden_states'] = hs
+                batch['cached_attention_mask'] = mask
+
             preds = model.predict(batch)
 
             all_y0.append(preds['y0_logit'].cpu().numpy())

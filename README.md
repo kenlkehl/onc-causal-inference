@@ -84,6 +84,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
 | `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
+| `frozen_llm_pooler` | Frozen pretrained LLM + gated attention pooling over all tokens (auto-cached) | Yes (32K) | No |
 | `llm` | Decoder-only LLM (Qwen3) with random init or pretrained, last token embedding | Yes (32K) | No |
 | `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
 | `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
@@ -312,6 +313,28 @@ Key parameters: `llm_model_name`, `llm_max_length`, `llm_projection_dim`, `llm_g
 | 2K | 16-32 | Fast iteration |
 
 See `example_configs/llm_config.json` for a complete configuration.
+
+### Frozen LLM Pooler (Pretrained + Cached)
+
+Uses a pretrained decoder-only LLM with **frozen weights** and applies gated attention pooling
+over ALL token hidden states (not just the last token). Only the lightweight pooling + projection
+layers (~200K params) are trained.
+
+```
+Clinical Text → Pretrained Tokenizer (right-padded)
+    → Frozen LLM → All Token Hidden States
+    → Gated Attention Pooling → Projection MLP
+    → Document Vector → Causal Head
+```
+
+**Hidden state caching** (enabled by default): When the LLM is frozen, its outputs are deterministic.
+CDT pre-computes hidden states once for the entire dataset, caches them to disk as float16 memmap
+files, and reuses them across K-fold CV folds and across experiment runs. This saves ~2.4 GB GPU
+memory per training run and eliminates redundant LLM forward passes.
+
+Key parameters: `flp_model_name`, `flp_max_length`, `flp_cache_hidden_states`
+
+See `example_configs/frozen_llm_pooler_config.json` for a complete configuration.
 
 ### Numeric Feature Extraction
 

@@ -198,6 +198,10 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 
     feature_type_lower = feature_type.lower()
 
+    # Check for Frozen LLM Pooler (must come before "llm" to avoid "llm_pooler" matching "llm")
+    if feature_type_lower in ("frozen_llm_pooler", "frozen_llm", "llm_pooler", "llm_pool"):
+        return "frozen_llm_pooler"
+
     # Check for LLM extractor (decoder-only with last token embedding)
     if feature_type_lower in ("llm", "gpt", "qwen", "llama", "decoder"):
         return "llm"
@@ -555,6 +559,18 @@ class ModelArchitectureConfig:
     llm_dropout: float = 0.1  # Dropout rate for projection layers
     llm_gradient_checkpointing: bool = True  # Enable gradient checkpointing for memory efficiency
     llm_use_pretrained: bool = False  # If True, load pretrained weights; if False, random init
+
+    # Frozen LLM Pooler extractor (pretrained LLM + gated attention pooling)
+    # Uses all token hidden states + GatedAttentionPooling instead of last-token embedding
+    # Always loads pretrained weights; frozen by default for efficient training
+    flp_model_name: str = "Qwen/Qwen3-0.6B-Base"  # HuggingFace model name
+    flp_max_length: int = 8192  # Max sequence length
+    flp_freeze_llm: bool = True  # Freeze LLM backbone (only train pooling + projection)
+    flp_gated_attention_dim: int = 128  # Hidden dim for gated attention pooling
+    flp_projection_dim: int = 128  # Final output dimension
+    flp_dropout: float = 0.1  # Dropout rate for projection layers
+    flp_gradient_checkpointing: bool = True  # Gradient checkpointing (when not frozen)
+    flp_cache_hidden_states: bool = True  # Pre-compute and cache LLM hidden states to disk (when frozen)
 
     # Numeric feature extraction (magnitude-aware number encoding)
     numeric_features_enabled: bool = False  # Enable numeric feature extraction

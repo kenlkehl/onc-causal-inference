@@ -222,6 +222,16 @@ class PropensityOnlyModel(nn.Module):
         llm_dropout: float = 0.1,
         llm_gradient_checkpointing: bool = True,
         llm_use_pretrained: bool = False,
+        # Frozen LLM Pooler args
+        flp_model_name: str = "Qwen/Qwen3-0.6B-Base",
+        flp_max_length: int = 8192,
+        flp_freeze_llm: bool = True,
+        flp_gated_attention_dim: int = 128,
+        flp_projection_dim: int = 128,
+        flp_dropout: float = 0.1,
+        flp_gradient_checkpointing: bool = True,
+        flp_skip_llm: bool = False,
+        flp_cached_hidden_size: int = 0,
         # Numeric feature args
         numeric_features_enabled: bool = False,
         numeric_embedding_dim: int = 32,
@@ -407,6 +417,15 @@ class PropensityOnlyModel(nn.Module):
             'llm_dropout': llm_dropout,
             'llm_gradient_checkpointing': llm_gradient_checkpointing,
             'llm_use_pretrained': llm_use_pretrained,
+            'flp_model_name': flp_model_name,
+            'flp_max_length': flp_max_length,
+            'flp_freeze_llm': flp_freeze_llm,
+            'flp_gated_attention_dim': flp_gated_attention_dim,
+            'flp_projection_dim': flp_projection_dim,
+            'flp_dropout': flp_dropout,
+            'flp_gradient_checkpointing': flp_gradient_checkpointing,
+            'flp_skip_llm': flp_skip_llm,
+            'flp_cached_hidden_size': flp_cached_hidden_size,
             'numeric_features_enabled': numeric_features_enabled,
             'numeric_embedding_dim': numeric_embedding_dim,
             'numeric_magnitude_bins': numeric_magnitude_bins,
@@ -559,6 +578,15 @@ class PropensityOnlyModel(nn.Module):
             llm_dropout=llm_dropout,
             llm_gradient_checkpointing=llm_gradient_checkpointing,
             llm_use_pretrained=llm_use_pretrained,
+            flp_model_name=flp_model_name,
+            flp_max_length=flp_max_length,
+            flp_freeze_llm=flp_freeze_llm,
+            flp_gated_attention_dim=flp_gated_attention_dim,
+            flp_projection_dim=flp_projection_dim,
+            flp_dropout=flp_dropout,
+            flp_gradient_checkpointing=flp_gradient_checkpointing,
+            flp_skip_llm=flp_skip_llm,
+            flp_cached_hidden_size=flp_cached_hidden_size,
             numeric_features_enabled=numeric_features_enabled,
             numeric_embedding_dim=numeric_embedding_dim,
             numeric_magnitude_bins=numeric_magnitude_bins,
@@ -585,6 +613,12 @@ class PropensityOnlyModel(nn.Module):
     @staticmethod
     def _get_extractor_input(batch, texts):
         """Return preprocessed batch if available, otherwise raw texts."""
+        if 'cached_hidden_states' in batch:
+            return {
+                'cached_hidden_states': batch['cached_hidden_states'],
+                'cached_attention_mask': batch['cached_attention_mask'],
+                'texts': texts,
+            }
         if 'chunk_input_ids' in batch or 'chunk_token_ids' in batch:
             return batch
         return texts
@@ -678,7 +712,9 @@ class PropensityOnlyModel(nn.Module):
 def create_propensity_model_from_config(
     arch_config,
     representation_dim: int,
-    device: torch.device
+    device: torch.device,
+    flp_skip_llm: bool = False,
+    flp_cached_hidden_size: int = 0
 ) -> PropensityOnlyModel:
     """
     Create a PropensityOnlyModel from architecture config.
@@ -850,6 +886,16 @@ def create_propensity_model_from_config(
         llm_dropout=getattr(arch_config, 'llm_dropout', 0.1),
         llm_gradient_checkpointing=getattr(arch_config, 'llm_gradient_checkpointing', True),
         llm_use_pretrained=getattr(arch_config, 'llm_use_pretrained', False),
+        # Frozen LLM Pooler args
+        flp_model_name=getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        flp_max_length=getattr(arch_config, 'flp_max_length', 8192),
+        flp_freeze_llm=getattr(arch_config, 'flp_freeze_llm', True),
+        flp_gated_attention_dim=getattr(arch_config, 'flp_gated_attention_dim', 128),
+        flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
+        flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
+        flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_skip_llm=flp_skip_llm,
+        flp_cached_hidden_size=flp_cached_hidden_size,
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
