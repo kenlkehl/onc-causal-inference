@@ -24,7 +24,7 @@ from ..config import AppliedInferenceConfig, PlasmodeExperimentConfig, PlasmodeC
 from ..models.causal_text import CausalText
 from ..models.causal_text_forest import CausalTextForest
 from ..models.hidden_state_cache import HiddenStateCache
-from ..data import ClinicalTextDataset, collate_batch, create_collator, CachedHiddenStateDataset, collate_cached_batch
+from ..data import ClinicalTextDataset, collate_batch, create_collator, CachedHiddenStateDataset, collate_cached_batch, prepare_cached_batch
 from ..utils import cuda_cleanup, get_memory_info, set_seed
 
 
@@ -271,6 +271,7 @@ def _worker_wrapper(task: Dict[str, Any]) -> Optional[Tuple[dict, List[Dict[str,
             dataset_path=cache_config['dataset_path'],
         )
         hidden_state_cache.open()
+        hidden_state_cache.preload_to_ram()
 
     try:
         metrics, logs = _run_single_plasmode_experiment(
@@ -762,19 +763,25 @@ def _train_cnn_model(
 
     # Create datasets
     if hidden_state_cache is not None and train_indices is not None:
+        cache_hs = hidden_state_cache.hidden_states_array
+        cache_mask = hidden_state_cache.attention_mask_array
         train_dataset = CachedHiddenStateDataset(
             data=train_df,
             text_column=applied_config.text_column,
             outcome_column=applied_config.outcome_column,
             treatment_column=applied_config.treatment_column,
-            dataset_indices=train_indices
+            dataset_indices=train_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
             text_column=applied_config.text_column,
             outcome_column=applied_config.outcome_column,
             treatment_column=applied_config.treatment_column,
-            dataset_indices=val_indices
+            dataset_indices=val_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         collate_fn = collate_cached_batch
     else:
@@ -794,18 +801,23 @@ def _train_cnn_model(
         collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
         collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_mode = hidden_state_cache is not None and train_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=True,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     optimizer = torch.optim.AdamW(
@@ -834,11 +846,7 @@ def _train_cnn_model(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             optimizer.zero_grad()
             losses = model.train_step(
@@ -866,11 +874,7 @@ def _train_cnn_model(
                 batch['outcome'] = batch['outcome'].to(device)
                 batch['treatment'] = batch['treatment'].to(device)
 
-                # Inject cached hidden states if available
-                if 'cache_indices' in batch and hidden_state_cache is not None:
-                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                    batch['cached_hidden_states'] = hs
-                    batch['cached_attention_mask'] = mask
+                prepare_cached_batch(batch, device, hidden_state_cache)
 
                 losses = model.train_step(
                     batch,
@@ -1231,19 +1235,25 @@ def _train_causal_forest_model(
 
     # Create datasets
     if hidden_state_cache is not None and train_indices is not None:
+        cache_hs = hidden_state_cache.hidden_states_array
+        cache_mask = hidden_state_cache.attention_mask_array
         train_dataset = CachedHiddenStateDataset(
             data=train_df,
             text_column=applied_config.text_column,
             outcome_column=applied_config.outcome_column,
             treatment_column=applied_config.treatment_column,
-            dataset_indices=train_indices
+            dataset_indices=train_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
             text_column=applied_config.text_column,
             outcome_column=applied_config.outcome_column,
             treatment_column=applied_config.treatment_column,
-            dataset_indices=val_indices
+            dataset_indices=val_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         collate_fn = collate_cached_batch
     else:
@@ -1263,18 +1273,23 @@ def _train_causal_forest_model(
         collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
         collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_mode = hidden_state_cache is not None and train_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=True,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     optimizer = torch.optim.AdamW(
@@ -1304,11 +1319,7 @@ def _train_causal_forest_model(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             optimizer.zero_grad()
             losses = model.train_representation_step(
@@ -1335,11 +1346,7 @@ def _train_causal_forest_model(
                 batch['outcome'] = batch['outcome'].to(device)
                 batch['treatment'] = batch['treatment'].to(device)
 
-                # Inject cached hidden states if available
-                if 'cache_indices' in batch and hidden_state_cache is not None:
-                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                    batch['cached_hidden_states'] = hs
-                    batch['cached_attention_mask'] = mask
+                prepare_cached_batch(batch, device, hidden_state_cache)
 
                 losses = model.train_representation_step(
                     batch,
@@ -1379,7 +1386,9 @@ def _train_causal_forest_model(
             text_column=applied_config.text_column,
             outcome_column=applied_config.outcome_column,
             treatment_column=applied_config.treatment_column,
-            dataset_indices=combined_indices
+            dataset_indices=combined_indices,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array,
         )
         combined_collate_fn = collate_cached_batch
     else:
@@ -1390,32 +1399,22 @@ def _train_causal_forest_model(
             treatment_column=applied_config.treatment_column
         )
         combined_collate_fn = collate_fn
+
+    dl_kwargs_combined = dict(num_workers=2, persistent_workers=True, pin_memory=True) if (hidden_state_cache is not None) else {}
     combined_loader = DataLoader(
         combined_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=combined_collate_fn
+        collate_fn=combined_collate_fn,
+        **dl_kwargs_combined
     )
 
-    # Wrap loader with cache injection for Stage 2 feature extraction
-    if hidden_state_cache is not None:
-        combined_loader = _cache_injecting_loader(combined_loader, hidden_state_cache, device)
-
+    # Hidden states already in DataLoader batches; prepare_cached_batch called in extract_features
     combined_T = combined_df[applied_config.treatment_column].values
     combined_Y = combined_df[applied_config.outcome_column].values
     model.train_causal_forest(combined_loader, combined_T, combined_Y)
 
     return model, history
-
-
-def _cache_injecting_loader(loader, hidden_state_cache, device):
-    """Wrap a DataLoader to inject cached hidden states into batches."""
-    for batch in loader:
-        if 'cache_indices' in batch and hidden_state_cache is not None:
-            hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-            batch['cached_hidden_states'] = hs
-            batch['cached_attention_mask'] = mask
-        yield batch
 
 
 def _generate_plasmode_data(
@@ -1438,7 +1437,9 @@ def _generate_plasmode_data(
             text_column=applied_config.text_column,
             outcome_column=applied_config.outcome_column,
             treatment_column=applied_config.treatment_column,
-            dataset_indices=dataset_indices
+            dataset_indices=dataset_indices,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array,
         )
         collate_fn = collate_cached_batch
     else:
@@ -1452,11 +1453,13 @@ def _generate_plasmode_data(
         collator = create_collator(generator.feature_extractor, getattr(generator, 'effect_feature_extractor', None))
         collate_fn = collator if collator is not None else collate_batch
 
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if (hidden_state_cache is not None) else {}
     loader = DataLoader(
         dataset,
         batch_size=32,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     generator.eval()
@@ -1464,11 +1467,7 @@ def _generate_plasmode_data(
 
     with torch.no_grad():
         for batch in loader:
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             # get_features accepts both text lists and batch dicts
             if 'cached_hidden_states' in batch:
@@ -1568,7 +1567,9 @@ def _predict_cnn_model(
                 text_column=applied_config.text_column,
                 outcome_column=applied_config.outcome_column,
                 treatment_column=applied_config.treatment_column,
-                dataset_indices=dataset_indices
+                dataset_indices=dataset_indices,
+                cache_hidden_states=hidden_state_cache.hidden_states_array,
+                cache_attention_masks=hidden_state_cache.attention_mask_array,
             )
             forest_collate_fn = collate_cached_batch
         else:
@@ -1580,15 +1581,15 @@ def _predict_cnn_model(
             )
             forest_collator = create_collator(model.feature_extractor)
             forest_collate_fn = forest_collator if forest_collator is not None else collate_batch
+        dl_kwargs_forest = dict(num_workers=2, persistent_workers=True, pin_memory=True) if (hidden_state_cache is not None) else {}
         forest_loader = DataLoader(
             forest_dataset,
             batch_size=32,
             shuffle=False,
-            collate_fn=forest_collate_fn
+            collate_fn=forest_collate_fn,
+            **dl_kwargs_forest
         )
-        # Wrap with cache injection if needed
-        if hidden_state_cache is not None:
-            forest_loader = _cache_injecting_loader(forest_loader, hidden_state_cache, device)
+        # Hidden states already in DataLoader batches; prepare_cached_batch called in extract_features
         preds = model.predict(forest_loader, return_ci=False)
         return {
             'y0_prob': preds['pred_y0_prob'],
@@ -1604,7 +1605,9 @@ def _predict_cnn_model(
             text_column=applied_config.text_column,
             outcome_column=applied_config.outcome_column,
             treatment_column=applied_config.treatment_column,
-            dataset_indices=dataset_indices
+            dataset_indices=dataset_indices,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array,
         )
         collate_fn = collate_cached_batch
     else:
@@ -1618,11 +1621,13 @@ def _predict_cnn_model(
         collator = create_collator(model.feature_extractor, getattr(model, 'effect_feature_extractor', None))
         collate_fn = collator if collator is not None else collate_batch
 
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if (hidden_state_cache is not None) else {}
     loader = DataLoader(
         dataset,
         batch_size=32,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     model.eval()
@@ -1632,11 +1637,7 @@ def _predict_cnn_model(
 
     with torch.no_grad():
         for batch in loader:
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             preds = model.predict(batch)
             all_y0.append(preds['y0_logit'].cpu().numpy())

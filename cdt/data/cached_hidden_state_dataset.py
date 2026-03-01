@@ -1,10 +1,13 @@
 # cdt/data/cached_hidden_state_dataset.py
 """Dataset and collator for cached hidden state mode.
 
-When using pre-computed LLM hidden states, each sample includes a cache_index
-that maps to its position in the global hidden state cache. The collator
-produces batch dicts with cache_indices that are used to load hidden states
-from the cache in the training loop.
+When using pre-computed LLM hidden states, each sample includes either:
+- A cache_index for deferred loading (legacy path), or
+- The actual hidden states loaded directly by the DataLoader workers (optimized path)
+
+The optimized path moves I/O into DataLoader workers, overlapping disk reads with
+GPU compute and enabling prefetching. Hidden states are kept as float16 through
+the DataLoader and cast to float32 on GPU to halve CPU-GPU bandwidth.
 """
 
 import logging
@@ -19,10 +22,11 @@ logger = logging.getLogger(__name__)
 
 
 class CachedHiddenStateDataset(Dataset):
-    """Dataset that adds cache_index for pre-computed hidden state lookup.
+    """Dataset for pre-computed hidden state lookup.
 
-    Same interface as ClinicalTextDataset but includes a cache_index per sample
-    that maps the local dataset position to the global cache index.
+    When cache arrays are provided, hidden states are loaded directly in
+    __getitem__() so DataLoader workers handle I/O in parallel. When not
+    provided, falls back to returning cache_index for deferred loading.
 
     Args:
         data: DataFrame with text, outcomes, and treatments.
@@ -31,6 +35,10 @@ class CachedHiddenStateDataset(Dataset):
         treatment_column: Name of treatment column.
         dataset_indices: Array mapping local position -> global cache index.
         explicit_confounder_columns: Optional list of explicit confounder column names.
+        cache_hidden_states: Optional numpy array of hidden states (N, seq_len, hidden_size).
+            When provided, __getitem__ returns hidden states directly.
+        cache_attention_masks: Optional numpy array of attention masks (N, seq_len).
+            Required when cache_hidden_states is provided.
     """
 
     def __init__(
@@ -41,10 +49,16 @@ class CachedHiddenStateDataset(Dataset):
         treatment_column: str,
         dataset_indices: np.ndarray,
         explicit_confounder_columns: Optional[List[str]] = None,
+        cache_hidden_states: Optional[np.ndarray] = None,
+        cache_attention_masks: Optional[np.ndarray] = None,
     ):
         self.data = data.reset_index(drop=True)
         self.text_column = text_column
         self.dataset_indices = dataset_indices
+
+        # Store cache arrays for direct loading in __getitem__
+        self._cache_hs = cache_hidden_states
+        self._cache_mask = cache_attention_masks
 
         self.texts = data[text_column].tolist()
         self.outcomes = torch.tensor(
@@ -76,9 +90,11 @@ class CachedHiddenStateDataset(Dataset):
                         row_values[f"{spec_name}_missing"] = pd.isna(row_values[spec_name])
                 self.explicit_confounder_values.append(row_values)
 
+        mode = "inline loading" if self._cache_hs is not None else "deferred (cache_index)"
         logger.info(
             f"CachedHiddenStateDataset created: {len(self)} samples, "
-            f"cache indices range [{dataset_indices.min()}, {dataset_indices.max()}]"
+            f"cache indices range [{dataset_indices.min()}, {dataset_indices.max()}], "
+            f"mode={mode}"
         )
 
     def __len__(self) -> int:
@@ -90,8 +106,17 @@ class CachedHiddenStateDataset(Dataset):
             'outcome': self.outcomes[idx],
             'treatment': self.treatments[idx],
             'text_id': idx,
-            'cache_index': int(self.dataset_indices[idx]),
         }
+
+        global_idx = self.dataset_indices[idx]
+
+        if self._cache_hs is not None:
+            # Optimized path: load hidden states directly (DataLoader workers handle I/O)
+            item['hidden_states'] = self._cache_hs[global_idx]    # float16 numpy
+            item['attention_mask'] = self._cache_mask[global_idx]  # uint8 numpy
+        else:
+            # Legacy path: return index for deferred loading in training loop
+            item['cache_index'] = int(global_idx)
 
         if self.explicit_confounder_values is not None:
             item['explicit_confounder_values'] = self.explicit_confounder_values[idx]
@@ -102,29 +127,37 @@ class CachedHiddenStateDataset(Dataset):
 def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Collate batch for cached hidden state dataset.
 
-    Same as collate_batch but includes cache_indices list. Does NOT load
-    hidden states (that happens in the training loop to place them on the
-    correct device).
+    When items contain 'hidden_states' (optimized path), stacks them into
+    tensors as float16 for efficient GPU transfer. When items contain
+    'cache_index' (legacy path), collects indices for deferred loading.
 
     Args:
         batch: List of samples from CachedHiddenStateDataset.
 
     Returns:
-        Batched data with texts, tensors, and cache_indices.
+        Batched data with texts, tensors, and either cached_hidden_states or cache_indices.
     """
     texts = [item['text'] for item in batch]
     outcomes = torch.stack([item['outcome'] for item in batch])
     treatments = torch.stack([item['treatment'] for item in batch])
     text_ids = [item['text_id'] for item in batch]
-    cache_indices = [item['cache_index'] for item in batch]
 
     result = {
         'texts': texts,
         'outcome': outcomes,
         'treatment': treatments,
         'text_id': text_ids,
-        'cache_indices': cache_indices,
     }
+
+    if 'hidden_states' in batch[0]:
+        # Optimized path: stack hidden states as float16 tensors
+        hs = np.stack([item['hidden_states'] for item in batch])
+        mask = np.stack([item['attention_mask'] for item in batch])
+        result['cached_hidden_states'] = torch.from_numpy(hs)  # float16 tensor
+        result['cached_attention_mask'] = torch.from_numpy(mask.astype(np.float32))
+    elif 'cache_index' in batch[0]:
+        # Legacy path: collect indices for deferred loading
+        result['cache_indices'] = [item['cache_index'] for item in batch]
 
     if 'explicit_confounder_values' in batch[0]:
         result['explicit_confounder_values'] = [
@@ -132,3 +165,31 @@ def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         ]
 
     return result
+
+
+def prepare_cached_batch(
+    batch: Dict[str, Any],
+    device: torch.device,
+    hidden_state_cache=None,
+) -> None:
+    """Move cached hidden states to device, loading from cache if needed.
+
+    Supports two paths:
+    - Optimized: hidden states already in batch (loaded by DataLoader workers).
+      Just moves float16 tensors to GPU and casts to float32.
+    - Legacy: batch has cache_indices, loads from HiddenStateCache.
+
+    Args:
+        batch: Batch dict from DataLoader.
+        device: Target device.
+        hidden_state_cache: Optional HiddenStateCache for legacy fallback.
+    """
+    if 'cached_hidden_states' in batch:
+        # Optimized path: loaded by DataLoader, transfer float16 to GPU and cast
+        batch['cached_hidden_states'] = batch['cached_hidden_states'].to(device).float()
+        batch['cached_attention_mask'] = batch['cached_attention_mask'].to(device)
+    elif 'cache_indices' in batch and hidden_state_cache is not None:
+        # Legacy fallback: load from cache
+        hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
+        batch['cached_hidden_states'] = hs
+        batch['cached_attention_mask'] = mask

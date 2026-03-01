@@ -55,7 +55,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from cdt.config import ExplicitConfounderSpec
 from cdt.data import ClinicalTextDataset, collate_batch
-from cdt.data import CachedHiddenStateDataset, collate_cached_batch
+from cdt.data import CachedHiddenStateDataset, collate_cached_batch, prepare_cached_batch
 from cdt.models.causal_text_forest import CausalTextForest
 from cdt.models.hidden_state_cache import HiddenStateCache
 
@@ -188,16 +188,6 @@ def compute_metrics(
     return metrics
 
 
-def _cache_injecting_loader(loader, hidden_state_cache, device):
-    """Wrap a DataLoader to inject cached hidden states into batches."""
-    for batch in loader:
-        if 'cache_indices' in batch and hidden_state_cache is not None:
-            hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-            batch['cached_hidden_states'] = hs
-            batch['cached_attention_mask'] = mask
-        yield batch
-
-
 def _resolve_parquet_file(dataset_path: str) -> Optional[Path]:
     """Resolve the parquet file path for a dataset."""
     dp = Path(dataset_path)
@@ -264,6 +254,7 @@ def precompute_caches(
         if cache.is_valid(len(df)):
             logger.info(f"  Cache {cache_hash}: valid, reusing")
             cache.open()
+            cache.preload_to_ram()
             ready_caches[cache_hash] = cache
         else:
             logger.info(f"  Cache {cache_hash}: needs precomputation "
@@ -286,6 +277,7 @@ def precompute_caches(
         gpu_device = torch.device(device)
         cache.precompute(all_texts, gpu_device, batch_size=batch_size)
         cache.open()
+        cache.preload_to_ram()
         return cache_hash, cache
 
     if len(caches_to_compute) == 1:
@@ -429,17 +421,22 @@ def run_single_experiment(
 
         # Create datasets: use CachedHiddenStateDataset when cache is available
         if use_cache and hidden_state_cache is not None:
+            # Pass cache arrays directly so DataLoader workers load hidden states
             train_dataset = CachedHiddenStateDataset(
                 data=train_df, text_column=text_column,
                 outcome_column='outcome_indicator', treatment_column='treatment_indicator',
                 dataset_indices=np.array(train_idx),
                 explicit_confounder_columns=confounder_cols,
+                cache_hidden_states=hidden_state_cache.hidden_states_array,
+                cache_attention_masks=hidden_state_cache.attention_mask_array,
             )
             test_dataset = CachedHiddenStateDataset(
                 data=test_df, text_column=text_column,
                 outcome_column='outcome_indicator', treatment_column='treatment_indicator',
                 dataset_indices=np.array(test_idx),
                 explicit_confounder_columns=confounder_cols,
+                cache_hidden_states=hidden_state_cache.hidden_states_array,
+                cache_attention_masks=hidden_state_cache.attention_mask_array,
             )
             collate_fn = collate_cached_batch
         else:
@@ -460,14 +457,16 @@ def run_single_experiment(
             model.fit_explicit_confounders(train_dataset.explicit_confounder_values)
             model.fit_explicit_confounder_featurizer(train_dataset.explicit_confounder_values)
 
+        # Use more DataLoader workers when cache is loaded (I/O in workers, not training loop)
+        dl_num_workers = 2 if (use_cache and hidden_state_cache is not None) else 1
         train_loader = DataLoader(
             train_dataset, batch_size=batch_size, shuffle=True,
-            collate_fn=collate_fn, num_workers=1,
+            collate_fn=collate_fn, num_workers=dl_num_workers,
             persistent_workers=True, pin_memory=True
         )
         test_loader = DataLoader(
             test_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=collate_fn, num_workers=1,
+            collate_fn=collate_fn, num_workers=dl_num_workers,
             persistent_workers=True, pin_memory=True
         )
 
@@ -491,12 +490,7 @@ def run_single_experiment(
             for batch in train_loader:
                 batch['treatment'] = batch['treatment'].to(device)
                 batch['outcome'] = batch['outcome'].to(device)
-
-                # Inject cached hidden states if available
-                if 'cache_indices' in batch and hidden_state_cache is not None:
-                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                    batch['cached_hidden_states'] = hs
-                    batch['cached_attention_mask'] = mask
+                prepare_cached_batch(batch, device)
 
                 optimizer.zero_grad()
                 losses = model.train_representation_step(
@@ -520,12 +514,7 @@ def run_single_experiment(
                 for batch in test_loader:
                     batch['treatment'] = batch['treatment'].to(device)
                     batch['outcome'] = batch['outcome'].to(device)
-
-                    # Inject cached hidden states if available
-                    if 'cache_indices' in batch and hidden_state_cache is not None:
-                        hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                        batch['cached_hidden_states'] = hs
-                        batch['cached_attention_mask'] = mask
+                    prepare_cached_batch(batch, device)
 
                     losses = model.train_representation_step(
                         batch,
@@ -561,6 +550,8 @@ def run_single_experiment(
                 outcome_column='outcome_indicator', treatment_column='treatment_indicator',
                 dataset_indices=combined_indices,
                 explicit_confounder_columns=confounder_cols,
+                cache_hidden_states=hidden_state_cache.hidden_states_array,
+                cache_attention_masks=hidden_state_cache.attention_mask_array,
             )
             combined_collate = collate_cached_batch
         else:
@@ -573,24 +564,15 @@ def run_single_experiment(
 
         combined_loader = DataLoader(
             combined_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=combined_collate, num_workers=1,
+            collate_fn=combined_collate, num_workers=dl_num_workers,
             persistent_workers=True, pin_memory=True
         )
 
-        # For causal forest training and prediction, we need to inject cached states
-        # into the DataLoader batches. We wrap the loaders with a helper.
-        if use_cache and hidden_state_cache is not None:
-            model.train_causal_forest(
-                _cache_injecting_loader(combined_loader, hidden_state_cache, device),
-                combined_T, combined_Y
-            )
-            preds = model.predict(
-                _cache_injecting_loader(test_loader, hidden_state_cache, device),
-                return_ci=True
-            )
-        else:
-            model.train_causal_forest(combined_loader, combined_T, combined_Y)
-            preds = model.predict(test_loader, return_ci=True)
+        # Hidden states are already in DataLoader batches (loaded by workers).
+        # train_causal_forest/predict handle prepare_cached_batch internally
+        # via _get_extractor_input which checks for 'cached_hidden_states'.
+        model.train_causal_forest(combined_loader, combined_T, combined_Y)
+        preds = model.predict(test_loader, return_ci=True)
 
         # Store predictions
         fold_preds = test_df.copy()

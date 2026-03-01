@@ -22,6 +22,7 @@ from ..data import (
     create_collator,
     CachedHiddenStateDataset,
     collate_cached_batch,
+    prepare_cached_batch,
 )
 from ..models.hidden_state_cache import HiddenStateCache
 from ..utils import cuda_cleanup, get_memory_info
@@ -100,6 +101,7 @@ def run_applied_inference_forest(
 
             if hidden_state_cache is not None:
                 hidden_state_cache.open()
+                hidden_state_cache.preload_to_ram()
         elif flp_cache_enabled and not flp_freeze:
             logger.warning(
                 "flp_cache_hidden_states=True but flp_freeze_llm=False. "
@@ -233,19 +235,25 @@ def _process_fold_forest(
 
     # Create DataLoaders for Stage 2 feature extraction and prediction
     if hidden_state_cache is not None and train_indices is not None and test_indices is not None:
+        cache_hs = hidden_state_cache.hidden_states_array
+        cache_mask = hidden_state_cache.attention_mask_array
         train_dataset = CachedHiddenStateDataset(
             data=train_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=train_indices
+            dataset_indices=train_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         test_dataset = CachedHiddenStateDataset(
             data=test_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=test_indices
+            dataset_indices=test_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         collate_fn = collate_cached_batch
     else:
@@ -264,31 +272,35 @@ def _process_fold_forest(
         collator = create_collator(model.feature_extractor)
         collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_mode = hidden_state_cache is not None and train_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     test_loader = DataLoader(
         test_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
-    # Stage 2: Train causal forest (wrap loaders to inject cache if needed)
+    # Stage 2: Train causal forest
+    # Hidden states already loaded by DataLoader; prepare_cached_batch called in extract_features
     logger.info("\n--- Stage 2: Training causal forest ---")
     train_T = train_df[config.treatment_column].values
     train_Y = train_df[config.outcome_column].values
-    train_loader_s2 = _cache_injecting_loader(train_loader, hidden_state_cache, device) if hidden_state_cache is not None else train_loader
-    model.train_causal_forest(train_loader_s2, train_T, train_Y)
+    model.train_causal_forest(train_loader, train_T, train_Y)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
-    test_loader_pred = _cache_injecting_loader(test_loader, hidden_state_cache, device) if hidden_state_cache is not None else test_loader
-    preds = model.predict(test_loader_pred, return_ci=True)
+    preds = model.predict(test_loader, return_ci=True)
 
     # Build predictions DataFrame
     preds_df = test_df.copy()
@@ -380,13 +392,17 @@ def _run_fixed_split_inference_forest(
     combined_df = pd.concat([train_df, val_df])
 
     if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+        cache_hs = hidden_state_cache.hidden_states_array
+        cache_mask = hidden_state_cache.attention_mask_array
         combined_indices = np.concatenate([train_indices, val_indices])
         combined_dataset = CachedHiddenStateDataset(
             data=combined_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=combined_indices
+            dataset_indices=combined_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         combined_collate_fn = collate_cached_batch
     else:
@@ -399,26 +415,33 @@ def _run_fixed_split_inference_forest(
         collator = create_collator(model.feature_extractor)
         combined_collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_combined = hidden_state_cache is not None and train_indices is not None
+    dl_kwargs_combined = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_combined else {}
+
     combined_loader = DataLoader(
         combined_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=combined_collate_fn
+        collate_fn=combined_collate_fn,
+        **dl_kwargs_combined
     )
     combined_T = combined_df[config.treatment_column].values
     combined_Y = combined_df[config.outcome_column].values
-    combined_loader_s2 = _cache_injecting_loader(combined_loader, hidden_state_cache, device) if hidden_state_cache is not None else combined_loader
-    model.train_causal_forest(combined_loader_s2, combined_T, combined_Y)
+    model.train_causal_forest(combined_loader, combined_T, combined_Y)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
     if hidden_state_cache is not None and test_indices is not None:
+        cache_hs = hidden_state_cache.hidden_states_array
+        cache_mask = hidden_state_cache.attention_mask_array
         test_dataset = CachedHiddenStateDataset(
             data=test_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=test_indices
+            dataset_indices=test_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         test_collate_fn = collate_cached_batch
     else:
@@ -431,14 +454,17 @@ def _run_fixed_split_inference_forest(
         collator = create_collator(model.feature_extractor)
         test_collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_test = hidden_state_cache is not None and test_indices is not None
+    dl_kwargs_test = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_test else {}
+
     test_loader = DataLoader(
         test_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=test_collate_fn
+        collate_fn=test_collate_fn,
+        **dl_kwargs_test
     )
-    test_loader_pred = _cache_injecting_loader(test_loader, hidden_state_cache, device) if hidden_state_cache is not None else test_loader
-    preds = model.predict(test_loader_pred, return_ci=True)
+    preds = model.predict(test_loader, return_ci=True)
 
     # Build results DataFrame
     results_df = test_df.copy()
@@ -655,19 +681,25 @@ def _train_representation(
 
     # Create datasets
     if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+        cache_hs = hidden_state_cache.hidden_states_array
+        cache_mask = hidden_state_cache.attention_mask_array
         train_dataset = CachedHiddenStateDataset(
             data=train_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=train_indices
+            dataset_indices=train_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=val_indices
+            dataset_indices=val_indices,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         collate_fn = collate_cached_batch
         logger.info("Using cached hidden state datasets for Stage 1 training")
@@ -687,18 +719,23 @@ def _train_representation(
         collator = create_collator(model.feature_extractor)
         collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_mode = hidden_state_cache is not None and train_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=train_config.batch_size,
         shuffle=True,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=train_config.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     # Optimizer
@@ -743,11 +780,7 @@ def _train_representation(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             optimizer.zero_grad()
 
@@ -796,11 +829,7 @@ def _train_representation(
                 batch['outcome'] = batch['outcome'].to(device)
                 batch['treatment'] = batch['treatment'].to(device)
 
-                # Inject cached hidden states if available
-                if 'cache_indices' in batch and hidden_state_cache is not None:
-                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                    batch['cached_hidden_states'] = hs
-                    batch['cached_attention_mask'] = mask
+                prepare_cached_batch(batch, device, hidden_state_cache)
 
                 losses = model.train_representation_step(
                     batch,
@@ -895,16 +924,6 @@ def _train_representation(
     gc.collect()
 
     return history
-
-
-def _cache_injecting_loader(loader, hidden_state_cache, device):
-    """Wrap a DataLoader to inject cached hidden states into each batch."""
-    for batch in loader:
-        if 'cache_indices' in batch and hidden_state_cache is not None:
-            hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-            batch['cached_hidden_states'] = hs
-            batch['cached_attention_mask'] = mask
-        yield batch
 
 
 def _save_and_summarize_forest(results_df: pd.DataFrame, output_path: Path) -> None:

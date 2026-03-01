@@ -24,6 +24,7 @@ from ..data import (
     create_collator,
     CachedHiddenStateDataset,
     collate_cached_batch,
+    prepare_cached_batch,
 )
 from ..models.hidden_state_cache import HiddenStateCache
 from ..utils import cuda_cleanup, get_memory_info
@@ -327,6 +328,7 @@ def run_applied_inference(
 
             if hidden_state_cache is not None:
                 hidden_state_cache.open()
+                hidden_state_cache.preload_to_ram()
         elif flp_cache_enabled and not flp_freeze:
             logger.warning(
                 "flp_cache_hidden_states=True but flp_freeze_llm=False. "
@@ -990,14 +992,18 @@ def _train_single_model(
 
     # Create datasets
     if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
-        # Cached mode: use CachedHiddenStateDataset with cache indices
+        # Cached mode: pass cache arrays so DataLoader workers load hidden states
+        cache_hs = hidden_state_cache.hidden_states_array
+        cache_mask = hidden_state_cache.attention_mask_array
         train_dataset = CachedHiddenStateDataset(
             data=train_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
-            explicit_confounder_columns=explicit_confounder_columns
+            explicit_confounder_columns=explicit_confounder_columns,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
@@ -1005,7 +1011,9 @@ def _train_single_model(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=val_indices,
-            explicit_confounder_columns=explicit_confounder_columns
+            explicit_confounder_columns=explicit_confounder_columns,
+            cache_hidden_states=cache_hs,
+            cache_attention_masks=cache_mask,
         )
         collate_fn = collate_cached_batch
         logger.info("Using cached hidden state datasets (LLM not loaded)")
@@ -1033,18 +1041,24 @@ def _train_single_model(
         collate_fn = collator if collator is not None else collate_batch
 
     # Create data loaders
+    # Use parallel workers + pinned memory when hidden states are cached in RAM
+    use_cached_mode = hidden_state_cache is not None and train_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config.training.batch_size,
         shuffle=True,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=config.training.batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     # Optimization
@@ -1127,7 +1141,9 @@ def _predict_dataset(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=dataset_indices,
-            explicit_confounder_columns=explicit_confounder_columns
+            explicit_confounder_columns=explicit_confounder_columns,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array,
         )
         predict_collate_fn = collate_cached_batch
     else:
@@ -1146,11 +1162,15 @@ def _predict_dataset(
         )
         predict_collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_mode = hidden_state_cache is not None and dataset_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     loader = DataLoader(
         dataset,
         batch_size=config.training.batch_size,
         shuffle=False,
-        collate_fn=predict_collate_fn
+        collate_fn=predict_collate_fn,
+        **dl_kwargs
     )
 
     result = _generate_predictions(model, loader, device,
@@ -1195,11 +1215,7 @@ def _train_epoch(
         batch['treatment'] = batch['treatment'].to(device)
         # 'texts' stays as list of strings
 
-        # Inject cached hidden states if available
-        if 'cache_indices' in batch and hidden_state_cache is not None:
-            hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-            batch['cached_hidden_states'] = hs
-            batch['cached_attention_mask'] = mask
+        prepare_cached_batch(batch, device, hidden_state_cache)
 
         optimizer.zero_grad()
 
@@ -1267,11 +1283,7 @@ def _eval_epoch(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             losses = model.train_step(
                 batch,
@@ -1383,11 +1395,7 @@ def _generate_predictions(
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Predicting", leave=False):
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             preds = model.predict(batch)
 

@@ -66,6 +66,7 @@ class HiddenStateCache:
         self._hs_mmap = None
         self._mask_mmap = None
         self._metadata = None
+        self._preloaded = False
 
     @staticmethod
     def compute_cache_hash(model_name: str, max_length: int, dataset_path: str) -> str:
@@ -84,6 +85,30 @@ class HiddenStateCache:
         if self._metadata is None:
             self._load_metadata()
         return self._metadata['hidden_size']
+
+    @property
+    def cache_size_gb(self) -> float:
+        """Return approximate cache size in GB."""
+        if self._metadata is None:
+            self._load_metadata()
+        n = self._metadata['num_samples']
+        seq_len = self._metadata['actual_max_len']
+        hs = self._metadata['hidden_size']
+        return (n * seq_len * hs * 2 + n * seq_len) / 1e9  # float16 + uint8
+
+    @property
+    def hidden_states_array(self) -> np.ndarray:
+        """Return the hidden states numpy array (memmap or RAM)."""
+        if self._hs_mmap is None:
+            self.open()
+        return self._hs_mmap
+
+    @property
+    def attention_mask_array(self) -> np.ndarray:
+        """Return the attention mask numpy array (memmap or RAM)."""
+        if self._mask_mmap is None:
+            self.open()
+        return self._mask_mmap
 
     @property
     def actual_max_len(self) -> int:
@@ -328,6 +353,29 @@ class HiddenStateCache:
 
         logger.info(f"Hidden state cache opened: shape={self._hs_mmap.shape}")
 
+    def preload_to_ram(self) -> None:
+        """Load entire cache from disk into RAM for faster random access.
+
+        After preloading, all reads come from RAM instead of disk-backed memmap,
+        eliminating I/O latency for random batch access. The arrays are shared
+        across forked DataLoader workers via copy-on-write.
+        """
+        if self._preloaded:
+            return
+
+        if self._hs_mmap is None:
+            self.open()
+
+        size_gb = self.cache_size_gb
+        logger.info(f"Preloading hidden state cache to RAM ({size_gb:.2f} GB)...")
+
+        # Copy memmap data into regular numpy arrays in RAM
+        self._hs_mmap = np.array(self._hs_mmap)
+        self._mask_mmap = np.array(self._mask_mmap)
+        self._preloaded = True
+
+        logger.info(f"Hidden state cache preloaded to RAM: shape={self._hs_mmap.shape}")
+
     def load_batch(
         self,
         indices: List[int],
@@ -347,14 +395,16 @@ class HiddenStateCache:
         if self._hs_mmap is None:
             self.open()
 
-        # Read from memmap (copies data from disk)
+        # Read from memmap or RAM
         idx_array = np.array(indices)
         hs = self._hs_mmap[idx_array]  # (batch, seq_len, hidden_size) float16
         mask = self._mask_mmap[idx_array]  # (batch, seq_len) uint8
 
-        # Convert to tensors on device (float16 -> float32)
-        hs_tensor = torch.from_numpy(hs.astype(np.float32)).to(device)
-        mask_tensor = torch.from_numpy(mask.astype(np.float32)).to(device)
+        # Transfer float16 to GPU, then cast to float32 on GPU (2x less CPU→GPU bandwidth)
+        # np.ascontiguousarray avoids a full copy when data is already contiguous
+        # (e.g., after preload_to_ram), but ensures torch.from_numpy gets valid memory.
+        hs_tensor = torch.from_numpy(np.ascontiguousarray(hs)).to(device).float()
+        mask_tensor = torch.from_numpy(np.ascontiguousarray(mask).astype(np.float32)).to(device)
 
         return hs_tensor, mask_tensor
 

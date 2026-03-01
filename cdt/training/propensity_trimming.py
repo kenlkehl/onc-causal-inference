@@ -17,7 +17,7 @@ from joblib import Parallel, delayed
 from ..config import AppliedInferenceConfig, PropensityTrimmingConfig, normalize_feature_extractor_type
 from ..models.propensity_model import PropensityOnlyModel, create_propensity_model_from_config
 from ..models.hidden_state_cache import HiddenStateCache
-from ..data import ClinicalTextDataset, collate_batch, create_collator, CachedHiddenStateDataset, collate_cached_batch
+from ..data import ClinicalTextDataset, collate_batch, create_collator, CachedHiddenStateDataset, collate_cached_batch, prepare_cached_batch
 from ..utils import cuda_cleanup, get_memory_info
 
 
@@ -359,14 +359,18 @@ def _train_propensity_model(
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=train_indices
+            dataset_indices=train_indices,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=val_indices
+            dataset_indices=val_indices,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array
         )
         collate_fn = collate_cached_batch
         logger.info("Using cached hidden state datasets for propensity model")
@@ -387,18 +391,23 @@ def _train_propensity_model(
         collate_fn = collator if collator is not None else collate_batch
 
     # Create data loaders
+    use_cached_mode = hidden_state_cache is not None and train_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=trimming_config.propensity_batch_size,
         shuffle=True,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=trimming_config.propensity_batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     # Optimizer
@@ -423,11 +432,7 @@ def _train_propensity_model(
         for batch in train_loader:
             batch['treatment'] = batch['treatment'].to(device)
 
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             optimizer.zero_grad()
             losses = model.train_step(batch)
@@ -454,11 +459,7 @@ def _train_propensity_model(
             for batch in val_loader:
                 batch['treatment'] = batch['treatment'].to(device)
 
-                # Inject cached hidden states if available
-                if 'cache_indices' in batch and hidden_state_cache is not None:
-                    hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                    batch['cached_hidden_states'] = hs
-                    batch['cached_attention_mask'] = mask
+                prepare_cached_batch(batch, device, hidden_state_cache)
 
                 losses = model.train_step(batch)
                 val_loss += losses['loss'].item()
@@ -548,7 +549,9 @@ def _predict_propensity(
             text_column=config.text_column,
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
-            dataset_indices=dataset_indices
+            dataset_indices=dataset_indices,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array
         )
         collate_fn = collate_cached_batch
     else:
@@ -561,11 +564,15 @@ def _predict_propensity(
         collator = create_collator(model.feature_extractor)
         collate_fn = collator if collator is not None else collate_batch
 
+    use_cached_mode = hidden_state_cache is not None and dataset_indices is not None
+    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+
     loader = DataLoader(
         dataset,
         batch_size=config.propensity_trimming.propensity_batch_size,
         shuffle=False,
-        collate_fn=collate_fn
+        collate_fn=collate_fn,
+        **dl_kwargs
     )
 
     model.eval()
@@ -573,11 +580,7 @@ def _predict_propensity(
 
     with torch.no_grad():
         for batch in loader:
-            # Inject cached hidden states if available
-            if 'cache_indices' in batch and hidden_state_cache is not None:
-                hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
-                batch['cached_hidden_states'] = hs
-                batch['cached_attention_mask'] = mask
+            prepare_cached_batch(batch, device, hidden_state_cache)
 
             propensity = model.predict(batch)
             all_propensity.append(propensity.cpu().numpy())

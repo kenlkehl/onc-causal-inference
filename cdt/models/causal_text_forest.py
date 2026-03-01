@@ -13,6 +13,7 @@ from .explicit_confounder_featurizer import get_raw_confounder_features, Explici
 from .intra_batch_contrastive import IntraBatchContrastiveLoss
 from .extractor_factory import create_feature_extractor
 from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
+from ..data.cached_hidden_state_dataset import prepare_cached_batch
 
 
 logger = logging.getLogger(__name__)
@@ -1272,6 +1273,8 @@ class CausalTextForest(nn.Module):
             # DataLoader / batch iterable path: iterate over preprocessed batches
             with torch.no_grad():
                 for batch in texts_or_loader:
+                    # Move cached hidden states to device if present (from DataLoader)
+                    prepare_cached_batch(batch, self._device)
                     texts = batch['texts']
                     extractor_input = self._get_extractor_input(batch, texts)
                     batch_conf_values = batch.get('explicit_confounder_values', None)

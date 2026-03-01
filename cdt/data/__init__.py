@@ -18,6 +18,7 @@ from .collators import (
 from .cached_hidden_state_dataset import (
     CachedHiddenStateDataset,
     collate_cached_batch,
+    prepare_cached_batch,
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     'create_collator',
     'CachedHiddenStateDataset',
     'collate_cached_batch',
+    'prepare_cached_batch',
 ]
