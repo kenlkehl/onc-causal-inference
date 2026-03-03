@@ -150,11 +150,18 @@ def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
     if 'hidden_states' in batch[0]:
-        # Optimized path: stack hidden states as float16 tensors
-        hs = np.stack([item['hidden_states'] for item in batch])
-        mask = np.stack([item['attention_mask'] for item in batch])
+        # Optimized path: pad variable-length hidden states to batch-local max
+        lengths = [item['hidden_states'].shape[0] for item in batch]
+        max_len = max(lengths)
+        hidden_size = batch[0]['hidden_states'].shape[-1]
+        hs = np.zeros((len(batch), max_len, hidden_size), dtype=np.float16)
+        mask = np.zeros((len(batch), max_len), dtype=np.float32)
+        for i, item in enumerate(batch):
+            l = lengths[i]
+            hs[i, :l] = item['hidden_states']
+            mask[i, :l] = 1.0
         result['cached_hidden_states'] = torch.from_numpy(hs)  # float16 tensor
-        result['cached_attention_mask'] = torch.from_numpy(mask.astype(np.float32))
+        result['cached_attention_mask'] = torch.from_numpy(mask)
     elif 'cache_index' in batch[0]:
         # Legacy path: collect indices for deferred loading
         result['cache_indices'] = [item['cache_index'] for item in batch]

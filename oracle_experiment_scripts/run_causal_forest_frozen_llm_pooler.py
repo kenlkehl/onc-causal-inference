@@ -12,7 +12,7 @@ Usage:
     # Run full grid with both GPUs
     python oracle_experiment_scripts/run_causal_forest_frozen_llm_pooler.py \
         --output-dir ../pcori_experiments/causal_text_forest_frozen_llm_pooler \
-        --devices cuda:2 cuda:3 --workers-per-device 1
+        --devices cuda:0 cuda:1 --workers-per-device 1
 
     # Run subset for testing
     python oracle_experiment_scripts/run_causal_forest_frozen_llm_pooler.py \
@@ -630,8 +630,8 @@ def generate_experiment_grid(
     """Generate all experiment configurations with shuffled order."""
 
     datasets = [
-        ("example_synthetic_data_one_confounder", "one_confounder"),
-        ("example_synthetic_data_ten_confounders", "ten_confounders"),
+        #("example_synthetic_data_one_confounder", "one_confounder"),
+        #("example_synthetic_data_ten_confounders", "ten_confounders"),
         ("../example_synthetic_data_ten_confounders_50K_rows", "ten_confounders_50K"),
     ]
 
