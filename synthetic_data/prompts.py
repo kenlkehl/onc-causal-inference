@@ -214,6 +214,196 @@ The confounder values should appear naturally in the clinical narrative (e.g., "
 Begin the clinical history document now:"""
 
 
+# =============================================================================
+# Two-Stage Generation: Event Timeline Prompt
+# =============================================================================
+
+EVENT_TIMELINE_PROMPT = """Generate a realistic longitudinal clinical history as a sequence of events for a cancer patient with the following characteristics:
+
+Patient Characteristics (YOU MUST ACCURATELY REPRESENT THESE VALUES):
+{patient_characteristics}
+
+Clinical Context: {clinical_question}
+
+Generate a list of {min_events}-{max_events} events that might have occurred along this patient's disease trajectory.
+Events should be chronological and cover the patient's cancer journey from diagnosis through the treatment decision point.
+
+Types of events (tag each event with its type at the start of the line):
+- <demographics> Patient demographics (name, gender)
+- <diagnosis> Cancer diagnosis with TNM stage, histology, site, biomarkers
+- <systemic> Initiation of a systemic therapy
+- <surgery> Surgical procedure
+- <radiation> Radiation treatment
+- <adverse_event> Treatment-related adverse event
+- <clinical_note> Oncologist progress note (indicate disease status: responding/progressing/stable)
+- <imaging_report> Single imaging study (specify type: CT/MRI/PET; indicate findings and disease status)
+- <pathology_report> Pathology report (anatomic pathology, molecular testing, etc.)
+- <ngs_report> Next-generation sequencing report (diagnosis, specimen site, detailed genomic findings)
+
+Rules:
+1. Each event is one line of text, tagged with its event type
+2. Events should reference the patient's age at each timepoint
+3. CRITICAL: FAITHFULLY represent ALL patient characteristics listed above in the events
+4. CRITICAL: Do NOT mention which specific treatment the patient was ultimately assigned to for the clinical question. The history should end BEFORE the treatment decision.
+5. Express all characteristics naturally in clinical language (no underscores or codes)
+6. Include realistic lab values, imaging findings, and clinical details consistent with the patient profile
+7. Imaging reports must specify study type, presence/absence of cancer, response status if applicable, and metastatic sites
+8. Clinical notes must indicate disease status (responding, progressing, stable, or no evidence of disease)
+9. The disease trajectory should be clinically plausible for the described patient profile
+10. Diagnosis events should include TNM stage, summary stage, site description, histology, and all relevant biomarkers
+11. NGS reports should be very detailed: include actionable alterations, co-mutations, fusions, and copy number alterations. Genomic findings must be consistent with known mutation/co-mutation patterns (e.g., EGFR mutant lung cancers almost never have KRAS co-mutations)
+12. To ensure diversity, vary patient names and genders
+
+Example format (hypothetical, just to illustrate formatting):
+<demographics> The patient is a 62-year-old female named Maria Santos.
+<diagnosis> At age 62, the patient was diagnosed with stage IIIB (T4N2M0) non-small cell lung cancer, adenocarcinoma histology, of the right upper lobe. EGFR exon 19 deletion positive, PD-L1 TPS 30%.
+<pathology_report> At age 62, CT-guided core biopsy of right upper lobe mass showed adenocarcinoma, TTF-1 positive, CK7 positive.
+<imaging_report> At age 62, CT chest/abdomen/pelvis showed 4.2cm right upper lobe mass with right hilar and mediastinal lymphadenopathy. No distant metastases.
+<clinical_note> At age 62, initial oncology consultation. Cancer present, newly diagnosed.
+<ngs_report> At age 62 years, the patient had next generation sequencing performed for lung adenocarcinoma based on a specimen obtained from the right upper lobe, which showed an EGFR exon 19 deletion (p.E746_A750del), a TP53 p.R248W mutation, and an RB1 loss.
+<systemic> At age 62, started concurrent chemoradiation with carboplatin/paclitaxel.
+<imaging_report> At age 63, CT chest showed partial response with decrease in primary mass to 2.1cm. Lymphadenopathy improved.
+<clinical_note> At age 63, follow-up visit. Cancer present, responding to therapy.
+
+Generate the event timeline now:"""
+
+
+# =============================================================================
+# Two-Stage Generation: Note Expansion Prompt
+# =============================================================================
+
+NOTE_EXPANSION_PROMPT = """You are a brilliant synthetic clinical document generation bot with encyclopedic knowledge about cancer and its treatment.
+
+Below is a chronological list of events from a patient's clinical history. One event is surrounded by <BEGIN EVENT CORRESPONDING TO SYNTHETIC NOTE> and <END EVENT CORRESPONDING TO SYNTHETIC NOTE> tags.
+
+Generate a detailed, realistic clinical document corresponding to that tagged event.
+
+Rules:
+1. The document should be a {note_type} as indicated by the tagged event
+2. Incorporate everything you know about the patient's history and cancer generally
+3. Don't directly incorporate information about future events as if they have already occurred, but you can use your knowledge of the future to inform what the document might have contained at the time it was written
+4. CRITICAL: Ignore your knowledge of today's date. Do not add dates to the synthetic document. These will be added later programmatically.
+5. Do NOT mention which specific treatment the patient will receive for: {clinical_question}
+6. The document should read as if it were a real clinical document
+7. CRITICAL: Do not invent treatments that are not included in the list of events
+8. Do not include any disclaimers or notes about the fact that the document is synthetic
+
+Note type guidelines:
+- **Pathology reports** (~1 page): Specimen ID, date of procedure, type of specimen, diagnostic findings, any ancillary studies (IHC, molecular), and a description of gross pathology if relevant. Pathology reports should NOT include recommendations about management, since these are not part of real pathology reports.
+- **Imaging reports** (~1 page): Scan type, Findings (broken down by organs imaged by the study), and Impression. Imaging reports should NOT make treatment or monitoring recommendations.
+- **Clinical progress notes** (~2 pages): Chief complaint, history of present illness, review of systems, physical exam, lab results, imaging results, and assessment/plan. If it is the first clinical note, it is a consult note and should also include past medical history, social history, family history, allergies, and medications. Clinical notes should use a realistic mix of common brand names (e.g., Herceptin, Keytruda, Taxol) and generic drug names (e.g., trastuzumab, pembrolizumab, paclitaxel), and sometimes abbreviations (e.g., pembro, cape). Within clinical notes, sometimes patients should have adverse events of therapy and/or comorbidities described that are consistent with their clinical trajectories.
+- **NGS reports** (~1-2 pages): Specimen site, diagnosis, testing methodology, and detailed genomic findings including actionable alterations, co-mutations, fusions, and copy number alterations. Most reports should describe alterations in many genes, even though only some will be clinically relevant. If you do not have information about key biomarkers explicitly provided, you should imagine what they might be based on cancer type, history, and prior treatments. However, these must be consistent with realistic biological patterns (e.g., EGFR mutant lung cancers almost never have concomitant driver mutations in KRAS, BRAF, etc.).
+
+Here is the list of events:
+{masked_event_timeline}
+
+Now, generate the synthetic document corresponding to the notated event."""
+
+
+# =============================================================================
+# Drug Perturbation Map (generic -> brand/abbreviation alternatives)
+# =============================================================================
+
+DRUG_PERTURBATION_MAP = {
+    # PD-(L)1 & CTLA-4
+    "pembrolizumab": ["Keytruda", "pembro"],
+    "nivolumab": ["Opdivo", "nivo"],
+    "ipilimumab": ["Yervoy", "ipi"],
+    "atezolizumab": ["Tecentriq", "atezo"],
+    "durvalumab": ["Imfinzi", "durva"],
+    "cemiplimab": ["Libtayo", "cemi"],
+    # Platinums & taxanes
+    "carboplatin": ["Paraplatin", "carbo"],
+    "cisplatin": ["Platinol", "cis"],
+    "oxaliplatin": ["Eloxatin", "oxali"],
+    "paclitaxel": ["Taxol", "pacli", "PTX"],
+    "docetaxel": ["Taxotere", "doce"],
+    "nab-paclitaxel": ["Abraxane", "nab-pac"],
+    # Antimetabolites
+    "capecitabine": ["Xeloda", "cape"],
+    "fluorouracil": ["5-FU", "Adrucil", "5FU"],
+    "5-fluorouracil": ["5-FU", "Adrucil", "5FU"],
+    "gemcitabine": ["Gemzar", "gem"],
+    "pemetrexed": ["Alimta", "peme", "pem"],
+    "methotrexate": ["MTX", "Trexall"],
+    # Anthracyclines & others
+    "doxorubicin": ["Adriamycin", "doxo"],
+    "epirubicin": ["Ellence", "epi"],
+    "cyclophosphamide": ["Cytoxan", "CTX", "cyclo"],
+    "etoposide": ["VP-16", "eto"],
+    "irinotecan": ["Camptosar", "iri"],
+    "topotecan": ["Hycamtin", "topo"],
+    # HER2 axis
+    "trastuzumab": ["Herceptin", "trast"],
+    "pertuzumab": ["Perjeta", "pertu"],
+    "ado-trastuzumab emtansine": ["Kadcyla", "T-DM1"],
+    "trastuzumab emtansine": ["Kadcyla", "T-DM1"],
+    "trastuzumab deruxtecan": ["Enhertu", "T-DXd"],
+    "tucatinib": ["Tukysa", "tuca"],
+    "lapatinib": ["Tykerb", "lapa"],
+    # CDK4/6
+    "palbociclib": ["Ibrance", "palbo"],
+    "ribociclib": ["Kisqali", "ribo"],
+    "abemaciclib": ["Verzenio", "abema"],
+    # PARP
+    "olaparib": ["Lynparza", "ola"],
+    "niraparib": ["Zejula", "nira"],
+    "rucaparib": ["Rubraca", "ruca"],
+    "talazoparib": ["Talzenna", "tala"],
+    # VEGF axis
+    "bevacizumab": ["Avastin", "bev"],
+    "ramucirumab": ["Cyramza", "ramu"],
+    # EGFR, ALK, etc.
+    "osimertinib": ["Tagrisso", "osi"],
+    "erlotinib": ["Tarceva", "erlo"],
+    "gefitinib": ["Iressa", "gefi"],
+    "afatinib": ["Gilotrif", "afat"],
+    "dacomitinib": ["Vizimpro", "daco"],
+    "alectinib": ["Alecensa", "alec"],
+    "ceritinib": ["Zykadia", "ceri"],
+    "crizotinib": ["Xalkori", "crizo"],
+    "lorlatinib": ["Lorbrena", "lorla"],
+    # BRAF/MEK
+    "dabrafenib": ["Tafinlar", "dabra"],
+    "trametinib": ["Mekinist", "tram"],
+    "vemurafenib": ["Zelboraf", "vem"],
+    "encorafenib": ["Braftovi", "enco"],
+    "binimetinib": ["Mektovi", "bini"],
+    # Multi-TKIs
+    "lenvatinib": ["Lenvima", "lenva"],
+    "sorafenib": ["Nexavar", "sora"],
+    "regorafenib": ["Stivarga", "rego"],
+    "pazopanib": ["Votrient", "pazo"],
+    "sunitinib": ["Sutent", "suni"],
+    # Antibodies (other)
+    "rituximab": ["Rituxan", "ritux"],
+    "cetuximab": ["Erbitux", "cetux"],
+    "panitumumab": ["Vectibix", "pani"],
+    # GU agents
+    "enzalutamide": ["Xtandi", "enza"],
+    "abiraterone": ["Zytiga", "abi"],
+    "apalutamide": ["Erleada", "apa"],
+    "leuprolide": ["Lupron", "leup"],
+    "degarelix": ["Firmagon", "dega"],
+    "relugolix": ["Orgovyx", "relu"],
+    # Endocrine
+    "letrozole": ["Femara"],
+    "anastrozole": ["Arimidex"],
+    "exemestane": ["Aromasin"],
+    "tamoxifen": ["Nolvadex", "tam"],
+    "fulvestrant": ["Faslodex"],
+    # mTOR, alkylators, myeloma, etc.
+    "everolimus": ["Afinitor", "evero"],
+    "sirolimus": ["Rapamune", "siro"],
+    "temozolomide": ["Temodar", "TMZ"],
+    "bortezomib": ["Velcade", "bortez"],
+    "carfilzomib": ["Kyprolis", "carfil"],
+    "ixazomib": ["Ninlaro", "ixa"],
+    "daratumumab": ["Darzalex", "dara"],
+    "obinutuzumab": ["Gazyva", "obinu"],
+}
+
+
 def format_confounder_list(confounders: list) -> str:
     """Format confounders into a readable list for prompts."""
     lines = []

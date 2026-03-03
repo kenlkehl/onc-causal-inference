@@ -117,6 +117,39 @@ Examples:
         help="Target std of logits; lower values compress propensities toward 0.5 (default: 2.0)",
     )
 
+    # Generation mode
+    parser.add_argument(
+        "--generation-mode",
+        type=str,
+        choices=["single_document", "two_stage"],
+        default="two_stage",
+        help="Generation mode: 'single_document' (legacy single blob) or 'two_stage' (event timeline + note expansion, default)",
+    )
+    parser.add_argument(
+        "--min-events",
+        type=int,
+        default=15,
+        help="Minimum events per patient in two-stage mode (default: 15)",
+    )
+    parser.add_argument(
+        "--max-events",
+        type=int,
+        default=30,
+        help="Maximum events per patient in two-stage mode (default: 30)",
+    )
+    parser.add_argument(
+        "--note-separator",
+        type=str,
+        default="\n\n<new_note>\n\n",
+        help="Separator between concatenated notes in two-stage mode (default: <new_note> tag)",
+    )
+    parser.add_argument(
+        "--drug-perturbation-prob",
+        type=float,
+        default=0.3,
+        help="Probability of generic->brand drug name swapping per note (default: 0.3)",
+    )
+
     # LLM parameters
     parser.add_argument(
         "--api-url",
@@ -261,6 +294,17 @@ Examples:
             config.outcome_type = args.outcome_type
         if args.outcome_noise_std != 1.0:
             config.outcome_noise_std = args.outcome_noise_std
+        # Two-stage generation overrides
+        if args.generation_mode != "two_stage":
+            config.generation_mode = args.generation_mode
+        if args.min_events != 15:
+            config.min_events_per_patient = args.min_events
+        if args.max_events != 30:
+            config.max_events_per_patient = args.max_events
+        if args.note_separator != "\n\n<new_note>\n\n":
+            config.note_separator = args.note_separator
+        if args.drug_perturbation_prob != 0.3:
+            config.drug_perturbation_prob = args.drug_perturbation_prob
         if args.output_dir != "./synthetic_output":
             config.output_dir = args.output_dir
         if args.seed != 42:
@@ -291,6 +335,11 @@ Examples:
             num_confounders=args.num_confounders,
             outcome_type=args.outcome_type,
             outcome_noise_std=args.outcome_noise_std,
+            generation_mode=args.generation_mode,
+            min_events_per_patient=args.min_events,
+            max_events_per_patient=args.max_events,
+            note_separator=args.note_separator,
+            drug_perturbation_prob=args.drug_perturbation_prob,
             output_dir=args.output_dir,
             seed=args.seed,
             llm=LLMConfig(
@@ -365,6 +414,9 @@ Examples:
             print(f"  - Outcome rate: {df['outcome_indicator'].mean():.1%}")
         if config.enforce_positivity:
             print(f"  - Positivity enforcement: ON (min={config.min_treatment_rate_per_stratum:.0%}, max={config.max_treatment_rate_per_stratum:.0%})")
+        print(f"  - Generation mode: {config.generation_mode}")
+        if config.generation_mode == "two_stage" and "num_notes" in df.columns:
+            print(f"  - Notes per patient: {df['num_notes'].mean():.1f} avg ({df['num_notes'].min()}-{df['num_notes'].max()} range)")
         print(f"  - Config: {config.output_dir}/generation_config.json")
         print(f"  - Dataset: {config.output_dir}/dataset.parquet")
         print(f"  - Metadata: {config.output_dir}/metadata.json")

@@ -22,6 +22,9 @@ from .prompts import (
     REGRESSION_EQUATION_PROMPT,
     SUMMARY_STATISTICS_PROMPT,
     PATIENT_HISTORY_PROMPT,
+    EVENT_TIMELINE_PROMPT,
+    NOTE_EXPANSION_PROMPT,
+    DRUG_PERTURBATION_MAP,
     format_confounder_list,
     format_patient_characteristics,
     validate_clinical_text,
@@ -822,6 +825,93 @@ def _enforce_positivity(
     return np.clip(treatment_prob, min_rate, max_rate)
 
 
+# ============================================================================
+# Two-stage generation helpers
+# ============================================================================
+
+def _parse_event_timeline(timeline_text: str) -> List[Dict[str, str]]:
+    """
+    Parse event timeline text into structured events.
+
+    Each event is a line starting with <event_type> tag.
+    Returns list of dicts with 'event_type' and 'event_text' keys.
+    """
+    pattern = re.compile(r'<(\w+)>\s*(.*?)(?=\n\s*<\w+>|\Z)', re.DOTALL)
+    events = []
+    for event_type, event_text in pattern.findall(timeline_text):
+        text = event_text.strip()
+        if text:
+            events.append({
+                "event_type": event_type.strip(),
+                "event_text": text,
+            })
+    return events
+
+
+def _create_masked_timeline(events: List[Dict[str, str]], target_idx: int) -> str:
+    """
+    Create masked version of timeline with one event highlighted.
+
+    The target event is wrapped with BEGIN/END tags so the LLM knows
+    which event to expand into a full clinical note.
+    """
+    lines = []
+    for i, event in enumerate(events):
+        line = f"<{event['event_type']}> {event['event_text']}"
+        if i == target_idx:
+            line = (
+                f"<BEGIN EVENT CORRESPONDING TO SYNTHETIC NOTE> "
+                f"{line} "
+                f"<END EVENT CORRESPONDING TO SYNTHETIC NOTE>"
+            )
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def _event_type_to_note_type(event_type: str) -> str:
+    """Map event type tag to human-readable note type for the expansion prompt."""
+    mapping = {
+        "clinical_note": "clinical progress note",
+        "imaging_report": "imaging/radiology report",
+        "pathology_report": "pathology report",
+        "ngs_report": "next-generation sequencing report",
+    }
+    return mapping.get(event_type, "clinical document")
+
+
+# Drug perturbation utilities (adapted from matchminer)
+_COMPILED_DRUG_PATTERNS = None
+
+
+def _get_drug_patterns():
+    """Compile regex patterns for drug name replacement (cached)."""
+    global _COMPILED_DRUG_PATTERNS
+    if _COMPILED_DRUG_PATTERNS is not None:
+        return _COMPILED_DRUG_PATTERNS
+
+    patterns = []
+    for generic, alternatives in DRUG_PERTURBATION_MAP.items():
+        pattern = re.compile(r'\b' + re.escape(generic) + r'\b', re.IGNORECASE)
+        patterns.append((pattern, alternatives))
+    _COMPILED_DRUG_PATTERNS = patterns
+    return patterns
+
+
+def _apply_drug_perturbation(text: str) -> str:
+    """
+    Replace some generic drug names with brand names or abbreviations.
+
+    For each drug found in the text, randomly decides whether to replace it
+    and picks a random alternative from the drug map.
+    """
+    patterns = _get_drug_patterns()
+    for pattern, alternatives in patterns:
+        if pattern.search(text):
+            replacement = random.choice(alternatives)
+            text = pattern.sub(replacement, text)
+    return text
+
+
 def _compute_logit(
     characteristics: Dict[str, Any],
     confounders: List[Dict[str, Any]],
@@ -989,36 +1079,113 @@ def _generate_single_patient(
     # Format patient characteristics as prompt
     patient_prompt = format_patient_characteristics(characteristics, confounders)
 
-    # Generate clinical history
-    history_prompt = PATIENT_HISTORY_PROMPT.format(
-        patient_characteristics=patient_prompt,
-        clinical_question=config.clinical_question,
-    )
-
-    # Reserve tokens for prompt (system prompt + patient history prompt ~1500-2000 tokens)
+    # Reserve tokens for prompt
     history_max_tokens = max(1000, config.llm.max_tokens - 2000)
 
-    try:
-        clinical_history = client.generate(
-            prompt=history_prompt,
-            system_prompt=CLINICAL_SYSTEM_PROMPT,
-            temperature=0.4,  # Lower temperature for more faithful confounder representation
-            max_tokens=history_max_tokens,
+    generation_mode = getattr(config, 'generation_mode', 'single_document')
+    event_timeline = ""
+    num_notes = 0
+
+    if generation_mode == "two_stage":
+        # ---- Stage 1: Generate event timeline ----
+        timeline_prompt = EVENT_TIMELINE_PROMPT.format(
+            patient_characteristics=patient_prompt,
+            clinical_question=config.clinical_question,
+            min_events=config.min_events_per_patient,
+            max_events=config.max_events_per_patient,
         )
-        # Handle None response from LLM
-        if clinical_history is None:
-            logger.warning(f"Patient {patient_idx}: LLM returned None for clinical_history")
+
+        try:
+            timeline_text = client.generate(
+                prompt=timeline_prompt,
+                system_prompt=CLINICAL_SYSTEM_PROMPT,
+                temperature=0.7,
+                max_tokens=history_max_tokens,
+            )
+            if timeline_text is None:
+                logger.warning(f"Patient {patient_idx}: LLM returned None for event timeline")
+                timeline_text = ""
+        except Exception as e:
+            logger.error(f"Patient {patient_idx}: Failed to generate event timeline: {e}")
+            timeline_text = ""
+
+        event_timeline = timeline_text
+        events = _parse_event_timeline(timeline_text)
+
+        if not events:
+            logger.warning(f"Patient {patient_idx}: No events parsed from timeline")
+
+        # ---- Stage 2: Expand note-worthy events into detailed notes ----
+        note_types = set(getattr(config, 'note_types_to_expand', [
+            "clinical_note", "imaging_report", "pathology_report", "ngs_report"
+        ]))
+        note_separator = getattr(config, 'note_separator', "\n\n---\n\n")
+        drug_prob = getattr(config, 'drug_perturbation_prob', 0.3)
+
+        notes = []
+        for event_idx, event in enumerate(events):
+            if event["event_type"] not in note_types:
+                continue
+
+            masked_timeline = _create_masked_timeline(events, event_idx)
+            note_type = _event_type_to_note_type(event["event_type"])
+
+            expansion_prompt = NOTE_EXPANSION_PROMPT.format(
+                note_type=note_type,
+                clinical_question=config.clinical_question,
+                masked_event_timeline=masked_timeline,
+            )
+
+            try:
+                note_text = client.generate(
+                    prompt=expansion_prompt,
+                    system_prompt=CLINICAL_SYSTEM_PROMPT,
+                    temperature=0.5,
+                    max_tokens=history_max_tokens,
+                )
+                if note_text is None:
+                    logger.warning(f"Patient {patient_idx}, event {event_idx}: LLM returned None for note expansion")
+                    continue
+            except Exception as e:
+                logger.error(f"Patient {patient_idx}, event {event_idx}: Failed to expand note: {e}")
+                continue
+
+            # Apply drug perturbation
+            if drug_prob > 0 and random.random() < drug_prob:
+                note_text = _apply_drug_perturbation(note_text)
+
+            notes.append(note_text)
+
+        clinical_history = note_separator.join(notes)
+        num_notes = len(notes)
+
+    else:
+        # ---- Legacy single-document mode ----
+        history_prompt = PATIENT_HISTORY_PROMPT.format(
+            patient_characteristics=patient_prompt,
+            clinical_question=config.clinical_question,
+        )
+
+        try:
+            clinical_history = client.generate(
+                prompt=history_prompt,
+                system_prompt=CLINICAL_SYSTEM_PROMPT,
+                temperature=0.4,
+                max_tokens=history_max_tokens,
+            )
+            if clinical_history is None:
+                logger.warning(f"Patient {patient_idx}: LLM returned None for clinical_history")
+                clinical_history = ""
+        except Exception as e:
+            logger.error(f"Patient {patient_idx}: Failed to generate clinical_history: {e}")
             clinical_history = ""
-    except Exception as e:
-        logger.error(f"Patient {patient_idx}: Failed to generate clinical_history: {e}")
-        clinical_history = ""
 
     # Validate that text doesn't contain literal category codes
     underscore_patterns = re.findall(r'\b[a-z]+(?:_[a-z0-9]+){2,}\b', clinical_history.lower())
     if underscore_patterns:
         logger.warning(f"Patient {patient_idx}: Clinical text contains underscore patterns (likely category codes): {underscore_patterns[:3]}")
 
-    return {
+    result = {
         "patient_id": patient_idx,
         "patient_prompt": patient_prompt,
         "clinical_text": clinical_history,
@@ -1030,6 +1197,12 @@ def _generate_single_patient(
         "true_y1_prob": outcome_prob_1,
         "true_ite_prob": true_ite_prob,
     }
+
+    if generation_mode == "two_stage":
+        result["event_timeline"] = event_timeline
+        result["num_notes"] = num_notes
+
+    return result
 
 
 def _generate_all_patients(
@@ -1538,13 +1711,6 @@ def generate_synthetic_dataset_batch(
         # Format patient characteristics as prompt
         patient_prompt = format_patient_characteristics(characteristics, confounders)
 
-        # Build clinical history prompt
-        history_prompt = PATIENT_HISTORY_PROMPT.format(
-            patient_characteristics=patient_prompt,
-            clinical_question=config.clinical_question,
-        )
-        history_prompts.append(history_prompt)
-
         patient_records.append({
             "patient_id": patient_idx,
             "patient_prompt": patient_prompt,
@@ -1557,76 +1723,189 @@ def generate_synthetic_dataset_batch(
             "true_y1_prob": outcome_prob_1,
             "true_ite_prob": true_ite_prob,
         })
-    
-    # Step 6: Batch generate all clinical histories using vLLM
-    logger.info(f"Step 6/6: Batch generating {len(history_prompts)} clinical histories with vLLM...")
 
-    if use_multi_gpu:
-        # Multi-GPU mode: unload initialization model and spawn parallel workers
-        logger.info("Unloading initialization model to free GPU memory for parallel workers...")
-        del vllm_client
-        import gc
-        gc.collect()
-        try:
-            import torch
-            torch.cuda.empty_cache()
-        except Exception:
-            pass
+    generation_mode = getattr(config, 'generation_mode', 'single_document')
 
-        # Build vllm config dict for workers (dataclasses aren't picklable with complex defaults)
-        vllm_config_dict = {
-            "model_name": vllm_config.model_name,
-            "tensor_parallel_size": vllm_config.tensor_parallel_size,
-            "gpu_memory_utilization": vllm_config.gpu_memory_utilization,
-            "max_model_len": vllm_config.max_model_len,
-            "temperature": vllm_config.temperature,
-            "max_tokens": vllm_config.max_tokens,
-            "download_dir": vllm_config.download_dir,
-        }
+    # Build vllm config dict for multi-GPU workers (shared by both modes)
+    vllm_config_dict = {
+        "model_name": vllm_config.model_name,
+        "tensor_parallel_size": vllm_config.tensor_parallel_size,
+        "gpu_memory_utilization": vllm_config.gpu_memory_utilization,
+        "max_model_len": vllm_config.max_model_len,
+        "temperature": vllm_config.temperature,
+        "max_tokens": vllm_config.max_tokens,
+        "download_dir": vllm_config.download_dir,
+    }
 
-        # Run parallel workers
-        patient_indices = list(range(len(patient_records)))
-        clinical_texts = _run_parallel_vllm_workers(
-            gpu_device_ids=gpu_device_ids,
-            tensor_parallel_size=vllm_config.tensor_parallel_size,
-            vllm_config_dict=vllm_config_dict,
-            patient_indices=patient_indices,
-            history_prompts=history_prompts,
-            reasoning_marker=vllm_config.reasoning_marker,
-        )
-    else:
-        # Single-GPU mode: generate all clinical histories in one batch
-        clinical_texts = vllm_client.generate_batch(
-            prompts=history_prompts,
-            system_prompt=CLINICAL_SYSTEM_PROMPT,
-            temperature=0.4,  # Lower temperature for more faithful confounder representation
-            max_tokens=vllm_config.max_tokens,
-        )
-
-        # Strip reasoning prefix in single-GPU mode
-        clinical_texts = [
-            VLLMBatchClient.strip_reasoning_prefix(
-                text if text else "",
-                vllm_config.reasoning_marker
+    def _batch_generate_texts(prompts, temperature=0.4, description="texts"):
+        """Helper to batch generate texts using single-GPU or multi-GPU path."""
+        if use_multi_gpu:
+            return _run_parallel_vllm_workers(
+                gpu_device_ids=gpu_device_ids,
+                tensor_parallel_size=vllm_config.tensor_parallel_size,
+                vllm_config_dict=vllm_config_dict,
+                patient_indices=list(range(len(prompts))),
+                history_prompts=prompts,
+                reasoning_marker=vllm_config.reasoning_marker,
             )
-            for text in clinical_texts
-        ]
+        else:
+            texts = vllm_client.generate_batch(
+                prompts=prompts,
+                system_prompt=CLINICAL_SYSTEM_PROMPT,
+                temperature=temperature,
+                max_tokens=vllm_config.max_tokens,
+            )
+            return [
+                VLLMBatchClient.strip_reasoning_prefix(
+                    text if text else "", vllm_config.reasoning_marker
+                )
+                for text in texts
+            ]
 
-    # Merge clinical texts with patient records
-    # Also validate that texts don't contain literal category codes
+    if generation_mode == "two_stage":
+        # ================================================================
+        # Two-stage batch generation
+        # ================================================================
+
+        # --- Batch Pass 1: Generate event timelines ---
+        logger.info(f"Step 6/8: Batch generating {len(patient_records)} event timelines with vLLM...")
+        timeline_prompts = []
+        for record in patient_records:
+            timeline_prompts.append(EVENT_TIMELINE_PROMPT.format(
+                patient_characteristics=record["patient_prompt"],
+                clinical_question=config.clinical_question,
+                min_events=config.min_events_per_patient,
+                max_events=config.max_events_per_patient,
+            ))
+
+        if use_multi_gpu:
+            # Unload init model before spawning workers
+            logger.info("Unloading initialization model for parallel timeline generation...")
+            del vllm_client
+            import gc
+            gc.collect()
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+            vllm_client_deleted = True
+        else:
+            vllm_client_deleted = False
+
+        timeline_texts = _batch_generate_texts(timeline_prompts, temperature=0.7, description="event timelines")
+
+        # Parse all timelines into events
+        logger.info("Step 7/8: Parsing event timelines and building note expansion prompts...")
+        all_patient_events = []
+        note_expansion_prompts = []
+        # Track which expansion prompt maps to which patient and event
+        expansion_mapping = []  # List of (patient_idx, event_idx)
+
+        note_types = set(getattr(config, 'note_types_to_expand', [
+            "clinical_note", "imaging_report", "pathology_report", "ngs_report"
+        ]))
+
+        for patient_idx, timeline_text in enumerate(timeline_texts):
+            events = _parse_event_timeline(timeline_text)
+            all_patient_events.append(events)
+            patient_records[patient_idx]["event_timeline"] = timeline_text
+
+            for event_idx, event in enumerate(events):
+                if event["event_type"] not in note_types:
+                    continue
+
+                masked_timeline = _create_masked_timeline(events, event_idx)
+                note_type = _event_type_to_note_type(event["event_type"])
+
+                expansion_prompt = NOTE_EXPANSION_PROMPT.format(
+                    note_type=note_type,
+                    clinical_question=config.clinical_question,
+                    masked_event_timeline=masked_timeline,
+                )
+                note_expansion_prompts.append(expansion_prompt)
+                expansion_mapping.append((patient_idx, event_idx))
+
+        logger.info(f"Built {len(note_expansion_prompts)} note expansion prompts for {len(patient_records)} patients "
+                    f"(avg {len(note_expansion_prompts)/max(1, len(patient_records)):.1f} notes/patient)")
+
+        # --- Batch Pass 2: Expand all notes ---
+        logger.info(f"Step 8/8: Batch generating {len(note_expansion_prompts)} expanded notes with vLLM...")
+
+        if use_multi_gpu and not vllm_client_deleted:
+            # Need to unload if not already done
+            del vllm_client
+            import gc
+            gc.collect()
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        expanded_notes = _batch_generate_texts(note_expansion_prompts, temperature=0.5, description="expanded notes")
+
+        # Group notes back by patient and concatenate
+        note_separator = getattr(config, 'note_separator', "\n\n---\n\n")
+        drug_prob = getattr(config, 'drug_perturbation_prob', 0.3)
+
+        patient_notes = {i: [] for i in range(len(patient_records))}
+        for (patient_idx, _event_idx), note_text in zip(expansion_mapping, expanded_notes):
+            if not note_text:
+                continue
+            # Apply drug perturbation
+            if drug_prob > 0 and random.random() < drug_prob:
+                note_text = _apply_drug_perturbation(note_text)
+            patient_notes[patient_idx].append(note_text)
+
+        # Merge into patient records
+        for patient_idx, notes in patient_notes.items():
+            patient_records[patient_idx]["clinical_text"] = note_separator.join(notes)
+            patient_records[patient_idx]["num_notes"] = len(notes)
+
+    else:
+        # ================================================================
+        # Legacy single-document batch generation
+        # ================================================================
+        history_prompts = []
+        for record in patient_records:
+            history_prompts.append(PATIENT_HISTORY_PROMPT.format(
+                patient_characteristics=record["patient_prompt"],
+                clinical_question=config.clinical_question,
+            ))
+
+        logger.info(f"Step 6/6: Batch generating {len(history_prompts)} clinical histories with vLLM...")
+
+        if use_multi_gpu:
+            logger.info("Unloading initialization model to free GPU memory for parallel workers...")
+            del vllm_client
+            import gc
+            gc.collect()
+            try:
+                import torch
+                torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        clinical_texts = _batch_generate_texts(history_prompts, temperature=0.4, description="clinical histories")
+
+        for i, cleaned_text in enumerate(clinical_texts):
+            patient_records[i]["clinical_text"] = cleaned_text
+
+    # Validate all clinical texts
     validation_issues = 0
-    for i, cleaned_text in enumerate(clinical_texts):
-        patient_records[i]["clinical_text"] = cleaned_text
-
-        # Check for underscore-connected phrases (likely category codes that weren't naturalized)
-        underscore_patterns = re.findall(r'\b[a-z]+(?:_[a-z0-9]+){2,}\b', cleaned_text.lower())
+    for i, record in enumerate(patient_records):
+        text = record.get("clinical_text", "")
+        if not text:
+            continue
+        underscore_patterns = re.findall(r'\b[a-z]+(?:_[a-z0-9]+){2,}\b', text.lower())
         if underscore_patterns:
             validation_issues += 1
-            if validation_issues <= 3:  # Only log first few examples
+            if validation_issues <= 3:
                 logger.warning(f"Patient {i}: Clinical text contains underscore patterns: {underscore_patterns[:3]}")
 
     if validation_issues > 0:
-        logger.warning(f"VALIDATION: {validation_issues}/{len(patient_records)} clinical texts contain underscore-connected phrases (likely literal category codes)")
+        logger.warning(f"VALIDATION: {validation_issues}/{len(patient_records)} clinical texts contain underscore-connected phrases")
     else:
         logger.info("VALIDATION: All clinical texts passed - no underscore-connected category codes detected")
 
@@ -1654,11 +1933,19 @@ def generate_synthetic_dataset_batch(
             "mean_ite_prob": df["true_ite_prob"].mean(),
             "std_ite_prob": df["true_ite_prob"].std(),
             "clinical_text_stats": {
-                "non_empty_count": (df["clinical_text"].str.len() > 0).sum(),
-                "mean_length": df["clinical_text"].str.len().mean(),
-            }
+                "non_empty_count": int((df["clinical_text"].str.len() > 0).sum()),
+                "mean_length": float(df["clinical_text"].str.len().mean()),
+            },
+            "generation_mode": generation_mode,
         }
     }
+
+    if generation_mode == "two_stage" and "num_notes" in df.columns:
+        metadata["dataset_statistics"]["two_stage_stats"] = {
+            "mean_notes_per_patient": float(df["num_notes"].mean()),
+            "min_notes_per_patient": int(df["num_notes"].min()),
+            "max_notes_per_patient": int(df["num_notes"].max()),
+        }
     
     # Save outputs
     dataset_path = output_dir / "dataset.parquet"

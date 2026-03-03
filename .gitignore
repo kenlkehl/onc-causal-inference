@@ -3,3 +3,4 @@
 __pycache__/
 .test_outputs/
 *.cdt_cache*
+synthetic_output*

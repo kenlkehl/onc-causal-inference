@@ -13,3 +13,14 @@ python -m synthetic_data.cli \
   --output-dir ../example_synthetic_data_one_confounder
 
 python -m synthetic_data.cli --outcome-type continuous --outcome-noise-std 1.0       --output-dir ../example_synthetic_data_ten_confounders_continuous_50K       --num-confounders 10       --dataset-size 50000       --model openai/gpt-oss-120b       --use-vllm-batch --tensor-parallel-size 1 --num-workers 8  --gpu-devices 0,1,2,3,4,5,6,7
+
+
+python -m synthetic_data.cli  --use-vllm-batch  --model openai/gpt-oss-120b \
+--gpu-devices 0,1,2,3 \
+--tensor-parallel-size 1 \
+--dataset-size 1000 \
+--generation-mode two_stage \
+--num-confounders 1 \
+--output-dir ./synthetic_output_test \
+--vllm-download-dir /data1/ken/models
+    
