@@ -1,0 +1,381 @@
+{
+  "config": {
+    "clinical_question": "Compare the effectiveness of letrozole+palbociclib with letrozole+ribociclib for the first line treatment of metastatic ER positive breast cancer.",
+    "dataset_size": 1000,
+    "treatment_effect_prob": 0.2,
+    "target_treatment_rate": 0.5,
+    "target_control_outcome_rate": 0.5,
+    "enforce_positivity": false,
+    "min_treatment_rate_per_stratum": 0.1,
+    "max_treatment_rate_per_stratum": 0.9,
+    "main_coefficient_scale": 0.3,
+    "interaction_coefficient_scale": 0.1,
+    "target_logit_std": 2.0,
+    "num_confounders": 10,
+    "outcome_type": "binary",
+    "outcome_noise_std": 1.0,
+    "generation_mode": "two_stage",
+    "min_events_per_patient": 15,
+    "max_events_per_patient": 30,
+    "note_types_to_expand": [
+      "clinical_note",
+      "imaging_report",
+      "pathology_report",
+      "ngs_report"
+    ],
+    "note_separator": "\n\n<new_note>\n\n",
+    "drug_perturbation_prob": 0.3,
+    "output_dir": "./example_synthetic_data_ten_confounders",
+    "llm": {
+      "api_base_url": "http://localhost:8000/v1",
+      "api_key": "",
+      "model_name": "openai/gpt-oss-120b",
+      "temperature": 0.7,
+      "max_tokens": 50000,
+      "timeout": 300.0
+    },
+    "seed": 42
+  },
+  "confounders": [
+    {
+      "name": "age",
+      "type": "continuous",
+      "description": "Patient age at initiation of first‑line therapy (years)"
+    },
+    {
+      "name": "charlson_comorbidity_index",
+      "type": "continuous",
+      "description": "Weighted score summarizing baseline comorbid conditions"
+    },
+    {
+      "name": "baseline_tumor_burden",
+      "type": "continuous",
+      "description": "Sum of the longest diameters of all measurable lesions at baseline (centimeters)"
+    },
+    {
+      "name": "neutrophil_to_lymphocyte_ratio",
+      "type": "continuous",
+      "description": "Baseline NLR calculated from routine complete blood count"
+    },
+    {
+      "name": "serum_albumin",
+      "type": "continuous",
+      "description": "Baseline serum albumin concentration (g/dL) reflecting nutritional status"
+    },
+    {
+      "name": "ecog_performance_status",
+      "type": "categorical",
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ],
+      "description": "Eastern Cooperative Oncology Group performance status score"
+    },
+    {
+      "name": "menopausal_status",
+      "type": "categorical",
+      "categories": [
+        "pre",
+        "peri",
+        "post"
+      ],
+      "description": "Menopausal state at treatment start"
+    },
+    {
+      "name": "visceral_metastasis_site",
+      "type": "categorical",
+      "categories": [
+        "none",
+        "bone-only",
+        "liver",
+        "lung",
+        "multiple"
+      ],
+      "description": "Location of metastatic disease at baseline"
+    },
+    {
+      "name": "prior_adjuvant_endocrine_therapy",
+      "type": "categorical",
+      "categories": [
+        "none",
+        "tamoxifen",
+        "aromatase_inhibitor",
+        "sequential"
+      ],
+      "description": "Type of endocrine therapy received in the adjuvant setting before recurrence"
+    },
+    {
+      "name": "insurance_type",
+      "type": "categorical",
+      "categories": [
+        "private",
+        "medicare",
+        "medicaid",
+        "uninsured"
+      ],
+      "description": "Primary health‑insurance coverage influencing drug access"
+    }
+  ],
+  "treatment_equation": {
+    "intercept": 0.7444234655345436,
+    "coefficients": {
+      "age": -0.9942487252216973,
+      "charlson_comorbidity_index": -1.1930984702660368,
+      "baseline_tumor_burden": 0.19884974504433944,
+      "neutrophil_to_lymphocyte_ratio": -0.3976994900886789,
+      "serum_albumin": 0.7953989801773578,
+      "ecog_performance_status_1": -0.5965492351330184,
+      "ecog_performance_status_2": -1.3919482153103762,
+      "ecog_performance_status_3": -2.187347195487734,
+      "menopausal_status_peri": 0.19884974504433944,
+      "menopausal_status_post": 0.3976994900886789,
+      "visceral_metastasis_site_bone-only": 0.3976994900886789,
+      "visceral_metastasis_site_liver": 0.7953989801773578,
+      "visceral_metastasis_site_lung": 0.5965492351330184,
+      "visceral_metastasis_site_multiple": 0.9942487252216973,
+      "prior_adjuvant_endocrine_therapy_tamoxifen": -0.19884974504433944,
+      "prior_adjuvant_endocrine_therapy_aromatase_inhibitor": -0.3976994900886789,
+      "prior_adjuvant_endocrine_therapy_sequential": -0.7953989801773578,
+      "insurance_type_medicare": -0.3976994900886789,
+      "insurance_type_medicaid": -0.9942487252216973,
+      "insurance_type_uninsured": -1.5907979603547155
+    },
+    "interactions": [
+      {
+        "terms": [
+          "age",
+          "ecog_performance_status_2"
+        ],
+        "coefficient": -0.06628324834811317
+      },
+      {
+        "terms": [
+          "charlson_comorbidity_index",
+          "insurance_type_uninsured"
+        ],
+        "coefficient": -0.10605319735698104
+      }
+    ],
+    "original_intercept": -0.3
+  },
+  "outcome_equation": {
+    "intercept": 2.4530797468968104,
+    "coefficients": {
+      "age": -0.6848837728057352,
+      "charlson_comorbidity_index": -0.8561047160071691,
+      "baseline_tumor_burden": -1.0273256592086029,
+      "neutrophil_to_lymphocyte_ratio": -0.5136628296043014,
+      "serum_albumin": 0.8561047160071691,
+      "ecog_performance_status_1": -0.6848837728057352,
+      "ecog_performance_status_2": -1.3697675456114704,
+      "ecog_performance_status_3": -2.0546513184172057,
+      "menopausal_status_peri": -0.06848837728057353,
+      "menopausal_status_post": -0.1712209432014338,
+      "visceral_metastasis_site_bone-only": -0.3424418864028676,
+      "visceral_metastasis_site_liver": -1.0273256592086029,
+      "visceral_metastasis_site_lung": -0.8561047160071691,
+      "visceral_metastasis_site_multiple": -1.5409884888129044,
+      "prior_adjuvant_endocrine_therapy_tamoxifen": -0.1712209432014338,
+      "prior_adjuvant_endocrine_therapy_aromatase_inhibitor": -0.3424418864028676,
+      "prior_adjuvant_endocrine_therapy_sequential": -0.6848837728057352,
+      "insurance_type_medicare": -0.1712209432014338,
+      "insurance_type_medicaid": -0.5136628296043014,
+      "insurance_type_uninsured": -1.0273256592086029
+    },
+    "interactions": [
+      {
+        "terms": [
+          "baseline_tumor_burden",
+          "visceral_metastasis_site_multiple"
+        ],
+        "coefficient": -0.11414729546762256
+      },
+      {
+        "terms": [
+          "age",
+          "serum_albumin"
+        ],
+        "coefficient": 0.09131783637409804
+      }
+    ],
+    "treatment_coefficient": 0.2,
+    "treatment_interactions": [
+      {
+        "term": "age",
+        "coefficient": -0.28641812246525844
+      },
+      {
+        "term": "charlson_comorbidity_index",
+        "coefficient": 1.0289563821051453
+      },
+      {
+        "term": "baseline_tumor_burden",
+        "coefficient": 0.5296296204528979
+      },
+      {
+        "term": "neutrophil_to_lymphocyte_ratio",
+        "coefficient": 0.22523198292053814
+      },
+      {
+        "term": "serum_albumin",
+        "coefficient": -0.7852908376954343
+      },
+      {
+        "term": "ecog_performance_status_1",
+        "coefficient": -0.785345902593294
+      },
+      {
+        "term": "ecog_performance_status_2",
+        "coefficient": -1.0088712098764203
+      },
+      {
+        "term": "ecog_performance_status_3",
+        "coefficient": 0.835960334099335
+      },
+      {
+        "term": "menopausal_status_peri",
+        "coefficient": 0.2308401024332836
+      },
+      {
+        "term": "menopausal_status_post",
+        "coefficient": 0.4750184403279017
+      },
+      {
+        "term": "visceral_metastasis_site_bone-only",
+        "coefficient": -1.0944796676275346
+      },
+      {
+        "term": "visceral_metastasis_site_liver",
+        "coefficient": 1.0727787747576398
+      },
+      {
+        "term": "visceral_metastasis_site_lung",
+        "coefficient": 0.7589485669096491
+      },
+      {
+        "term": "visceral_metastasis_site_multiple",
+        "coefficient": -0.6567142505577176
+      },
+      {
+        "term": "prior_adjuvant_endocrine_therapy_tamoxifen",
+        "coefficient": -0.7263763895726316
+      },
+      {
+        "term": "prior_adjuvant_endocrine_therapy_aromatase_inhibitor",
+        "coefficient": -0.7227703791495375
+      },
+      {
+        "term": "prior_adjuvant_endocrine_therapy_sequential",
+        "coefficient": -0.4469043706595343
+      },
+      {
+        "term": "insurance_type_medicare",
+        "coefficient": 0.056517594324981005
+      },
+      {
+        "term": "insurance_type_medicaid",
+        "coefficient": -0.15536584130203912
+      },
+      {
+        "term": "insurance_type_uninsured",
+        "coefficient": -0.47661258037687426
+      }
+    ],
+    "original_intercept": -1.0
+  },
+  "summary_statistics": {
+    "age": {
+      "type": "continuous",
+      "mean": 62.3,
+      "std": 11.4
+    },
+    "charlson_comorbidity_index": {
+      "type": "continuous",
+      "mean": 4.2,
+      "std": 2.6
+    },
+    "baseline_tumor_burden": {
+      "type": "continuous",
+      "mean": 9.7,
+      "std": 6.1
+    },
+    "neutrophil_to_lymphocyte_ratio": {
+      "type": "continuous",
+      "mean": 2.5,
+      "std": 1.2
+    },
+    "serum_albumin": {
+      "type": "continuous",
+      "mean": 3.8,
+      "std": 0.5
+    },
+    "ecog_performance_status": {
+      "type": "categorical",
+      "proportions": {
+        "0": 0.15,
+        "1": 0.4,
+        "2": 0.3,
+        "3": 0.15
+      }
+    },
+    "menopausal_status": {
+      "type": "categorical",
+      "proportions": {
+        "pre": 0.1,
+        "peri": 0.1,
+        "post": 0.8
+      }
+    },
+    "visceral_metastasis_site": {
+      "type": "categorical",
+      "proportions": {
+        "none": 0.05,
+        "bone-only": 0.35,
+        "liver": 0.2,
+        "lung": 0.15,
+        "multiple": 0.25
+      }
+    },
+    "prior_adjuvant_endocrine_therapy": {
+      "type": "categorical",
+      "proportions": {
+        "none": 0.25,
+        "tamoxifen": 0.3,
+        "aromatase_inhibitor": 0.3,
+        "sequential": 0.15
+      }
+    },
+    "insurance_type": {
+      "type": "categorical",
+      "proportions": {
+        "private": 0.25,
+        "medicare": 0.55,
+        "medicaid": 0.15,
+        "uninsured": 0.05
+      }
+    }
+  },
+  "dataset_statistics": {
+    "n_patients": 1000,
+    "treatment_rate": 0.527,
+    "outcome_rate": 0.417,
+    "mean_treatment_prob": 0.514411503631671,
+    "std_treatment_prob": 0.3149899810683661,
+    "mean_outcome_prob": 0.42300619317631954,
+    "std_outcome_prob": 0.29530583439229896,
+    "mean_ite_prob": -0.08467503832648487,
+    "std_ite_prob": 0.3057886651691235,
+    "clinical_text_stats": {
+      "non_empty_count": 997,
+      "mean_length": 79924.894
+    },
+    "generation_mode": "two_stage",
+    "two_stage_stats": {
+      "mean_notes_per_patient": 13.867,
+      "min_notes_per_patient": 0,
+      "max_notes_per_patient": 21
+    }
+  }
+}

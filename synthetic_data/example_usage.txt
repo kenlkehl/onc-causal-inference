@@ -21,6 +21,6 @@ python -m synthetic_data.cli  --use-vllm-batch  --model openai/gpt-oss-120b \
 --dataset-size 1000 \
 --generation-mode two_stage \
 --num-confounders 1 \
---output-dir ./synthetic_output_test \
+--output-dir ./example_synthetic_data_one_confounder \
 --vllm-download-dir /data1/ken/models
     
