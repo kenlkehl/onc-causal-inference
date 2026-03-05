@@ -43,6 +43,7 @@ cdt/models/extractor_factory.py
 cdt/models/frozen_llm_pooler_extractor.py
 cdt/models/gated_mil_attention.py
 cdt/models/gated_mil_hierarchical_extractor.py
+cdt/models/gpu_hidden_state_store.py
 cdt/models/gru_extractor.py
 cdt/models/gru_pool_extractor.py
 cdt/models/gru_transformer_mil_extractor.py

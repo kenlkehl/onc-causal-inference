@@ -17,7 +17,7 @@ Requires-Python: >=3.12
 Description-Content-Type: text/markdown
 License-File: LICENSE
 Requires-Dist: torch>=2.0.0
-Requires-Dist: transformers>=4.30.0
+Requires-Dist: transformers>=5.3.0
 Requires-Dist: sentence-transformers>=2.2.0
 Requires-Dist: pandas>=1.5.0
 Requires-Dist: numpy>=1.23.0

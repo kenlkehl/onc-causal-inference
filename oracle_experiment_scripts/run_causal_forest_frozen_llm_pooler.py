@@ -746,7 +746,7 @@ def generate_experiment_grid(
     freeze_llm_options = [True]
     projection_dim_options = [64, 128, 256]
     gated_attention_dim_options = [64, 128]
-    max_length_options = [8192]
+    max_length_options = [200000]
 
     # Pre-load confounder specs for each dataset
     dataset_specs = {}
