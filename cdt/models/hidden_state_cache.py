@@ -641,14 +641,12 @@ class HiddenStateCache:
                 else:
                     tok.add_special_tokens({'pad_token': '[PAD]'})
 
-            # Load to CPU first, then move to target device.
-            # low_cpu_mem_usage=False prevents the meta-tensor path that
-            # fails for models with tied weights (e.g. Qwen3).
+            # Load model directly to target device to avoid meta-tensor
+            # issues with newer transformers + accelerate + tied weights.
             mdl = AutoModelForCausalLM.from_pretrained(
                 self._model_name, config=hf_config, trust_remote_code=True,
-                torch_dtype=torch.float16, low_cpu_mem_usage=False,
+                torch_dtype=torch.float16, device_map=device,
             )
-            mdl = mdl.to(device)
             if needs_resize:
                 mdl.resize_token_embeddings(vocab_size)
             mdl.eval()
