@@ -641,9 +641,12 @@ class HiddenStateCache:
                 else:
                     tok.add_special_tokens({'pad_token': '[PAD]'})
 
+            # Load to CPU first, then move to target device.
+            # device_map=None prevents accelerate from using meta tensors,
+            # which fail for models with tied weights (e.g. Qwen3).
             mdl = AutoModelForCausalLM.from_pretrained(
                 self._model_name, config=hf_config, trust_remote_code=True,
-                torch_dtype=torch.float16,
+                torch_dtype=torch.float16, device_map=None,
             )
             mdl = mdl.to(device)
             if needs_resize:
