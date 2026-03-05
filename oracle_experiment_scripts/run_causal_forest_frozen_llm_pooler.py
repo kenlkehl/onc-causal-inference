@@ -88,6 +88,9 @@ class ExperimentConfig:
     flp_gated_attention_dim: int = 128
     flp_max_length: int = 200000 # int = 8192
 
+    # Random projection for cached hidden states (None = no projection)
+    flp_random_projection_dim: Optional[int] = None
+
     # Fixed parameters
     flp_model_name: str = "Qwen/Qwen3.5-0.8B-Base" #"Qwen/Qwen3-0.6B-Base"
     flp_dropout: float = 0.1
@@ -216,21 +219,22 @@ def precompute_caches(
     Returns:
         Dict mapping cache_hash -> HiddenStateCache (opened for reading).
     """
-    # Collect unique cache keys: (dataset_path, model_name, max_length)
-    unique_keys = {}  # cache_hash -> (parquet_file, model_name, max_length, batch_size)
+    # Collect unique cache keys: (dataset_path, model_name, max_length, random_projection_dim)
+    unique_keys = {}  # cache_hash -> (parquet_file, model_name, max_length, batch_size, rp_dim)
     for config in configs:
         if not config.flp_freeze_llm:
             continue
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
+        rp_dim = config.flp_random_projection_dim
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file)
+            config.flp_model_name, config.flp_max_length, str(parquet_file), rp_dim
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
                 parquet_file, config.flp_model_name,
-                config.flp_max_length, config.batch_size,
+                config.flp_max_length, config.batch_size, rp_dim,
             )
 
     if not unique_keys:
@@ -243,13 +247,14 @@ def precompute_caches(
     caches_to_compute = []  # list of (cache_hash, cache_obj, parquet_file, batch_size)
     ready_caches = {}       # cache_hash -> HiddenStateCache
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size) in unique_keys.items():
+    for cache_hash, (parquet_file, model_name, max_length, batch_size, rp_dim) in unique_keys.items():
         cache_dir = str(parquet_file.parent / '.cdt_cache')
         cache = HiddenStateCache(
             cache_dir=cache_dir,
             model_name=model_name,
             max_length=max_length,
             dataset_path=str(parquet_file),
+            random_projection_dim=rp_dim,
         )
         df = pd.read_parquet(parquet_file)
         if cache.is_valid(len(df)):
@@ -337,20 +342,21 @@ def precompute_gpu_stores(
     Returns:
         Dict mapping cache_hash -> GPUHiddenStateStore on this device.
     """
-    unique_keys = {}  # cache_hash -> (parquet_file, model_name, max_length, batch_size)
+    unique_keys = {}  # cache_hash -> (parquet_file, model_name, max_length, batch_size, rp_dim)
     for config in configs:
         if not config.flp_freeze_llm:
             continue
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
+        rp_dim = config.flp_random_projection_dim
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file)
+            config.flp_model_name, config.flp_max_length, str(parquet_file), rp_dim
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
                 parquet_file, config.flp_model_name,
-                config.flp_max_length, config.batch_size,
+                config.flp_max_length, config.batch_size, rp_dim,
             )
 
     if not unique_keys:
@@ -359,7 +365,7 @@ def precompute_gpu_stores(
     gpu_device = torch.device(device)
     stores = {}
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size) in unique_keys.items():
+    for cache_hash, (parquet_file, model_name, max_length, batch_size, rp_dim) in unique_keys.items():
         df = pd.read_parquet(parquet_file)
         all_texts = df['clinical_text'].tolist()
 
@@ -463,7 +469,8 @@ def run_single_experiment(
 
     if config.flp_freeze_llm:
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file)
+            config.flp_model_name, config.flp_max_length, str(parquet_file),
+            config.flp_random_projection_dim
         )
         # Prefer GPU store over disk cache
         if gpu_store_registry is not None:

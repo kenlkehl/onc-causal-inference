@@ -402,7 +402,8 @@ tokens via gated attention, producing a richer representation while keeping the 
 | Projection | 2-layer MLP | Linear->LN->GELU->Dropout->Linear->LN |
 
 Key params: `flp_model_name`, `flp_max_length`, `flp_freeze_llm`, `flp_gated_attention_dim`,
-`flp_projection_dim`, `flp_dropout`, `flp_gradient_checkpointing`, `flp_cache_hidden_states`
+`flp_projection_dim`, `flp_dropout`, `flp_gradient_checkpointing`, `flp_cache_hidden_states`,
+`flp_random_projection_dim`
 
 Key differences from `llm`:
 - **All tokens used**: Gated attention pooling over all hidden states (not just last token)
@@ -422,14 +423,16 @@ experiment runs. During training, only the lightweight trainable layers (~200K p
 | Param | Description | Default |
 |-------|-------------|---------|
 | `flp_cache_hidden_states` | Enable hidden state caching | `True` |
+| `flp_random_projection_dim` | Apply random linear projection to reduce cached hidden state dimension | `None` |
 
 Cache details:
 - **Location**: `{dataset_dir}/.cdt_cache/flp_hidden_states_{hash}/`
-- **Key**: `(model_name, max_length, dataset_path)` — different causal heads, learning rates, fold counts all share the same cache
-- **Format**: `hidden_states.npy` (float16 memmap) + `attention_mask.npy` (uint8 memmap) + `metadata.json`
-- **Padding**: Padded to actual max tokenized length (not max_length) to save disk space
+- **Key**: `(model_name, max_length, dataset_path, random_projection_dim)` — different causal heads, learning rates, fold counts all share the same cache
+- **Format**: `hidden_states.npy` (float16 memmap) + `offsets.npy` (variable-length indexing) + `metadata.json`
+- **Storage**: Variable-length flat format (no padding waste)
 - **GPU savings**: ~2.4 GB less GPU memory (no LLM loaded during training)
 - **Reuse**: Cache is automatically reused across experiments with the same model/dataset
+- **Random projection**: When `flp_random_projection_dim` is set (e.g., 256), a deterministic random Gaussian matrix projects each token's hidden state from `hidden_size` (e.g., 1024) down to `flp_random_projection_dim` before caching. Reduces cache disk/RAM size proportionally. The projection matrix is seeded on `(model_name, hidden_size, projection_dim)` for reproducibility.
 - **Disable**: Set `flp_cache_hidden_states: false` in config
 
 No `fit_tokenizer()` required. Interpretability: `interpret_attention()`, `get_attention_weights()` (not available in cached mode)

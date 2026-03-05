@@ -96,6 +96,10 @@ class HiddenStateCache:
         model_name: HuggingFace model name.
         max_length: Maximum sequence length for tokenization.
         dataset_path: Path to the dataset file (used for cache key).
+        random_projection_dim: If set, apply a random linear projection to reduce
+            hidden state dimensionality before caching. Uses a deterministic random
+            matrix seeded on (model_name, hidden_size, projection_dim) for
+            reproducibility. Reduces cache size proportionally.
     """
 
     def __init__(
@@ -104,12 +108,16 @@ class HiddenStateCache:
         model_name: str,
         max_length: int,
         dataset_path: str,
+        random_projection_dim: Optional[int] = None,
     ):
         self._cache_dir = Path(cache_dir)
         self._model_name = model_name
         self._max_length = max_length
         self._dataset_path = dataset_path
-        self._cache_hash = self.compute_cache_hash(model_name, max_length, dataset_path)
+        self._random_projection_dim = random_projection_dim
+        self._cache_hash = self.compute_cache_hash(
+            model_name, max_length, dataset_path, random_projection_dim
+        )
 
         # Actual cache location
         self._cache_path = self._cache_dir / f"flp_hidden_states_{self._cache_hash}"
@@ -123,9 +131,16 @@ class HiddenStateCache:
         self._preloaded = False
 
     @staticmethod
-    def compute_cache_hash(model_name: str, max_length: int, dataset_path: str) -> str:
+    def compute_cache_hash(
+        model_name: str,
+        max_length: int,
+        dataset_path: str,
+        random_projection_dim: Optional[int] = None,
+    ) -> str:
         """Compute deterministic hash for cache identification."""
         key = f"{model_name}|{max_length}|{os.path.abspath(dataset_path)}"
+        if random_projection_dim is not None:
+            key += f"|rp{random_projection_dim}"
         return hashlib.md5(key.encode()).hexdigest()[:12]
 
     @property
@@ -233,6 +248,15 @@ class HiddenStateCache:
             if hs.shape[0] != expected_total:
                 return False
 
+            # Check random projection dim matches
+            cached_rp = self._metadata.get('random_projection_dim')
+            if cached_rp != self._random_projection_dim:
+                logger.warning(
+                    f"Cache random_projection_dim mismatch: "
+                    f"expected {self._random_projection_dim}, got {cached_rp}"
+                )
+                return False
+
             logger.info(
                 f"Valid hidden state cache found: {expected_num_samples} samples, "
                 f"total_tokens={expected_total}, hash={self._cache_hash}"
@@ -242,6 +266,28 @@ class HiddenStateCache:
         except Exception as e:
             logger.warning(f"Cache validation failed: {e}")
             return False
+
+    @staticmethod
+    def _make_random_projection(
+        hidden_size: int,
+        projection_dim: int,
+        model_name: str,
+    ) -> np.ndarray:
+        """Generate a deterministic random projection matrix.
+
+        Uses a seed derived from (model_name, hidden_size, projection_dim) so
+        the same matrix is always produced for the same configuration.
+
+        Returns:
+            float32 numpy array of shape (hidden_size, projection_dim), scaled
+            by 1/sqrt(projection_dim) for variance preservation.
+        """
+        seed_str = f"rp|{model_name}|{hidden_size}|{projection_dim}"
+        seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
+        rng = np.random.RandomState(seed)
+        W = rng.randn(hidden_size, projection_dim).astype(np.float32)
+        W *= 1.0 / np.sqrt(projection_dim)
+        return W
 
     def precompute(
         self,
@@ -332,6 +378,21 @@ class HiddenStateCache:
         for param in model.parameters():
             param.requires_grad = False
 
+        # Random projection setup
+        rp_matrix = None
+        rp_matrix_gpu = None
+        store_dim = hidden_size
+        if self._random_projection_dim is not None and self._random_projection_dim < hidden_size:
+            rp_matrix = self._make_random_projection(
+                hidden_size, self._random_projection_dim, self._model_name
+            )
+            rp_matrix_gpu = torch.from_numpy(rp_matrix).to(device)
+            store_dim = self._random_projection_dim
+            logger.info(
+                f"  Random projection: {hidden_size} -> {store_dim} "
+                f"({store_dim / hidden_size:.1%} of original)"
+            )
+
         # Create cache directory
         self._cache_path.mkdir(parents=True, exist_ok=True)
 
@@ -341,7 +402,7 @@ class HiddenStateCache:
 
         hs_mmap = np.lib.format.open_memmap(
             str(hs_path), mode='w+', dtype=np.float16,
-            shape=(total_tokens, hidden_size)
+            shape=(total_tokens, store_dim)
         )
 
         # Save offsets
@@ -376,6 +437,10 @@ class HiddenStateCache:
                 )
                 hidden_states = outputs.hidden_states[-1]  # (batch, batch_max_len, hidden_size)
 
+                # Apply random projection on GPU before transfer
+                if rp_matrix_gpu is not None:
+                    hidden_states = hidden_states.float() @ rp_matrix_gpu
+
             # Write only real (non-padding) tokens to flat memmap
             hs_cpu = hidden_states.cpu().to(torch.float16).numpy()
             for j in range(len(batch_texts)):
@@ -389,13 +454,15 @@ class HiddenStateCache:
 
         # Flush to disk
         hs_mmap.flush()
-        del hs_mmap
+        del hs_mmap, rp_matrix_gpu
 
         # Write metadata
         metadata = {
             'model_name': self._model_name,
             'max_length': self._max_length,
-            'hidden_size': hidden_size,
+            'hidden_size': store_dim,
+            'original_hidden_size': hidden_size,
+            'random_projection_dim': self._random_projection_dim,
             'num_samples': num_samples,
             'actual_max_len': actual_max_len,
             'total_tokens': total_tokens,
@@ -419,13 +486,16 @@ class HiddenStateCache:
             torch.cuda.empty_cache()
 
         # Log cache size
-        total_bytes = total_tokens * hidden_size * 2  # float16
+        total_bytes = total_tokens * store_dim * 2  # float16
+        original_bytes = total_tokens * hidden_size * 2
         padded_bytes = num_samples * actual_max_len * hidden_size * 2
-        logger.info(
-            f"Hidden state cache created: {total_bytes / 1e9:.2f} GB "
-            f"(vs {padded_bytes / 1e9:.2f} GB if padded), "
-            f"total_tokens={total_tokens:,}, savings={savings_pct:.1%}"
+        msg = f"Hidden state cache created: {total_bytes / 1e9:.2f} GB"
+        if store_dim != hidden_size:
+            msg += f" (vs {original_bytes / 1e9:.2f} GB without projection)"
+        msg += (
+            f", total_tokens={total_tokens:,}, savings={savings_pct:.1%}"
         )
+        logger.info(msg)
 
     def precompute_multi_gpu(
         self,
@@ -510,6 +580,19 @@ class HiddenStateCache:
         needs_resize = tokenizer.pad_token == '[PAD]'
         vocab_size = len(tokenizer)
 
+        # Random projection setup
+        rp_matrix = None
+        store_dim = hidden_size
+        if self._random_projection_dim is not None and self._random_projection_dim < hidden_size:
+            rp_matrix = self._make_random_projection(
+                hidden_size, self._random_projection_dim, self._model_name
+            )
+            store_dim = self._random_projection_dim
+            logger.info(
+                f"  Random projection: {hidden_size} -> {store_dim} "
+                f"({store_dim / hidden_size:.1%} of original)"
+            )
+
         # --- Create memmap and save offsets ---
         self._cache_path.mkdir(parents=True, exist_ok=True)
         hs_path = self._cache_path / "hidden_states.npy"
@@ -517,7 +600,7 @@ class HiddenStateCache:
 
         hs_mmap = np.lib.format.open_memmap(
             str(hs_path), mode='w+', dtype=np.float16,
-            shape=(total_tokens, hidden_size)
+            shape=(total_tokens, store_dim)
         )
         np.save(str(offsets_path), offsets)
 
@@ -569,6 +652,11 @@ class HiddenStateCache:
             for param in mdl.parameters():
                 param.requires_grad = False
 
+            # Per-device random projection matrix on GPU
+            rp_gpu = None
+            if rp_matrix is not None:
+                rp_gpu = torch.from_numpy(rp_matrix).to(device)
+
             for i in range(0, n_shard, batch_size):
                 batch_texts = shard_texts[i:i + batch_size]
                 batch_end = min(i + batch_size, n_shard)
@@ -594,6 +682,10 @@ class HiddenStateCache:
                     )
                     hidden_states = outputs.hidden_states[-1]
 
+                    # Apply random projection on GPU before transfer
+                    if rp_gpu is not None:
+                        hidden_states = hidden_states.float() @ rp_gpu
+
                 hs_cpu = hidden_states.cpu().to(torch.float16).numpy()
                 global_start = shard_start + i
                 for j in range(len(batch_texts)):
@@ -608,7 +700,7 @@ class HiddenStateCache:
                                      f"({device})")
 
             # Unload model from this GPU
-            del mdl, tok
+            del mdl, tok, rp_gpu
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -630,7 +722,9 @@ class HiddenStateCache:
         metadata = {
             'model_name': self._model_name,
             'max_length': self._max_length,
-            'hidden_size': hidden_size,
+            'hidden_size': store_dim,
+            'original_hidden_size': hidden_size,
+            'random_projection_dim': self._random_projection_dim,
             'num_samples': num_samples,
             'actual_max_len': actual_max_len,
             'total_tokens': total_tokens,
@@ -647,13 +741,16 @@ class HiddenStateCache:
 
         self._metadata = metadata
 
-        total_bytes = total_tokens * hidden_size * 2
+        total_bytes = total_tokens * store_dim * 2
+        original_bytes = total_tokens * hidden_size * 2
         padded_bytes = num_samples * actual_max_len * hidden_size * 2
-        logger.info(
-            f"Hidden state cache created ({len(shards)} GPUs): {total_bytes / 1e9:.2f} GB "
-            f"(vs {padded_bytes / 1e9:.2f} GB if padded), "
-            f"total_tokens={total_tokens:,}, savings={savings_pct:.1%}"
+        msg = (
+            f"Hidden state cache created ({len(shards)} GPUs): {total_bytes / 1e9:.2f} GB"
         )
+        if store_dim != hidden_size:
+            msg += f" (vs {original_bytes / 1e9:.2f} GB without projection)"
+        msg += f", total_tokens={total_tokens:,}, savings={savings_pct:.1%}"
+        logger.info(msg)
 
     def open(self) -> None:
         """Open memmap files for reading (lazy).

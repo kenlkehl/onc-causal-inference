@@ -572,6 +572,7 @@ class ModelArchitectureConfig:
     flp_gradient_checkpointing: bool = True  # Gradient checkpointing (when not frozen)
     flp_cache_hidden_states: bool = True  # Pre-compute and cache LLM hidden states to disk (when frozen)
     flp_gpu_cache: bool = False  # Keep hidden states on GPU VRAM instead of disk (auto-fallback to disk if insufficient VRAM)
+    flp_random_projection_dim: Optional[int] = None  # Random linear projection dimension for cached hidden states (None = no projection, keeps original hidden_size)
 
     # Numeric feature extraction (magnitude-aware number encoding)
     numeric_features_enabled: bool = False  # Enable numeric feature extraction

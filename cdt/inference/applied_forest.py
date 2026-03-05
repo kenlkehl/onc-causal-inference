@@ -115,11 +115,13 @@ def run_applied_inference_forest(
         # Fall back to disk cache if GPU cache not available
         if gpu_store is None and flp_cache_enabled and flp_freeze:
             cache_dir = str(Path(dataset_path).parent / ".cdt_cache")
+            flp_random_projection_dim = getattr(arch_config, 'flp_random_projection_dim', None)
             hidden_state_cache = HiddenStateCache(
                 cache_dir=cache_dir,
                 model_name=model_name,
                 max_length=max_length,
                 dataset_path=dataset_path,
+                random_projection_dim=flp_random_projection_dim,
             )
 
             if not hidden_state_cache.is_valid(len(dataset)):
