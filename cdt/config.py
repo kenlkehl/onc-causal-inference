@@ -571,6 +571,7 @@ class ModelArchitectureConfig:
     flp_dropout: float = 0.1  # Dropout rate for projection layers
     flp_gradient_checkpointing: bool = True  # Gradient checkpointing (when not frozen)
     flp_cache_hidden_states: bool = True  # Pre-compute and cache LLM hidden states to disk (when frozen)
+    flp_gpu_cache: bool = False  # Keep hidden states on GPU VRAM instead of disk (auto-fallback to disk if insufficient VRAM)
 
     # Numeric feature extraction (magnitude-aware number encoding)
     numeric_features_enabled: bool = False  # Enable numeric feature extraction

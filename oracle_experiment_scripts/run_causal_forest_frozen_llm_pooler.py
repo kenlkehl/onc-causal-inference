@@ -58,6 +58,7 @@ from cdt.data import ClinicalTextDataset, collate_batch
 from cdt.data import CachedHiddenStateDataset, collate_cached_batch, prepare_cached_batch
 from cdt.models.causal_text_forest import CausalTextForest
 from cdt.models.hidden_state_cache import HiddenStateCache
+from cdt.models.gpu_hidden_state_store import GPUHiddenStateStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -85,10 +86,10 @@ class ExperimentConfig:
     flp_freeze_llm: bool = True
     flp_projection_dim: int = 128
     flp_gated_attention_dim: int = 128
-    flp_max_length: int = 8192
+    flp_max_length: int = 200000 # int = 8192
 
     # Fixed parameters
-    flp_model_name: str = "Qwen/Qwen3-0.6B-Base"
+    flp_model_name: str = "Qwen/Qwen3.5-0.8B-Base" #"Qwen/Qwen3-0.6B-Base"
     flp_dropout: float = 0.1
     flp_gradient_checkpointing: bool = True
     epochs: int = 30
@@ -305,11 +306,72 @@ def precompute_caches(
     return ready_caches
 
 
+def precompute_gpu_stores(
+    configs: List[ExperimentConfig],
+    device: str,
+) -> Dict[str, GPUHiddenStateStore]:
+    """Pre-compute GPU-resident hidden state stores for a single device.
+
+    Creates one GPUHiddenStateStore per unique (dataset, model, max_length)
+    combo, with VRAM check. Returns empty dict for combos that don't fit.
+
+    Args:
+        configs: All experiment configs.
+        device: GPU device string (e.g., "cuda:0").
+
+    Returns:
+        Dict mapping cache_hash -> GPUHiddenStateStore on this device.
+    """
+    unique_keys = {}  # cache_hash -> (parquet_file, model_name, max_length, batch_size)
+    for config in configs:
+        if not config.flp_freeze_llm:
+            continue
+        parquet_file = _resolve_parquet_file(config.dataset_path)
+        if parquet_file is None:
+            continue
+        cache_hash = HiddenStateCache.compute_cache_hash(
+            config.flp_model_name, config.flp_max_length, str(parquet_file)
+        )
+        if cache_hash not in unique_keys:
+            unique_keys[cache_hash] = (
+                parquet_file, config.flp_model_name,
+                config.flp_max_length, config.batch_size,
+            )
+
+    if not unique_keys:
+        return {}
+
+    gpu_device = torch.device(device)
+    stores = {}
+
+    for cache_hash, (parquet_file, model_name, max_length, batch_size) in unique_keys.items():
+        df = pd.read_parquet(parquet_file)
+        all_texts = df['clinical_text'].tolist()
+
+        estimated_gb = GPUHiddenStateStore.estimate_vram_gb(all_texts, model_name, max_length)
+        free_vram_gb = torch.cuda.mem_get_info(gpu_device)[0] / 1e9
+
+        if estimated_gb < free_vram_gb * 0.8:
+            logger.info(f"  GPU store {cache_hash} on {device}: ~{estimated_gb:.1f} GB "
+                        f"(free: {free_vram_gb:.1f} GB) — precomputing...")
+            store = GPUHiddenStateStore()
+            store.precompute(all_texts, model_name, max_length, gpu_device, batch_size=batch_size)
+            stores[cache_hash] = store
+            logger.info(f"  GPU store {cache_hash}: done, "
+                        f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
+        else:
+            logger.warning(f"  GPU store {cache_hash} on {device}: needs ~{estimated_gb:.1f} GB "
+                           f"but only {free_vram_gb:.1f} GB free — will use disk cache")
+
+    return stores
+
+
 def run_single_experiment(
     config: ExperimentConfig,
     device: str,
     output_dir: Path,
     cache_registry: Optional[Dict[str, HiddenStateCache]] = None,
+    gpu_store_registry: Optional[Dict[str, GPUHiddenStateStore]] = None,
 ) -> Dict[str, Any]:
     """Run a single experiment configuration with K-fold CV.
 
@@ -319,6 +381,7 @@ def run_single_experiment(
         output_dir: Output directory for results.
         cache_registry: Dict mapping cache_hash -> pre-computed HiddenStateCache.
             Populated by precompute_caches() in main() before workers start.
+        gpu_store_registry: Dict mapping cache_hash -> GPUHiddenStateStore on this device.
     """
     device = torch.device(device)
 
@@ -368,18 +431,21 @@ def run_single_experiment(
     df = df.reset_index(drop=True)
     kf = KFold(n_splits=config.n_folds, shuffle=True, random_state=42)
 
-    # --- Look up pre-computed hidden state cache ---
+    # --- Look up GPU store or disk cache ---
+    gpu_store = None
     hidden_state_cache = None
-    use_cache = config.flp_freeze_llm and cache_registry is not None
 
-    if use_cache:
+    if config.flp_freeze_llm:
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file)
         )
-        hidden_state_cache = cache_registry.get(cache_hash)
-        if hidden_state_cache is None:
-            logger.warning(f"Cache {cache_hash} not found in registry, falling back to non-cached mode")
-            use_cache = False
+        # Prefer GPU store over disk cache
+        if gpu_store_registry is not None:
+            gpu_store = gpu_store_registry.get(cache_hash)
+        if gpu_store is None and cache_registry is not None:
+            hidden_state_cache = cache_registry.get(cache_hash)
+
+    use_cache = hidden_state_cache is not None
 
     all_predictions = []
     fold_histories = []
@@ -411,7 +477,10 @@ def run_single_experiment(
             explicit_confounder_specs=confounder_specs,
             device=str(device),
         )
-        if use_cache and hidden_state_cache is not None:
+        if gpu_store is not None:
+            model_kwargs['flp_skip_llm'] = True
+            model_kwargs['flp_cached_hidden_size'] = gpu_store.hidden_size
+        elif use_cache and hidden_state_cache is not None:
             model_kwargs['flp_skip_llm'] = True
             model_kwargs['flp_cached_hidden_size'] = hidden_state_cache.hidden_size
 
@@ -419,9 +488,24 @@ def run_single_experiment(
 
         # No fit_tokenizer needed - uses pretrained HF tokenizer
 
-        # Create datasets: use CachedHiddenStateDataset when cache is available
-        if use_cache and hidden_state_cache is not None:
-            # Pass cache arrays directly so DataLoader workers load hidden states
+        # Create datasets: GPU store > disk cache > no cache
+        if gpu_store is not None:
+            # GPU store: cache_index mode (no inline loading, indices only)
+            train_dataset = CachedHiddenStateDataset(
+                data=train_df, text_column=text_column,
+                outcome_column='outcome_indicator', treatment_column='treatment_indicator',
+                dataset_indices=np.array(train_idx),
+                explicit_confounder_columns=confounder_cols,
+            )
+            test_dataset = CachedHiddenStateDataset(
+                data=test_df, text_column=text_column,
+                outcome_column='outcome_indicator', treatment_column='treatment_indicator',
+                dataset_indices=np.array(test_idx),
+                explicit_confounder_columns=confounder_cols,
+            )
+            collate_fn = collate_cached_batch
+        elif use_cache and hidden_state_cache is not None:
+            # Disk cache: pass cache arrays for DataLoader workers
             train_dataset = CachedHiddenStateDataset(
                 data=train_df, text_column=text_column,
                 outcome_column='outcome_indicator', treatment_column='treatment_indicator',
@@ -457,17 +541,20 @@ def run_single_experiment(
             model.fit_explicit_confounders(train_dataset.explicit_confounder_values)
             model.fit_explicit_confounder_featurizer(train_dataset.explicit_confounder_values)
 
-        # Use more DataLoader workers when cache is loaded (I/O in workers, not training loop)
-        dl_num_workers = 2 if (use_cache and hidden_state_cache is not None) else 1
+        # DataLoader config: GPU store requires num_workers=0 (GPU tensors not fork-safe)
+        if gpu_store is not None:
+            dl_kwargs = dict(num_workers=0)
+        elif use_cache and hidden_state_cache is not None:
+            dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+        else:
+            dl_kwargs = dict(num_workers=1, persistent_workers=True, pin_memory=True)
         train_loader = DataLoader(
             train_dataset, batch_size=batch_size, shuffle=True,
-            collate_fn=collate_fn, num_workers=dl_num_workers,
-            persistent_workers=True, pin_memory=True
+            collate_fn=collate_fn, **dl_kwargs
         )
         test_loader = DataLoader(
             test_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=collate_fn, num_workers=dl_num_workers,
-            persistent_workers=True, pin_memory=True
+            collate_fn=collate_fn, **dl_kwargs
         )
 
         # Training
@@ -490,7 +577,7 @@ def run_single_experiment(
             for batch in train_loader:
                 batch['treatment'] = batch['treatment'].to(device)
                 batch['outcome'] = batch['outcome'].to(device)
-                prepare_cached_batch(batch, device)
+                prepare_cached_batch(batch, device, gpu_store=gpu_store)
 
                 optimizer.zero_grad()
                 losses = model.train_representation_step(
@@ -514,7 +601,7 @@ def run_single_experiment(
                 for batch in test_loader:
                     batch['treatment'] = batch['treatment'].to(device)
                     batch['outcome'] = batch['outcome'].to(device)
-                    prepare_cached_batch(batch, device)
+                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
 
                     losses = model.train_representation_step(
                         batch,
@@ -543,7 +630,16 @@ def run_single_experiment(
         combined_T = combined_df['treatment_indicator'].values
         combined_Y = combined_df['outcome_indicator'].values
 
-        if use_cache and hidden_state_cache is not None:
+        if gpu_store is not None:
+            combined_indices = np.concatenate([train_idx, test_idx])
+            combined_dataset = CachedHiddenStateDataset(
+                data=combined_df, text_column=text_column,
+                outcome_column='outcome_indicator', treatment_column='treatment_indicator',
+                dataset_indices=combined_indices,
+                explicit_confounder_columns=confounder_cols,
+            )
+            combined_collate = collate_cached_batch
+        elif use_cache and hidden_state_cache is not None:
             combined_indices = np.concatenate([train_idx, test_idx])
             combined_dataset = CachedHiddenStateDataset(
                 data=combined_df, text_column=text_column,
@@ -564,15 +660,14 @@ def run_single_experiment(
 
         combined_loader = DataLoader(
             combined_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=combined_collate, num_workers=dl_num_workers,
-            persistent_workers=True, pin_memory=True
+            collate_fn=combined_collate, **dl_kwargs
         )
 
         # Hidden states are already in DataLoader batches (loaded by workers).
         # train_causal_forest/predict handle prepare_cached_batch internally
         # via _get_extractor_input which checks for 'cached_hidden_states'.
-        model.train_causal_forest(combined_loader, combined_T, combined_Y)
-        preds = model.predict(test_loader, return_ci=True)
+        model.train_causal_forest(combined_loader, combined_T, combined_Y, gpu_store=gpu_store)
+        preds = model.predict(test_loader, return_ci=True, gpu_store=gpu_store)
 
         # Store predictions
         fold_preds = test_df.copy()
@@ -632,7 +727,10 @@ def generate_experiment_grid(
     datasets = [
         #("example_synthetic_data_one_confounder", "one_confounder"),
         #("example_synthetic_data_ten_confounders", "ten_confounders"),
-        ("../example_synthetic_data_ten_confounders_50K_rows", "ten_confounders_50K"),
+        ("example_synthetic_data_one_confounder_twostage", "one_confounder_twostage"),
+        ("example_synthetic_data_ten_confounders_twostage", "ten_confounders_twostage")
+       
+        #("../example_synthetic_data_ten_confounders_50K_rows", "ten_confounders_50K"),
     ]
 
     if filter_datasets:
@@ -714,6 +812,7 @@ def worker_thread(
     lock: threading.Lock,
     progress_bar: tqdm,
     cache_registry: Optional[Dict[str, HiddenStateCache]] = None,
+    gpu_store_registry: Optional[Dict[str, GPUHiddenStateStore]] = None,
 ):
     """Worker thread to process experiments on a single GPU."""
     while True:
@@ -725,7 +824,7 @@ def worker_thread(
         config_hash = config.config_hash()
 
         try:
-            result = run_single_experiment(config, device, output_dir, cache_registry)
+            result = run_single_experiment(config, device, output_dir, cache_registry, gpu_store_registry)
 
             with lock:
                 results_dict[config_hash] = result
@@ -827,6 +926,12 @@ def main():
         default=5,
         help="Number of CV folds"
     )
+    parser.add_argument(
+        "--gpu-cache",
+        action="store_true",
+        help="Keep pre-computed hidden states in GPU VRAM instead of disk cache "
+             "(auto-fallback to disk if insufficient VRAM)"
+    )
 
     args = parser.parse_args()
 
@@ -883,9 +988,18 @@ def main():
         logger.info("No experiments to run")
         return
 
-    # Pre-compute hidden state caches ONCE before workers start.
-    # All experiments sharing the same (dataset, model, max_length) reuse one cache.
-    # Precomputation is distributed across available GPUs.
+    # Pre-compute GPU stores per device if --gpu-cache is set.
+    # Falls back to disk cache for combos that don't fit in VRAM.
+    gpu_store_registries = {}  # device_str -> Dict[cache_hash -> GPUHiddenStateStore]
+    if args.gpu_cache:
+        logger.info("GPU cache mode: pre-computing hidden states on each device...")
+        for device_str in args.devices:
+            stores = precompute_gpu_stores(pending_configs, device_str)
+            if stores:
+                gpu_store_registries[device_str] = stores
+                logger.info(f"  {device_str}: {len(stores)} GPU store(s) ready")
+
+    # Pre-compute disk caches as fallback (reuses existing caches if valid).
     cache_registry = precompute_caches(pending_configs, args.devices)
 
     # Create job queue
@@ -899,11 +1013,12 @@ def main():
 
     threads = []
     for device in args.devices:
+        device_gpu_stores = gpu_store_registries.get(device, {})
         for worker_idx in range(args.workers_per_device):
             t = threading.Thread(
                 target=worker_thread,
                 args=(device, job_queue, results_dict, output_dir, lock, progress_bar,
-                      cache_registry),
+                      cache_registry, device_gpu_stores),
                 name=f"worker-{device}-{worker_idx}"
             )
             t.start()
@@ -913,7 +1028,12 @@ def main():
     for t in threads:
         t.join()
 
-    # Close all caches
+    # Free GPU stores
+    for device_stores in gpu_store_registries.values():
+        for store in device_stores.values():
+            store.free()
+
+    # Close all disk caches
     for cache in cache_registry.values():
         cache.close()
 

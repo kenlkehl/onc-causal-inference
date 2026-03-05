@@ -178,25 +178,33 @@ def prepare_cached_batch(
     batch: Dict[str, Any],
     device: torch.device,
     hidden_state_cache=None,
+    gpu_store=None,
 ) -> None:
     """Move cached hidden states to device, loading from cache if needed.
 
-    Supports two paths:
+    Supports three paths:
     - Optimized: hidden states already in batch (loaded by DataLoader workers).
       Just moves float16 tensors to GPU and casts to float32.
-    - Legacy: batch has cache_indices, loads from HiddenStateCache.
+    - GPU store: batch has cache_indices, loads from GPU-resident store (zero-copy).
+    - Legacy: batch has cache_indices, loads from disk-backed HiddenStateCache.
 
     Args:
         batch: Batch dict from DataLoader.
         device: Target device.
-        hidden_state_cache: Optional HiddenStateCache for legacy fallback.
+        hidden_state_cache: Optional HiddenStateCache for disk-based fallback.
+        gpu_store: Optional GPUHiddenStateStore for GPU-resident hidden states.
     """
     if 'cached_hidden_states' in batch:
         # Optimized path: loaded by DataLoader, transfer float16 to GPU and cast
         batch['cached_hidden_states'] = batch['cached_hidden_states'].to(device).float()
         batch['cached_attention_mask'] = batch['cached_attention_mask'].to(device)
+    elif gpu_store is not None and 'cache_indices' in batch:
+        # GPU store path: hidden states already on GPU, zero-copy gather+pad
+        hs, mask = gpu_store.load_batch(batch['cache_indices'])
+        batch['cached_hidden_states'] = hs
+        batch['cached_attention_mask'] = mask
     elif 'cache_indices' in batch and hidden_state_cache is not None:
-        # Legacy fallback: load from cache
+        # Legacy fallback: load from disk-backed cache
         hs, mask = hidden_state_cache.load_batch(batch['cache_indices'], device)
         batch['cached_hidden_states'] = hs
         batch['cached_attention_mask'] = mask

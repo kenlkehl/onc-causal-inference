@@ -63,6 +63,7 @@ def run_applied_inference_forest(
 
     # Pre-compute and cache LLM hidden states for frozen_llm_pooler
     hidden_state_cache = None
+    gpu_store = None
     arch_config = config.architecture
     feature_extractor_type = normalize_feature_extractor_type(
         getattr(arch_config, 'feature_extractor_type', 'gru_pool')
@@ -70,12 +71,47 @@ def run_applied_inference_forest(
     if feature_extractor_type == "frozen_llm_pooler":
         flp_freeze = getattr(arch_config, 'flp_freeze_llm', True)
         flp_cache_enabled = getattr(arch_config, 'flp_cache_hidden_states', True)
+        flp_gpu_cache = getattr(arch_config, 'flp_gpu_cache', False)
 
-        if flp_cache_enabled and flp_freeze:
-            dataset_path = config.dataset_path
-            model_name = getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
-            max_length = getattr(arch_config, 'flp_max_length', 8192)
+        dataset_path = config.dataset_path
+        model_name = getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
+        max_length = getattr(arch_config, 'flp_max_length', 8192)
+        batch_size = config.training.batch_size
 
+        # Reset index for consistent cache indices
+        dataset = dataset.reset_index(drop=True)
+        all_texts = dataset[config.text_column].tolist()
+
+        # Try GPU cache first if requested
+        if flp_gpu_cache and flp_freeze and device.type == "cuda":
+            from ..models.gpu_hidden_state_store import GPUHiddenStateStore
+            try:
+                estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
+                    all_texts, model_name, max_length
+                )
+                free_vram_gb = torch.cuda.mem_get_info(device)[0] / 1e9
+                if estimated_gb < free_vram_gb * 0.8:
+                    logger.info(
+                        f"GPU cache: estimated {estimated_gb:.2f} GB, "
+                        f"free VRAM {free_vram_gb:.1f} GB — using GPU cache"
+                    )
+                    gpu_store = GPUHiddenStateStore()
+                    gpu_store.precompute(
+                        all_texts, model_name, max_length, device, batch_size=batch_size
+                    )
+                else:
+                    logger.warning(
+                        f"GPU cache needs ~{estimated_gb:.1f} GB but only "
+                        f"{free_vram_gb:.1f} GB free. Falling back to disk cache."
+                    )
+            except Exception as e:
+                logger.warning(f"GPU cache failed: {e}. Falling back to disk cache.")
+                if gpu_store is not None:
+                    gpu_store.free()
+                    gpu_store = None
+
+        # Fall back to disk cache if GPU cache not available
+        if gpu_store is None and flp_cache_enabled and flp_freeze:
             cache_dir = str(Path(dataset_path).parent / ".cdt_cache")
             hidden_state_cache = HiddenStateCache(
                 cache_dir=cache_dir,
@@ -84,13 +120,8 @@ def run_applied_inference_forest(
                 dataset_path=dataset_path,
             )
 
-            # Reset index for consistent cache indices
-            dataset = dataset.reset_index(drop=True)
-            all_texts = dataset[config.text_column].tolist()
-
             if not hidden_state_cache.is_valid(len(dataset)):
-                logger.info("Pre-computing LLM hidden states for caching...")
-                batch_size = config.training.batch_size
+                logger.info("Pre-computing LLM hidden states for disk caching...")
                 try:
                     hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
                 except Exception as e:
@@ -102,7 +133,7 @@ def run_applied_inference_forest(
             if hidden_state_cache is not None:
                 hidden_state_cache.open()
                 hidden_state_cache.preload_to_ram()
-        elif flp_cache_enabled and not flp_freeze:
+        elif gpu_store is None and flp_cache_enabled and not flp_freeze:
             logger.warning(
                 "flp_cache_hidden_states=True but flp_freeze_llm=False. "
                 "Caching is only supported with frozen LLM. Skipping cache."
@@ -112,17 +143,21 @@ def run_applied_inference_forest(
     if config.cv_folds > 1:
         _run_cv_inference_forest(
             dataset, config, output_path, device, verbose,
-            hidden_state_cache=hidden_state_cache
+            hidden_state_cache=hidden_state_cache,
+            gpu_store=gpu_store
         )
     else:
         _run_fixed_split_inference_forest(
             dataset, config, output_path, device, verbose,
-            hidden_state_cache=hidden_state_cache
+            hidden_state_cache=hidden_state_cache,
+            gpu_store=gpu_store
         )
 
-    # Cleanup cache
+    # Cleanup
     if hidden_state_cache is not None:
         hidden_state_cache.close()
+    if gpu_store is not None:
+        gpu_store.free()
 
 
 def _run_cv_inference_forest(
@@ -131,7 +166,8 @@ def _run_cv_inference_forest(
     output_path: Path,
     device: torch.device,
     verbose: bool = True,
-    hidden_state_cache: Optional[HiddenStateCache] = None
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    gpu_store=None
 ) -> None:
     """Run K-Fold Cross-Validation inference with causal forest."""
     k = config.cv_folds
@@ -161,7 +197,8 @@ def _run_cv_inference_forest(
             fold, train_df, test_df, config, device, verbose,
             hidden_state_cache=hidden_state_cache,
             train_indices=train_idx,
-            test_indices=test_idx
+            test_indices=test_idx,
+            gpu_store=gpu_store
         )
 
         # Add fold info
@@ -195,7 +232,8 @@ def _process_fold_forest(
     verbose: bool = True,
     hidden_state_cache: Optional[HiddenStateCache] = None,
     train_indices: Optional[np.ndarray] = None,
-    test_indices: Optional[np.ndarray] = None
+    test_indices: Optional[np.ndarray] = None,
+    gpu_store=None
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """Process a single fold with causal forest."""
     arch_config = config.architecture
@@ -210,11 +248,17 @@ def _process_fold_forest(
     outcome_type = getattr(config, 'outcome_type', 'binary')
     model = _create_causal_forest_model(
         arch_config, device, outcome_type=outcome_type,
-        flp_skip_llm=hidden_state_cache is not None,
-        flp_cached_hidden_size=hidden_state_cache.hidden_size if hidden_state_cache is not None else 0
+        flp_skip_llm=hidden_state_cache is not None or gpu_store is not None,
+        flp_cached_hidden_size=(
+            gpu_store.hidden_size if gpu_store is not None
+            else hidden_state_cache.hidden_size if hidden_state_cache is not None
+            else 0
+        )
     )
     logger.info(f"Created CausalTextForest with {feature_extractor_type.upper()} extractor")
-    if hidden_state_cache is not None:
+    if gpu_store is not None:
+        logger.info("Using GPU-resident hidden states (LLM not loaded)")
+    elif hidden_state_cache is not None:
         logger.info("Using cached hidden states (LLM not loaded)")
 
     # Get training texts for tokenizer fitting
@@ -230,11 +274,29 @@ def _process_fold_forest(
         model, train_df, test_df, config, device, verbose,
         hidden_state_cache=hidden_state_cache,
         train_indices=train_indices,
-        val_indices=test_indices
+        val_indices=test_indices,
+        gpu_store=gpu_store
     )
 
     # Create DataLoaders for Stage 2 feature extraction and prediction
-    if hidden_state_cache is not None and train_indices is not None and test_indices is not None:
+    if gpu_store is not None and train_indices is not None and test_indices is not None:
+        # GPU cache mode: cache_index path
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=train_indices,
+        )
+        test_dataset = CachedHiddenStateDataset(
+            data=test_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=test_indices,
+        )
+        collate_fn = collate_cached_batch
+    elif hidden_state_cache is not None and train_indices is not None and test_indices is not None:
         cache_hs = hidden_state_cache.hidden_states_array
         cache_mask = hidden_state_cache.attention_mask_array
         train_dataset = CachedHiddenStateDataset(
@@ -273,7 +335,12 @@ def _process_fold_forest(
         collate_fn = collator if collator is not None else collate_batch
 
     use_cached_mode = hidden_state_cache is not None and train_indices is not None
-    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+    if gpu_store is not None:
+        dl_kwargs = {}
+    elif use_cached_mode:
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    else:
+        dl_kwargs = {}
 
     train_loader = DataLoader(
         train_dataset,
@@ -296,11 +363,11 @@ def _process_fold_forest(
     logger.info("\n--- Stage 2: Training causal forest ---")
     train_T = train_df[config.treatment_column].values
     train_Y = train_df[config.outcome_column].values
-    model.train_causal_forest(train_loader, train_T, train_Y)
+    model.train_causal_forest(train_loader, train_T, train_Y, gpu_store=gpu_store)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
-    preds = model.predict(test_loader, return_ci=True)
+    preds = model.predict(test_loader, return_ci=True, gpu_store=gpu_store)
 
     # Build predictions DataFrame
     preds_df = test_df.copy()
@@ -333,7 +400,8 @@ def _run_fixed_split_inference_forest(
     output_path: Path,
     device: torch.device,
     verbose: bool = True,
-    hidden_state_cache: Optional[HiddenStateCache] = None
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    gpu_store=None
 ) -> None:
     """Run inference using fixed train/val/test splits with causal forest."""
     logger.info("Running Fixed Split Inference (Train/Val/Test)")
@@ -349,7 +417,7 @@ def _run_fixed_split_inference_forest(
     train_indices = None
     val_indices = None
     test_indices = None
-    if hidden_state_cache is not None:
+    if hidden_state_cache is not None or gpu_store is not None:
         train_mask = dataset[config.split_column] == 'train'
         val_mask = dataset[config.split_column] == 'val'
         test_mask = dataset[config.split_column] == 'test'
@@ -364,8 +432,12 @@ def _run_fixed_split_inference_forest(
     outcome_type = getattr(config, 'outcome_type', 'binary')
     model = _create_causal_forest_model(
         arch_config, device, outcome_type=outcome_type,
-        flp_skip_llm=hidden_state_cache is not None,
-        flp_cached_hidden_size=hidden_state_cache.hidden_size if hidden_state_cache is not None else 0
+        flp_skip_llm=hidden_state_cache is not None or gpu_store is not None,
+        flp_cached_hidden_size=(
+            gpu_store.hidden_size if gpu_store is not None
+            else hidden_state_cache.hidden_size if hidden_state_cache is not None
+            else 0
+        )
     )
 
     # Get texts for tokenizer fitting
@@ -380,7 +452,8 @@ def _run_fixed_split_inference_forest(
         model, train_df, val_df, config, device, verbose,
         hidden_state_cache=hidden_state_cache,
         train_indices=train_indices,
-        val_indices=val_indices
+        val_indices=val_indices,
+        gpu_store=gpu_store
     )
 
     # Save training logs
@@ -391,7 +464,17 @@ def _run_fixed_split_inference_forest(
     logger.info("\n--- Stage 2: Training causal forest ---")
     combined_df = pd.concat([train_df, val_df])
 
-    if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+    if gpu_store is not None and train_indices is not None and val_indices is not None:
+        combined_indices = np.concatenate([train_indices, val_indices])
+        combined_dataset = CachedHiddenStateDataset(
+            data=combined_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=combined_indices,
+        )
+        combined_collate_fn = collate_cached_batch
+    elif hidden_state_cache is not None and train_indices is not None and val_indices is not None:
         cache_hs = hidden_state_cache.hidden_states_array
         cache_mask = hidden_state_cache.attention_mask_array
         combined_indices = np.concatenate([train_indices, val_indices])
@@ -416,7 +499,12 @@ def _run_fixed_split_inference_forest(
         combined_collate_fn = collator if collator is not None else collate_batch
 
     use_cached_combined = hidden_state_cache is not None and train_indices is not None
-    dl_kwargs_combined = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_combined else {}
+    if gpu_store is not None:
+        dl_kwargs_combined = {}
+    elif use_cached_combined:
+        dl_kwargs_combined = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    else:
+        dl_kwargs_combined = {}
 
     combined_loader = DataLoader(
         combined_dataset,
@@ -427,11 +515,20 @@ def _run_fixed_split_inference_forest(
     )
     combined_T = combined_df[config.treatment_column].values
     combined_Y = combined_df[config.outcome_column].values
-    model.train_causal_forest(combined_loader, combined_T, combined_Y)
+    model.train_causal_forest(combined_loader, combined_T, combined_Y, gpu_store=gpu_store)
 
     # Predict on test
     logger.info("\n--- Generating predictions on test set ---")
-    if hidden_state_cache is not None and test_indices is not None:
+    if gpu_store is not None and test_indices is not None:
+        test_dataset = CachedHiddenStateDataset(
+            data=test_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=test_indices,
+        )
+        test_collate_fn = collate_cached_batch
+    elif hidden_state_cache is not None and test_indices is not None:
         cache_hs = hidden_state_cache.hidden_states_array
         cache_mask = hidden_state_cache.attention_mask_array
         test_dataset = CachedHiddenStateDataset(
@@ -455,7 +552,12 @@ def _run_fixed_split_inference_forest(
         test_collate_fn = collator if collator is not None else collate_batch
 
     use_cached_test = hidden_state_cache is not None and test_indices is not None
-    dl_kwargs_test = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_test else {}
+    if gpu_store is not None:
+        dl_kwargs_test = {}
+    elif use_cached_test:
+        dl_kwargs_test = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    else:
+        dl_kwargs_test = {}
 
     test_loader = DataLoader(
         test_dataset,
@@ -464,7 +566,7 @@ def _run_fixed_split_inference_forest(
         collate_fn=test_collate_fn,
         **dl_kwargs_test
     )
-    preds = model.predict(test_loader, return_ci=True)
+    preds = model.predict(test_loader, return_ci=True, gpu_store=gpu_store)
 
     # Build results DataFrame
     results_df = test_df.copy()
@@ -674,13 +776,32 @@ def _train_representation(
     verbose: bool = True,
     hidden_state_cache: Optional[HiddenStateCache] = None,
     train_indices: Optional[np.ndarray] = None,
-    val_indices: Optional[np.ndarray] = None
+    val_indices: Optional[np.ndarray] = None,
+    gpu_store=None
 ) -> List[Dict[str, Any]]:
     """Train representation (Stage 1)."""
     train_config = config.training
 
     # Create datasets
-    if hidden_state_cache is not None and train_indices is not None and val_indices is not None:
+    if gpu_store is not None and train_indices is not None and val_indices is not None:
+        # GPU cache mode: cache_index path
+        train_dataset = CachedHiddenStateDataset(
+            data=train_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=train_indices,
+        )
+        val_dataset = CachedHiddenStateDataset(
+            data=val_df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=val_indices,
+        )
+        collate_fn = collate_cached_batch
+        logger.info("Using GPU-resident hidden states for Stage 1 training")
+    elif hidden_state_cache is not None and train_indices is not None and val_indices is not None:
         cache_hs = hidden_state_cache.hidden_states_array
         cache_mask = hidden_state_cache.attention_mask_array
         train_dataset = CachedHiddenStateDataset(
@@ -720,7 +841,12 @@ def _train_representation(
         collate_fn = collator if collator is not None else collate_batch
 
     use_cached_mode = hidden_state_cache is not None and train_indices is not None
-    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+    if gpu_store is not None:
+        dl_kwargs = {}
+    elif use_cached_mode:
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    else:
+        dl_kwargs = {}
 
     train_loader = DataLoader(
         train_dataset,
@@ -780,7 +906,7 @@ def _train_representation(
             batch['outcome'] = batch['outcome'].to(device)
             batch['treatment'] = batch['treatment'].to(device)
 
-            prepare_cached_batch(batch, device, hidden_state_cache)
+            prepare_cached_batch(batch, device, hidden_state_cache, gpu_store=gpu_store)
 
             optimizer.zero_grad()
 
@@ -829,7 +955,7 @@ def _train_representation(
                 batch['outcome'] = batch['outcome'].to(device)
                 batch['treatment'] = batch['treatment'].to(device)
 
-                prepare_cached_batch(batch, device, hidden_state_cache)
+                prepare_cached_batch(batch, device, hidden_state_cache, gpu_store=gpu_store)
 
                 losses = model.train_representation_step(
                     batch,

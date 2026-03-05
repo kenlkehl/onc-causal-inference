@@ -1227,7 +1227,8 @@ class CausalTextForest(nn.Module):
         self,
         texts_or_loader,
         batch_size: int = 32,
-        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        gpu_store=None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Extract features and nuisance predictions for all texts.
@@ -1274,7 +1275,7 @@ class CausalTextForest(nn.Module):
             with torch.no_grad():
                 for batch in texts_or_loader:
                     # Move cached hidden states to device if present (from DataLoader)
-                    prepare_cached_batch(batch, self._device)
+                    prepare_cached_batch(batch, self._device, gpu_store=gpu_store)
                     texts = batch['texts']
                     extractor_input = self._get_extractor_input(batch, texts)
                     batch_conf_values = batch.get('explicit_confounder_values', None)
@@ -1341,7 +1342,8 @@ class CausalTextForest(nn.Module):
         T: np.ndarray,
         Y: np.ndarray,
         batch_size: int = 32,
-        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        gpu_store=None
     ) -> 'CausalTextForest':
         """
         Train causal forest on extracted features.
@@ -1357,6 +1359,7 @@ class CausalTextForest(nn.Module):
             batch_size: Batch size for feature extraction (only used with raw texts)
             explicit_confounder_values: Optional list of dicts with confounder values.
                 If provided, raw confounder features are concatenated to neural features.
+            gpu_store: Optional GPUHiddenStateStore for GPU-resident hidden states.
 
         Returns:
             self
@@ -1364,7 +1367,8 @@ class CausalTextForest(nn.Module):
         logger.info("Extracting features for causal forest training...")
         features, _, _ = self.extract_features(
             texts_or_loader, batch_size,
-            explicit_confounder_values=explicit_confounder_values
+            explicit_confounder_values=explicit_confounder_values,
+            gpu_store=gpu_store
         )
 
         if self.explicit_confounder_specs and explicit_confounder_values is not None:
@@ -1387,7 +1391,8 @@ class CausalTextForest(nn.Module):
         batch_size: int = 32,
         return_ci: bool = True,
         alpha: float = 0.05,
-        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        gpu_store=None
     ) -> Dict[str, np.ndarray]:
         """
         Predict ITEs using trained causal forest.
@@ -1399,6 +1404,7 @@ class CausalTextForest(nn.Module):
             alpha: Significance level for confidence intervals
             explicit_confounder_values: Optional list of dicts with confounder values.
                 Must be provided if model was trained with explicit confounders.
+            gpu_store: Optional GPUHiddenStateStore for GPU-resident hidden states.
 
         Returns:
             Dictionary with predictions:
@@ -1410,7 +1416,8 @@ class CausalTextForest(nn.Module):
         # Extract features (with raw confounder features if provided)
         features, propensity, outcome_pred = self.extract_features(
             texts_or_loader, batch_size,
-            explicit_confounder_values=explicit_confounder_values
+            explicit_confounder_values=explicit_confounder_values,
+            gpu_store=gpu_store
         )
 
         # Get ITE predictions from causal forest

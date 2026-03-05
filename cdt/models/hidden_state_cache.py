@@ -34,6 +34,8 @@ from typing import List, Optional, Tuple
 import numpy as np
 import torch
 
+from .gpu_hidden_state_store import _get_hidden_size
+
 logger = logging.getLogger(__name__)
 
 
@@ -267,7 +269,8 @@ class HiddenStateCache:
         tokenizer = AutoTokenizer.from_pretrained(
             self._model_name,
             trust_remote_code=True,
-            padding_side="right"
+            padding_side="right",
+            truncation_side="left",  # Keep end of long documents
         )
         if tokenizer.pad_token is None:
             if tokenizer.eos_token is not None:
@@ -309,7 +312,7 @@ class HiddenStateCache:
         # Load model
         logger.info("Loading LLM for hidden state extraction...")
         hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
-        hidden_size = hf_config.hidden_size
+        hidden_size = _get_hidden_size(hf_config)
 
         # Load to CPU first, then move to device.
         # Using device_map triggers accelerate's dispatch_model which loads

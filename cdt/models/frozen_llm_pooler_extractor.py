@@ -47,6 +47,7 @@ import torch
 import torch.nn as nn
 
 from .gru_pool_extractor import GatedAttentionPooling
+from .gpu_hidden_state_store import _get_hidden_size
 from .numeric_features import NumericFeatureVector
 
 logger = logging.getLogger(__name__)
@@ -132,7 +133,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
 
             # Load config and model (always pretrained)
             self._hf_config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
-            self._hidden_size = self._hf_config.hidden_size
+            self._hidden_size = _get_hidden_size(self._hf_config)
 
             logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size})")
             self._model = AutoModelForCausalLM.from_pretrained(
@@ -143,7 +144,8 @@ class FrozenLLMPoolerExtractor(nn.Module):
             self._tokenizer = AutoTokenizer.from_pretrained(
                 model_name,
                 trust_remote_code=True,
-                padding_side="right"
+                padding_side="right",
+                truncation_side="left",  # Keep end of long documents
             )
 
             # Ensure pad token exists
