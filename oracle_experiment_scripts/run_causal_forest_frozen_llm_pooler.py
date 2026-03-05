@@ -780,6 +780,7 @@ def generate_experiment_grid(
     projection_dim_options = [64, 128, 256]
     gated_attention_dim_options = [64, 128]
     max_length_options = [10000]
+    random_projection_dim_options = [None, 128, 256]
 
     # Pre-load confounder specs for each dataset
     dataset_specs = {}
@@ -795,9 +796,10 @@ def generate_experiment_grid(
     for (dataset_path, dataset_name), rlearner_mode, explicit_conf in itertools.product(
         datasets, rlearner_modes, explicit_confounder_options
     ):
-        for freeze_llm, proj_dim, attn_dim, max_len in itertools.product(
+        for freeze_llm, proj_dim, attn_dim, max_len, rp_dim in itertools.product(
             freeze_llm_options, projection_dim_options,
-            gated_attention_dim_options, max_length_options
+            gated_attention_dim_options, max_length_options,
+            random_projection_dim_options
         ):
             sampled_names = []
             sample_seed = 0
@@ -807,7 +809,7 @@ def generate_experiment_grid(
                 if not all_specs:
                     continue
 
-                seed_str = f"{dataset_name}_{rlearner_mode}_{freeze_llm}_{proj_dim}_{attn_dim}_{max_len}_{sample_counter}"
+                seed_str = f"{dataset_name}_{rlearner_mode}_{freeze_llm}_{proj_dim}_{attn_dim}_{max_len}_{rp_dim}_{sample_counter}"
                 sample_seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
                 rng = random.Random(sample_seed)
 
@@ -829,6 +831,7 @@ def generate_experiment_grid(
                 flp_projection_dim=proj_dim,
                 flp_gated_attention_dim=attn_dim,
                 flp_max_length=max_len,
+                flp_random_projection_dim=rp_dim,
             ))
 
     # Shuffle experiment order so patterns emerge early
