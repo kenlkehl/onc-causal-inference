@@ -266,23 +266,15 @@ def precompute_caches(
         logger.info("All caches already valid")
         return ready_caches
 
-    # Distribute precomputation across GPUs (round-robin)
-    # Since loading an LLM is expensive, we precompute one at a time per GPU
+    # Distribute GPUs evenly across caches.
+    # E.g. 8 GPUs, 2 caches -> each cache gets 4 GPUs for parallel precomputation.
+    # E.g. 8 GPUs, 3 caches -> caches get 3, 3, 2 GPUs respectively.
+    # Each cache uses precompute_multi_gpu() to split its dataset rows across its GPUs.
     logger.info(f"Pre-computing {len(caches_to_compute)} cache(s) across "
                 f"{len(devices)} device(s)...")
 
-    def _precompute_one(cache_hash, cache, parquet_file, batch_size, device):
-        """Precompute a single cache on a given device."""
-        df = pd.read_parquet(parquet_file)
-        all_texts = df['clinical_text'].tolist()
-        gpu_device = torch.device(device)
-        cache.precompute(all_texts, gpu_device, batch_size=batch_size)
-        cache.open()
-        cache.preload_to_ram()
-        return cache_hash, cache
-
     def _precompute_one_multi_gpu(cache_hash, cache, parquet_file, batch_size, gpu_devices):
-        """Precompute a single cache across multiple GPUs."""
+        """Precompute a single cache across one or more GPUs."""
         df = pd.read_parquet(parquet_file)
         all_texts = df['clinical_text'].tolist()
         gpu_devices = [torch.device(d) for d in gpu_devices]
@@ -291,25 +283,30 @@ def precompute_caches(
         cache.preload_to_ram()
         return cache_hash, cache
 
-    if len(caches_to_compute) == 1:
-        # Single cache: use ALL available GPUs to precompute in parallel
+    # Divide GPUs among caches: round-robin assignment
+    n_caches = len(caches_to_compute)
+    device_assignments = [[] for _ in range(n_caches)]
+    for i, dev in enumerate(devices):
+        device_assignments[i % n_caches].append(dev)
+
+    for i, (ch, cache, pf, bs) in enumerate(caches_to_compute):
+        assigned = device_assignments[i]
+        logger.info(f"  Cache {ch}: assigned {len(assigned)} GPU(s) {assigned}")
+
+    if n_caches == 1:
+        # Single cache: all GPUs, run directly
         ch, cache, pf, bs = caches_to_compute[0]
-        if len(devices) > 1:
-            logger.info(f"  Using {len(devices)} GPUs for parallel precomputation")
-            _, cache = _precompute_one_multi_gpu(ch, cache, pf, bs, devices)
-        else:
-            _, cache = _precompute_one(ch, cache, pf, bs, devices[0])
+        _, cache = _precompute_one_multi_gpu(ch, cache, pf, bs, device_assignments[0])
         ready_caches[ch] = cache
     else:
-        # Multiple caches: distribute across GPUs using threads
+        # Multiple caches: run in parallel threads, each using its assigned GPUs
         import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=min(len(devices), len(caches_to_compute))
-        ) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_caches) as executor:
             futures = {}
             for i, (ch, cache, pf, bs) in enumerate(caches_to_compute):
-                device = devices[i % len(devices)]
-                fut = executor.submit(_precompute_one, ch, cache, pf, bs, device)
+                fut = executor.submit(
+                    _precompute_one_multi_gpu, ch, cache, pf, bs, device_assignments[i]
+                )
                 futures[fut] = ch
             for fut in concurrent.futures.as_completed(futures):
                 ch, cache = fut.result()
