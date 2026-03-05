@@ -281,10 +281,24 @@ def precompute_caches(
         cache.preload_to_ram()
         return cache_hash, cache
 
+    def _precompute_one_multi_gpu(cache_hash, cache, parquet_file, batch_size, gpu_devices):
+        """Precompute a single cache across multiple GPUs."""
+        df = pd.read_parquet(parquet_file)
+        all_texts = df['clinical_text'].tolist()
+        gpu_devices = [torch.device(d) for d in gpu_devices]
+        cache.precompute_multi_gpu(all_texts, gpu_devices, batch_size=batch_size)
+        cache.open()
+        cache.preload_to_ram()
+        return cache_hash, cache
+
     if len(caches_to_compute) == 1:
-        # Single cache: precompute directly on first device
+        # Single cache: use ALL available GPUs to precompute in parallel
         ch, cache, pf, bs = caches_to_compute[0]
-        _, cache = _precompute_one(ch, cache, pf, bs, devices[0])
+        if len(devices) > 1:
+            logger.info(f"  Using {len(devices)} GPUs for parallel precomputation")
+            _, cache = _precompute_one_multi_gpu(ch, cache, pf, bs, devices)
+        else:
+            _, cache = _precompute_one(ch, cache, pf, bs, devices[0])
         ready_caches[ch] = cache
     else:
         # Multiple caches: distribute across GPUs using threads
@@ -309,15 +323,19 @@ def precompute_caches(
 def precompute_gpu_stores(
     configs: List[ExperimentConfig],
     device: str,
+    cache_registry: Optional[Dict[str, HiddenStateCache]] = None,
 ) -> Dict[str, GPUHiddenStateStore]:
     """Pre-compute GPU-resident hidden state stores for a single device.
 
     Creates one GPUHiddenStateStore per unique (dataset, model, max_length)
-    combo, with VRAM check. Returns empty dict for combos that don't fit.
+    combo, with VRAM check. When a disk cache is available (from multi-GPU
+    precomputation), loads from disk instead of re-running the LLM.
+    Returns empty dict for combos that don't fit.
 
     Args:
         configs: All experiment configs.
         device: GPU device string (e.g., "cuda:0").
+        cache_registry: Optional dict of pre-computed disk caches to load from.
 
     Returns:
         Dict mapping cache_hash -> GPUHiddenStateStore on this device.
@@ -353,12 +371,23 @@ def precompute_gpu_stores(
 
         if estimated_gb < free_vram_gb * 0.8:
             logger.info(f"  GPU store {cache_hash} on {device}: ~{estimated_gb:.1f} GB "
-                        f"(free: {free_vram_gb:.1f} GB) — precomputing...")
-            store = GPUHiddenStateStore()
-            store.precompute(all_texts, model_name, max_length, gpu_device, batch_size=batch_size)
-            stores[cache_hash] = store
-            logger.info(f"  GPU store {cache_hash}: done, "
-                        f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
+                        f"(free: {free_vram_gb:.1f} GB) — loading...")
+
+            # Prefer loading from disk cache (already multi-GPU precomputed)
+            disk_cache = cache_registry.get(cache_hash) if cache_registry else None
+            if disk_cache is not None:
+                logger.info(f"  Loading GPU store from disk cache...")
+                store = GPUHiddenStateStore()
+                store.load_from_disk_cache(disk_cache, gpu_device)
+                stores[cache_hash] = store
+                logger.info(f"  GPU store {cache_hash}: loaded from disk, "
+                            f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
+            else:
+                store = GPUHiddenStateStore()
+                store.precompute(all_texts, model_name, max_length, gpu_device, batch_size=batch_size)
+                stores[cache_hash] = store
+                logger.info(f"  GPU store {cache_hash}: done, "
+                            f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
         else:
             logger.warning(f"  GPU store {cache_hash} on {device}: needs ~{estimated_gb:.1f} GB "
                            f"but only {free_vram_gb:.1f} GB free — will use disk cache")
@@ -988,19 +1017,19 @@ def main():
         logger.info("No experiments to run")
         return
 
+    # Pre-compute disk caches first (uses all GPUs in parallel for each cache).
+    cache_registry = precompute_caches(pending_configs, args.devices)
+
     # Pre-compute GPU stores per device if --gpu-cache is set.
-    # Falls back to disk cache for combos that don't fit in VRAM.
+    # Loads from disk cache (already multi-GPU precomputed) instead of re-running LLM.
     gpu_store_registries = {}  # device_str -> Dict[cache_hash -> GPUHiddenStateStore]
     if args.gpu_cache:
-        logger.info("GPU cache mode: pre-computing hidden states on each device...")
+        logger.info("GPU cache mode: loading hidden states to each device...")
         for device_str in args.devices:
-            stores = precompute_gpu_stores(pending_configs, device_str)
+            stores = precompute_gpu_stores(pending_configs, device_str, cache_registry)
             if stores:
                 gpu_store_registries[device_str] = stores
                 logger.info(f"  {device_str}: {len(stores)} GPU store(s) ready")
-
-    # Pre-compute disk caches as fallback (reuses existing caches if valid).
-    cache_registry = precompute_caches(pending_configs, args.devices)
 
     # Create job queue
     job_queue = queue.Queue()

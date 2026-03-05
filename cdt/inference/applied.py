@@ -195,7 +195,8 @@ def run_applied_inference(
             output_path=output_path,
             device=device,
             num_workers=num_workers,
-            explicit_confounder_columns=explicit_confounder_columns
+            explicit_confounder_columns=explicit_confounder_columns,
+            gpu_ids=gpu_ids,
         )
         return
 
@@ -350,7 +351,17 @@ def run_applied_inference(
             if not hidden_state_cache.is_valid(len(dataset)):
                 logger.info("Pre-computing LLM hidden states for disk caching...")
                 try:
-                    hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
+                    # Use multi-GPU precomputation when multiple GPUs available
+                    precompute_devices = [device]
+                    if gpu_ids and device.type == "cuda":
+                        precompute_devices = [torch.device(f"cuda:{i}") for i in gpu_ids]
+                    if len(precompute_devices) > 1:
+                        logger.info(f"Using {len(precompute_devices)} GPUs for parallel precomputation")
+                        hidden_state_cache.precompute_multi_gpu(
+                            all_texts, precompute_devices, batch_size=batch_size
+                        )
+                    else:
+                        hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
                 except Exception as e:
                     logger.warning(f"Hidden state caching failed: {e}. Falling back to non-cached mode.")
                     hidden_state_cache = None

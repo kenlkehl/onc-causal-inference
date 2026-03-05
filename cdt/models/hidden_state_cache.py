@@ -21,12 +21,14 @@ Per-batch padding to the batch-local max length happens during collation,
 avoiding the global-max padding waste of the old format.
 """
 
+import concurrent.futures
 import gc
 import hashlib
 import json
 import logging
 import os
 import shutil
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -421,6 +423,234 @@ class HiddenStateCache:
         padded_bytes = num_samples * actual_max_len * hidden_size * 2
         logger.info(
             f"Hidden state cache created: {total_bytes / 1e9:.2f} GB "
+            f"(vs {padded_bytes / 1e9:.2f} GB if padded), "
+            f"total_tokens={total_tokens:,}, savings={savings_pct:.1%}"
+        )
+
+    def precompute_multi_gpu(
+        self,
+        texts: List[str],
+        devices: List[torch.device],
+        batch_size: int = 4,
+    ) -> None:
+        """Pre-compute LLM hidden states in parallel across multiple GPUs.
+
+        Splits the dataset into contiguous shards (one per device), loads a
+        separate LLM copy on each GPU, and writes results to a shared memmap.
+        Each thread writes to non-overlapping offsets so no locking is needed.
+
+        Falls back to single-GPU ``precompute()`` when only one device is given.
+
+        Args:
+            texts: All texts in the dataset (in order).
+            devices: List of GPU devices to use.
+            batch_size: Batch size for LLM inference per GPU.
+        """
+        if len(devices) <= 1:
+            device = devices[0] if devices else torch.device('cuda:0')
+            return self.precompute(texts, device, batch_size)
+
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+
+        num_samples = len(texts)
+        num_devices = len(devices)
+        logger.info(f"Pre-computing hidden states for {num_samples} texts "
+                     f"across {num_devices} GPUs...")
+        logger.info(f"  Model: {self._model_name}")
+        logger.info(f"  Max length: {self._max_length}")
+        logger.info(f"  Devices: {[str(d) for d in devices]}")
+        logger.info(f"  Cache path: {self._cache_path}")
+
+        # --- Pass 1: tokenize to get sequence lengths (CPU, single-threaded) ---
+        logger.info("Pass 1/2: Computing per-sample tokenized lengths...")
+        tokenizer = AutoTokenizer.from_pretrained(
+            self._model_name,
+            trust_remote_code=True,
+            padding_side="right",
+            truncation_side="left",
+        )
+        if tokenizer.pad_token is None:
+            if tokenizer.eos_token is not None:
+                tokenizer.pad_token = tokenizer.eos_token
+                tokenizer.pad_token_id = tokenizer.eos_token_id
+            else:
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+        sequence_lengths = []
+        for i in range(0, num_samples, batch_size * 4):
+            batch_texts = texts[i:i + batch_size * 4]
+            encodings = tokenizer(
+                batch_texts,
+                truncation=True,
+                max_length=self._max_length,
+                padding=False,
+                return_length=True,
+            )
+            sequence_lengths.extend(encodings['length'])
+
+        total_tokens = sum(sequence_lengths)
+        actual_max_len = max(sequence_lengths)
+        mean_len = total_tokens / num_samples
+        padded_total = num_samples * actual_max_len
+        savings_pct = 1 - total_tokens / padded_total
+
+        logger.info(f"  Total tokens: {total_tokens:,} across {num_samples} samples")
+        logger.info(f"  Mean length: {mean_len:.0f}, Max: {actual_max_len}")
+        logger.info(f"  Savings vs padded: {savings_pct:.1%} "
+                     f"({total_tokens:,} vs {padded_total:,} tokens)")
+
+        # Compute offsets
+        offsets = np.zeros(num_samples + 1, dtype=np.int64)
+        for i, length in enumerate(sequence_lengths):
+            offsets[i + 1] = offsets[i] + length
+
+        # Get hidden size from config (no model load yet)
+        hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
+        hidden_size = _get_hidden_size(hf_config)
+        needs_resize = tokenizer.pad_token == '[PAD]'
+        vocab_size = len(tokenizer)
+
+        # --- Create memmap and save offsets ---
+        self._cache_path.mkdir(parents=True, exist_ok=True)
+        hs_path = self._cache_path / "hidden_states.npy"
+        offsets_path = self._cache_path / "offsets.npy"
+
+        hs_mmap = np.lib.format.open_memmap(
+            str(hs_path), mode='w+', dtype=np.float16,
+            shape=(total_tokens, hidden_size)
+        )
+        np.save(str(offsets_path), offsets)
+
+        # --- Shard texts across devices ---
+        shard_size = (num_samples + num_devices - 1) // num_devices
+        shards = []
+        for d_idx in range(num_devices):
+            start = d_idx * shard_size
+            end = min(start + shard_size, num_samples)
+            if start >= num_samples:
+                break
+            shards.append((devices[d_idx], start, end))
+
+        logger.info(f"Pass 2/2: Computing hidden states across {len(shards)} shards...")
+        for dev, s, e in shards:
+            logger.info(f"  {dev}: samples [{s}, {e}) ({e - s} samples)")
+
+        progress_lock = threading.Lock()
+        progress = [0]
+
+        def _compute_shard(device, shard_start, shard_end):
+            """Load LLM on device, process shard, write to shared memmap."""
+            shard_texts = texts[shard_start:shard_end]
+            shard_lengths = sequence_lengths[shard_start:shard_end]
+            n_shard = len(shard_texts)
+
+            # Each thread loads its own tokenizer and model
+            tok = AutoTokenizer.from_pretrained(
+                self._model_name,
+                trust_remote_code=True,
+                padding_side="right",
+                truncation_side="left",
+            )
+            if tok.pad_token is None:
+                if tok.eos_token is not None:
+                    tok.pad_token = tok.eos_token
+                    tok.pad_token_id = tok.eos_token_id
+                else:
+                    tok.add_special_tokens({'pad_token': '[PAD]'})
+
+            mdl = AutoModelForCausalLM.from_pretrained(
+                self._model_name, config=hf_config, trust_remote_code=True,
+                torch_dtype=torch.float16,
+            )
+            mdl = mdl.to(device)
+            if needs_resize:
+                mdl.resize_token_embeddings(vocab_size)
+            mdl.eval()
+            for param in mdl.parameters():
+                param.requires_grad = False
+
+            for i in range(0, n_shard, batch_size):
+                batch_texts = shard_texts[i:i + batch_size]
+                batch_end = min(i + batch_size, n_shard)
+                batch_lengths = shard_lengths[i:batch_end]
+                batch_max_len = max(batch_lengths)
+
+                encoding = tok(
+                    batch_texts,
+                    padding='max_length',
+                    truncation=True,
+                    max_length=batch_max_len,
+                    return_tensors="pt",
+                )
+                input_ids = encoding['input_ids'].to(device)
+                attention_mask = encoding['attention_mask'].to(device)
+
+                with torch.no_grad():
+                    outputs = mdl(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        output_hidden_states=True,
+                        return_dict=True,
+                    )
+                    hidden_states = outputs.hidden_states[-1]
+
+                hs_cpu = hidden_states.cpu().to(torch.float16).numpy()
+                global_start = shard_start + i
+                for j in range(len(batch_texts)):
+                    sample_len = batch_lengths[j]
+                    sample_offset = int(offsets[global_start + j])
+                    hs_mmap[sample_offset:sample_offset + sample_len] = hs_cpu[j, :sample_len]
+
+                with progress_lock:
+                    progress[0] += len(batch_texts)
+                    if progress[0] % (batch_size * 10) == 0 or progress[0] == num_samples:
+                        logger.info(f"  Processed {progress[0]}/{num_samples} texts "
+                                     f"({device})")
+
+            # Unload model from this GPU
+            del mdl, tok
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        # --- Launch threads ---
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(shards)) as executor:
+            futures = [
+                executor.submit(_compute_shard, dev, s, e)
+                for dev, s, e in shards
+            ]
+            for fut in concurrent.futures.as_completed(futures):
+                fut.result()  # raise any exceptions
+
+        # Flush memmap
+        hs_mmap.flush()
+        del hs_mmap
+
+        # Write metadata
+        metadata = {
+            'model_name': self._model_name,
+            'max_length': self._max_length,
+            'hidden_size': hidden_size,
+            'num_samples': num_samples,
+            'actual_max_len': actual_max_len,
+            'total_tokens': total_tokens,
+            'sequence_lengths': sequence_lengths,
+            'storage_format': 'variable_length',
+            'dataset_path': os.path.abspath(self._dataset_path),
+            'cache_hash': self._cache_hash,
+            'created_at': datetime.now().isoformat(),
+            'dtype': 'float16',
+            'num_gpus_used': len(shards),
+        }
+        with open(self._cache_path / "metadata.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
+
+        self._metadata = metadata
+
+        total_bytes = total_tokens * hidden_size * 2
+        padded_bytes = num_samples * actual_max_len * hidden_size * 2
+        logger.info(
+            f"Hidden state cache created ({len(shards)} GPUs): {total_bytes / 1e9:.2f} GB "
             f"(vs {padded_bytes / 1e9:.2f} GB if padded), "
             f"total_tokens={total_tokens:,}, savings={savings_pct:.1%}"
         )

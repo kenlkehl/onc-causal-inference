@@ -365,6 +365,47 @@ class GPUHiddenStateStore:
         return self._device
 
     # ------------------------------------------------------------------
+    # Load from disk cache
+    # ------------------------------------------------------------------
+
+    def load_from_disk_cache(self, disk_cache, device: torch.device) -> None:
+        """Load hidden states from a pre-computed HiddenStateCache into GPU.
+
+        This avoids re-running the LLM when a disk cache is already available
+        (e.g., from multi-GPU precomputation).
+
+        Args:
+            disk_cache: A HiddenStateCache that has been opened and optionally
+                preloaded to RAM.
+            device: GPU device to store the tensor on.
+        """
+        self._device = device
+
+        # Access the underlying flat array and offsets
+        hs_array = disk_cache.hidden_states_array
+        self._offsets = hs_array.offsets.copy()
+        self._num_samples = len(hs_array)
+        self._hidden_size = hs_array.flat.shape[-1]
+
+        total_tokens = int(self._offsets[-1])
+        estimated_gb = total_tokens * self._hidden_size * 2 / 1e9
+        logger.info(
+            f"GPUHiddenStateStore: loading from disk cache "
+            f"({self._num_samples} samples, {total_tokens:,} tokens, "
+            f"~{estimated_gb:.2f} GB) to {device}"
+        )
+
+        # Transfer flat array to GPU as float16
+        self._flat_tensor = torch.from_numpy(
+            np.array(hs_array.flat, dtype=np.float16)
+        ).to(device)
+
+        logger.info(
+            f"GPUHiddenStateStore ready: {self._num_samples} samples, "
+            f"{total_tokens:,} tokens, {self.estimated_vram_gb:.2f} GB VRAM"
+        )
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 

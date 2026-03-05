@@ -37,7 +37,8 @@ def run_applied_inference_forest(
     output_path: Path,
     device: torch.device,
     num_workers: int = 1,
-    verbose: bool = True
+    verbose: bool = True,
+    gpu_ids: Optional[List[int]] = None,
 ) -> None:
     """
     Run applied causal inference using two-stage neural + causal forest approach.
@@ -55,6 +56,7 @@ def run_applied_inference_forest(
         device: PyTorch device
         num_workers: Number of parallel workers (not used - sequential for memory)
         verbose: Print detailed logs
+        gpu_ids: Optional list of GPU IDs for multi-GPU hidden state precomputation
     """
     logger.info("=" * 80)
     logger.info("APPLIED CAUSAL INFERENCE (CAUSAL FOREST)")
@@ -123,7 +125,17 @@ def run_applied_inference_forest(
             if not hidden_state_cache.is_valid(len(dataset)):
                 logger.info("Pre-computing LLM hidden states for disk caching...")
                 try:
-                    hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
+                    # Use multi-GPU precomputation when multiple GPUs available
+                    precompute_devices = [device]
+                    if gpu_ids and device.type == "cuda":
+                        precompute_devices = [torch.device(f"cuda:{i}") for i in gpu_ids]
+                    if len(precompute_devices) > 1:
+                        logger.info(f"Using {len(precompute_devices)} GPUs for parallel precomputation")
+                        hidden_state_cache.precompute_multi_gpu(
+                            all_texts, precompute_devices, batch_size=batch_size
+                        )
+                    else:
+                        hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
                 except Exception as e:
                     logger.warning(f"Hidden state caching failed: {e}. Falling back to non-cached mode.")
                     hidden_state_cache = None

@@ -123,7 +123,17 @@ def run_plasmode_experiments(
                     logger.info(f"Pre-computing LLM hidden states for plasmode ({arch_label} arch)...")
                     batch_size = getattr(plasmode_config.generator_training, 'batch_size', 8)
                     try:
-                        cache.precompute(all_texts, device, batch_size=batch_size)
+                        # Use multi-GPU precomputation when multiple GPUs available
+                        precompute_devices = [device]
+                        if gpu_ids and device.type == "cuda":
+                            precompute_devices = [torch.device(f"cuda:{i}") for i in gpu_ids]
+                        if len(precompute_devices) > 1:
+                            logger.info(f"Using {len(precompute_devices)} GPUs for parallel precomputation")
+                            cache.precompute_multi_gpu(
+                                all_texts, precompute_devices, batch_size=batch_size
+                            )
+                        else:
+                            cache.precompute(all_texts, device, batch_size=batch_size)
                     except Exception as e:
                         logger.warning(f"Hidden state caching failed: {e}. Falling back to non-cached mode.")
                         cache = None
