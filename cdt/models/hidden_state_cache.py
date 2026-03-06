@@ -641,12 +641,14 @@ class HiddenStateCache:
                 else:
                     tok.add_special_tokens({'pad_token': '[PAD]'})
 
-            # Load model directly to target device to avoid meta-tensor
-            # issues with newer transformers + accelerate + tied weights.
+            # Load model to CPU first, then move to target device.
+            # Use device_map="cpu" to force real tensors (not meta) even
+            # when accelerate is installed and the model has tied weights.
             mdl = AutoModelForCausalLM.from_pretrained(
                 self._model_name, config=hf_config, trust_remote_code=True,
-                torch_dtype=torch.float16, device_map=device,
+                torch_dtype=torch.float16, device_map="cpu",
             )
+            mdl = mdl.to(device)
             if needs_resize:
                 mdl.resize_token_embeddings(vocab_size)
             mdl.eval()
@@ -674,7 +676,7 @@ class HiddenStateCache:
                 input_ids = encoding['input_ids'].to(device)
                 attention_mask = encoding['attention_mask'].to(device)
 
-                with torch.no_grad(), torch.amp.autocast(device.type, dtype=torch.float16):
+                with torch.no_grad():
                     outputs = mdl(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
