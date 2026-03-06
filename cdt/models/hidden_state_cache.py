@@ -674,7 +674,7 @@ class HiddenStateCache:
                 input_ids = encoding['input_ids'].to(device)
                 attention_mask = encoding['attention_mask'].to(device)
 
-                with torch.no_grad(), torch.amp.autocast(device.split(':')[0], dtype=torch.float16):
+                with torch.no_grad(), torch.amp.autocast(device.type, dtype=torch.float16):
                     outputs = mdl(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
