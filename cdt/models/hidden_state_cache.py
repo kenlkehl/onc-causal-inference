@@ -674,7 +674,7 @@ class HiddenStateCache:
                 input_ids = encoding['input_ids'].to(device)
                 attention_mask = encoding['attention_mask'].to(device)
 
-                with torch.no_grad():
+                with torch.no_grad(), torch.amp.autocast(device.split(':')[0], dtype=torch.float16):
                     outputs = mdl(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
@@ -698,7 +698,7 @@ class HiddenStateCache:
                     progress[0] += len(batch_texts)
                     if progress[0] % (batch_size * 10) == 0 or progress[0] == num_samples:
                         logger.info(f"  Processed {progress[0]}/{num_samples} texts "
-                                     f"({device})")
+                                     f"(total across all GPUs, reported by {device})")
 
             # Unload model from this GPU
             del mdl, tok, rp_gpu
