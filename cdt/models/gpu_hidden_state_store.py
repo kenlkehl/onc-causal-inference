@@ -206,11 +206,14 @@ class GPUHiddenStateStore:
         hidden_size = _get_hidden_size(hf_config)
         self._hidden_size = hidden_size
 
+        # Use device_map="cpu" to force real tensors (not meta) even
+        # when accelerate is installed and the model has tied weights.
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             config=hf_config,
             trust_remote_code=True,
             torch_dtype=torch.float16,
+            device_map="cpu",
         )
         model = model.to(device)
 

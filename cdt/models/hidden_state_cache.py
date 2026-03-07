@@ -362,12 +362,12 @@ class HiddenStateCache:
         hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(hf_config)
 
-        # Load to CPU first, then move to device.
-        # Using device_map triggers accelerate's dispatch_model which loads
-        # via meta tensors — this fails for models with tied weights (e.g. Qwen3).
+        # Load model to CPU first, then move to target device.
+        # Use device_map="cpu" to force real tensors (not meta) even
+        # when accelerate is installed and the model has tied weights.
         model = AutoModelForCausalLM.from_pretrained(
             self._model_name, config=hf_config, trust_remote_code=True,
-            torch_dtype=torch.float16,
+            torch_dtype=torch.float16, device_map="cpu",
         )
         model = model.to(device)
 
