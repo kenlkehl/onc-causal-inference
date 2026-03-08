@@ -362,12 +362,13 @@ class HiddenStateCache:
         hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(hf_config)
 
-        # Load model to CPU first, then move to target device.
-        # Use device_map="cpu" to force real tensors (not meta) even
-        # when accelerate is installed and the model has tied weights.
+        # Load to CPU first, then move to device.
+        # low_cpu_mem_usage=False prevents meta-tensor initialization that
+        # breaks .to(device) for models with tied weights (e.g. Qwen3).
         model = AutoModelForCausalLM.from_pretrained(
             self._model_name, config=hf_config, trust_remote_code=True,
-            torch_dtype=torch.float16, device_map="cpu",
+            torch_dtype=torch.float16,
+            low_cpu_mem_usage=False,
         )
         model = model.to(device)
 
@@ -641,12 +642,13 @@ class HiddenStateCache:
                 else:
                     tok.add_special_tokens({'pad_token': '[PAD]'})
 
-            # Load model to CPU first, then move to target device.
-            # Use device_map="cpu" to force real tensors (not meta) even
-            # when accelerate is installed and the model has tied weights.
+            # Load to CPU first, then move to target device.
+            # low_cpu_mem_usage=False prevents meta-tensor initialization that
+            # breaks .to(device) for models with tied weights (e.g. Qwen3).
             mdl = AutoModelForCausalLM.from_pretrained(
                 self._model_name, config=hf_config, trust_remote_code=True,
-                torch_dtype=torch.float16, device_map="cpu",
+                torch_dtype=torch.float16,
+                low_cpu_mem_usage=False,
             )
             mdl = mdl.to(device)
             if needs_resize:

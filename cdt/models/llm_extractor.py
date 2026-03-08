@@ -104,7 +104,8 @@ class LLMFeatureExtractor(nn.Module):
         if use_pretrained:
             logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size})")
             self._model = AutoModelForCausalLM.from_pretrained(
-                model_name, config=self._config, trust_remote_code=True
+                model_name, config=self._config, trust_remote_code=True,
+                low_cpu_mem_usage=False,
             )
         else:
             logger.info(f"Creating model from config with random weights (hidden_size={self._hidden_size})")

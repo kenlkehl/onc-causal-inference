@@ -137,7 +137,8 @@ class FrozenLLMPoolerExtractor(nn.Module):
 
             logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size})")
             self._model = AutoModelForCausalLM.from_pretrained(
-                model_name, config=self._hf_config, trust_remote_code=True
+                model_name, config=self._hf_config, trust_remote_code=True,
+                low_cpu_mem_usage=False,
             )
 
             # Load pretrained tokenizer (right padding for pooling over all tokens)
