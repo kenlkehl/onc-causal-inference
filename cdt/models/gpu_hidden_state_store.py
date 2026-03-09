@@ -206,16 +206,17 @@ class GPUHiddenStateStore:
         hidden_size = _get_hidden_size(hf_config)
         self._hidden_size = hidden_size
 
-        # low_cpu_mem_usage=False prevents meta-tensor initialization that
-        # breaks .to(device) for models with tied weights (e.g. Qwen3).
+        # Load directly to target device to avoid meta tensors with
+        # tied-weight models (e.g. Qwen3.5).
         model = AutoModelForCausalLM.from_pretrained(
             model_name,
             config=hf_config,
             trust_remote_code=True,
             torch_dtype=torch.float16,
-            low_cpu_mem_usage=False,
+            device_map={"": device},
         )
-        model = model.to(device)
+        from accelerate.hooks import remove_hook_from_module
+        remove_hook_from_module(model, recurse=True)
 
         if tokenizer.pad_token == "[PAD]":
             model.resize_token_embeddings(len(tokenizer))
@@ -254,7 +255,7 @@ class GPUHiddenStateStore:
             input_ids = encoding["input_ids"].to(device)
             attention_mask = encoding["attention_mask"].to(device)
 
-            with torch.no_grad():
+            with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,

@@ -362,15 +362,17 @@ class HiddenStateCache:
         hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(hf_config)
 
-        # Load to CPU first, then move to device.
-        # low_cpu_mem_usage=False prevents meta-tensor initialization that
-        # breaks .to(device) for models with tied weights (e.g. Qwen3).
+        # Load model directly to target device.
+        # Using device_map={"": device} avoids meta tensors that break .to()
+        # for models with tied weights (e.g. Qwen3.5).
         model = AutoModelForCausalLM.from_pretrained(
             self._model_name, config=hf_config, trust_remote_code=True,
             torch_dtype=torch.float16,
-            low_cpu_mem_usage=False,
+            device_map={"": device},
         )
-        model = model.to(device)
+        # Remove accelerate dispatch hooks so the model behaves like a normal nn.Module
+        from accelerate.hooks import remove_hook_from_module
+        remove_hook_from_module(model, recurse=True)
 
         if tokenizer.pad_token == '[PAD]':
             model.resize_token_embeddings(len(tokenizer))
@@ -429,7 +431,7 @@ class HiddenStateCache:
             input_ids = encoding['input_ids'].to(device)
             attention_mask = encoding['attention_mask'].to(device)
 
-            with torch.no_grad():
+            with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
@@ -642,15 +644,15 @@ class HiddenStateCache:
                 else:
                     tok.add_special_tokens({'pad_token': '[PAD]'})
 
-            # Load to CPU first, then move to target device.
-            # low_cpu_mem_usage=False prevents meta-tensor initialization that
-            # breaks .to(device) for models with tied weights (e.g. Qwen3).
+            # Load directly to target device to avoid meta tensors with
+            # tied-weight models (e.g. Qwen3.5).
             mdl = AutoModelForCausalLM.from_pretrained(
                 self._model_name, config=hf_config, trust_remote_code=True,
                 torch_dtype=torch.float16,
-                low_cpu_mem_usage=False,
+                device_map={"": device},
             )
-            mdl = mdl.to(device)
+            from accelerate.hooks import remove_hook_from_module
+            remove_hook_from_module(mdl, recurse=True)
             if needs_resize:
                 mdl.resize_token_embeddings(vocab_size)
             mdl.eval()
@@ -678,7 +680,7 @@ class HiddenStateCache:
                 input_ids = encoding['input_ids'].to(device)
                 attention_mask = encoding['attention_mask'].to(device)
 
-                with torch.no_grad():
+                with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
                     outputs = mdl(
                         input_ids=input_ids,
                         attention_mask=attention_mask,

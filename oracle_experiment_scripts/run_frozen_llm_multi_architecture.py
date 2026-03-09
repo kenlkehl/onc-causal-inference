@@ -88,6 +88,7 @@ class ExperimentConfig:
     flp_freeze_llm: bool = True
     flp_projection_dim: int = 128
     flp_gated_attention_dim: int = 128
+    flp_random_projection_dim: Optional[int] = None  # None = full hidden size
 
     # Fixed parameters
     flp_model_name: str = "Qwen/Qwen3.5-0.8B-Base"
@@ -220,13 +221,15 @@ def precompute_caches(
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
+        rp_dim = config.flp_random_projection_dim
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), None
+            config.flp_model_name, config.flp_max_length, str(parquet_file), rp_dim
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
                 parquet_file, config.flp_model_name,
                 config.flp_max_length, config.batch_size,
+                rp_dim,
             )
 
     if not unique_keys:
@@ -238,14 +241,14 @@ def precompute_caches(
     caches_to_compute = []
     ready_caches = {}
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size) in unique_keys.items():
+    for cache_hash, (parquet_file, model_name, max_length, batch_size, rp_dim) in unique_keys.items():
         cache_dir = str(parquet_file.parent / '.cdt_cache')
         cache = HiddenStateCache(
             cache_dir=cache_dir,
             model_name=model_name,
             max_length=max_length,
             dataset_path=str(parquet_file),
-            random_projection_dim=None,
+            random_projection_dim=rp_dim,
         )
         df = pd.read_parquet(parquet_file)
         if cache.is_valid(len(df)):
@@ -262,44 +265,20 @@ def precompute_caches(
         logger.info("All caches already valid")
         return ready_caches
 
-    logger.info(f"Pre-computing {len(caches_to_compute)} cache(s) across "
-                f"{len(devices)} device(s)...")
-
-    def _precompute_one_multi_gpu(cache_hash, cache, parquet_file, batch_size, gpu_devices):
-        df = pd.read_parquet(parquet_file)
-        all_texts = df['clinical_text'].tolist()
-        gpu_devices = [torch.device(d) for d in gpu_devices]
-        cache.precompute_multi_gpu(all_texts, gpu_devices, batch_size=batch_size)
-        cache.open()
-        cache.preload_to_ram()
-        return cache_hash, cache
-
-    n_caches = len(caches_to_compute)
-    device_assignments = [[] for _ in range(n_caches)]
-    for i, dev in enumerate(devices):
-        device_assignments[i % n_caches].append(dev)
+    gpu_devices = [torch.device(d) for d in devices]
+    logger.info(f"Pre-computing {len(caches_to_compute)} cache(s) sequentially, "
+                f"each using {len(gpu_devices)} GPU(s)...")
 
     for i, (ch, cache, pf, bs) in enumerate(caches_to_compute):
-        assigned = device_assignments[i]
-        logger.info(f"  Cache {ch}: assigned {len(assigned)} GPU(s) {assigned}")
-
-    if n_caches == 1:
-        ch, cache, pf, bs = caches_to_compute[0]
-        _, cache = _precompute_one_multi_gpu(ch, cache, pf, bs, device_assignments[0])
+        logger.info(f"  Cache {i+1}/{len(caches_to_compute)} ({ch}): "
+                     f"precomputing on {len(gpu_devices)} GPU(s)...")
+        df = pd.read_parquet(pf)
+        all_texts = df['clinical_text'].tolist()
+        cache.precompute_multi_gpu(all_texts, gpu_devices, batch_size=bs)
+        cache.open()
+        cache.preload_to_ram()
         ready_caches[ch] = cache
-    else:
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=n_caches) as executor:
-            futures = {}
-            for i, (ch, cache, pf, bs) in enumerate(caches_to_compute):
-                fut = executor.submit(
-                    _precompute_one_multi_gpu, ch, cache, pf, bs, device_assignments[i]
-                )
-                futures[fut] = ch
-            for fut in concurrent.futures.as_completed(futures):
-                ch, cache = fut.result()
-                ready_caches[ch] = cache
-                logger.info(f"  Cache {ch}: precomputation complete")
+        logger.info(f"  Cache {ch}: precomputation complete")
 
     logger.info(f"All {len(ready_caches)} caches ready")
     return ready_caches
@@ -318,8 +297,9 @@ def precompute_gpu_stores(
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
+        rp_dim = config.flp_random_projection_dim
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), None
+            config.flp_model_name, config.flp_max_length, str(parquet_file), rp_dim
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
@@ -444,7 +424,8 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
 
     if config.flp_freeze_llm:
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), None
+            config.flp_model_name, config.flp_max_length, str(parquet_file),
+            config.flp_random_projection_dim,
         )
         if gpu_store_registry is not None:
             gpu_store = gpu_store_registry.get(cache_hash)
@@ -921,8 +902,9 @@ def generate_experiment_grid(
     ]
 
     model_types = ["causal_forest", "rlearner", "dragonnet"]
-    max_lengths = [5000, 10000, 25000, 50000, 100000]
+    max_lengths = [5000, 10000, 25000, 50000]
     explicit_confounder_options = [False, True]
+    random_projection_dims = [None, 256, 512]
 
     if filter_datasets:
         datasets = [(p, n) for p, n in datasets if n in filter_datasets]
@@ -933,8 +915,8 @@ def generate_experiment_grid(
 
     configs = []
 
-    for (dataset_path, dataset_name), model_type, max_len, explicit_conf in itertools.product(
-        datasets, model_types, max_lengths, explicit_confounder_options
+    for (dataset_path, dataset_name), model_type, max_len, explicit_conf, rp_dim in itertools.product(
+        datasets, model_types, max_lengths, explicit_confounder_options, random_projection_dims
     ):
         configs.append(ExperimentConfig(
             dataset_path=dataset_path,
@@ -942,6 +924,7 @@ def generate_experiment_grid(
             model_type=model_type,
             use_explicit_confounders=explicit_conf,
             flp_max_length=max_len,
+            flp_random_projection_dim=rp_dim,
         ))
 
     # Shuffle so patterns emerge early
