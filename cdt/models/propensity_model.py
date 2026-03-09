@@ -230,6 +230,7 @@ class PropensityOnlyModel(nn.Module):
         flp_projection_dim: int = 128,
         flp_dropout: float = 0.1,
         flp_gradient_checkpointing: bool = True,
+        flp_downprojection_dim: Optional[int] = None,
         flp_skip_llm: bool = False,
         flp_cached_hidden_size: int = 0,
         # Numeric feature args
@@ -424,6 +425,7 @@ class PropensityOnlyModel(nn.Module):
             'flp_projection_dim': flp_projection_dim,
             'flp_dropout': flp_dropout,
             'flp_gradient_checkpointing': flp_gradient_checkpointing,
+            'flp_downprojection_dim': flp_downprojection_dim,
             'flp_skip_llm': flp_skip_llm,
             'flp_cached_hidden_size': flp_cached_hidden_size,
             'numeric_features_enabled': numeric_features_enabled,
@@ -585,6 +587,7 @@ class PropensityOnlyModel(nn.Module):
             flp_projection_dim=flp_projection_dim,
             flp_dropout=flp_dropout,
             flp_gradient_checkpointing=flp_gradient_checkpointing,
+            flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
             numeric_features_enabled=numeric_features_enabled,
@@ -894,6 +897,7 @@ def create_propensity_model_from_config(
         flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
         flp_skip_llm=flp_skip_llm,
         flp_cached_hidden_size=flp_cached_hidden_size,
         # Numeric feature args

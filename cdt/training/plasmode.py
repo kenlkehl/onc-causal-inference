@@ -642,6 +642,7 @@ def _train_cnn_model(
         flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
         flp_skip_llm=(hidden_state_cache is not None),
         flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
         # Numeric feature args
@@ -812,7 +813,12 @@ def _train_cnn_model(
         collate_fn = collator if collator is not None else collate_batch
 
     use_cached_mode = hidden_state_cache is not None and train_indices is not None
-    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+    if use_cached_mode:
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    elif feature_extractor_type == "frozen_llm_pooler":
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True, prefetch_factor=2)
+    else:
+        dl_kwargs = {}
 
     train_loader = DataLoader(
         train_dataset,
@@ -1225,6 +1231,7 @@ def _train_causal_forest_model(
         flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
         flp_skip_llm=(hidden_state_cache is not None),
         flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
         # LLM args
@@ -1284,7 +1291,12 @@ def _train_causal_forest_model(
         collate_fn = collator if collator is not None else collate_batch
 
     use_cached_mode = hidden_state_cache is not None and train_indices is not None
-    dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True) if use_cached_mode else {}
+    if use_cached_mode:
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    elif feature_extractor_type == "frozen_llm_pooler":
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True, prefetch_factor=2)
+    else:
+        dl_kwargs = {}
 
     train_loader = DataLoader(
         train_dataset,
@@ -1410,7 +1422,12 @@ def _train_causal_forest_model(
         )
         combined_collate_fn = collate_fn
 
-    dl_kwargs_combined = dict(num_workers=2, persistent_workers=True, pin_memory=True) if (hidden_state_cache is not None) else {}
+    if hidden_state_cache is not None:
+        dl_kwargs_combined = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    elif feature_extractor_type == "frozen_llm_pooler":
+        dl_kwargs_combined = dict(num_workers=2, persistent_workers=True, pin_memory=True, prefetch_factor=2)
+    else:
+        dl_kwargs_combined = {}
     combined_loader = DataLoader(
         combined_dataset,
         batch_size=train_config.batch_size,

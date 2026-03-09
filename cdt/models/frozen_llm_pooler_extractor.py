@@ -17,13 +17,15 @@ Architecture:
          |
     Tokenize with pretrained HF tokenizer (right-padded)
          |
-    Decoder-only LLM (pretrained, frozen by default)
+    Decoder-only LLM (pretrained, frozen by default, autocast float16)
          |
     ALL token hidden states from final layer: (batch, seq_len, hidden_size)
          |
+    [Optional] Trainable downprojection: Linear(hidden_size -> downprojection_dim)
+         |
     GatedAttentionPooling (with attention_mask for padding):
       g = tanh(V(h)) * sigmoid(U(h))  ->  scores = v(W(LN(g)))  ->  softmax  ->  weighted sum
-      Output: (batch, hidden_size)
+      Output: (batch, effective_dim)  where effective_dim = downprojection_dim or hidden_size
          |
     [Optional] Merge numeric features
          |
@@ -72,6 +74,8 @@ class FrozenLLMPoolerExtractor(nn.Module):
         projection_dim: Output projection dimension
         dropout: Dropout rate for projection layers
         gradient_checkpointing: Enable gradient checkpointing (only when not frozen)
+        downprojection_dim: If set, trainable linear projection from hidden_size to this dim
+            before pooling. Reduces memory for trainable layers.
         device: PyTorch device
         skip_llm: If True, skip loading the LLM entirely (cached mode)
         cached_hidden_size: Hidden size to use when skip_llm=True
@@ -86,6 +90,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
         projection_dim: int = 128,
         dropout: float = 0.1,
         gradient_checkpointing: bool = True,
+        downprojection_dim: Optional[int] = None,
         device: Optional[torch.device] = None,
         numeric_features_enabled: bool = False,
         numeric_embedding_dim: int = 32,
@@ -104,6 +109,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
         self._projection_dim = projection_dim
         self._dropout = dropout
         self._gradient_checkpointing = gradient_checkpointing
+        self._downprojection_dim = downprojection_dim
         self._skip_llm = skip_llm
 
         if skip_llm:
@@ -136,10 +142,20 @@ class FrozenLLMPoolerExtractor(nn.Module):
             self._hidden_size = _get_hidden_size(self._hf_config)
 
             logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size})")
+            # Use device_map to load directly to target device, avoiding meta
+            # tensors that arise from tied weights (e.g. lm_head tied to
+            # embed_tokens in Qwen3.5).  After loading, remove accelerate
+            # dispatch hooks so the model behaves as a plain nn.Module.
             self._model = AutoModelForCausalLM.from_pretrained(
                 model_name, config=self._hf_config, trust_remote_code=True,
-                low_cpu_mem_usage=False,
+                dtype=torch.float16 if freeze_llm else None,
+                device_map={"": self._device},
             )
+            try:
+                from accelerate.hooks import remove_hook_from_module
+                remove_hook_from_module(self._model, recurse=True)
+            except ImportError:
+                pass  # accelerate not installed; device_map likely wasn't used
 
             # Load pretrained tokenizer (right padding for pooling over all tokens)
             self._tokenizer = AutoTokenizer.from_pretrained(
@@ -172,9 +188,18 @@ class FrozenLLMPoolerExtractor(nn.Module):
                     self._model.gradient_checkpointing_enable()
                     logger.info("Gradient checkpointing enabled")
 
-        # Gated attention pooling over token hidden states
+        # Trainable downprojection from hidden_size to a smaller dim (optional)
+        if downprojection_dim is not None:
+            self._downprojection = nn.Linear(self._hidden_size, downprojection_dim)
+            effective_dim = downprojection_dim
+        else:
+            self._downprojection = None
+            effective_dim = self._hidden_size
+        self._effective_dim = effective_dim
+
+        # Gated attention pooling over token hidden states (or their projections)
         self._pooling = GatedAttentionPooling(
-            hidden_dim=self._hidden_size,
+            hidden_dim=effective_dim,
             attention_dim=gated_attention_dim,
         )
 
@@ -188,15 +213,15 @@ class FrozenLLMPoolerExtractor(nn.Module):
                 output_dim=numeric_embedding_dim,
             )
             self._numeric_merge = nn.Sequential(
-                nn.Linear(self._hidden_size + numeric_embedding_dim, self._hidden_size),
-                nn.LayerNorm(self._hidden_size),
+                nn.Linear(effective_dim + numeric_embedding_dim, effective_dim),
+                nn.LayerNorm(effective_dim),
                 nn.ReLU(),
             )
 
         # Projection MLP
         self._output_dim = projection_dim
         self._projection = nn.Sequential(
-            nn.Linear(self._hidden_size, projection_dim),
+            nn.Linear(effective_dim, projection_dim),
             nn.LayerNorm(projection_dim),
             nn.GELU(),
             nn.Dropout(dropout),
@@ -207,15 +232,16 @@ class FrozenLLMPoolerExtractor(nn.Module):
         if skip_llm:
             logger.info(f"FrozenLLMPoolerExtractor (cached mode) initialized:")
             logger.info(f"  Hidden size: {self._hidden_size}")
-            logger.info(f"  Gated attention dim: {gated_attention_dim}")
-            logger.info(f"  Output dim: {projection_dim}")
         else:
             logger.info(f"FrozenLLMPoolerExtractor initialized:")
             logger.info(f"  Model: {model_name} (pretrained, {'frozen' if freeze_llm else 'trainable'})")
             logger.info(f"  Hidden size: {self._hidden_size}")
             logger.info(f"  Max length: {max_length}")
-            logger.info(f"  Gated attention dim: {gated_attention_dim}")
-            logger.info(f"  Output dim: {projection_dim}")
+        if downprojection_dim is not None:
+            logger.info(f"  Downprojection: {self._hidden_size} -> {downprojection_dim} (trainable)")
+        logger.info(f"  Effective dim (pooling input): {effective_dim}")
+        logger.info(f"  Gated attention dim: {gated_attention_dim}")
+        logger.info(f"  Output dim: {projection_dim}")
         if numeric_features_enabled:
             logger.info(f"  Numeric features: enabled (dim={numeric_embedding_dim})")
 
@@ -276,20 +302,24 @@ class FrozenLLMPoolerExtractor(nn.Module):
             return_tensors="pt",
         )
 
-        input_ids = encoding['input_ids'].to(self._device)
-        attention_mask = encoding['attention_mask'].to(self._device)
+        input_ids = encoding['input_ids'].to(self._device, non_blocking=True)
+        attention_mask = encoding['attention_mask'].to(self._device, non_blocking=True)
 
         # Forward through the LLM
         if self._freeze_llm:
             with torch.no_grad():
-                outputs = self._model(
-                    input_ids=input_ids,
-                    attention_mask=attention_mask,
-                    output_hidden_states=True,
-                    return_dict=True,
-                )
-                # Extract all token hidden states from final layer
-                hidden_states = outputs.hidden_states[-1]  # (batch, seq_len, hidden_size)
+                # Use autocast for memory-efficient frozen LLM forward pass
+                with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self._device.type == "cuda"):
+                    outputs = self._model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        output_hidden_states=True,
+                        return_dict=True,
+                    )
+                    # Extract all token hidden states from final layer
+                    hidden_states = outputs.hidden_states[-1]  # (batch, seq_len, hidden_size)
+            # Detach from LLM graph and cast to float32
+            hidden_states = hidden_states.detach().float()
         else:
             outputs = self._model(
                 input_ids=input_ids,
@@ -298,15 +328,18 @@ class FrozenLLMPoolerExtractor(nn.Module):
                 return_dict=True,
             )
             hidden_states = outputs.hidden_states[-1]
+            # Cast BFloat16 -> Float32 if needed (Qwen3 uses BFloat16)
+            if hidden_states.dtype != torch.float32:
+                hidden_states = hidden_states.float()
 
-        # Cast BFloat16 -> Float32 if needed (Qwen3 uses BFloat16)
-        if hidden_states.dtype != torch.float32:
-            hidden_states = hidden_states.float()
+        # Trainable downprojection (has gradients even when LLM is frozen)
+        if self._downprojection is not None:
+            hidden_states = self._downprojection(hidden_states)
 
         # Gated attention pooling with attention mask
         pooled, self._last_attention_weights = self._pooling(
             hidden_states, attention_mask=attention_mask
-        )  # pooled: (batch, hidden_size)
+        )  # pooled: (batch, effective_dim)
 
         # Add numeric features before projection
         if self.numeric_features_enabled and self.numeric_feature_vector is not None:
@@ -343,10 +376,14 @@ class FrozenLLMPoolerExtractor(nn.Module):
         if hidden_states.dtype != torch.float32:
             hidden_states = hidden_states.float()
 
+        # Trainable downprojection (if configured)
+        if self._downprojection is not None:
+            hidden_states = self._downprojection(hidden_states)
+
         # Gated attention pooling with attention mask
         pooled, self._last_attention_weights = self._pooling(
             hidden_states, attention_mask=attention_mask
-        )  # pooled: (batch, hidden_size)
+        )  # pooled: (batch, effective_dim)
 
         # Add numeric features before projection
         if self.numeric_features_enabled and self.numeric_feature_vector is not None and texts is not None:
@@ -370,6 +407,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
             'projection_dim': self._projection_dim,
             'dropout': self._dropout,
             'gradient_checkpointing': self._gradient_checkpointing,
+            'downprojection_dim': self._downprojection_dim,
             'hidden_size': self._hidden_size,
             'output_dim': self._output_dim,
             'skip_llm': self._skip_llm,

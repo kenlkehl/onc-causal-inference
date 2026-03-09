@@ -84,7 +84,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
 | `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
-| `frozen_llm_pooler` | Frozen pretrained LLM + gated attention pooling over all tokens (auto-cached) | Yes (32K) | No |
+| `frozen_llm_pooler` | Frozen pretrained LLM + optional trainable downprojection + gated attention pooling | Yes (32K) | No |
 | `llm` | Decoder-only LLM (Qwen3) with random init or pretrained, last token embedding | Yes (32K) | No |
 | `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
 | `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
@@ -314,25 +314,25 @@ Key parameters: `llm_model_name`, `llm_max_length`, `llm_projection_dim`, `llm_g
 
 See `example_configs/llm_config.json` for a complete configuration.
 
-### Frozen LLM Pooler (Pretrained + Cached)
+### Frozen LLM Pooler (Pretrained + Live Forward)
 
 Uses a pretrained decoder-only LLM with **frozen weights** and applies gated attention pooling
-over ALL token hidden states (not just the last token). Only the lightweight pooling + projection
-layers (~200K params) are trained.
+over ALL token hidden states (not just the last token). An optional **trainable downprojection**
+layer reduces hidden state dimensionality before pooling.
 
 ```
 Clinical Text → Pretrained Tokenizer (right-padded)
-    → Frozen LLM → All Token Hidden States
+    → Frozen LLM (no_grad, autocast float16) → All Token Hidden States
+    → [Optional] Trainable Downprojection (e.g., 1024 → 256)
     → Gated Attention Pooling → Projection MLP
     → Document Vector → Causal Head
 ```
 
-**Hidden state caching** (enabled by default): When the LLM is frozen, its outputs are deterministic.
-CDT pre-computes hidden states once for the entire dataset, caches them to disk as float16 memmap
-files, and reuses them across K-fold CV folds and across experiment runs. This saves ~2.4 GB GPU
-memory per training run and eliminates redundant LLM forward passes.
+By default, the frozen LLM runs a live forward pass per batch. This avoids the OOM issues
+of pre-computing hidden states for entire datasets. Hidden state caching is available as an
+opt-in via `flp_cache_hidden_states: true` for cases where disk space allows.
 
-Key parameters: `flp_model_name`, `flp_max_length`, `flp_cache_hidden_states`
+Key parameters: `flp_model_name`, `flp_max_length`, `flp_downprojection_dim`, `flp_cache_hidden_states`
 
 See `example_configs/frozen_llm_pooler_config.json` for a complete configuration.
 

@@ -240,6 +240,7 @@ def create_feature_extractor(
     flp_projection_dim: int = 128,
     flp_dropout: float = 0.1,
     flp_gradient_checkpointing: bool = True,
+    flp_downprojection_dim: Optional[int] = None,
     flp_skip_llm: bool = False,
     flp_cached_hidden_size: int = 0,
     # Numeric feature args
@@ -668,6 +669,7 @@ def create_feature_extractor(
             projection_dim=flp_projection_dim,
             dropout=flp_dropout,
             gradient_checkpointing=flp_gradient_checkpointing,
+            downprojection_dim=flp_downprojection_dim,
             numeric_features_enabled=numeric_features_enabled,
             numeric_embedding_dim=numeric_embedding_dim,
             numeric_magnitude_bins=numeric_magnitude_bins,
@@ -948,6 +950,7 @@ def create_feature_extractor_from_config(
         flp_projection_dim=config.get('flp_projection_dim', 128),
         flp_dropout=config.get('flp_dropout', 0.1),
         flp_gradient_checkpointing=config.get('flp_gradient_checkpointing', True),
+        flp_downprojection_dim=config.get('flp_downprojection_dim', None),
         flp_skip_llm=config.get('flp_skip_llm', False),
         flp_cached_hidden_size=config.get('flp_cached_hidden_size', 0),
         # Numeric args

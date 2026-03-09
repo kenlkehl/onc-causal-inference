@@ -5,6 +5,10 @@ Compares causal_forest, rlearner, and dragonnet model types using the
 frozen_llm_pooler feature extractor across multiple datasets and max
 sequence lengths.
 
+By default, uses live LLM forward pass per batch with a trainable
+downprojection layer (no pre-caching). Pass --cache to opt-in to
+hidden state pre-computation for large-scale runs.
+
 Output is compatible with analyze_results.py.
 
 Usage:
@@ -88,7 +92,8 @@ class ExperimentConfig:
     flp_freeze_llm: bool = True
     flp_projection_dim: int = 128
     flp_gated_attention_dim: int = 128
-    flp_random_projection_dim: Optional[int] = None  # None = full hidden size
+    flp_downprojection_dim: Optional[int] = 256  # Trainable downprojection dim (None = full hidden size)
+    flp_cache_hidden_states: bool = False  # If True, pre-cache hidden states to disk
 
     # Fixed parameters
     flp_model_name: str = "Qwen/Qwen3.5-0.8B-Base"
@@ -216,20 +221,19 @@ def precompute_caches(
     """
     unique_keys = {}
     for config in configs:
-        if not config.flp_freeze_llm:
+        if not config.flp_freeze_llm or not config.flp_cache_hidden_states:
             continue
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
-        rp_dim = config.flp_random_projection_dim
+        # Cache raw hidden states (no random projection — downprojection is trainable)
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), rp_dim
+            config.flp_model_name, config.flp_max_length, str(parquet_file), None
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
                 parquet_file, config.flp_model_name,
                 config.flp_max_length, config.batch_size,
-                rp_dim,
             )
 
     if not unique_keys:
@@ -241,14 +245,14 @@ def precompute_caches(
     caches_to_compute = []
     ready_caches = {}
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size, rp_dim) in unique_keys.items():
+    for cache_hash, (parquet_file, model_name, max_length, batch_size) in unique_keys.items():
         cache_dir = str(parquet_file.parent / '.cdt_cache')
         cache = HiddenStateCache(
             cache_dir=cache_dir,
             model_name=model_name,
             max_length=max_length,
             dataset_path=str(parquet_file),
-            random_projection_dim=rp_dim,
+            random_projection_dim=None,
         )
         df = pd.read_parquet(parquet_file)
         if cache.is_valid(len(df)):
@@ -292,14 +296,13 @@ def precompute_gpu_stores(
     """Pre-compute GPU-resident hidden state stores for a single device."""
     unique_keys = {}
     for config in configs:
-        if not config.flp_freeze_llm:
+        if not config.flp_freeze_llm or not config.flp_cache_hidden_states:
             continue
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
-        rp_dim = config.flp_random_projection_dim
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), rp_dim
+            config.flp_model_name, config.flp_max_length, str(parquet_file), None
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
@@ -403,7 +406,8 @@ def _create_datasets_and_loaders(
     elif use_cache:
         dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
     else:
-        dl_kwargs = dict(num_workers=1, persistent_workers=True, pin_memory=True)
+        # Live FLP mode: prefetch batches to keep GPU fed during LLM forward passes
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True, prefetch_factor=2)
 
     train_loader = DataLoader(
         train_dataset, batch_size=batch_size, shuffle=True,
@@ -422,10 +426,11 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
     gpu_store = None
     hidden_state_cache = None
 
-    if config.flp_freeze_llm:
+    if config.flp_freeze_llm and config.flp_cache_hidden_states:
+        # Cache raw hidden states (no random projection) — downprojection is trainable
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file),
-            config.flp_random_projection_dim,
+            None,
         )
         if gpu_store_registry is not None:
             gpu_store = gpu_store_registry.get(cache_hash)
@@ -446,10 +451,11 @@ def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs
         flp_projection_dim=config.flp_projection_dim,
         flp_dropout=config.flp_dropout,
         flp_gradient_checkpointing=config.flp_gradient_checkpointing,
+        flp_downprojection_dim=config.flp_downprojection_dim,
         device=str(device),
     )
 
-    # Enable cached mode (skip loading the LLM)
+    # Enable cached mode (skip loading the LLM) only when caching
     if gpu_store is not None:
         kwargs['flp_skip_llm'] = True
         kwargs['flp_cached_hidden_size'] = gpu_store.hidden_size
@@ -523,6 +529,8 @@ def run_causal_forest_experiment(
         best_state = None
         history = []
 
+        use_cached = gpu_store is not None or hidden_state_cache is not None
+
         for epoch in range(config.epochs):
             model.train()
             train_loss = 0.0
@@ -530,7 +538,8 @@ def run_causal_forest_experiment(
             for batch in train_loader:
                 batch['treatment'] = batch['treatment'].to(device)
                 batch['outcome'] = batch['outcome'].to(device)
-                prepare_cached_batch(batch, device, gpu_store=gpu_store)
+                if use_cached:
+                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
 
                 optimizer.zero_grad()
                 losses = model.train_representation_step(
@@ -553,7 +562,8 @@ def run_causal_forest_experiment(
                 for batch in test_loader:
                     batch['treatment'] = batch['treatment'].to(device)
                     batch['outcome'] = batch['outcome'].to(device)
-                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
+                    if use_cached:
+                        prepare_cached_batch(batch, device, gpu_store=gpu_store)
                     losses = model.train_representation_step(
                         batch,
                         alpha_propensity=1.0,
@@ -613,8 +623,9 @@ def run_causal_forest_experiment(
             collate_fn=combined_collate, **dl_kwargs
         )
 
-        model.train_causal_forest(combined_loader, combined_T, combined_Y, gpu_store=gpu_store)
-        preds = model.predict(test_loader, return_ci=True, gpu_store=gpu_store)
+        cf_kwargs = dict(gpu_store=gpu_store) if use_cached else {}
+        model.train_causal_forest(combined_loader, combined_T, combined_Y, **cf_kwargs)
+        preds = model.predict(test_loader, return_ci=True, **cf_kwargs)
 
         fold_preds = test_df.copy()
         fold_preds['pred_y0_prob'] = preds['pred_y0_prob']
@@ -703,6 +714,8 @@ def run_neural_experiment(
         )
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
 
+        use_cached = gpu_store is not None or hidden_state_cache is not None
+
         best_val_loss = float('inf')
         best_state = None
         history = []
@@ -714,7 +727,8 @@ def run_neural_experiment(
             for batch in train_loader:
                 batch['treatment'] = batch['treatment'].to(device)
                 batch['outcome'] = batch['outcome'].to(device)
-                prepare_cached_batch(batch, device, gpu_store=gpu_store)
+                if use_cached:
+                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
 
                 optimizer.zero_grad()
                 if config.model_type == "rlearner":
@@ -744,7 +758,8 @@ def run_neural_experiment(
                 for batch in test_loader:
                     batch['treatment'] = batch['treatment'].to(device)
                     batch['outcome'] = batch['outcome'].to(device)
-                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
+                    if use_cached:
+                        prepare_cached_batch(batch, device, gpu_store=gpu_store)
                     if config.model_type == "rlearner":
                         losses = model.train_step(
                             batch,
@@ -784,7 +799,8 @@ def run_neural_experiment(
             for batch in test_loader:
                 batch['treatment'] = batch['treatment'].to(device)
                 batch['outcome'] = batch['outcome'].to(device)
-                prepare_cached_batch(batch, device, gpu_store=gpu_store)
+                if use_cached:
+                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
 
                 preds = model.predict(batch)
                 all_y0.append(preds['y0_prob'].cpu().numpy())
@@ -904,7 +920,7 @@ def generate_experiment_grid(
     model_types = ["causal_forest", "rlearner", "dragonnet"]
     max_lengths = [5000, 10000, 25000, 50000]
     explicit_confounder_options = [False, True]
-    random_projection_dims = [None, 256, 512]
+    downprojection_dims = [128, 256, 512]
 
     if filter_datasets:
         datasets = [(p, n) for p, n in datasets if n in filter_datasets]
@@ -915,8 +931,8 @@ def generate_experiment_grid(
 
     configs = []
 
-    for (dataset_path, dataset_name), model_type, max_len, explicit_conf, rp_dim in itertools.product(
-        datasets, model_types, max_lengths, explicit_confounder_options, random_projection_dims
+    for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim in itertools.product(
+        datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims
     ):
         configs.append(ExperimentConfig(
             dataset_path=dataset_path,
@@ -924,7 +940,7 @@ def generate_experiment_grid(
             model_type=model_type,
             use_explicit_confounders=explicit_conf,
             flp_max_length=max_len,
-            flp_random_projection_dim=rp_dim,
+            flp_downprojection_dim=dp_dim,
         ))
 
     # Shuffle so patterns emerge early
@@ -1052,9 +1068,14 @@ def main():
         help="Number of CV folds"
     )
     parser.add_argument(
+        "--cache",
+        action="store_true",
+        help="Opt-in to pre-caching hidden states to disk (default: live LLM forward per batch)"
+    )
+    parser.add_argument(
         "--gpu-cache",
         action="store_true",
-        help="Keep pre-computed hidden states in GPU VRAM instead of disk cache"
+        help="Keep pre-computed hidden states in GPU VRAM instead of disk cache (implies --cache)"
     )
 
     args = parser.parse_args()
@@ -1068,11 +1089,15 @@ def main():
         filter_max_lengths=args.max_lengths,
     )
 
+    use_cache = args.cache or args.gpu_cache
+
     for config in configs:
         config.epochs = args.epochs
         config.n_folds = args.n_folds
+        config.flp_cache_hidden_states = use_cache
 
     logger.info(f"Generated {len(configs)} experiment configurations")
+    logger.info(f"Mode: {'cached hidden states' if use_cache else 'live LLM forward per batch'}")
 
     # Log grid summary
     model_type_counts = {}
@@ -1105,18 +1130,19 @@ def main():
         logger.info("No experiments to run")
         return
 
-    # Pre-compute disk caches (uses all GPUs in parallel)
-    cache_registry = precompute_caches(pending_configs, args.devices)
-
-    # Pre-compute GPU stores if requested
+    # Pre-compute caches only when --cache or --gpu-cache is passed
+    cache_registry = {}
     gpu_store_registries = {}
-    if args.gpu_cache:
-        logger.info("GPU cache mode: loading hidden states to each device...")
-        for device_str in args.devices:
-            stores = precompute_gpu_stores(pending_configs, device_str, cache_registry)
-            if stores:
-                gpu_store_registries[device_str] = stores
-                logger.info(f"  {device_str}: {len(stores)} GPU store(s) ready")
+    if use_cache:
+        cache_registry = precompute_caches(pending_configs, args.devices)
+
+        if args.gpu_cache:
+            logger.info("GPU cache mode: loading hidden states to each device...")
+            for device_str in args.devices:
+                stores = precompute_gpu_stores(pending_configs, device_str, cache_registry)
+                if stores:
+                    gpu_store_registries[device_str] = stores
+                    logger.info(f"  {device_str}: {len(stores)} GPU store(s) ready")
 
     # Create job queue and workers (1 worker per GPU)
     job_queue = queue.Queue()
@@ -1167,7 +1193,7 @@ def main():
         results_df.to_parquet(output_dir / "all_results.parquet", index=False)
 
         summary = results_df.groupby(
-            ['dataset_name', 'model_type', 'flp_max_length', 'use_explicit_confounders']
+            ['dataset_name', 'model_type', 'flp_max_length', 'flp_downprojection_dim', 'use_explicit_confounders']
         ).agg({
             'ite_corr': ['mean', 'std', 'max'],
             'ite_spearman_corr': ['mean', 'std', 'max'],

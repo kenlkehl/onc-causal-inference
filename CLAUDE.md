@@ -394,46 +394,50 @@ Pretrained decoder-only LLM with frozen weights + GatedAttentionPooling over all
 Unlike `llm_extractor.py` which only uses the last token, this extractor pools information from ALL
 tokens via gated attention, producing a richer representation while keeping the LLM frozen.
 
+**Default mode (live forward)**: The frozen LLM runs per batch with `torch.no_grad()` and
+`torch.cuda.amp.autocast(float16)`. An optional trainable downprojection layer reduces the
+hidden state dimensionality before pooling, keeping trainable memory low.
+
 | Stage | Component | Description |
 |-------|-----------|-------------|
 | Tokenization | Pretrained HF tokenizer | Right-padded (all tokens used with mask) |
-| Backbone | Decoder-only LLM (frozen) | All token hidden states from final layer |
+| Backbone | Decoder-only LLM (frozen, autocast float16) | All token hidden states from final layer |
+| Downprojection | `nn.Linear(hidden_size, downprojection_dim)` (trainable, optional) | Reduces per-token dim before pooling |
 | Pooling | GatedAttentionPooling | tanh x sigmoid gating + softmax attention |
 | Projection | 2-layer MLP | Linear->LN->GELU->Dropout->Linear->LN |
 
 Key params: `flp_model_name`, `flp_max_length`, `flp_freeze_llm`, `flp_gated_attention_dim`,
-`flp_projection_dim`, `flp_dropout`, `flp_gradient_checkpointing`, `flp_cache_hidden_states`,
-`flp_random_projection_dim`
+`flp_projection_dim`, `flp_dropout`, `flp_gradient_checkpointing`, `flp_downprojection_dim`,
+`flp_cache_hidden_states`, `flp_random_projection_dim`
 
 Key differences from `llm`:
 - **All tokens used**: Gated attention pooling over all hidden states (not just last token)
 - **Right padding**: All tokens contribute via attention mask
 - **Always pretrained**: No random init option
-- **Frozen by default**: Only pooling + projection layers train (~200K params vs 600M total)
-- **Hidden state caching**: When frozen, LLM outputs are cached to disk and reused across folds/experiments
+- **Frozen by default**: Only downprojection + pooling + projection layers train
+- **Trainable downprojection**: Optional `nn.Linear(hidden_size, flp_downprojection_dim)` applied per token before pooling. Reduces memory for trainable layers and improves gradient efficiency.
 - **No CLAM support**: No `forward_with_instances()` method
 - **No fit_tokenizer()**: Uses pretrained tokenizer from HuggingFace
 
-**Hidden State Caching** (auto-enabled when `flp_freeze_llm=True`):
-
-When the LLM is frozen, hidden states are deterministic. CDT pre-computes them once for the entire
-dataset, caches to disk as float16 memmap files, and reuses across K-fold CV folds and across
-experiment runs. During training, only the lightweight trainable layers (~200K params) are loaded.
-
 | Param | Description | Default |
 |-------|-------------|---------|
-| `flp_cache_hidden_states` | Enable hidden state caching | `True` |
-| `flp_random_projection_dim` | Apply random linear projection to reduce cached hidden state dimension | `None` |
+| `flp_downprojection_dim` | Trainable linear projection dim before pooling (None = no downprojection) | `None` |
+| `flp_cache_hidden_states` | Pre-compute and cache LLM hidden states to disk (opt-in) | `False` |
+| `flp_random_projection_dim` | Random linear projection for cached hidden states | `None` |
+
+**Hidden State Caching** (opt-in via `flp_cache_hidden_states: true`):
+
+When caching is enabled and the LLM is frozen, hidden states are pre-computed once for the entire
+dataset, cached to disk as float16 memmap files, and reused across K-fold CV folds and across
+experiment runs. During training, the LLM is not loaded (~2.4 GB GPU savings).
 
 Cache details:
 - **Location**: `{dataset_dir}/.cdt_cache/flp_hidden_states_{hash}/`
 - **Key**: `(model_name, max_length, dataset_path, random_projection_dim)` — different causal heads, learning rates, fold counts all share the same cache
 - **Format**: `hidden_states.npy` (float16 memmap) + `offsets.npy` (variable-length indexing) + `metadata.json`
 - **Storage**: Variable-length flat format (no padding waste)
-- **GPU savings**: ~2.4 GB less GPU memory (no LLM loaded during training)
 - **Reuse**: Cache is automatically reused across experiments with the same model/dataset
-- **Random projection**: When `flp_random_projection_dim` is set (e.g., 256), a deterministic random Gaussian matrix projects each token's hidden state from `hidden_size` (e.g., 1024) down to `flp_random_projection_dim` before caching. Reduces cache disk/RAM size proportionally. The projection matrix is seeded on `(model_name, hidden_size, projection_dim)` for reproducibility.
-- **Disable**: Set `flp_cache_hidden_states: false` in config
+- **Random projection**: When `flp_random_projection_dim` is set (e.g., 256), a deterministic random Gaussian matrix projects hidden states before caching
 
 No `fit_tokenizer()` required. Interpretability: `interpret_attention()`, `get_attention_weights()` (not available in cached mode)
 

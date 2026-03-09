@@ -887,6 +887,7 @@ def _train_single_model(
         flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
         flp_skip_llm=hidden_state_cache is not None or gpu_store is not None,
         flp_cached_hidden_size=(
             gpu_store.hidden_size if gpu_store is not None
@@ -1124,12 +1125,14 @@ def _train_single_model(
 
     # Create data loaders
     # GPU store: num_workers=0 (GPU tensors not accessible from worker processes)
-    # Disk cache: parallel workers + pinned memory
+    # Disk cache or live FLP: parallel workers + pinned memory to overlap I/O with GPU compute
     use_cached_mode = hidden_state_cache is not None and train_indices is not None
     if gpu_store is not None:
         dl_kwargs = {}  # num_workers=0 (default), no pin_memory needed
     elif use_cached_mode:
         dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    elif feature_extractor_type == "frozen_llm_pooler":
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True, prefetch_factor=2)
     else:
         dl_kwargs = {}
 
@@ -1263,10 +1266,13 @@ def _predict_dataset(
         predict_collate_fn = collator if collator is not None else collate_batch
 
     use_cached_mode = hidden_state_cache is not None and dataset_indices is not None
+    is_flp = hasattr(model, '_config') and model._config.get('feature_extractor_type', '') == 'frozen_llm_pooler'
     if gpu_store is not None:
         dl_kwargs = {}
     elif use_cached_mode:
         dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    elif is_flp:
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True, prefetch_factor=2)
     else:
         dl_kwargs = {}
 

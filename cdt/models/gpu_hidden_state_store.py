@@ -212,7 +212,7 @@ class GPUHiddenStateStore:
             model_name,
             config=hf_config,
             trust_remote_code=True,
-            torch_dtype=torch.float16,
+            dtype=torch.float16,
             device_map={"": device},
         )
         from accelerate.hooks import remove_hook_from_module

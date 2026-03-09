@@ -21,7 +21,8 @@
       "flp_projection_dim": 128,
       "flp_dropout": 0.1,
       "flp_gradient_checkpointing": true,
-      "flp_cache_hidden_states": true,
+      "flp_downprojection_dim": 256,
+      "flp_cache_hidden_states": false,
 
       "causal_head_representation_dim": 128,
       "causal_head_hidden_outcome_dim": 64,
