@@ -36,7 +36,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import torch
 
-from .gpu_hidden_state_store import _get_hidden_size
+from .gpu_hidden_state_store import _get_hidden_size, _make_downprojection
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +100,8 @@ class HiddenStateCache:
             hidden state dimensionality before caching. Uses a deterministic random
             matrix seeded on (model_name, hidden_size, projection_dim) for
             reproducibility. Reduces cache size proportionally.
+        downprojection_dim: If set, apply a frozen nn.Linear downprojection during
+            precomputation. Mutually exclusive with random_projection_dim.
     """
 
     def __init__(
@@ -109,14 +111,22 @@ class HiddenStateCache:
         max_length: int,
         dataset_path: str,
         random_projection_dim: Optional[int] = None,
+        downprojection_dim: Optional[int] = None,
     ):
+        if random_projection_dim is not None and downprojection_dim is not None:
+            raise ValueError(
+                "Cannot use both random_projection_dim and downprojection_dim. "
+                "Use one or the other for dimensionality reduction."
+            )
         self._cache_dir = Path(cache_dir)
         self._model_name = model_name
         self._max_length = max_length
         self._dataset_path = dataset_path
         self._random_projection_dim = random_projection_dim
+        self._downprojection_dim = downprojection_dim
         self._cache_hash = self.compute_cache_hash(
-            model_name, max_length, dataset_path, random_projection_dim
+            model_name, max_length, dataset_path, random_projection_dim,
+            downprojection_dim,
         )
 
         # Actual cache location
@@ -136,11 +146,14 @@ class HiddenStateCache:
         max_length: int,
         dataset_path: str,
         random_projection_dim: Optional[int] = None,
+        downprojection_dim: Optional[int] = None,
     ) -> str:
         """Compute deterministic hash for cache identification."""
         key = f"{model_name}|{max_length}|{os.path.abspath(dataset_path)}"
         if random_projection_dim is not None:
             key += f"|rp{random_projection_dim}"
+        if downprojection_dim is not None:
+            key += f"|dp{downprojection_dim}"
         return hashlib.md5(key.encode()).hexdigest()[:12]
 
     @property
@@ -254,6 +267,15 @@ class HiddenStateCache:
                 logger.warning(
                     f"Cache random_projection_dim mismatch: "
                     f"expected {self._random_projection_dim}, got {cached_rp}"
+                )
+                return False
+
+            # Check downprojection dim matches
+            cached_dp = self._metadata.get('downprojection_dim')
+            if cached_dp != self._downprojection_dim:
+                logger.warning(
+                    f"Cache downprojection_dim mismatch: "
+                    f"expected {self._downprojection_dim}, got {cached_dp}"
                 )
                 return False
 
@@ -396,6 +418,18 @@ class HiddenStateCache:
                 f"({store_dim / hidden_size:.1%} of original)"
             )
 
+        # Frozen downprojection setup (mutually exclusive with random projection)
+        downproj_layer = None
+        if self._downprojection_dim is not None and self._downprojection_dim < hidden_size:
+            downproj_layer = _make_downprojection(
+                hidden_size, self._downprojection_dim, self._model_name
+            ).half().to(device)
+            store_dim = self._downprojection_dim
+            logger.info(
+                f"  Downprojection: {hidden_size} -> {store_dim} "
+                f"(frozen, {store_dim / hidden_size:.1%} of original)"
+            )
+
         # Create cache directory
         self._cache_path.mkdir(parents=True, exist_ok=True)
 
@@ -444,6 +478,11 @@ class HiddenStateCache:
                 if rp_matrix_gpu is not None:
                     hidden_states = hidden_states.float() @ rp_matrix_gpu
 
+            # Apply frozen downprojection on GPU before transfer
+            if downproj_layer is not None:
+                with torch.no_grad():
+                    hidden_states = downproj_layer(hidden_states.float()).half()
+
             # Write only real (non-padding) tokens to flat memmap
             hs_cpu = hidden_states.cpu().to(torch.float16).numpy()
             for j in range(len(batch_texts)):
@@ -457,7 +496,7 @@ class HiddenStateCache:
 
         # Flush to disk
         hs_mmap.flush()
-        del hs_mmap, rp_matrix_gpu
+        del hs_mmap, rp_matrix_gpu, downproj_layer
 
         # Write metadata
         metadata = {
@@ -466,6 +505,7 @@ class HiddenStateCache:
             'hidden_size': store_dim,
             'original_hidden_size': hidden_size,
             'random_projection_dim': self._random_projection_dim,
+            'downprojection_dim': self._downprojection_dim,
             'num_samples': num_samples,
             'actual_max_len': actual_max_len,
             'total_tokens': total_tokens,
@@ -596,6 +636,18 @@ class HiddenStateCache:
                 f"({store_dim / hidden_size:.1%} of original)"
             )
 
+        # Frozen downprojection flag (each thread creates its own layer)
+        use_downprojection = (
+            self._downprojection_dim is not None
+            and self._downprojection_dim < hidden_size
+        )
+        if use_downprojection:
+            store_dim = self._downprojection_dim
+            logger.info(
+                f"  Downprojection: {hidden_size} -> {store_dim} "
+                f"(frozen, {store_dim / hidden_size:.1%} of original)"
+            )
+
         # --- Create memmap and save offsets ---
         self._cache_path.mkdir(parents=True, exist_ok=True)
         hs_path = self._cache_path / "hidden_states.npy"
@@ -664,6 +716,13 @@ class HiddenStateCache:
             if rp_matrix is not None:
                 rp_gpu = torch.from_numpy(rp_matrix).to(device)
 
+            # Per-device frozen downprojection layer
+            dp_layer = None
+            if use_downprojection:
+                dp_layer = _make_downprojection(
+                    hidden_size, self._downprojection_dim, self._model_name
+                ).half().to(device)
+
             for i in range(0, n_shard, batch_size):
                 batch_texts = shard_texts[i:i + batch_size]
                 batch_end = min(i + batch_size, n_shard)
@@ -693,6 +752,11 @@ class HiddenStateCache:
                     if rp_gpu is not None:
                         hidden_states = hidden_states.float() @ rp_gpu
 
+                # Apply frozen downprojection on GPU before transfer
+                if dp_layer is not None:
+                    with torch.no_grad():
+                        hidden_states = dp_layer(hidden_states.float()).half()
+
                 hs_cpu = hidden_states.cpu().to(torch.float16).numpy()
                 global_start = shard_start + i
                 for j in range(len(batch_texts)):
@@ -707,7 +771,7 @@ class HiddenStateCache:
                                      f"(total across all GPUs, reported by {device})")
 
             # Unload model from this GPU
-            del mdl, tok, rp_gpu
+            del mdl, tok, rp_gpu, dp_layer
             gc.collect()
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -732,6 +796,7 @@ class HiddenStateCache:
             'hidden_size': store_dim,
             'original_hidden_size': hidden_size,
             'random_projection_dim': self._random_projection_dim,
+            'downprojection_dim': self._downprojection_dim,
             'num_samples': num_samples,
             'actual_max_len': actual_max_len,
             'total_tokens': total_tokens,

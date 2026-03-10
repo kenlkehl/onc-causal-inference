@@ -8,7 +8,7 @@ Usage:
     python synthetic_data/extract_confounders_llm.py \
         --input example_synthetic_data/dataset.parquet \
         --output example_synthetic_data/dataset_with_extraction.parquet \
-        --vllm-url http://localhost:8000/v1 \
+        --vllm-url http://localhost:8000/v1 \ (or --vllm-direct)
         --model openai/gpt-oss-120b \
 	--download-dir /data1/ken/models
 
@@ -40,6 +40,24 @@ logger = logging.getLogger(__name__)
 
 # Global reasoning marker (can be set via command line)
 REASONING_MARKER = "assistantfinal"
+
+
+def truncate_to_last_n_tokens(text: str, tokenizer, max_tokens: int) -> str:
+    """Truncate text to the last N tokens using the model's tokenizer.
+
+    Args:
+        text: Full clinical text
+        tokenizer: HuggingFace tokenizer instance
+        max_tokens: Maximum number of tokens to keep (from the end)
+
+    Returns:
+        Decoded text from the last max_tokens tokens
+    """
+    token_ids = tokenizer.encode(text, add_special_tokens=False)
+    if len(token_ids) <= max_tokens:
+        return text
+    truncated_ids = token_ids[-max_tokens:]
+    return tokenizer.decode(truncated_ids, skip_special_tokens=True)
 
 
 def load_metadata(metadata_path: Path) -> Dict[str, Any]:
@@ -370,7 +388,8 @@ class OpenAIClient:
         base_url: str = "http://localhost:8000/v1",
         model: str = "openai/gpt-oss-120b",
         api_key: str = "EMPTY",
-        confounders: Optional[List[Dict[str, Any]]] = None
+        confounders: Optional[List[Dict[str, Any]]] = None,
+        max_text_tokens: int = 100000
     ):
         """Initialize the client.
 
@@ -379,16 +398,21 @@ class OpenAIClient:
             model: Model name to use
             api_key: API key (use "EMPTY" for local vLLM)
             confounders: List of confounder definitions from metadata
+            max_text_tokens: Max tokens to keep from the end of each clinical text
         """
         try:
             from openai import OpenAI
         except ImportError:
             raise ImportError("openai package required. Install with: pip install openai")
 
+        from transformers import AutoTokenizer
         self.client = OpenAI(base_url=base_url, api_key=api_key)
         self.model = model
         self.confounders = confounders or []
+        self.max_text_tokens = max_text_tokens
+        self.tokenizer = AutoTokenizer.from_pretrained(model, trust_remote_code=True)
         logger.info(f"Initialized OpenAI client: {base_url} / {model}")
+        logger.info(f"Max text tokens (from end): {max_text_tokens}")
         if self.confounders:
             logger.info(f"Extracting {len(self.confounders)} confounders: {[c['name'] for c in self.confounders]}")
 
@@ -419,7 +443,8 @@ class OpenAIClient:
             batch_raw = []
 
             for text in batch:
-                prompt = build_extraction_prompt(text[:8000], self.confounders)
+                truncated = truncate_to_last_n_tokens(text, self.tokenizer, self.max_text_tokens)
+                prompt = build_extraction_prompt(truncated, self.confounders)
 
                 try:
                     response = self.client.chat.completions.create(
@@ -501,9 +526,10 @@ class VLLMBatchClientWrapper:
         self,
         model_name: str = "openai/gpt-oss-120b",
 	download_dir: str = "/data1/ken/models",
-        tensor_parallel_size: int = 2,
+        tensor_parallel_size: int = 1,
         gpu_memory_utilization: float = 0.90,
-        confounders: Optional[List[Dict[str, Any]]] = None
+        confounders: Optional[List[Dict[str, Any]]] = None,
+        max_text_tokens: int = 100000
     ):
         """Initialize the vLLM batch client.
 
@@ -512,6 +538,7 @@ class VLLMBatchClientWrapper:
             tensor_parallel_size: Number of GPUs for tensor parallelism
             gpu_memory_utilization: GPU memory fraction to use
             confounders: List of confounder definitions from metadata
+            max_text_tokens: Max tokens to keep from the end of each clinical text
         """
         try:
             from vllm import LLM, SamplingParams
@@ -529,7 +556,10 @@ class VLLMBatchClientWrapper:
         )
         self.model_name = model_name
         self.confounders = confounders or []
+        self.max_text_tokens = max_text_tokens
+        self.tokenizer = self.llm.get_tokenizer()
         logger.info("vLLM model loaded successfully")
+        logger.info(f"Max text tokens (from end): {max_text_tokens}")
         if self.confounders:
             logger.info(f"Extracting {len(self.confounders)} confounders: {[c['name'] for c in self.confounders]}")
 
@@ -583,7 +613,8 @@ class VLLMBatchClientWrapper:
             prompts = []
 
             for text in clinical_texts:
-                user_content = build_extraction_prompt(text[:8000], self.confounders)
+                truncated = truncate_to_last_n_tokens(text, self.tokenizer, self.max_text_tokens)
+                user_content = build_extraction_prompt(truncated, self.confounders)
                 convo = Conversation.from_messages([
                     Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
                     Message.from_role_and_content(
@@ -611,7 +642,8 @@ class VLLMBatchClientWrapper:
             messages_list = []
 
             for text in clinical_texts:
-                user_content = build_extraction_prompt(text[:8000], self.confounders)
+                truncated = truncate_to_last_n_tokens(text, self.tokenizer, self.max_text_tokens)
+                user_content = build_extraction_prompt(truncated, self.confounders)
                 messages_list.append([{"role": "user", "content": user_content}])
 
             sampling_params = SamplingParams(
@@ -863,6 +895,18 @@ def main():
     )
 
     parser.add_argument(
+        "--max-text-tokens",
+        type=int,
+        default=100000,
+        help="Max tokens to keep from the end of each clinical text (default: 100000)"
+    )
+    parser.add_argument(
+        "--max-completion-tokens",
+        type=int,
+        default=5000,
+        help="Max tokens for model response (default: 5000)"
+    )
+    parser.add_argument(
         "--download-dir",
         type=str,
 	default="/data1/ken/models",
@@ -925,14 +969,16 @@ def main():
             model_name=args.model,
 	    download_dir=args.download_dir,
             tensor_parallel_size=args.tensor_parallel_size,
-            confounders=confounders
+            confounders=confounders,
+            max_text_tokens=args.max_text_tokens
         )
     elif args.vllm_url:
         client = OpenAIClient(
             base_url=args.vllm_url,
             model=args.model,
             api_key=args.api_key,
-            confounders=confounders
+            confounders=confounders,
+            max_text_tokens=args.max_text_tokens
         )
     else:
         raise ValueError("Must specify either --vllm-url or --vllm-direct")
@@ -941,7 +987,8 @@ def main():
     clinical_texts = df[args.text_column].tolist()
     extracted_values_list, raw_responses = client.extract_batch(
         clinical_texts,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        max_tokens=args.max_completion_tokens
     )
 
     # Add extracted values to dataframe (one column per confounder)

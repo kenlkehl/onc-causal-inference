@@ -110,12 +110,14 @@ def run_plasmode_experiments(
                 max_length = getattr(arch, 'flp_max_length', 8192)
                 dataset_path = applied_config.dataset_path
 
+                flp_downprojection_dim = getattr(arch, 'flp_downprojection_dim', None)
                 cache_dir = str(Path(dataset_path).parent / ".cdt_cache")
                 cache = HiddenStateCache(
                     cache_dir=cache_dir,
                     model_name=model_name,
                     max_length=max_length,
                     dataset_path=dataset_path,
+                    downprojection_dim=flp_downprojection_dim,
                 )
 
                 all_texts = train_df[applied_config.text_column].tolist()
@@ -149,6 +151,7 @@ def run_plasmode_experiments(
                         'max_length': max_length,
                         'dataset_path': dataset_path,
                         'hidden_size': cache.hidden_size,
+                        'downprojection_dim': flp_downprojection_dim,
                     }
                     cache.close()
                 break  # Only need one cache (same texts for both architectures)
@@ -279,6 +282,7 @@ def _worker_wrapper(task: Dict[str, Any]) -> Optional[Tuple[dict, List[Dict[str,
             model_name=cache_config['model_name'],
             max_length=cache_config['max_length'],
             dataset_path=cache_config['dataset_path'],
+            downprojection_dim=cache_config.get('downprojection_dim'),
         )
         hidden_state_cache.open()
         hidden_state_cache.preload_to_ram()
@@ -642,7 +646,10 @@ def _train_cnn_model(
         flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
-        flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
+        flp_downprojection_dim=(
+            None if hidden_state_cache is not None
+            else getattr(arch_config, 'flp_downprojection_dim', None)
+        ),
         flp_skip_llm=(hidden_state_cache is not None),
         flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
         # Numeric feature args
@@ -1231,7 +1238,10 @@ def _train_causal_forest_model(
         flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
-        flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
+        flp_downprojection_dim=(
+            None if hidden_state_cache is not None
+            else getattr(arch_config, 'flp_downprojection_dim', None)
+        ),
         flp_skip_llm=(hidden_state_cache is not None),
         flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
         # LLM args

@@ -79,6 +79,7 @@ def run_applied_inference_forest(
         model_name = getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
         max_length = getattr(arch_config, 'flp_max_length', 8192)
         batch_size = config.training.batch_size
+        flp_downprojection_dim = getattr(arch_config, 'flp_downprojection_dim', None)
 
         # Reset index for consistent cache indices
         dataset = dataset.reset_index(drop=True)
@@ -89,7 +90,8 @@ def run_applied_inference_forest(
             from ..models.gpu_hidden_state_store import GPUHiddenStateStore
             try:
                 estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
-                    all_texts, model_name, max_length
+                    all_texts, model_name, max_length,
+                    downprojection_dim=flp_downprojection_dim,
                 )
                 free_vram_gb = torch.cuda.mem_get_info(device)[0] / 1e9
                 if estimated_gb < free_vram_gb * 0.8:
@@ -99,7 +101,9 @@ def run_applied_inference_forest(
                     )
                     gpu_store = GPUHiddenStateStore()
                     gpu_store.precompute(
-                        all_texts, model_name, max_length, device, batch_size=batch_size
+                        all_texts, model_name, max_length, device,
+                        batch_size=batch_size,
+                        downprojection_dim=flp_downprojection_dim,
                     )
                 else:
                     logger.warning(
@@ -122,6 +126,7 @@ def run_applied_inference_forest(
                 max_length=max_length,
                 dataset_path=dataset_path,
                 random_projection_dim=flp_random_projection_dim,
+                downprojection_dim=flp_downprojection_dim,
             )
 
             if not hidden_state_cache.is_valid(len(dataset)):
@@ -267,7 +272,11 @@ def _process_fold_forest(
             gpu_store.hidden_size if gpu_store is not None
             else hidden_state_cache.hidden_size if hidden_state_cache is not None
             else 0
-        )
+        ),
+        flp_downprojection_dim=(
+            None if (hidden_state_cache is not None or gpu_store is not None)
+            else getattr(arch_config, 'flp_downprojection_dim', None)
+        ),
     )
     logger.info(f"Created CausalTextForest with {feature_extractor_type.upper()} extractor")
     if gpu_store is not None:
@@ -451,7 +460,11 @@ def _run_fixed_split_inference_forest(
             gpu_store.hidden_size if gpu_store is not None
             else hidden_state_cache.hidden_size if hidden_state_cache is not None
             else 0
-        )
+        ),
+        flp_downprojection_dim=(
+            None if (hidden_state_cache is not None or gpu_store is not None)
+            else getattr(arch_config, 'flp_downprojection_dim', None)
+        ),
     )
 
     # Get texts for tokenizer fitting
@@ -601,7 +614,8 @@ def _create_causal_forest_model(
     device: torch.device,
     outcome_type: str = "binary",
     flp_skip_llm: bool = False,
-    flp_cached_hidden_size: int = 0
+    flp_cached_hidden_size: int = 0,
+    flp_downprojection_dim: Optional[int] = None,
 ) -> CausalTextForest:
     """Create CausalTextForest model from config."""
     feature_extractor_type = normalize_feature_extractor_type(
@@ -742,6 +756,7 @@ def _create_causal_forest_model(
         flp_projection_dim=getattr(arch_config, 'flp_projection_dim', 128),
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
+        flp_downprojection_dim=flp_downprojection_dim,
         flp_skip_llm=flp_skip_llm,
         flp_cached_hidden_size=flp_cached_hidden_size,
         # Head args

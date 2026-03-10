@@ -5,9 +5,9 @@ Compares causal_forest, rlearner, and dragonnet model types using the
 frozen_llm_pooler feature extractor across multiple datasets and max
 sequence lengths.
 
-By default, uses live LLM forward pass per batch with a trainable
-downprojection layer (no pre-caching). Pass --cache to opt-in to
-hidden state pre-computation for large-scale runs.
+By default, uses live LLM forward pass per batch (no pre-caching).
+Pass --cache to opt-in to hidden state pre-computation with frozen
+downprojection for large-scale runs.
 
 Output is compatible with analyze_results.py.
 
@@ -24,8 +24,8 @@ Usage:
     # Run subset for testing
     python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
         --output-dir ../pcori_experiments/frozen_llm_multi_architecture \
-        --devices cuda:0 \
-        --max-experiments 3 --epochs 3 --n-folds 2
+        --devices cuda:1 \
+        --max-experiments 1 --epochs 3 --n-folds 5  
 
     # Resume from checkpoint
     python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
@@ -92,7 +92,7 @@ class ExperimentConfig:
     flp_freeze_llm: bool = True
     flp_projection_dim: int = 128
     flp_gated_attention_dim: int = 128
-    flp_downprojection_dim: Optional[int] = 256  # Trainable downprojection dim (None = full hidden size)
+    flp_downprojection_dim: Optional[int] = 256  # Frozen downprojection dim applied during caching (None = full hidden size)
     flp_cache_hidden_states: bool = False  # If True, pre-cache hidden states to disk
 
     # Fixed parameters
@@ -226,14 +226,16 @@ def precompute_caches(
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
-        # Cache raw hidden states (no random projection — downprojection is trainable)
+        # Cache includes frozen downprojection — each downprojection_dim gets its own cache
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), None
+            config.flp_model_name, config.flp_max_length, str(parquet_file), None,
+            downprojection_dim=config.flp_downprojection_dim,
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
                 parquet_file, config.flp_model_name,
                 config.flp_max_length, config.batch_size,
+                config.flp_downprojection_dim,
             )
 
     if not unique_keys:
@@ -245,7 +247,7 @@ def precompute_caches(
     caches_to_compute = []
     ready_caches = {}
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size) in unique_keys.items():
+    for cache_hash, (parquet_file, model_name, max_length, batch_size, dp_dim) in unique_keys.items():
         cache_dir = str(parquet_file.parent / '.cdt_cache')
         cache = HiddenStateCache(
             cache_dir=cache_dir,
@@ -253,6 +255,7 @@ def precompute_caches(
             max_length=max_length,
             dataset_path=str(parquet_file),
             random_projection_dim=None,
+            downprojection_dim=dp_dim,
         )
         df = pd.read_parquet(parquet_file)
         if cache.is_valid(len(df)):
@@ -302,12 +305,14 @@ def precompute_gpu_stores(
         if parquet_file is None:
             continue
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), None
+            config.flp_model_name, config.flp_max_length, str(parquet_file), None,
+            downprojection_dim=config.flp_downprojection_dim,
         )
         if cache_hash not in unique_keys:
             unique_keys[cache_hash] = (
                 parquet_file, config.flp_model_name,
                 config.flp_max_length, config.batch_size,
+                config.flp_downprojection_dim,
             )
 
     if not unique_keys:
@@ -316,11 +321,13 @@ def precompute_gpu_stores(
     gpu_device = torch.device(device)
     stores = {}
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size) in unique_keys.items():
+    for cache_hash, (parquet_file, model_name, max_length, batch_size, dp_dim) in unique_keys.items():
         df = pd.read_parquet(parquet_file)
         all_texts = df['clinical_text'].tolist()
 
-        estimated_gb = GPUHiddenStateStore.estimate_vram_gb(all_texts, model_name, max_length)
+        estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
+            all_texts, model_name, max_length, downprojection_dim=dp_dim,
+        )
         free_vram_gb = torch.cuda.mem_get_info(gpu_device)[0] / 1e9
 
         if estimated_gb < free_vram_gb * 0.8:
@@ -337,7 +344,8 @@ def precompute_gpu_stores(
                             f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
             else:
                 store = GPUHiddenStateStore()
-                store.precompute(all_texts, model_name, max_length, gpu_device, batch_size=batch_size)
+                store.precompute(all_texts, model_name, max_length, gpu_device,
+                                 batch_size=batch_size, downprojection_dim=dp_dim)
                 stores[cache_hash] = store
                 logger.info(f"  GPU store {cache_hash}: done, "
                             f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
@@ -427,10 +435,9 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
     hidden_state_cache = None
 
     if config.flp_freeze_llm and config.flp_cache_hidden_states:
-        # Cache raw hidden states (no random projection) — downprojection is trainable
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file),
-            None,
+            None, downprojection_dim=config.flp_downprojection_dim,
         )
         if gpu_store_registry is not None:
             gpu_store = gpu_store_registry.get(cache_hash)
@@ -442,6 +449,7 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
 
 def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs, device):
     """Build common model kwargs for frozen_llm_pooler extractor."""
+    use_cache = gpu_store is not None or hidden_state_cache is not None
     kwargs = dict(
         feature_extractor_type="frozen_llm_pooler",
         flp_model_name=config.flp_model_name,
@@ -451,7 +459,8 @@ def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs
         flp_projection_dim=config.flp_projection_dim,
         flp_dropout=config.flp_dropout,
         flp_gradient_checkpointing=config.flp_gradient_checkpointing,
-        flp_downprojection_dim=config.flp_downprojection_dim,
+        # Downprojection already applied during caching — disable in model
+        flp_downprojection_dim=None if use_cache else config.flp_downprojection_dim,
         device=str(device),
     )
 
@@ -877,6 +886,13 @@ def run_single_experiment(
                     f"{[s.name for s in confounder_specs]}")
         df = _rename_confounder_columns(df, confounder_specs)
         confounder_cols = [f"explicit_conf_{s.name}" for s in confounder_specs]
+        missing_cols = [c for c in confounder_cols if c not in df.columns]
+        if missing_cols:
+            return {
+                'error': (f"Confounder columns missing from dataset: {missing_cols}. "
+                          f"Run LLM extraction first to create llm_extracted_* columns."),
+                'skipped': True,
+            }
 
     # Look up cache
     gpu_store, hidden_state_cache = _get_cache_info(

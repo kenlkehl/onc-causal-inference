@@ -17,6 +17,7 @@ load_batch().
 """
 
 import gc
+import hashlib
 import logging
 from typing import List, Optional, Tuple
 
@@ -41,6 +42,33 @@ def _get_hidden_size(config) -> int:
         f"Cannot determine hidden_size from config type {type(config).__name__}. "
         f"Neither config.hidden_size nor config.text_config.hidden_size exists."
     )
+
+
+def _make_downprojection(
+    hidden_size: int,
+    downprojection_dim: int,
+    model_name: str,
+) -> torch.nn.Linear:
+    """Create a deterministic frozen downprojection layer.
+
+    Uses Kaiming uniform init with a deterministic seed derived from
+    (model_name, hidden_size, downprojection_dim) for reproducibility.
+    """
+    seed_str = f"downproj|{model_name}|{hidden_size}|{downprojection_dim}"
+    seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
+
+    rng_state = torch.random.get_rng_state()
+    torch.manual_seed(seed)
+
+    layer = torch.nn.Linear(hidden_size, downprojection_dim, bias=False)
+
+    torch.random.set_rng_state(rng_state)
+
+    for p in layer.parameters():
+        p.requires_grad = False
+    layer.eval()
+
+    return layer
 
 
 class GPUHiddenStateStore:
@@ -78,6 +106,7 @@ class GPUHiddenStateStore:
         texts: List[str],
         model_name: str,
         max_length: int,
+        downprojection_dim: Optional[int] = None,
     ) -> float:
         """Estimate VRAM needed without loading the model.
 
@@ -88,6 +117,9 @@ class GPUHiddenStateStore:
             texts: All texts in the dataset.
             model_name: HuggingFace model name.
             max_length: Maximum sequence length for tokenization.
+            downprojection_dim: If set, use this instead of hidden_size
+                for storage estimation (frozen downprojection applied
+                during precomputation).
 
         Returns:
             Estimated VRAM in GB for the hidden state tensor.
@@ -107,6 +139,10 @@ class GPUHiddenStateStore:
         config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(config)
 
+        store_dim = hidden_size
+        if downprojection_dim is not None and downprojection_dim < hidden_size:
+            store_dim = downprojection_dim
+
         # Compute total tokens
         total_tokens = 0
         batch_size = 512
@@ -121,7 +157,7 @@ class GPUHiddenStateStore:
             total_tokens += sum(encodings["length"])
 
         # float16: 2 bytes per element
-        return total_tokens * hidden_size * 2 / 1e9
+        return total_tokens * store_dim * 2 / 1e9
 
     # ------------------------------------------------------------------
     # Precompute
@@ -134,6 +170,7 @@ class GPUHiddenStateStore:
         max_length: int,
         device: torch.device,
         batch_size: int = 4,
+        downprojection_dim: Optional[int] = None,
     ) -> None:
         """Pre-compute LLM hidden states for all texts and store on GPU.
 
@@ -141,12 +178,19 @@ class GPUHiddenStateStore:
         flat float16 tensor on ``device``, and then unloads the LLM to free
         VRAM for training.
 
+        When ``downprojection_dim`` is set, a frozen linear projection
+        (hidden_size -> downprojection_dim) is applied during precomputation
+        so the cached tensor is smaller. The downprojection weights are
+        deterministically initialized from the model name for reproducibility.
+
         Args:
             texts: All texts in the dataset (in order).
             model_name: HuggingFace model name.
             max_length: Maximum sequence length for tokenization.
             device: GPU device to store results on.
             batch_size: Batch size for LLM inference.
+            downprojection_dim: If set, apply a frozen linear projection to
+                reduce hidden states from hidden_size to this dimension.
         """
         from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
 
@@ -225,14 +269,28 @@ class GPUHiddenStateStore:
         for param in model.parameters():
             param.requires_grad = False
 
+        # Frozen downprojection (applied during precomputation)
+        downproj_layer = None
+        store_dim = hidden_size
+        if downprojection_dim is not None and downprojection_dim < hidden_size:
+            downproj_layer = _make_downprojection(
+                hidden_size, downprojection_dim, model_name
+            ).half().to(device)
+            store_dim = downprojection_dim
+            logger.info(
+                f"  Downprojection: {hidden_size} -> {store_dim} "
+                f"(frozen, {store_dim / hidden_size:.1%} of original)"
+            )
+        self._hidden_size = store_dim
+
         # Allocate flat GPU tensor
-        estimated_gb = total_tokens * hidden_size * 2 / 1e9
+        estimated_gb = total_tokens * store_dim * 2 / 1e9
         logger.info(
-            f"  Allocating GPU tensor: ({total_tokens:,}, {hidden_size}) "
+            f"  Allocating GPU tensor: ({total_tokens:,}, {store_dim}) "
             f"float16 ≈ {estimated_gb:.2f} GB"
         )
         flat_tensor = torch.zeros(
-            total_tokens, hidden_size, dtype=torch.float16, device=device
+            total_tokens, store_dim, dtype=torch.float16, device=device
         )
 
         # Second pass: compute hidden states and write to flat tensor
@@ -264,6 +322,11 @@ class GPUHiddenStateStore:
                 )
                 hidden_states = outputs.hidden_states[-1]  # (batch, seq, hidden)
 
+            # Apply frozen downprojection before storing
+            if downproj_layer is not None:
+                with torch.no_grad():
+                    hidden_states = downproj_layer(hidden_states.float()).half()
+
             # Write only real (non-padding) tokens to flat tensor
             hs_fp16 = hidden_states.to(torch.float16)
             for j in range(len(batch_texts)):
@@ -281,7 +344,7 @@ class GPUHiddenStateStore:
 
         # Unload LLM
         logger.info("  Unloading LLM from GPU...")
-        del model, tokenizer
+        del model, tokenizer, downproj_layer
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
