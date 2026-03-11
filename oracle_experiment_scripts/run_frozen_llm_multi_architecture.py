@@ -210,150 +210,123 @@ def _resolve_parquet_file(dataset_path: str) -> Optional[Path]:
     return parquet_file
 
 
-def precompute_caches(
+def group_configs_by_cache_key(
     configs: List[ExperimentConfig],
-    devices: List[str],
-) -> Dict[str, HiddenStateCache]:
-    """Pre-compute hidden state caches for all unique (dataset, model, max_length) combos.
+    use_cache: bool,
+) -> List[tuple]:
+    """Group configs by their cache key for sequential processing.
 
-    Distributes precomputation across available GPUs. Returns a dict mapping
-    cache_hash -> opened HiddenStateCache, ready for workers to read from.
+    Returns list of (cache_hash, cache_info_dict, configs) tuples,
+    sorted by (max_length, dataset_name, dp_dim) so smaller caches run first.
+    Non-cached mode returns a single group.
     """
-    unique_keys = {}
+    if not use_cache:
+        return [("__no_cache__", {}, configs)]
+
+    groups: Dict[str, tuple] = {}  # cache_hash -> (cache_info, [configs])
     for config in configs:
-        if not config.flp_freeze_llm or not config.flp_cache_hidden_states:
-            continue
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
-        # Cache includes frozen downprojection — each downprojection_dim gets its own cache
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file), None,
             downprojection_dim=config.flp_downprojection_dim,
         )
-        if cache_hash not in unique_keys:
-            unique_keys[cache_hash] = (
-                parquet_file, config.flp_model_name,
-                config.flp_max_length, config.batch_size,
-                config.flp_downprojection_dim,
+        if cache_hash not in groups:
+            cache_info = dict(
+                parquet_file=parquet_file,
+                model_name=config.flp_model_name,
+                max_length=config.flp_max_length,
+                batch_size=config.batch_size,
+                downprojection_dim=config.flp_downprojection_dim,
+                dataset_name=config.dataset_name,
             )
+            groups[cache_hash] = (cache_info, [])
+        groups[cache_hash][1].append(config)
 
-    if not unique_keys:
-        logger.info("No hidden state caches to precompute")
-        return {}
+    # Sort by (max_length, dataset_name, dp_dim) so smaller/faster caches run first
+    result = []
+    for cache_hash, (cache_info, cfgs) in groups.items():
+        result.append((cache_hash, cache_info, cfgs))
+    result.sort(key=lambda x: (x[1]['max_length'], x[1]['dataset_name'], x[1]['downprojection_dim']))
+    return result
 
-    logger.info(f"Found {len(unique_keys)} unique hidden state cache(s) to prepare")
 
-    caches_to_compute = []
-    ready_caches = {}
+def precompute_single_cache(
+    cache_info: dict,
+    devices: List[str],
+) -> HiddenStateCache:
+    """Compute (if needed) and open a single hidden state cache.
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size, dp_dim) in unique_keys.items():
-        cache_dir = str(parquet_file.parent / '.cdt_cache')
-        cache = HiddenStateCache(
-            cache_dir=cache_dir,
-            model_name=model_name,
-            max_length=max_length,
-            dataset_path=str(parquet_file),
-            random_projection_dim=None,
-            downprojection_dim=dp_dim,
-        )
-        df = pd.read_parquet(parquet_file)
-        if cache.is_valid(len(df)):
-            logger.info(f"  Cache {cache_hash}: valid, reusing")
-            cache.open()
-            cache.preload_to_ram()
-            ready_caches[cache_hash] = cache
-        else:
-            logger.info(f"  Cache {cache_hash}: needs precomputation "
-                        f"({model_name}, max_len={max_length}, {len(df)} samples)")
-            caches_to_compute.append((cache_hash, cache, parquet_file, batch_size))
+    Returns an opened HiddenStateCache with data preloaded to RAM.
+    """
+    parquet_file = cache_info['parquet_file']
+    model_name = cache_info['model_name']
+    max_length = cache_info['max_length']
+    batch_size = cache_info['batch_size']
+    dp_dim = cache_info['downprojection_dim']
 
-    if not caches_to_compute:
-        logger.info("All caches already valid")
-        return ready_caches
+    cache_dir = str(parquet_file.parent / '.cdt_cache')
+    cache = HiddenStateCache(
+        cache_dir=cache_dir,
+        model_name=model_name,
+        max_length=max_length,
+        dataset_path=str(parquet_file),
+        random_projection_dim=None,
+        downprojection_dim=dp_dim,
+    )
 
-    gpu_devices = [torch.device(d) for d in devices]
-    logger.info(f"Pre-computing {len(caches_to_compute)} cache(s) sequentially, "
-                f"each using {len(gpu_devices)} GPU(s)...")
-
-    for i, (ch, cache, pf, bs) in enumerate(caches_to_compute):
-        logger.info(f"  Cache {i+1}/{len(caches_to_compute)} ({ch}): "
-                     f"precomputing on {len(gpu_devices)} GPU(s)...")
-        df = pd.read_parquet(pf)
+    df = pd.read_parquet(parquet_file)
+    if cache.is_valid(len(df)):
+        logger.info(f"  Cache valid, reusing from disk")
+    else:
+        gpu_devices = [torch.device(d) for d in devices]
+        logger.info(f"  Precomputing on {len(gpu_devices)} GPU(s) "
+                    f"({model_name}, max_len={max_length}, {len(df)} samples)...")
         all_texts = df['clinical_text'].tolist()
-        cache.precompute_multi_gpu(all_texts, gpu_devices, batch_size=bs)
-        cache.open()
-        cache.preload_to_ram()
-        ready_caches[ch] = cache
-        logger.info(f"  Cache {ch}: precomputation complete")
+        cache.precompute_multi_gpu(all_texts, gpu_devices, batch_size=batch_size)
+        logger.info(f"  Precomputation complete")
 
-    logger.info(f"All {len(ready_caches)} caches ready")
-    return ready_caches
+    cache.open()
+    cache.preload_to_ram()
+    return cache
 
 
-def precompute_gpu_stores(
-    configs: List[ExperimentConfig],
+def load_single_gpu_store(
+    cache: HiddenStateCache,
+    cache_info: dict,
     device: str,
-    cache_registry: Optional[Dict[str, HiddenStateCache]] = None,
-) -> Dict[str, GPUHiddenStateStore]:
-    """Pre-compute GPU-resident hidden state stores for a single device."""
-    unique_keys = {}
-    for config in configs:
-        if not config.flp_freeze_llm or not config.flp_cache_hidden_states:
-            continue
-        parquet_file = _resolve_parquet_file(config.dataset_path)
-        if parquet_file is None:
-            continue
-        cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), None,
-            downprojection_dim=config.flp_downprojection_dim,
-        )
-        if cache_hash not in unique_keys:
-            unique_keys[cache_hash] = (
-                parquet_file, config.flp_model_name,
-                config.flp_max_length, config.batch_size,
-                config.flp_downprojection_dim,
-            )
+) -> Optional[GPUHiddenStateStore]:
+    """Load a single cache to GPU VRAM if it fits.
 
-    if not unique_keys:
-        return {}
-
+    Returns GPUHiddenStateStore or None if insufficient VRAM.
+    """
+    parquet_file = cache_info['parquet_file']
+    dp_dim = cache_info['downprojection_dim']
+    max_length = cache_info['max_length']
+    model_name = cache_info['model_name']
     gpu_device = torch.device(device)
-    stores = {}
 
-    for cache_hash, (parquet_file, model_name, max_length, batch_size, dp_dim) in unique_keys.items():
-        df = pd.read_parquet(parquet_file)
-        all_texts = df['clinical_text'].tolist()
+    df = pd.read_parquet(parquet_file)
+    all_texts = df['clinical_text'].tolist()
 
-        estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
-            all_texts, model_name, max_length, downprojection_dim=dp_dim,
-        )
-        free_vram_gb = torch.cuda.mem_get_info(gpu_device)[0] / 1e9
+    estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
+        all_texts, model_name, max_length, downprojection_dim=dp_dim,
+    )
+    free_vram_gb = torch.cuda.mem_get_info(gpu_device)[0] / 1e9
 
-        if estimated_gb < free_vram_gb * 0.8:
-            logger.info(f"  GPU store {cache_hash} on {device}: ~{estimated_gb:.1f} GB "
-                        f"(free: {free_vram_gb:.1f} GB) — loading...")
-
-            disk_cache = cache_registry.get(cache_hash) if cache_registry else None
-            if disk_cache is not None:
-                logger.info(f"  Loading GPU store from disk cache...")
-                store = GPUHiddenStateStore()
-                store.load_from_disk_cache(disk_cache, gpu_device)
-                stores[cache_hash] = store
-                logger.info(f"  GPU store {cache_hash}: loaded from disk, "
-                            f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
-            else:
-                store = GPUHiddenStateStore()
-                store.precompute(all_texts, model_name, max_length, gpu_device,
-                                 batch_size=batch_size, downprojection_dim=dp_dim)
-                stores[cache_hash] = store
-                logger.info(f"  GPU store {cache_hash}: done, "
-                            f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
-        else:
-            logger.warning(f"  GPU store {cache_hash} on {device}: needs ~{estimated_gb:.1f} GB "
-                           f"but only {free_vram_gb:.1f} GB free — will use disk cache")
-
-    return stores
+    if estimated_gb < free_vram_gb * 0.8:
+        logger.info(f"  GPU store on {device}: ~{estimated_gb:.1f} GB "
+                    f"(free: {free_vram_gb:.1f} GB) — loading...")
+        store = GPUHiddenStateStore()
+        store.load_from_disk_cache(cache, gpu_device)
+        logger.info(f"  GPU store on {device}: loaded, "
+                    f"actual VRAM: {store.estimated_vram_gb:.2f} GB")
+        return store
+    else:
+        logger.warning(f"  GPU store on {device}: needs ~{estimated_gb:.1f} GB "
+                       f"but only {free_vram_gb:.1f} GB free — will use disk cache")
+        return None
 
 
 def _create_datasets_and_loaders(
@@ -1139,58 +1112,80 @@ def main():
     if args.max_experiments:
         pending_configs = pending_configs[:args.max_experiments]
 
-    logger.info(f"Running {len(pending_configs)} experiments on {len(args.devices)} GPU(s) "
-               f"(1 worker per GPU, {len(args.devices)} total workers)")
-
     if not pending_configs:
         logger.info("No experiments to run")
         return
 
-    # Pre-compute caches only when --cache or --gpu-cache is passed
-    cache_registry = {}
-    gpu_store_registries = {}
-    if use_cache:
-        cache_registry = precompute_caches(pending_configs, args.devices)
+    # Group experiments by cache key for sequential cache processing
+    cache_groups = group_configs_by_cache_key(pending_configs, use_cache)
 
-        if args.gpu_cache:
-            logger.info("GPU cache mode: loading hidden states to each device...")
-            for device_str in args.devices:
-                stores = precompute_gpu_stores(pending_configs, device_str, cache_registry)
-                if stores:
-                    gpu_store_registries[device_str] = stores
-                    logger.info(f"  {device_str}: {len(stores)} GPU store(s) ready")
-
-    # Create job queue and workers (1 worker per GPU)
-    job_queue = queue.Queue()
-    for config in pending_configs:
-        job_queue.put(config)
+    logger.info(f"Running {len(pending_configs)} experiments in {len(cache_groups)} cache group(s) "
+                f"on {len(args.devices)} GPU(s) (1 worker per GPU)")
 
     lock = threading.Lock()
     progress_bar = tqdm(total=len(pending_configs), desc="Experiments")
 
-    threads = []
-    for device in args.devices:
-        device_gpu_stores = gpu_store_registries.get(device, {})
-        t = threading.Thread(
-            target=worker_thread,
-            args=(device, job_queue, results_dict, output_dir, lock, progress_bar,
-                  cache_registry, device_gpu_stores),
-            name=f"worker-{device}"
-        )
-        t.start()
-        threads.append(t)
+    for group_idx, (cache_hash, cache_info, group_configs) in enumerate(cache_groups):
+        if not group_configs:
+            continue
 
-    for t in threads:
-        t.join()
+        # Log cache group info
+        if use_cache and cache_hash != "__no_cache__":
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Cache group {group_idx+1}/{len(cache_groups)}: {cache_hash}")
+            logger.info(f"  max_length={cache_info.get('max_length')}, "
+                        f"dp_dim={cache_info.get('downprojection_dim')}, "
+                        f"dataset={cache_info.get('dataset_name')}")
+            logger.info(f"  {len(group_configs)} experiment(s) in this group")
+            logger.info(f"{'='*60}")
 
-    # Free GPU stores
-    for device_stores in gpu_store_registries.values():
-        for store in device_stores.values():
-            store.free()
+        # 1. Compute/load cache for this group only
+        cache_registry = {}
+        gpu_store_registries = {}
 
-    # Close all disk caches
-    for cache in cache_registry.values():
-        cache.close()
+        if use_cache and cache_hash != "__no_cache__":
+            cache = precompute_single_cache(cache_info, args.devices)
+            cache_registry[cache_hash] = cache
+
+            if args.gpu_cache:
+                for device_str in args.devices:
+                    store = load_single_gpu_store(cache, cache_info, device_str)
+                    if store is not None:
+                        gpu_store_registries[device_str] = {cache_hash: store}
+
+        # 2. Queue and run this group's experiments (multi-GPU parallel)
+        job_queue = queue.Queue()
+        for config in group_configs:
+            job_queue.put(config)
+
+        threads = []
+        for device in args.devices:
+            device_gpu_stores = gpu_store_registries.get(device, {})
+            t = threading.Thread(
+                target=worker_thread,
+                args=(device, job_queue, results_dict, output_dir, lock, progress_bar,
+                      cache_registry, device_gpu_stores),
+                name=f"worker-{device}"
+            )
+            t.start()
+            threads.append(t)
+
+        for t in threads:
+            t.join()
+
+        # 3. Free this group's resources before moving to next
+        for device_stores in gpu_store_registries.values():
+            for store in device_stores.values():
+                store.free()
+        gpu_store_registries.clear()
+
+        for c in cache_registry.values():
+            c.close()
+        cache_registry.clear()
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     progress_bar.close()
 
