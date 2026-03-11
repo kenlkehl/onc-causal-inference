@@ -47,7 +47,7 @@ import torch.nn.functional as F
 
 from .cnn_extractor import WordTokenizer
 from .conv_pool_extractor import DilatedResidualBlock
-from .gru_pool_extractor import GatedAttentionPooling
+from .gated_attention_pooling import GatedAttentionPooling
 from .hierarchical_transformer_extractor import InterpretableTransformerLayer
 from .numeric_features import NumericFeatureVector
 

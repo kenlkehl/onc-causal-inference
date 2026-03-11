@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .cnn_extractor import WordTokenizer  # Reuse word-level tokenizer
+from .gated_attention_pooling import GatedAttentionPooling
 from .numeric_features import NumericEmbedding
 
 logger = logging.getLogger(__name__)
@@ -157,9 +158,9 @@ class GRUFeatureExtractor(nn.Module):
             bidirectional=bidirectional
         )
 
-        # Attention pooling over GRU outputs
+        # Gated attention pooling over GRU outputs
         gru_output_dim = hidden_dim * self.num_directions
-        self.attention = AttentionPooling(
+        self.attention = GatedAttentionPooling(
             hidden_dim=gru_output_dim,
             attention_dim=attention_dim
         )
@@ -339,8 +340,8 @@ class GRUFeatureExtractor(nn.Module):
         # which complicates the attention mask handling. GRU handles padding reasonably well.
         gru_output, _ = self.gru(embeddings)  # (batch, seq_len, hidden_dim * num_directions)
 
-        # Attention pooling
-        pooled = self.attention(gru_output, attention_mask)  # (batch, hidden_dim * num_directions)
+        # Gated attention pooling
+        pooled, _weights = self.attention(gru_output, attention_mask)  # (batch, hidden_dim * num_directions)
 
         # Optional projection
         if self.projection is not None:
@@ -378,10 +379,8 @@ class GRUFeatureExtractor(nn.Module):
 
         gru_output, _ = self.gru(embeddings)
 
-        # Get attention scores before softmax
-        scores = self.attention.v(torch.tanh(self.attention.W(gru_output))).squeeze(-1)
-        scores = scores.masked_fill(attention_mask == 0, -1e9)
-        weights = F.softmax(scores, dim=1)
+        # Get attention weights from gated attention pooling
+        _pooled, weights = self.attention(gru_output, attention_mask)
 
         return weights
 

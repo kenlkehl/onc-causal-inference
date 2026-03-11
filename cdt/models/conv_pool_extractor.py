@@ -45,7 +45,7 @@ import torch.nn.functional as F
 
 from .cnn_extractor import WordTokenizer
 from .gru_extractor import AttentionPooling
-from .gru_pool_extractor import GatedAttentionPooling
+from .gated_attention_pooling import GatedAttentionPooling
 from .hierarchical_transformer_extractor import InterpretableTransformerLayer
 from .chunking import split_into_chunks_vocab
 from .numeric_features import NumericFeatureVector

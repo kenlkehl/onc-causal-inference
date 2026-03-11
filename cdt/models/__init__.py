@@ -15,7 +15,8 @@ from .hierarchical_transformer_extractor import HierarchicalTransformerExtractor
 from .bert_pool_extractor import BertPoolExtractor
 from .gated_mil_hierarchical_extractor import GatedMILHierarchicalExtractor
 from .gru_transformer_mil_extractor import GRUTransformerMILExtractor
-from .gru_pool_extractor import GRUPoolExtractor, GatedAttentionPooling
+from .gru_pool_extractor import GRUPoolExtractor
+from .gated_attention_pooling import GatedAttentionPooling
 from .conv_pool_extractor import DilatedConvPoolExtractor
 from .conv1d_transformer_hybrid_extractor import Conv1dTransformerHybridExtractor
 from .transformer_pool_extractor import TransformerPoolExtractor

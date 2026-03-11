@@ -48,7 +48,7 @@ from typing import Optional, List, Dict, Any, Tuple, Union
 import torch
 import torch.nn as nn
 
-from .gru_pool_extractor import GatedAttentionPooling
+from .gated_attention_pooling import GatedAttentionPooling
 from .gpu_hidden_state_store import _get_hidden_size
 from .numeric_features import NumericFeatureVector
 
