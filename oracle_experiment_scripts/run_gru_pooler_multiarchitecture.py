@@ -35,6 +35,7 @@ import json
 import logging
 import queue
 import random
+import resource
 import threading
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -456,8 +457,7 @@ def run_causal_forest_experiment(
         )
         combined_loader = DataLoader(
             combined_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=collate_fn, num_workers=2,
-            persistent_workers=True, pin_memory=True
+            collate_fn=collate_fn, num_workers=2, pin_memory=True
         )
 
         model.train_causal_forest(combined_loader, combined_T, combined_Y)
@@ -862,7 +862,18 @@ def worker_thread(
             torch.cuda.empty_cache()
 
 
+def _raise_fd_limit(target: int = 65536) -> None:
+    """Raise the soft file-descriptor limit to avoid OSError 24."""
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    new_soft = min(target, hard)
+    if new_soft > soft:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (new_soft, hard))
+        logger.info(f"Raised file descriptor limit: {soft} -> {new_soft} (hard={hard})")
+
+
 def main():
+    _raise_fd_limit()
+
     parser = argparse.ArgumentParser(
         description="Multi-architecture experiment with GRU Pool extractor"
     )
