@@ -803,6 +803,35 @@ class GRUPoolExtractor(nn.Module):
             return self._forward_with_instances_preprocessed(texts_or_batch)
         return self._forward_with_instances_from_texts(texts_or_batch)
 
+    def get_tokenizer_state(self) -> Dict[str, Any]:
+        """Get tokenizer state for checkpoint saving."""
+        return self._tokenizer.get_state()
+
+    def load_tokenizer_state(self, state: Dict[str, Any]) -> 'GRUPoolExtractor':
+        """
+        Load tokenizer state and rebuild embedding layer.
+
+        Args:
+            state: Tokenizer state dictionary
+
+        Returns:
+            self for method chaining
+        """
+        self._tokenizer.load_state(state)
+
+        # Rebuild embedding layer with loaded vocabulary size
+        self._embedding = nn.Embedding(
+            num_embeddings=self._tokenizer.vocab_size,
+            embedding_dim=self._embedding_dim,
+            padding_idx=self._tokenizer.pad_token
+        )
+        self._embedding.to(self._device)
+
+        self._initialized = True
+        logger.info(f"Tokenizer state loaded: vocab size = {self._tokenizer.vocab_size}")
+
+        return self
+
     def get_state(self) -> Dict[str, Any]:
         """
         Get extractor state for checkpoint saving.
