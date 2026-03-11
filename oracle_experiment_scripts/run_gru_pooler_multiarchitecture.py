@@ -208,13 +208,34 @@ def compute_metrics(
     return metrics
 
 
+def _fit_single_tokenizer(
+    args: tuple,
+) -> tuple:
+    """Fit a single tokenizer for one (dataset, fold). Used by ThreadPoolExecutor."""
+    dataset_name, fold, train_texts, max_vocab, min_word_freq = args
+
+    extractor = GRUPoolExtractor(
+        embedding_dim=64,  # Doesn't matter — only tokenizer state is kept
+        max_vocab_size=max_vocab,
+        min_word_freq=min_word_freq,
+        device='cpu',
+    )
+    extractor.fit_tokenizer(train_texts)
+    state = extractor.get_tokenizer_state()
+    vocab_size = extractor.vocab_size
+    del extractor
+
+    logger.info(f"Pre-fitted tokenizer: {dataset_name} fold {fold} (vocab={vocab_size})")
+    return (dataset_name, fold), state
+
+
 def prefit_tokenizers(
     datasets: List[tuple],
     n_folds: int,
     max_vocab: int = 50000,
     min_word_freq: int = 2,
 ) -> Dict[tuple, Dict[str, Any]]:
-    """Pre-fit tokenizers once per (dataset, fold) for reuse across experiments.
+    """Pre-fit tokenizers in parallel, once per (dataset, fold).
 
     Args:
         datasets: List of (dataset_path, dataset_name) tuples
@@ -225,8 +246,10 @@ def prefit_tokenizers(
     Returns:
         Dict mapping (dataset_name, fold_index) -> tokenizer state dict
     """
-    tokenizer_states = {}
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    # Build list of (dataset_name, fold, train_texts, ...) jobs
+    jobs = []
     for dataset_path, dataset_name in datasets:
         parquet_file = _resolve_parquet_file(dataset_path)
         if parquet_file is None:
@@ -244,23 +267,17 @@ def prefit_tokenizers(
 
         for fold, (train_idx, _test_idx) in enumerate(kf.split(df)):
             train_texts = df.iloc[train_idx][text_column].tolist()
+            jobs.append((dataset_name, fold, train_texts, max_vocab, min_word_freq))
 
-            # Create a temporary extractor just to fit the tokenizer
-            extractor = GRUPoolExtractor(
-                embedding_dim=64,  # Doesn't matter — only tokenizer state is kept
-                max_vocab_size=max_vocab,
-                min_word_freq=min_word_freq,
-                device='cpu',
-            )
-            extractor.fit_tokenizer(train_texts)
-            state = extractor.get_tokenizer_state()
-            tokenizer_states[(dataset_name, fold)] = state
+    # Fit all tokenizers in parallel
+    tokenizer_states = {}
+    with ThreadPoolExecutor(max_workers=len(jobs) or 1) as executor:
+        futures = {executor.submit(_fit_single_tokenizer, job): job for job in jobs}
+        for future in as_completed(futures):
+            key, state = future.result()
+            tokenizer_states[key] = state
 
-            logger.info(f"Pre-fitted tokenizer: {dataset_name} fold {fold} "
-                        f"(vocab={extractor.vocab_size})")
-            del extractor
-
-    logger.info(f"Pre-fitted {len(tokenizer_states)} tokenizers")
+    logger.info(f"Pre-fitted {len(tokenizer_states)} tokenizers in parallel")
     return tokenizer_states
 
 
