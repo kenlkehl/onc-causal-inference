@@ -94,7 +94,7 @@ class ExperimentConfig:
     gru_dropout: float = 0.1
     gru_bidirectional: bool = True
     projection_dim: int = 128
-    max_length: int = 8192
+    max_length: int = 100000
 
     # Training
     epochs: int = 30

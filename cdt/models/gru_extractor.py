@@ -102,7 +102,7 @@ class GRUFeatureExtractor(nn.Module):
         bidirectional: bool = True,
         attention_dim: Optional[int] = None,
         projection_dim: Optional[int] = 128,
-        max_length: int = 8192,
+        max_length: int = 100000,
         min_word_freq: int = 2,
         max_vocab_size: Optional[int] = 50000,
         device: torch.device = None,
