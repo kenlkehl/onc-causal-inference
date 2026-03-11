@@ -423,7 +423,7 @@ class HiddenStateCache:
         if self._downprojection_dim is not None and self._downprojection_dim < hidden_size:
             downproj_layer = _make_downprojection(
                 hidden_size, self._downprojection_dim, self._model_name
-            ).half().to(device)
+            ).float().to(device)
             store_dim = self._downprojection_dim
             logger.info(
                 f"  Downprojection: {hidden_size} -> {store_dim} "
@@ -466,13 +466,15 @@ class HiddenStateCache:
             attention_mask = encoding['attention_mask'].to(device)
 
             with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
-                outputs = model(
+                # Use base transformer (model.model) to skip lm_head logits
+                # computation, which would allocate vocab_size * seq_len floats
+                outputs = model.model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     output_hidden_states=True,
                     return_dict=True,
                 )
-                hidden_states = outputs.hidden_states[-1]  # (batch, batch_max_len, hidden_size)
+                hidden_states = outputs.last_hidden_state  # (batch, batch_max_len, hidden_size)
 
                 # Apply random projection on GPU before transfer
                 if rp_matrix_gpu is not None:
@@ -721,7 +723,7 @@ class HiddenStateCache:
             if use_downprojection:
                 dp_layer = _make_downprojection(
                     hidden_size, self._downprojection_dim, self._model_name
-                ).half().to(device)
+                ).float().to(device)
 
             for i in range(0, n_shard, batch_size):
                 batch_texts = shard_texts[i:i + batch_size]
@@ -740,13 +742,14 @@ class HiddenStateCache:
                 attention_mask = encoding['attention_mask'].to(device)
 
                 with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
-                    outputs = mdl(
+                    # Use base transformer (mdl.model) to skip lm_head logits
+                    outputs = mdl.model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
                         output_hidden_states=True,
                         return_dict=True,
                     )
-                    hidden_states = outputs.hidden_states[-1]
+                    hidden_states = outputs.last_hidden_state
 
                     # Apply random projection on GPU before transfer
                     if rp_gpu is not None:

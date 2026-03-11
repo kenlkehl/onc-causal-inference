@@ -372,9 +372,11 @@ class FrozenLLMPoolerExtractor(nn.Module):
         Returns:
             Feature tensor of shape (batch_size, output_dim)
         """
-        # Ensure float32
+        # Ensure float32 (defensive guard against float16 from cache)
         if hidden_states.dtype != torch.float32:
             hidden_states = hidden_states.float()
+        if attention_mask.dtype != torch.float32:
+            attention_mask = attention_mask.float()
 
         # Trainable downprojection (if configured)
         if self._downprojection is not None:

@@ -6,8 +6,8 @@ When using pre-computed LLM hidden states, each sample includes either:
 - The actual hidden states loaded directly by the DataLoader workers (optimized path)
 
 The optimized path moves I/O into DataLoader workers, overlapping disk reads with
-GPU compute and enabling prefetching. Hidden states are kept as float16 through
-the DataLoader and cast to float32 on GPU to halve CPU-GPU bandwidth.
+GPU compute and enabling prefetching. Hidden states are cast to float32 in the
+collate function to avoid dtype mismatches with trainable model parameters.
 """
 
 import logging
@@ -128,8 +128,8 @@ def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Collate batch for cached hidden state dataset.
 
     When items contain 'hidden_states' (optimized path), stacks them into
-    tensors as float16 for efficient GPU transfer. When items contain
-    'cache_index' (legacy path), collects indices for deferred loading.
+    float32 tensors for GPU transfer. When items contain 'cache_index'
+    (legacy path), collects indices for deferred loading.
 
     Args:
         batch: List of samples from CachedHiddenStateDataset.
@@ -154,13 +154,13 @@ def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         lengths = [item['hidden_states'].shape[0] for item in batch]
         max_len = max(lengths)
         hidden_size = batch[0]['hidden_states'].shape[-1]
-        hs = np.zeros((len(batch), max_len, hidden_size), dtype=np.float16)
+        hs = np.zeros((len(batch), max_len, hidden_size), dtype=np.float32)
         mask = np.zeros((len(batch), max_len), dtype=np.float32)
         for i, item in enumerate(batch):
             l = lengths[i]
             hs[i, :l] = item['hidden_states']
             mask[i, :l] = 1.0
-        result['cached_hidden_states'] = torch.from_numpy(hs)  # float16 tensor
+        result['cached_hidden_states'] = torch.from_numpy(hs)  # float32 tensor
         result['cached_attention_mask'] = torch.from_numpy(mask)
     elif 'cache_index' in batch[0]:
         # Legacy path: collect indices for deferred loading
@@ -184,7 +184,7 @@ def prepare_cached_batch(
 
     Supports three paths:
     - Optimized: hidden states already in batch (loaded by DataLoader workers).
-      Just moves float16 tensors to GPU and casts to float32.
+      Moves float32 tensors to GPU.
     - GPU store: batch has cache_indices, loads from GPU-resident store (zero-copy).
     - Legacy: batch has cache_indices, loads from disk-backed HiddenStateCache.
 
@@ -195,8 +195,8 @@ def prepare_cached_batch(
         gpu_store: Optional GPUHiddenStateStore for GPU-resident hidden states.
     """
     if 'cached_hidden_states' in batch:
-        # Optimized path: loaded by DataLoader, transfer float16 to GPU and cast
-        batch['cached_hidden_states'] = batch['cached_hidden_states'].to(device).float()
+        # Optimized path: loaded by DataLoader, transfer to GPU as float32
+        batch['cached_hidden_states'] = batch['cached_hidden_states'].to(device, dtype=torch.float32)
         batch['cached_attention_mask'] = batch['cached_attention_mask'].to(device)
     elif gpu_store is not None and 'cache_indices' in batch:
         # GPU store path: hidden states already on GPU, zero-copy gather+pad
