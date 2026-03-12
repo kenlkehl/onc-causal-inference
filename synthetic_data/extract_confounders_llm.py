@@ -612,23 +612,36 @@ class VLLMBatchClientWrapper:
             # Harmony path: render conversations to token IDs, use generate()
             prompts = []
 
-            for text in clinical_texts:
-                truncated = truncate_to_last_n_tokens(text, self.tokenizer, self.max_text_tokens)
-                user_content = build_extraction_prompt(truncated, self.confounders)
-                convo = Conversation.from_messages([
-                    Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
-                    Message.from_role_and_content(
-                        Role.DEVELOPER,
-                        DeveloperContent.new().with_instructions(
-                            "You are a clinical data extraction assistant. "
-                            "Extract patient characteristics from clinical notes and respond with valid JSON only."
+            try:
+                for text in clinical_texts:
+                    truncated = truncate_to_last_n_tokens(text, self.tokenizer, self.max_text_tokens)
+                    user_content = build_extraction_prompt(truncated, self.confounders)
+                    convo = Conversation.from_messages([
+                        Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
+                        Message.from_role_and_content(
+                            Role.DEVELOPER,
+                            DeveloperContent.new().with_instructions(
+                                "You are a clinical data extraction assistant. "
+                                "Extract patient characteristics from clinical notes and respond with valid JSON only."
+                            ),
                         ),
-                    ),
-                    Message.from_role_and_content(Role.USER, user_content),
-                ])
-                token_ids = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
-                prompts.append({"prompt_token_ids": token_ids})
+                        Message.from_role_and_content(Role.USER, user_content),
+                    ])
+                    token_ids = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
+                    prompts.append({"prompt_token_ids": token_ids})
+            except Exception as e:
+                if "StackOverflow" in str(e) or "PanicException" in type(e).__name__:
+                    logger.warning(
+                        f"Harmony tokenizer stack overflow on long text ({len(clinical_texts)} texts, "
+                        f"max_text_tokens={self.max_text_tokens}). "
+                        f"Falling back to chat template format. "
+                        f"Consider reducing --max-text-tokens to avoid this."
+                    )
+                    use_harmony = False
+                else:
+                    raise
 
+        if use_harmony:
             sampling_params = SamplingParams(
                 temperature=temperature,
                 max_tokens=max_tokens,
