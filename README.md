@@ -31,13 +31,12 @@ python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
     --output-dir ../quickstart_results \
     --devices cuda:0 \
     --datasets example_synthetic_data_one_confounder_twostage \
-    --model-types causal_forest \
     --max-lengths 50000 \
     --epochs 20 \
     --n-folds 3
 ```
 
-This runs the recommended architecture (Frozen LLM Pooler + Causal Forest) on the included synthetic dataset. The script sweeps over downprojection dimensions (128, 256, 512) and explicit confounder usage (on/off), producing 6 experiments total.
+This runs the frozen LLM pooler extractor across all three causal heads (causal_forest, rlearner, dragonnet) on the included synthetic dataset. The script sweeps over model types, downprojection dimensions (128, 256, 512), and explicit confounder usage (on/off), producing 18 experiments total.
 
 For CPU-only machines, CDT requires a CUDA GPU for the frozen LLM forward pass. On Apple Silicon Macs, you can also use `--device mps` with the CLI.
 
