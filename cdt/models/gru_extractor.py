@@ -338,7 +338,9 @@ class GRUFeatureExtractor(nn.Module):
         # GRU forward pass
         # Note: We don't use pack_padded_sequence because it requires sorting by length
         # which complicates the attention mask handling. GRU handles padding reasonably well.
-        gru_output, _ = self.gru(embeddings)  # (batch, seq_len, hidden_dim * num_directions)
+        # Disable cuDNN for very long sequences (cuDNN fused RNN has internal length limits)
+        with torch.backends.cudnn.flags(enabled=False):
+            gru_output, _ = self.gru(embeddings)  # (batch, seq_len, hidden_dim * num_directions)
 
         # Gated attention pooling
         pooled, _weights = self.attention(gru_output, attention_mask)  # (batch, hidden_dim * num_directions)
@@ -377,7 +379,8 @@ class GRUFeatureExtractor(nn.Module):
         embeddings = self.embedding(input_ids)
         embeddings = self.embed_layer_norm(embeddings)
 
-        gru_output, _ = self.gru(embeddings)
+        with torch.backends.cudnn.flags(enabled=False):
+            gru_output, _ = self.gru(embeddings)
 
         # Get attention weights from gated attention pooling
         _pooled, weights = self.attention(gru_output, attention_mask)
