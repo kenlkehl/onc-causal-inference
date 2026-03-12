@@ -19,7 +19,7 @@ pip install uv
 ```bash
 git clone https://github.com/kenlkehl/causal-dragonnet-text.git
 cd causal-dragonnet-text
-uv venv --python 3.12
+uv venv --python 3.13
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 uv pip install -e .
 ```
@@ -27,47 +27,59 @@ uv pip install -e .
 ### 3. Run an experiment
 
 ```bash
-python oracle_experiment_scripts/run_causal_forest_experiment.py \
-    --dataset example_synthetic_data_one_confounder/dataset_with_extraction.parquet \
+python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
     --output-dir ../quickstart_results \
-    --device cuda:0 \
+    --devices cuda:0 \
+    --datasets example_synthetic_data_one_confounder_twostage \
+    --model-types causal_forest \
+    --max-lengths 50000 \
     --epochs 20 \
     --n-folds 3
 ```
 
-For CPU-only machines, use `--device cpu`.  On Apple Silicon Macs, you can also use `--device mps`.
+This runs the recommended architecture (Frozen LLM Pooler + Causal Forest) on the included synthetic dataset. The script sweeps over downprojection dimensions (128, 256, 512) and explicit confounder usage (on/off), producing 6 experiments total.
+
+For CPU-only machines, CDT requires a CUDA GPU for the frozen LLM forward pass. On Apple Silicon Macs, you can also use `--device mps` with the CLI.
+
+Additional options:
+- `--cache` — pre-compute LLM hidden states to disk (avoids repeated forward passes across folds)
+- `--gpu-cache` — keep pre-computed hidden states in GPU VRAM (fastest, requires sufficient VRAM)
+- `--resume` — resume from existing results if interrupted
+- `--max-experiments N` — limit number of experiments (useful for quick testing)
 
 Results include:
 - `metrics_summary.csv` - ITE correlation, ATE bias, and CI coverage metrics
-- `*/predictions.parquet` - Per-sample treatment effect predictions with confidence intervals
+- `results/*.json` - Per-experiment detailed results with fold-level metrics
 
-## Recommended Approach: Causal Forest + GRU-Pool
+## Recommended Approach: Frozen LLM Pooler + Causal Forest
 
-The best-performing configuration uses a two-stage approach combining neural feature extraction with econml's CausalForestDML:
+The best-performing configuration uses a frozen pretrained LLM to extract token-level hidden states, pools them with gated attention into patient-level feature vectors, trains an R-learner to encourage treatment-effect-aware representations, and then feeds the learned features to econml's CausalForestDML for final effect estimation with confidence intervals.
 
 ```
-Stage 1: Representation Learning (Neural Network)
-├── GRU-Pool Extractor: Chunk BiGRU + transformer + gated attention
+Stage 1: Representation Learning
+├── Frozen LLM (e.g., Qwen3.5-0.8B-Base): Extract per-token hidden states
+├── Trainable Downprojection: Reduce hidden dim (e.g., 1024 → 256)
+├── Gated Attention Pooling: Pool all tokens into a single patient vector
 ├── Propensity Head: P(T=1|X) → BCE loss
 ├── Outcome Head: E[Y|X] → BCE loss
-└── [Optional] Effect Head: τ(X) → R-loss (when use_rlearner_representation=True)
+└── [Optional] Effect Head: τ(X) → R-loss (use_rlearner_representation=True)
 
 Stage 2: Effect Estimation (Causal Forest)
 ├── Extract learned representations from Stage 1
-├── Fit CausalForestDML on extracted features
+├── Fit CausalForestDML on patient-level features
 └── Estimate τ(X) = E[Y(1)-Y(0)|X] with confidence intervals
 ```
 
-**Optional: R-Learner Representation Training** - Enable `use_rlearner_representation: true` in the causal forest config to add an R-learner loss during Stage 1, encouraging the neural network to learn representations that capture treatment effect heterogeneity. For even stronger separation, enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions vs treatment effect.
+**Why this architecture works best:**
+- **Pretrained LLM backbone**: Leverages rich language understanding from pretraining without the cost of fine-tuning the full model — only the downprojection, pooling, and causal heads are trained
+- **All-token pooling**: Gated attention over every token's hidden state captures information from the entire document, unlike last-token-only approaches
+- **R-learner representation training**: When enabled, the R-learner loss during Stage 1 encourages learned features to capture treatment effect heterogeneity, not just confounders
+- **Causal Forest for final estimation**: Doubly-robust estimation with honest trees provides unbiased effect estimates and built-in confidence intervals, with theoretical guarantees from the causal forest literature
+- **Long document support**: Handles documents up to 50K+ tokens with the pretrained tokenizer
 
-**Key advantages:**
-- **Doubly-robust estimation**: Robust to misspecification of either propensity or outcome model
-- **Honest trees**: Unbiased effect estimates via sample splitting within trees
-- **Confidence intervals**: Built-in uncertainty quantification for treatment effects
-- **No gradient competition**: Representation learning completes before effect estimation
-- **Long document support**: GRU-Pool handles documents of any length via chunking
+**Optional: Dual Extractor Mode** — Enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions (propensity, outcome) vs treatment effect (τ). In dual mode, Stage 2 uses the effect extractor's features, which are specifically optimized for treatment effect heterogeneity via the R-loss.
 
-See `example_configs/causal_forest_config.json` for a complete configuration.
+See `oracle_experiment_scripts/run_frozen_llm_multi_architecture.py` for the full experiment script.
 
 ## Architecture
 
@@ -75,6 +87,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 
 | Type | Description | Long docs | fit_tokenizer |
 |------|-------------|-----------|---------------|
+| `frozen_llm_pooler` | **Recommended.** Frozen pretrained LLM + trainable downprojection + gated attention pooling | Yes (50K+) | No |
 | `gru_pool` | Chunk BiGRU + transformer + gated attention pooling | Yes | Required |
 | `conv_pool` | Chunk dilated conv + transformer + gated attention pooling | Yes | Required |
 | `transformer_pool` | Chunk token transformer + cross-chunk transformer + gated attention pooling | Yes | Required |
@@ -84,7 +97,6 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 | `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
 | `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
 | `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
-| `frozen_llm_pooler` | Frozen pretrained LLM + optional trainable downprojection + gated attention pooling | Yes (32K) | No |
 | `llm` | Decoder-only LLM (Qwen3) with random init or pretrained, last token embedding | Yes (32K) | No |
 | `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
 | `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
@@ -95,7 +107,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 
 | Type | Description | Key output |
 |------|-------------|------------|
-| `causal_forest` | Two-stage: neural features + CausalForestDML; optional R-learner representation and dual extractor mode | τ with confidence intervals |
+| `causal_forest` | **Recommended.** Two-stage: neural features + CausalForestDML; optional R-learner representation and dual extractor mode | τ with confidence intervals |
 | `rlearner` | Direct τ(X) optimization, detached nuisance functions; optional dual extractor mode | τ directly predicts ITE |
 | `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
 | `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
@@ -110,7 +122,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 {
   "architecture": {
     "model_type": "rlearner",
-    "feature_extractor_type": "gru_pool",
+    "feature_extractor_type": "frozen_llm_pooler",
     "rlearner_dual_extractors": true
   }
 }
@@ -122,7 +134,7 @@ See `example_configs/causal_forest_config.json` for a complete configuration.
 {
   "architecture": {
     "model_type": "causal_forest",
-    "feature_extractor_type": "gru_pool",
+    "feature_extractor_type": "frozen_llm_pooler",
     "causal_forest": {
       "n_estimators": 200,
       "use_rlearner_representation": true,
@@ -149,6 +161,36 @@ Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"cont
 
 ## Running Experiments
 
+### Experiment Script (Recommended)
+
+The `run_frozen_llm_multi_architecture.py` script runs a grid of experiments comparing causal heads (causal_forest, rlearner, dragonnet), max sequence lengths, downprojection dimensions, and explicit confounder usage:
+
+```bash
+# Full grid on one GPU
+python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
+    --output-dir ../my_results \
+    --devices cuda:0
+
+# Targeted run: causal forest only, 50K tokens, one dataset
+python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --datasets one_confounder_twostage \
+    --model-types causal_forest \
+    --max-lengths 50000
+
+# Multi-GPU parallel execution
+python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
+    --output-dir ../my_results \
+    --devices cuda:0 cuda:1 cuda:2 cuda:3
+
+# With hidden state pre-caching (avoids repeated LLM forward passes)
+python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --cache
+```
+
 ### CLI Usage
 
 ```bash
@@ -161,7 +203,7 @@ cdt run --config my_config.json --device cuda:0 --workers 4
 
 ### Configuration
 
-Example causal forest configuration:
+Example frozen LLM pooler + causal forest configuration:
 
 ```json
 {
@@ -175,27 +217,29 @@ Example causal forest configuration:
 
     "architecture": {
       "model_type": "causal_forest",
-      "feature_extractor_type": "gru_pool",
+      "feature_extractor_type": "frozen_llm_pooler",
 
-      "gru_pool_embedding_dim": 128,
-      "gru_pool_gru_hidden_dim": 128,
-      "gru_pool_transformer_layers": 2,
-      "gru_pool_chunk_size": 128,
-      "gru_pool_projection_dim": 128,
+      "flp_model_name": "Qwen/Qwen3.5-0.8B-Base",
+      "flp_max_length": 50000,
+      "flp_freeze_llm": true,
+      "flp_downprojection_dim": 256,
+      "flp_gated_attention_dim": 128,
+      "flp_projection_dim": 128,
+      "flp_gradient_checkpointing": true,
 
       "causal_forest": {
         "n_estimators": 200,
-        "min_samples_leaf": 10,
+        "min_samples_leaf": 5,
         "honest": true,
         "inference": true,
-        "use_rlearner_representation": false,
+        "use_rlearner_representation": true,
         "rlearner_dual_extractors": false
       }
     },
 
     "training": {
       "epochs": 30,
-      "batch_size": 8,
+      "batch_size": 2,
       "learning_rate": 1e-4
     }
   }
@@ -206,7 +250,30 @@ See `example_configs/` for configurations for each extractor and causal head typ
 
 ## Feature Extractor Details
 
-### GRU-Pool (Recommended for long documents)
+### Frozen LLM Pooler (Recommended)
+
+Uses a pretrained decoder-only LLM with **frozen weights** and applies gated attention pooling
+over ALL token hidden states. An optional **trainable downprojection** layer reduces hidden state
+dimensionality before pooling, keeping trainable parameter count low while leveraging the full
+representational power of the pretrained model.
+
+```
+Clinical Text → Pretrained Tokenizer (right-padded)
+    → Frozen LLM (no_grad, autocast float16) → All Token Hidden States
+    → Trainable Downprojection (e.g., 1024 → 256)
+    → Gated Attention Pooling → Projection MLP
+    → Patient Feature Vector → Causal Head (or Causal Forest)
+```
+
+The frozen LLM runs a live forward pass per batch by default. Hidden state caching is available
+as an opt-in via `flp_cache_hidden_states: true` (or `--cache` in the experiment script) for
+cases where you want to avoid repeated forward passes across CV folds.
+
+Key parameters: `flp_model_name`, `flp_max_length`, `flp_downprojection_dim`, `flp_cache_hidden_states`
+
+See `example_configs/frozen_llm_pooler_config.json` for a complete configuration.
+
+### GRU-Pool
 
 Combines BiGRU chunk encoding with transformer cross-chunk context and gated attention pooling. Learns from scratch via the causal objective.
 
@@ -292,49 +359,17 @@ Key parameters: `hier_transformer_num_layers`, `hier_transformer_chunk_size`
 
 Key parameters: `cnn_kernel_sizes`, `cnn_explicit_filter_concepts`, `cnn_num_latent_filters`
 
-### LLM (Decoder-Only with Random Init)
+### LLM (Decoder-Only)
 
-Uses a decoder-only LLM architecture (e.g., Qwen3-0.6B) initialized with **random weights** and trained entirely from scratch via the supervised causal objective. Extracts features using the last token embedding (GPT-style).
+Uses a decoder-only LLM architecture (e.g., Qwen3-0.6B) with last token embedding. Supports random weight initialization (train from scratch) or pretrained weights (fine-tune end-to-end).
 
 ```
 Clinical Text → Pretrained BBPE Tokenizer (left-padded)
-    → Randomly-initialized Decoder-only LLM
-    → Last Token Hidden State → Projection MLP
+    → Decoder-only LLM → Last Token Hidden State → Projection MLP
     → Document Vector → Causal Head
 ```
 
 Key parameters: `llm_model_name`, `llm_max_length`, `llm_projection_dim`, `llm_gradient_checkpointing`
-
-**Memory considerations:**
-| Context Length | Recommended Batch Size | Notes |
-|----------------|------------------------|-------|
-| 32K | 1-2 | Requires gradient checkpointing |
-| 8K | 4-8 | Good balance for most use cases |
-| 2K | 16-32 | Fast iteration |
-
-See `example_configs/llm_config.json` for a complete configuration.
-
-### Frozen LLM Pooler (Pretrained + Live Forward)
-
-Uses a pretrained decoder-only LLM with **frozen weights** and applies gated attention pooling
-over ALL token hidden states (not just the last token). An optional **trainable downprojection**
-layer reduces hidden state dimensionality before pooling.
-
-```
-Clinical Text → Pretrained Tokenizer (right-padded)
-    → Frozen LLM (no_grad, autocast float16) → All Token Hidden States
-    → [Optional] Trainable Downprojection (e.g., 1024 → 256)
-    → Gated Attention Pooling → Projection MLP
-    → Document Vector → Causal Head
-```
-
-By default, the frozen LLM runs a live forward pass per batch. This avoids the OOM issues
-of pre-computing hidden states for entire datasets. Hidden state caching is available as an
-opt-in via `flp_cache_hidden_states: true` for cases where disk space allows.
-
-Key parameters: `flp_model_name`, `flp_max_length`, `flp_downprojection_dim`, `flp_cache_hidden_states`
-
-See `example_configs/frozen_llm_pooler_config.json` for a complete configuration.
 
 ### Numeric Feature Extraction
 
@@ -456,4 +491,3 @@ The `predictions.parquet` contains:
 ## License
 
 MIT License - see [LICENSE](LICENSE) for details.
-
