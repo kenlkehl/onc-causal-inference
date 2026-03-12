@@ -688,7 +688,7 @@ def run_neural_experiment(
             )
 
         if confounder_specs and train_dataset.explicit_confounder_values:
-            model.fit_explicit_confounders(train_dataset.explicit_confounder_values)
+            model.fit_explicit_confounder_featurizer(train_dataset.explicit_confounder_values)
 
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
@@ -979,13 +979,20 @@ def worker_thread(
 
         except Exception as e:
             with lock:
+                error_msg = str(e)
                 results_dict[config_hash] = {
                     'config': asdict(config),
-                    'error': str(e),
+                    'error': error_msg,
                     'skipped': True
                 }
                 progress_bar.update(1)
-                progress_bar.set_postfix_str(f"Error: {str(e)[:30]}")
+                progress_bar.set_postfix_str(f"Error: {error_msg[:50]}")
+                logger.error(
+                    f"Experiment {config_hash} FAILED "
+                    f"(model={config.model_type}, ds={config.dataset_name}, "
+                    f"dp={config.flp_downprojection_dim}, "
+                    f"conf={config.use_explicit_confounders}): {error_msg}"
+                )
 
         finally:
             job_queue.task_done()

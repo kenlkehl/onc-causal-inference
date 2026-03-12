@@ -378,6 +378,17 @@ class FrozenLLMPoolerExtractor(nn.Module):
         if attention_mask.dtype != torch.float32:
             attention_mask = attention_mask.float()
 
+        # Validate hidden state dimension matches model expectation
+        actual_dim = hidden_states.shape[-1]
+        expected_dim = self._hidden_size
+        if actual_dim != expected_dim:
+            raise ValueError(
+                f"Cached hidden state dim ({actual_dim}) does not match "
+                f"model's expected hidden_size ({expected_dim}). "
+                f"This usually means the cache was built with a different "
+                f"downprojection_dim than the model expects."
+            )
+
         # Trainable downprojection (if configured)
         if self._downprojection is not None:
             hidden_states = self._downprojection(hidden_states)
