@@ -42,6 +42,7 @@ import logging
 import queue
 import random
 import threading
+import traceback
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Any, Optional
@@ -490,6 +491,12 @@ def run_causal_forest_experiment(
 
         model = CausalTextForest(**model_kwargs)
 
+        # Verify all parameters are float32 (diagnose dtype leakage)
+        for name, param in model.named_parameters():
+            if param.dtype != torch.float32:
+                logger.warning(f"Parameter {name} has unexpected dtype {param.dtype}, casting to float32")
+                param.data = param.data.float()
+
         train_dataset, test_dataset, train_loader, test_loader, collate_fn, dl_kwargs = \
             _create_datasets_and_loaders(
                 train_df, test_df, train_idx, test_idx,
@@ -679,6 +686,12 @@ def run_neural_experiment(
         ))
 
         model = CausalText(**model_kwargs)
+
+        # Verify all parameters are float32 (diagnose dtype leakage)
+        for name, param in model.named_parameters():
+            if param.dtype != torch.float32:
+                logger.warning(f"Parameter {name} has unexpected dtype {param.dtype}, casting to float32")
+                param.data = param.data.float()
 
         train_dataset, test_dataset, train_loader, test_loader, collate_fn, dl_kwargs = \
             _create_datasets_and_loaders(
@@ -987,11 +1000,12 @@ def worker_thread(
                 }
                 progress_bar.update(1)
                 progress_bar.set_postfix_str(f"Error: {error_msg[:50]}")
+                tb = traceback.format_exc()
                 logger.error(
                     f"Experiment {config_hash} FAILED "
                     f"(model={config.model_type}, ds={config.dataset_name}, "
                     f"dp={config.flp_downprojection_dim}, "
-                    f"conf={config.use_explicit_confounders}): {error_msg}"
+                    f"conf={config.use_explicit_confounders}): {error_msg}\n{tb}"
                 )
 
         finally:

@@ -378,6 +378,10 @@ class FrozenLLMPoolerExtractor(nn.Module):
         if attention_mask.dtype != torch.float32:
             attention_mask = attention_mask.float()
 
+        assert hidden_states.dtype == torch.float32, (
+            f"forward_cached: hidden_states is {hidden_states.dtype} after .float() cast"
+        )
+
         # Validate hidden state dimension matches model expectation
         actual_dim = hidden_states.shape[-1]
         expected_dim = self._hidden_size

@@ -158,9 +158,9 @@ def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         mask = np.zeros((len(batch), max_len), dtype=np.float32)
         for i, item in enumerate(batch):
             l = lengths[i]
-            hs[i, :l] = item['hidden_states']
+            hs[i, :l] = np.asarray(item['hidden_states'], dtype=np.float32)
             mask[i, :l] = 1.0
-        result['cached_hidden_states'] = torch.from_numpy(hs)  # float32 tensor
+        result['cached_hidden_states'] = torch.from_numpy(hs).float()  # enforce float32
         result['cached_attention_mask'] = torch.from_numpy(mask)
     elif 'cache_index' in batch[0]:
         # Legacy path: collect indices for deferred loading
@@ -196,7 +196,7 @@ def prepare_cached_batch(
     """
     if 'cached_hidden_states' in batch:
         # Optimized path: loaded by DataLoader, transfer to GPU as float32
-        batch['cached_hidden_states'] = batch['cached_hidden_states'].to(device, dtype=torch.float32)
+        batch['cached_hidden_states'] = batch['cached_hidden_states'].to(device).float()
         batch['cached_attention_mask'] = batch['cached_attention_mask'].to(device)
     elif gpu_store is not None and 'cache_indices' in batch:
         # GPU store path: hidden states already on GPU, zero-copy gather+pad
