@@ -42,6 +42,16 @@ Usage:
     python oracle_experiment_scripts/run_oracle_experiments.py \
         --output-dir ../pcori_experiments/oracle_experiments \
         --resume
+
+    # Run multiple experiments per GPU (cached mode only)
+    python oracle_experiment_scripts/run_oracle_experiments.py \
+        --output-dir ../pcori_experiments/oracle_experiments \
+        --cache --gpu-cache --workers-per-gpu auto
+
+    # Fixed 4 workers per GPU
+    python oracle_experiment_scripts/run_oracle_experiments.py \
+        --output-dir ../pcori_experiments/oracle_experiments \
+        --cache --workers-per-gpu 4
 """
 
 import argparse
@@ -1147,6 +1157,55 @@ def generate_experiment_grid(
     return configs
 
 
+def estimate_workers_per_gpu(
+    device: str,
+    max_cap: int = 8,
+    per_worker_mb: int = 50,
+) -> int:
+    """Estimate how many concurrent experiment workers a GPU can support.
+
+    After cache loading, queries free VRAM and divides by a conservative
+    per-worker overhead estimate (model ~1MB + optimizer ~3MB + activations
+    + batch tensors).
+
+    Args:
+        device: CUDA device string (e.g. "cuda:0").
+        max_cap: Maximum workers regardless of VRAM.
+        per_worker_mb: Estimated VRAM per worker in MB.
+
+    Returns:
+        Number of workers (clamped to [1, max_cap]).
+    """
+    try:
+        free_bytes, _ = torch.cuda.mem_get_info(torch.device(device))
+        free_mb = free_bytes / 1e6
+        n = int(free_mb // per_worker_mb)
+        n = max(1, min(n, max_cap))
+        logger.info(f"  {device}: {free_mb:.0f} MB free, ~{per_worker_mb} MB/worker -> {n} workers")
+        return n
+    except Exception as e:
+        logger.warning(f"  {device}: VRAM query failed ({e}), defaulting to 1 worker")
+        return 1
+
+
+def resolve_workers_per_gpu(
+    workers_per_gpu_arg: str,
+    device: str,
+    use_cache: bool,
+) -> int:
+    """Resolve the --workers-per-gpu argument for a specific device.
+
+    Returns 1 for non-cached mode (LLM loaded per experiment).
+    """
+    if not use_cache:
+        return 1
+
+    if workers_per_gpu_arg == "auto":
+        return estimate_workers_per_gpu(device)
+    else:
+        return int(workers_per_gpu_arg)
+
+
 def worker_thread(
     device: str,
     job_queue: queue.Queue,
@@ -1289,8 +1348,25 @@ def main():
         default=10,
         help="Number of repeats per experiment config with different random seeds (default: 10)"
     )
+    parser.add_argument(
+        "--workers-per-gpu",
+        type=str,
+        default="auto",
+        help="Concurrent experiment workers per GPU: 'auto' (estimate from free VRAM) "
+             "or an integer (default: auto). Only effective with --cache/--gpu-cache; "
+             "non-cached mode always uses 1."
+    )
 
     args = parser.parse_args()
+
+    # Validate --workers-per-gpu
+    if args.workers_per_gpu != "auto":
+        try:
+            wpg = int(args.workers_per_gpu)
+            if wpg < 1:
+                parser.error("--workers-per-gpu must be >= 1")
+        except ValueError:
+            parser.error(f"--workers-per-gpu must be 'auto' or an integer, got '{args.workers_per_gpu}'")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1351,8 +1427,12 @@ def main():
     # Group experiments by cache key for sequential cache processing
     cache_groups = group_configs_by_cache_key(pending_configs, use_cache)
 
+    if not use_cache and args.workers_per_gpu != "auto" and int(args.workers_per_gpu) > 1:
+        logger.warning("--workers-per-gpu > 1 requires --cache or --gpu-cache (LLM uses most VRAM); forcing 1")
+        args.workers_per_gpu = "1"
+
     logger.info(f"Running {len(pending_configs)} experiments in {len(cache_groups)} cache group(s) "
-                f"on {len(args.devices)} GPU(s) (1 worker per GPU)")
+                f"on {len(args.devices)} GPU(s) (workers-per-gpu: {args.workers_per_gpu})")
 
     lock = threading.Lock()
     progress_bar = tqdm(total=len(pending_configs), desc="Experiments")
@@ -1394,15 +1474,17 @@ def main():
 
         threads = []
         for device in args.devices:
+            n_workers = resolve_workers_per_gpu(args.workers_per_gpu, device, use_cache)
             device_gpu_stores = gpu_store_registries.get(device, {})
-            t = threading.Thread(
-                target=worker_thread,
-                args=(device, job_queue, results_dict, output_dir, lock, progress_bar,
-                      cache_registry, device_gpu_stores),
-                name=f"worker-{device}"
-            )
-            t.start()
-            threads.append(t)
+            for w in range(n_workers):
+                t = threading.Thread(
+                    target=worker_thread,
+                    args=(device, job_queue, results_dict, output_dir, lock, progress_bar,
+                          cache_registry, device_gpu_stores),
+                    name=f"worker-{device}-{w}"
+                )
+                t.start()
+                threads.append(t)
 
         for t in threads:
             t.join()
