@@ -1159,7 +1159,7 @@ def generate_experiment_grid(
 
 def estimate_workers_per_gpu(
     device: str,
-    max_cap: int = 8,
+    max_cap: int = 50,
     per_worker_mb: int = 50,
 ) -> int:
     """Estimate how many concurrent experiment workers a GPU can support.
