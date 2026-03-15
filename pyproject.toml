@@ -3,16 +3,16 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cdt-causal"
+name = "onc-causal-inference"
 version = "0.1.0"
-description = "Causal inference from clinical text using DragonNet"
+description = "Causal inference from clinical text using frozen LLM feature extraction"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {text = "MIT"}
 authors = [
     {name = "Ken Kehl", email = "kenneth_kehl@dfci.harvard.edu"}
 ]
-keywords = ["causal inference", "machine learning", "clinical text", "nlp"]
+keywords = ["causal inference", "machine learning", "clinical text", "nlp", "oncology"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",
@@ -24,16 +24,12 @@ classifiers = [
 dependencies = [
     "torch>=2.0.0",
     "transformers>=5.3.0",
-    "sentence-transformers>=2.2.0",
     "pandas>=1.5.0",
     "numpy>=1.23.0",
     "scikit-learn>=1.2.0",
     "tqdm>=4.65.0",
     "pyarrow",
     "joblib>=1.2.0",
-    "openai>=1.0.0",
-    "openai-harmony>=0.0.8",
-    "entmax>=1.0",
     "accelerate>=0.20.0",
     "econml>=0.14.0",
     "llvmlite>=0.46.0",
@@ -47,17 +43,21 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.0.0",
 ]
+extraction = [
+    "openai>=1.0.0",
+    "openai-harmony>=0.0.8",
+]
 
 [project.scripts]
-cdt = "cdt.cli:main"
+oci = "oci.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/kenlkehl/causal-dragonnet-text"
-Documentation = "https://github.com/kenlkehl/causal-dragonnet-text"
-Repository = "https://github.com/kenlkehl/causal-dragonnet-text"
+Homepage = "https://github.com/kenlkehl/onc-causal-inference"
+Documentation = "https://github.com/kenlkehl/onc-causal-inference"
+Repository = "https://github.com/kenlkehl/onc-causal-inference"
 
 [tool.setuptools.packages.find]
-include = ["cdt", "cdt.*"]
+include = ["oci", "oci.*"]
 
 [tool.black]
 line-length = 100

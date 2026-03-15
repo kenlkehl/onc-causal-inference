@@ -44,10 +44,10 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from cdt.config import ExplicitConfounderSpec, ExplicitConfounderExtractionConfig
-from cdt.data import ClinicalTextDataset, collate_batch
-from cdt.extraction import VLLMConfounderExtractor, ExtractionCache
-from cdt.models import CausalText, ExplicitConfounderFeaturizer
+from oci.config import ExplicitConfounderSpec, ExplicitConfounderExtractionConfig
+from oci.data import ClinicalTextDataset, collate_batch
+from oci.extraction import VLLMConfounderExtractor, ExtractionCache
+from oci.models import CausalText, ExplicitConfounderFeaturizer
 
 # Configure logging
 logging.basicConfig(
@@ -489,7 +489,7 @@ def train_and_evaluate_causal_forest(
 
     # Check if econml is available
     try:
-        from cdt.models import CausalTextForest, ECONML_AVAILABLE
+        from oci.models import CausalTextForest, ECONML_AVAILABLE
         if not ECONML_AVAILABLE:
             logger.warning("econml not available, skipping causal forest test")
             return {'model_type': 'causal_forest', 'error': 'econml not available'}

@@ -1,3 +1,43 @@
+Metadata-Version: 2.4
+Name: onc-causal-inference
+Version: 0.1.0
+Summary: Causal inference from clinical text using frozen LLM feature extraction
+Author-email: Ken Kehl <kenneth_kehl@dfci.harvard.edu>
+License: MIT
+Project-URL: Homepage, https://github.com/kenlkehl/onc-causal-inference
+Project-URL: Documentation, https://github.com/kenlkehl/onc-causal-inference
+Project-URL: Repository, https://github.com/kenlkehl/onc-causal-inference
+Keywords: causal inference,machine learning,clinical text,nlp,oncology
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: torch>=2.0.0
+Requires-Dist: transformers>=5.3.0
+Requires-Dist: pandas>=1.5.0
+Requires-Dist: numpy>=1.23.0
+Requires-Dist: scikit-learn>=1.2.0
+Requires-Dist: tqdm>=4.65.0
+Requires-Dist: pyarrow
+Requires-Dist: joblib>=1.2.0
+Requires-Dist: accelerate>=0.20.0
+Requires-Dist: econml>=0.14.0
+Requires-Dist: llvmlite>=0.46.0
+Requires-Dist: numba>=0.60.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Provides-Extra: extraction
+Requires-Dist: openai>=1.0.0; extra == "extraction"
+Requires-Dist: openai-harmony>=0.0.8; extra == "extraction"
+Dynamic: license-file
+
 # Oncology Causal Inference (OCI)
 
 OCI estimates treatment effects from clinical text. It uses a frozen pretrained LLM to extract patient-level feature vectors from unstructured EHR narratives, then feeds those features to causal inference heads (DragonNet, R-Learner, or Causal Forest) to estimate individual treatment effects (ITE) and average treatment effects (ATE).
