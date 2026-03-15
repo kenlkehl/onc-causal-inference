@@ -505,16 +505,8 @@ def train_and_evaluate_causal_forest(
 
     # Create model WITH explicit confounder specs
     model = CausalTextForest(
-        feature_extractor_type="gru_pool",
-        gru_pool_embedding_dim=128,
-        gru_pool_gru_hidden_dim=128,
-        gru_pool_transformer_layers=4,
-        gru_pool_max_chunks=100,
-        gru_pool_chunk_size=128,
-        gru_pool_chunk_overlap=32,
-        gru_pool_projection_dim=128,
-        gru_pool_max_vocab=10000,
-        gru_pool_min_word_freq=2,
+        feature_extractor_type="frozen_llm_pooler",
+        flp_projection_dim=128,
         representation_dim=128,
         hidden_dim=64,
         dropout=0.0,
@@ -526,11 +518,6 @@ def train_and_evaluate_causal_forest(
         explicit_confounder_specs=specs,  # Native support for explicit confounders
         device=device
     )
-
-    # Fit tokenizer
-    train_texts = train_df['clinical_text'].tolist()
-    model.fit_tokenizer(train_texts)
-    logger.info("Fitted tokenizer")
 
     # Create datasets with explicit confounders
     train_dataset = ClinicalTextDataset(

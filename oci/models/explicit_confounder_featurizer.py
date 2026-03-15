@@ -173,7 +173,7 @@ class ExplicitConfounderFeaturizer(nn.Module):
             if spec.type == "categorical":
                 # k-1 dummy coding
                 n_cats = len(spec.categories) if spec.categories else 2
-                dummy = torch.zeros(n_cats - 1, device=self._device)
+                dummy = torch.zeros(n_cats - 1, device=self._device, dtype=torch.float32)
 
                 if not missing and val is not None:
                     cat_idx = self._category_maps.get(name, {}).get(str(val))
@@ -182,7 +182,7 @@ class ExplicitConfounderFeaturizer(nn.Module):
                         dummy[cat_idx - 1] = 1.0
 
                 features.append(dummy)
-                features.append(torch.tensor([1.0 if missing else 0.0], device=self._device))
+                features.append(torch.tensor([1.0 if missing else 0.0], device=self._device, dtype=torch.float32))
 
             else:  # continuous
                 if not missing and val is not None:
@@ -190,12 +190,12 @@ class ExplicitConfounderFeaturizer(nn.Module):
                     mean = self._continuous_means.get(name, 0.0)
                     std = self._continuous_stds.get(name, 1.0)
                     normalized = (float(val) - mean) / std
-                    features.append(torch.tensor([normalized], device=self._device))
+                    features.append(torch.tensor([normalized], device=self._device, dtype=torch.float32))
                 else:
                     # Mean imputation (0 after z-score)
-                    features.append(torch.tensor([0.0], device=self._device))
+                    features.append(torch.tensor([0.0], device=self._device, dtype=torch.float32))
 
-                features.append(torch.tensor([1.0 if missing else 0.0], device=self._device))
+                features.append(torch.tensor([1.0 if missing else 0.0], device=self._device, dtype=torch.float32))
 
         return torch.cat(features)
 
@@ -216,8 +216,8 @@ class ExplicitConfounderFeaturizer(nn.Module):
         for values in confounder_values_list:
             encoded.append(self._encode_sample(values))
 
-        # Stack into batch
-        batch_encoded = torch.stack(encoded)  # (batch, input_dim)
+        # Stack into batch and ensure float32 (guard against default dtype contamination)
+        batch_encoded = torch.stack(encoded).float()  # (batch, input_dim)
 
         # Project through MLP
         output = self.mlp(batch_encoded)

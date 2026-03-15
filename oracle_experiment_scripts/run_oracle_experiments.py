@@ -1377,6 +1377,8 @@ def main():
 
         if use_cache and cache_hash != "__no_cache__":
             cache = precompute_single_cache(cache_info, args.devices)
+            # Guard against from_pretrained leaking torch.set_default_dtype(float16)
+            torch.set_default_dtype(torch.float32)
             cache_registry[cache_hash] = cache
 
             if args.gpu_cache:
