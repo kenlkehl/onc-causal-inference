@@ -60,6 +60,8 @@ import hashlib
 import itertools
 import json
 import logging
+import multiprocessing as mp
+import os
 import queue
 import random
 import threading
@@ -1206,6 +1208,114 @@ def resolve_workers_per_gpu(
         return int(workers_per_gpu_arg)
 
 
+def _open_cache_for_worker(cache_hash: str, cache_info: dict) -> HiddenStateCache:
+    """Open and preload a hidden state cache from disk in a worker process.
+
+    Each worker process calls this independently to get its own cache handle.
+    The OS page cache ensures that memmap reads are fast after the first load.
+    """
+    parquet_file = Path(cache_info['parquet_file'])
+    cache_dir = str(parquet_file.parent / '.oci_cache')
+    cache = HiddenStateCache(
+        cache_dir=cache_dir,
+        model_name=cache_info['model_name'],
+        max_length=cache_info['max_length'],
+        dataset_path=str(parquet_file),
+        random_projection_dim=None,
+        downprojection_dim=cache_info['downprojection_dim'],
+    )
+    cache.open()
+    cache.preload_to_ram()
+    return cache
+
+
+def worker_process_fn(
+    device: str,
+    job_queue: mp.Queue,
+    progress_queue: mp.Queue,
+    output_dir: str,
+    cache_hash: str,
+    cache_info: Optional[dict],
+    use_gpu_cache: bool,
+):
+    """Worker process for a single GPU.
+
+    Each process initializes its own CUDA context, opens the disk cache
+    independently, and optionally loads a GPU store. This avoids GIL
+    contention that serializes threading-based workers.
+    """
+    output_dir = Path(output_dir)
+    torch.set_default_dtype(torch.float32)
+
+    # Initialize cache in this process
+    cache_registry = {}
+    gpu_store_registry = {}
+
+    if cache_info and cache_hash != "__no_cache__":
+        cache = _open_cache_for_worker(cache_hash, cache_info)
+        cache_registry[cache_hash] = cache
+
+        if use_gpu_cache:
+            store = load_single_gpu_store(cache, cache_info, device)
+            if store is not None:
+                gpu_store_registry = {cache_hash: store}
+
+    logger.info(f"Worker process started on {device} (pid={os.getpid()})")
+
+    while True:
+        try:
+            config = job_queue.get(timeout=2)
+        except Exception:
+            break
+
+        config_hash = config.config_hash()
+
+        try:
+            result = run_single_experiment(
+                config, device, output_dir, cache_registry, gpu_store_registry
+            )
+
+            result_file = output_dir / "results" / f"{config_hash}.json"
+            result_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(result_file, 'w') as f:
+                json.dump(result, f, indent=2, default=str)
+
+            progress_queue.put(("done", config_hash, result))
+
+        except Exception as e:
+            error_msg = str(e)
+            tb = traceback.format_exc()
+            logger.error(
+                f"Experiment {config_hash} FAILED "
+                f"(model={config.model_type}, ds={config.dataset_name}, "
+                f"dp={config.flp_downprojection_dim}, "
+                f"conf={config.use_explicit_confounders}): {error_msg}\n{tb}"
+            )
+            error_result = {
+                'config': asdict(config),
+                'error': error_msg,
+                'skipped': True,
+            }
+            result_file = output_dir / "results" / f"{config_hash}.json"
+            result_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(result_file, 'w') as f:
+                json.dump(error_result, f, indent=2, default=str)
+
+            progress_queue.put(("error", config_hash, error_result))
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Cleanup
+    for store in gpu_store_registry.values():
+        store.free()
+    for c in cache_registry.values():
+        c.close()
+
+    logger.info(f"Worker process on {device} (pid={os.getpid()}) finished")
+
+
 def worker_thread(
     device: str,
     job_queue: queue.Queue,
@@ -1216,7 +1326,7 @@ def worker_thread(
     cache_registry: Optional[Dict[str, HiddenStateCache]] = None,
     gpu_store_registry: Optional[Dict[str, GPUHiddenStateStore]] = None,
 ):
-    """Worker thread to process experiments on a single GPU."""
+    """Worker thread to process experiments on a single GPU (legacy, used without --cache)."""
     while True:
         try:
             config = job_queue.get(timeout=1)
@@ -1433,8 +1543,11 @@ def main():
 
     logger.info(f"Running {len(pending_configs)} experiments in {len(cache_groups)} cache group(s) "
                 f"on {len(args.devices)} GPU(s) (workers-per-gpu: {args.workers_per_gpu})")
+    if use_cache:
+        logger.info("Using multiprocessing (1 process per GPU, avoids GIL contention)")
+    else:
+        logger.info("Using threading (non-cached mode, LLM loaded per experiment)")
 
-    lock = threading.Lock()
     progress_bar = tqdm(total=len(pending_configs), desc="Experiments")
 
     for group_idx, (cache_hash, cache_info, group_configs) in enumerate(cache_groups):
@@ -1451,53 +1564,105 @@ def main():
             logger.info(f"  {len(group_configs)} experiment(s) in this group")
             logger.info(f"{'='*60}")
 
-        # 1. Compute/load cache for this group only
-        cache_registry = {}
-        gpu_store_registries = {}
-
         if use_cache and cache_hash != "__no_cache__":
+            # === MULTIPROCESSING PATH (cached mode) ===
+            # 1. Precompute cache in main process (multi-GPU LLM inference)
             cache = precompute_single_cache(cache_info, args.devices)
-            # Guard against from_pretrained leaking torch.set_default_dtype(float16)
             torch.set_default_dtype(torch.float32)
-            cache_registry[cache_hash] = cache
+            cache.close()  # Close in main process; workers reopen independently
+            del cache
 
-            if args.gpu_cache:
-                for device_str in args.devices:
-                    store = load_single_gpu_store(cache, cache_info, device_str)
-                    if store is not None:
-                        gpu_store_registries[device_str] = {cache_hash: store}
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
-        # 2. Queue and run this group's experiments (multi-GPU parallel)
-        job_queue = queue.Queue()
-        for config in group_configs:
-            job_queue.put(config)
+            # 2. Serialize cache_info for worker processes (ensure Path -> str)
+            serializable_cache_info = {
+                k: str(v) if isinstance(v, Path) else v
+                for k, v in cache_info.items()
+            }
 
-        threads = []
-        for device in args.devices:
-            n_workers = resolve_workers_per_gpu(args.workers_per_gpu, device, use_cache)
-            device_gpu_stores = gpu_store_registries.get(device, {})
-            for w in range(n_workers):
+            # 3. Create multiprocessing queues
+            ctx = mp.get_context('spawn')
+            job_queue = ctx.Queue()
+            progress_queue = ctx.Queue()
+
+            for config in group_configs:
+                job_queue.put(config)
+
+            # 4. Spawn worker processes (1 per GPU)
+            processes = []
+            for device in args.devices:
+                p = ctx.Process(
+                    target=worker_process_fn,
+                    args=(device, job_queue, progress_queue, str(output_dir),
+                          cache_hash, serializable_cache_info, args.gpu_cache),
+                    name=f"worker-{device}",
+                )
+                p.start()
+                processes.append(p)
+
+            logger.info(f"Spawned {len(processes)} worker processes")
+
+            # 5. Monitor progress from main process
+            completed_in_group = 0
+            expected = len(group_configs)
+            while completed_in_group < expected:
+                # Check for dead workers
+                alive = [p for p in processes if p.is_alive()]
+                if not alive and completed_in_group < expected:
+                    logger.error(f"All workers died with {expected - completed_in_group} "
+                                 f"experiments remaining")
+                    break
+
+                try:
+                    status, config_hash, result = progress_queue.get(timeout=5)
+                    results_dict[config_hash] = result
+                    completed_in_group += 1
+                    progress_bar.update(1)
+
+                    if status == "done" and not result.get('skipped'):
+                        metrics = result.get('metrics', {})
+                        progress_bar.set_postfix_str(
+                            f"{result.get('config', {}).get('model_type', '?')} "
+                            f"ITE corr: {metrics.get('ite_corr', 'N/A'):.3f}"
+                        )
+                    elif result.get('skipped'):
+                        progress_bar.set_postfix_str(
+                            f"Skipped: {result.get('error', 'unknown')[:30]}"
+                        )
+                except Exception:
+                    pass  # timeout, retry
+
+            # 6. Join workers
+            for p in processes:
+                p.join(timeout=30)
+                if p.is_alive():
+                    logger.warning(f"Worker {p.name} did not exit cleanly, terminating")
+                    p.terminate()
+
+        else:
+            # === THREADING PATH (non-cached / live LLM mode) ===
+            cache_registry = {}
+            lock = threading.Lock()
+
+            job_queue_t = queue.Queue()
+            for config in group_configs:
+                job_queue_t.put(config)
+
+            threads = []
+            for device in args.devices:
                 t = threading.Thread(
                     target=worker_thread,
-                    args=(device, job_queue, results_dict, output_dir, lock, progress_bar,
-                          cache_registry, device_gpu_stores),
-                    name=f"worker-{device}-{w}"
+                    args=(device, job_queue_t, results_dict, output_dir, lock, progress_bar,
+                          cache_registry, {}),
+                    name=f"worker-{device}"
                 )
                 t.start()
                 threads.append(t)
 
-        for t in threads:
-            t.join()
-
-        # 3. Free this group's resources before moving to next
-        for device_stores in gpu_store_registries.values():
-            for store in device_stores.values():
-                store.free()
-        gpu_store_registries.clear()
-
-        for c in cache_registry.values():
-            c.close()
-        cache_registry.clear()
+            for t in threads:
+                t.join()
 
         gc.collect()
         if torch.cuda.is_available():
