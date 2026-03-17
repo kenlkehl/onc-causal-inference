@@ -1133,8 +1133,8 @@ def generate_experiment_grid(
         #("../example_synthetic_data_ten_confounders_50K_twostage", "ten_confounders_50K_twostage"),
     ]
 
-    model_types = ["causal_forest", "rlearner", "dragonnet"]
-    max_lengths = [5000, 10000, 25000, 50000]
+    model_types = ["causal_forest", "rlearner", "dragonnet", "best_attainable"]
+    max_lengths = [5000, 10000, 25000, 50000, 75000]
     explicit_confounder_options = [False, True]
     downprojection_dims = [128, 256, 512]
 
