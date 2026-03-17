@@ -88,7 +88,7 @@ class SyntheticDataConfig:
     drug_perturbation_prob: float = 0.3
 
     # Output
-    output_dir: str = "./synthetic_output"
+    output_dir: str = "./synthetic_data/example_synthetic_datasets"
 
     # LLM settings
     llm: LLMConfig = field(default_factory=LLMConfig)

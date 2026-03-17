@@ -8,7 +8,7 @@ This script tests the complete pipeline:
 3. GRU-Pool feature extractor with DragonNet causal head
 4. GRU-Pool feature extractor with Causal Forest
 
-Uses a 100-patient sample from example_synthetic_data_(one/ten)_confounders dataset
+Uses a 100-patient sample from synthetic_data/example_synthetic_datasets/(one_confounder/ten_confounders) dataset
 and the google/medgemma-1.5-4b-it model for extraction.
 
 Usage:
@@ -139,7 +139,7 @@ def get_confounder_specs() -> List[ExplicitConfounderSpec]:
 # ============================================================================
 
 def load_sample_dataset(
-    dataset_path: str = "example_synthetic_data_one_confounder/dataset.parquet",
+    dataset_path: str = "synthetic_data/example_synthetic_datasets/one_confounder/dataset.parquet",
     sample_size: int = 100,
     seed: int = 42
 ) -> pd.DataFrame:

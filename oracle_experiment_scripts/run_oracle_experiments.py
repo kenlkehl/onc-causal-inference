@@ -1128,8 +1128,8 @@ def generate_experiment_grid(
     """Generate all experiment configurations."""
 
     datasets = [
-        ("example_synthetic_data_one_confounder_twostage", "one_confounder_twostage"),
-        ("example_synthetic_data_ten_confounders_twostage", "ten_confounders_twostage"),
+        ("synthetic_data/example_synthetic_datasets/one_confounder_twostage", "one_confounder_twostage"),
+        ("synthetic_data/example_synthetic_datasets/ten_confounders_twostage", "ten_confounders_twostage"),
         #("../example_synthetic_data_ten_confounders_50K_twostage", "ten_confounders_50K_twostage"),
     ]
 
