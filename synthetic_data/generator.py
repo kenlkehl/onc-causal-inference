@@ -28,6 +28,11 @@ from .prompts import (
     format_confounder_list,
     format_patient_characteristics,
     validate_clinical_text,
+    build_event_timeline_prompt,
+)
+from .structured_data import (
+    STRUCTURED_EVENT_TYPES,
+    convert_structured_event_to_text,
 )
 
 # Type hints for vLLM imports (imported at runtime)
@@ -1088,7 +1093,11 @@ def _generate_single_patient(
 
     if generation_mode == "two_stage":
         # ---- Stage 1: Generate event timeline ----
-        timeline_prompt = EVENT_TIMELINE_PROMPT.format(
+        # Use structured-data-aware prompt if enabled
+        structured_config = getattr(config, 'structured_data', None)
+        event_timeline_prompt_template = build_event_timeline_prompt(structured_config)
+
+        timeline_prompt = event_timeline_prompt_template.format(
             patient_characteristics=patient_prompt,
             clinical_question=config.clinical_question,
             min_events=config.min_events_per_patient,
@@ -1115,49 +1124,73 @@ def _generate_single_patient(
         if not events:
             logger.warning(f"Patient {patient_idx}: No events parsed from timeline")
 
-        # ---- Stage 2: Expand note-worthy events into detailed notes ----
+        # ---- Stage 2: Expand note-worthy events and convert structured events ----
         note_types = set(getattr(config, 'note_types_to_expand', [
             "clinical_note", "imaging_report", "pathology_report", "ngs_report"
         ]))
         note_separator = getattr(config, 'note_separator', "\n\n---\n\n")
         drug_prob = getattr(config, 'drug_perturbation_prob', 0.3)
 
-        notes = []
+        # Determine which structured event types are enabled
+        structured_enabled = structured_config is not None and structured_config.enabled
+        enabled_structured_types = set()
+        if structured_enabled:
+            if structured_config.include_encounters:
+                enabled_structured_types.add("encounter")
+            if structured_config.include_hospitalizations:
+                enabled_structured_types.add("hospitalization")
+            if structured_config.include_labs:
+                enabled_structured_types.add("lab_result")
+            if structured_config.include_pros:
+                enabled_structured_types.add("pro_assessment")
+
+        # Collect text blocks with their timeline index for interleaving
+        text_blocks = []  # list of (timeline_index, text_content)
+
         for event_idx, event in enumerate(events):
-            if event["event_type"] not in note_types:
-                continue
+            etype = event["event_type"]
 
-            masked_timeline = _create_masked_timeline(events, event_idx)
-            note_type = _event_type_to_note_type(event["event_type"])
+            if etype in note_types:
+                # Narrative note - expand via LLM
+                masked_timeline = _create_masked_timeline(events, event_idx)
+                note_type = _event_type_to_note_type(etype)
 
-            expansion_prompt = NOTE_EXPANSION_PROMPT.format(
-                note_type=note_type,
-                clinical_question=config.clinical_question,
-                masked_event_timeline=masked_timeline,
-            )
-
-            try:
-                note_text = client.generate(
-                    prompt=expansion_prompt,
-                    system_prompt=CLINICAL_SYSTEM_PROMPT,
-                    temperature=0.5,
-                    max_tokens=history_max_tokens,
+                expansion_prompt = NOTE_EXPANSION_PROMPT.format(
+                    note_type=note_type,
+                    clinical_question=config.clinical_question,
+                    masked_event_timeline=masked_timeline,
                 )
-                if note_text is None:
-                    logger.warning(f"Patient {patient_idx}, event {event_idx}: LLM returned None for note expansion")
+
+                try:
+                    note_text = client.generate(
+                        prompt=expansion_prompt,
+                        system_prompt=CLINICAL_SYSTEM_PROMPT,
+                        temperature=0.5,
+                        max_tokens=history_max_tokens,
+                    )
+                    if note_text is None:
+                        logger.warning(f"Patient {patient_idx}, event {event_idx}: LLM returned None for note expansion")
+                        continue
+                except Exception as e:
+                    logger.error(f"Patient {patient_idx}, event {event_idx}: Failed to expand note: {e}")
                     continue
-            except Exception as e:
-                logger.error(f"Patient {patient_idx}, event {event_idx}: Failed to expand note: {e}")
-                continue
 
-            # Apply drug perturbation
-            if drug_prob > 0 and random.random() < drug_prob:
-                note_text = _apply_drug_perturbation(note_text)
+                # Apply drug perturbation
+                if drug_prob > 0 and random.random() < drug_prob:
+                    note_text = _apply_drug_perturbation(note_text)
 
-            notes.append(note_text)
+                text_blocks.append((event_idx, note_text))
 
-        clinical_history = note_separator.join(notes)
-        num_notes = len(notes)
+            elif etype in enabled_structured_types:
+                # Structured event - convert via template
+                structured_text = convert_structured_event_to_text(etype, event["event_text"])
+                if structured_text:
+                    text_blocks.append((event_idx, structured_text))
+
+        # Sort by timeline index and join
+        text_blocks.sort(key=lambda x: x[0])
+        clinical_history = note_separator.join(text for _, text in text_blocks)
+        num_notes = len(text_blocks)
 
     else:
         # ---- Legacy single-document mode ----
@@ -1762,6 +1795,20 @@ def generate_synthetic_dataset_batch(
                 for text in texts
             ]
 
+    # Determine structured data settings for two-stage mode
+    structured_config = getattr(config, 'structured_data', None)
+    structured_enabled = structured_config is not None and structured_config.enabled
+    enabled_structured_types = set()
+    if structured_enabled:
+        if structured_config.include_encounters:
+            enabled_structured_types.add("encounter")
+        if structured_config.include_hospitalizations:
+            enabled_structured_types.add("hospitalization")
+        if structured_config.include_labs:
+            enabled_structured_types.add("lab_result")
+        if structured_config.include_pros:
+            enabled_structured_types.add("pro_assessment")
+
     if generation_mode == "two_stage":
         # ================================================================
         # Two-stage batch generation
@@ -1769,9 +1816,15 @@ def generate_synthetic_dataset_batch(
 
         # --- Batch Pass 1: Generate event timelines ---
         logger.info(f"Step 6/8: Batch generating {len(patient_records)} event timelines with vLLM...")
+        if structured_enabled:
+            logger.info(f"Structured data enabled: {enabled_structured_types}")
+
+        # Use structured-data-aware prompt if enabled
+        event_timeline_prompt_template = build_event_timeline_prompt(structured_config)
+
         timeline_prompts = []
         for record in patient_records:
-            timeline_prompts.append(EVENT_TIMELINE_PROMPT.format(
+            timeline_prompts.append(event_timeline_prompt_template.format(
                 patient_characteristics=record["patient_prompt"],
                 clinical_question=config.clinical_question,
                 min_events=config.min_events_per_patient,
@@ -1845,23 +1898,44 @@ def generate_synthetic_dataset_batch(
 
         expanded_notes = _batch_generate_texts(note_expansion_prompts, temperature=0.5, description="expanded notes")
 
-        # Group notes back by patient and concatenate
+        # Group notes back by patient and interleave with structured events
         note_separator = getattr(config, 'note_separator', "\n\n---\n\n")
         drug_prob = getattr(config, 'drug_perturbation_prob', 0.3)
 
-        patient_notes = {i: [] for i in range(len(patient_records))}
-        for (patient_idx, _event_idx), note_text in zip(expansion_mapping, expanded_notes):
+        # Collect text blocks per patient: list of (timeline_index, text)
+        patient_text_blocks = {i: [] for i in range(len(patient_records))}
+
+        # Add expanded narrative notes
+        for (patient_idx, event_idx), note_text in zip(expansion_mapping, expanded_notes):
             if not note_text:
                 continue
             # Apply drug perturbation
             if drug_prob > 0 and random.random() < drug_prob:
                 note_text = _apply_drug_perturbation(note_text)
-            patient_notes[patient_idx].append(note_text)
+            patient_text_blocks[patient_idx].append((event_idx, note_text))
 
-        # Merge into patient records
-        for patient_idx, notes in patient_notes.items():
-            patient_records[patient_idx]["clinical_text"] = note_separator.join(notes)
-            patient_records[patient_idx]["num_notes"] = len(notes)
+        # Add structured events (template conversion, no LLM needed)
+        if structured_enabled and enabled_structured_types:
+            structured_count = 0
+            for patient_idx, events in enumerate(all_patient_events):
+                for event_idx, event in enumerate(events):
+                    if event["event_type"] in enabled_structured_types:
+                        structured_text = convert_structured_event_to_text(
+                            event["event_type"], event["event_text"]
+                        )
+                        if structured_text:
+                            patient_text_blocks[patient_idx].append((event_idx, structured_text))
+                            structured_count += 1
+            logger.info(f"Converted {structured_count} structured events to text "
+                        f"(avg {structured_count/max(1, len(patient_records)):.1f}/patient)")
+
+        # Merge into patient records (sorted by timeline index for interleaving)
+        for patient_idx, blocks in patient_text_blocks.items():
+            blocks.sort(key=lambda x: x[0])
+            patient_records[patient_idx]["clinical_text"] = note_separator.join(
+                text for _, text in blocks
+            )
+            patient_records[patient_idx]["num_notes"] = len(blocks)
 
     else:
         # ================================================================
@@ -1945,6 +2019,27 @@ def generate_synthetic_dataset_batch(
             "mean_notes_per_patient": float(df["num_notes"].mean()),
             "min_notes_per_patient": int(df["num_notes"].min()),
             "max_notes_per_patient": int(df["num_notes"].max()),
+        }
+
+    # Add structured data stats if enabled
+    if structured_enabled and generation_mode == "two_stage":
+        structured_stats = {etype: [] for etype in enabled_structured_types}
+        for patient_idx, events in enumerate(all_patient_events):
+            counts = {etype: 0 for etype in enabled_structured_types}
+            for event in events:
+                if event["event_type"] in enabled_structured_types:
+                    counts[event["event_type"]] += 1
+            for etype, count in counts.items():
+                structured_stats[etype].append(count)
+
+        metadata["dataset_statistics"]["structured_data_stats"] = {
+            etype: {
+                "mean_per_patient": float(np.mean(counts)) if counts else 0,
+                "min_per_patient": int(np.min(counts)) if counts else 0,
+                "max_per_patient": int(np.max(counts)) if counts else 0,
+                "total": int(np.sum(counts)) if counts else 0,
+            }
+            for etype, counts in structured_stats.items()
         }
     
     # Save outputs

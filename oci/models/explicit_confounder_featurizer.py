@@ -79,7 +79,7 @@ class ExplicitConfounderFeaturizer(nn.Module):
         #   - Categorical: k-1 dummy variables (reference coding)
         #   - Continuous: 1 normalized value
         #   - Both: 1 missingness indicator
-        self._category_maps = {}  # name -> {category: index}
+        self._category_maps = {}  # name -> {normalized_category: index}
         input_dim = 0
 
         for spec in specs:
@@ -87,7 +87,8 @@ class ExplicitConfounderFeaturizer(nn.Module):
                 # k-1 dummy variables + 1 missing indicator
                 n_cats = len(spec.categories) if spec.categories else 2
                 self._category_maps[spec.name] = {
-                    cat: i for i, cat in enumerate(spec.categories or [])
+                    cat.strip().lower().replace(" ", "_").replace("-", "_"): i
+                    for i, cat in enumerate(spec.categories or [])
                 }
                 input_dim += (n_cats - 1) + 1  # k-1 dummies + missing
             else:
@@ -176,7 +177,8 @@ class ExplicitConfounderFeaturizer(nn.Module):
                 dummy = torch.zeros(n_cats - 1, device=self._device, dtype=torch.float32)
 
                 if not missing and val is not None:
-                    cat_idx = self._category_maps.get(name, {}).get(str(val))
+                    val_norm = str(val).strip().lower().replace(" ", "_").replace("-", "_")
+                    cat_idx = self._category_maps.get(name, {}).get(val_norm)
                     if cat_idx is not None and cat_idx > 0:
                         # Reference category (idx 0) is all zeros
                         dummy[cat_idx - 1] = 1.0
@@ -316,9 +318,12 @@ def get_raw_confounder_features(
 
             if spec.type == "categorical":
                 cats = spec.categories or []
+                # Normalize value for comparison (spaces/underscores/hyphens, case)
+                val_norm = str(val).strip().lower().replace(" ", "_").replace("-", "_") if val is not None else ""
                 # k-1 dummy coding
                 for i, cat in enumerate(cats[1:], 1):
-                    if not missing and str(val) == cat:
+                    cat_norm = cat.strip().lower().replace(" ", "_").replace("-", "_")
+                    if not missing and val_norm == cat_norm:
                         features.append(1.0)
                     else:
                         features.append(0.0)

@@ -906,7 +906,7 @@ def run_best_attainable_experiment(
     No GPU required.
     """
     from econml.dml import CausalForestDML
-    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
     from oci.models.explicit_confounder_featurizer import get_raw_confounder_features
 
     confounder_specs = load_confounder_specs_from_metadata(config.dataset_path)
@@ -974,13 +974,29 @@ def run_best_attainable_experiment(
         T_train = train_df['treatment_indicator'].values.astype(np.float64)
         Y_train = train_df['outcome_indicator'].values.astype(np.float64)
 
-        # Train CausalForestDML
+        # Train CausalForestDML with flexible nuisance models
+        # (DGP has interaction terms that linear defaults can't capture)
         cf = CausalForestDML(
+            model_t=RandomForestClassifier(
+                n_estimators=max(50, config.cf_n_estimators // 2),
+                min_samples_leaf=config.cf_min_samples_leaf,
+                random_state=42 + config.repeat_index,
+                n_jobs=-1,
+            ),
+            model_y=RandomForestRegressor(
+                n_estimators=max(50, config.cf_n_estimators // 2),
+                min_samples_leaf=config.cf_min_samples_leaf,
+                random_state=42 + config.repeat_index,
+                n_jobs=-1,
+            ),
+            discrete_treatment=True,
             n_estimators=config.cf_n_estimators,
             min_samples_leaf=config.cf_min_samples_leaf,
             max_depth=None,
             honest=True,
             inference=True,
+            random_state=42 + config.repeat_index,
+            n_jobs=-1,
         )
         cf.fit(Y_train, T_train, X=X_train)
 

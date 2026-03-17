@@ -7,7 +7,7 @@ import os
 import sys
 from pathlib import Path
 
-from .config import SyntheticDataConfig, LLMConfig, DEFAULT_CLINICAL_QUESTION
+from .config import SyntheticDataConfig, LLMConfig, StructuredDataConfig, DEFAULT_CLINICAL_QUESTION
 from .generator import generate_synthetic_dataset, generate_synthetic_dataset_batch
 
 
@@ -148,6 +148,33 @@ Examples:
         type=float,
         default=0.3,
         help="Probability of generic->brand drug name swapping per note (default: 0.3)",
+    )
+
+    # Structured clinical data events
+    parser.add_argument(
+        "--structured-data",
+        action="store_true",
+        help="Enable structured clinical data events (encounters, labs, hospitalizations, PROs) in the generated text",
+    )
+    parser.add_argument(
+        "--no-encounters",
+        action="store_true",
+        help="Disable encounter records (ICD-10/CPT) when --structured-data is enabled",
+    )
+    parser.add_argument(
+        "--no-labs",
+        action="store_true",
+        help="Disable laboratory results when --structured-data is enabled",
+    )
+    parser.add_argument(
+        "--no-hospitalizations",
+        action="store_true",
+        help="Disable hospitalization records when --structured-data is enabled",
+    )
+    parser.add_argument(
+        "--no-pros",
+        action="store_true",
+        help="Disable patient-reported outcomes when --structured-data is enabled",
     )
 
     # LLM parameters
@@ -305,6 +332,17 @@ Examples:
             config.note_separator = args.note_separator
         if args.drug_perturbation_prob != 0.3:
             config.drug_perturbation_prob = args.drug_perturbation_prob
+        # Structured data overrides
+        if args.structured_data:
+            config.structured_data.enabled = True
+        if args.no_encounters:
+            config.structured_data.include_encounters = False
+        if args.no_labs:
+            config.structured_data.include_labs = False
+        if args.no_hospitalizations:
+            config.structured_data.include_hospitalizations = False
+        if args.no_pros:
+            config.structured_data.include_pros = False
         if args.output_dir != "./synthetic_output":
             config.output_dir = args.output_dir
         if args.seed != 42:
@@ -340,6 +378,13 @@ Examples:
             max_events_per_patient=args.max_events,
             note_separator=args.note_separator,
             drug_perturbation_prob=args.drug_perturbation_prob,
+            structured_data=StructuredDataConfig(
+                enabled=args.structured_data,
+                include_encounters=not args.no_encounters,
+                include_hospitalizations=not args.no_hospitalizations,
+                include_labs=not args.no_labs,
+                include_pros=not args.no_pros,
+            ),
             output_dir=args.output_dir,
             seed=args.seed,
             llm=LLMConfig(

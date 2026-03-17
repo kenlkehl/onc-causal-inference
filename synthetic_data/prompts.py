@@ -404,6 +404,171 @@ DRUG_PERTURBATION_MAP = {
 }
 
 
+# =============================================================================
+# Structured Data: Reference Schemas for Event Timeline
+# =============================================================================
+
+STRUCTURED_DATA_EVENT_TYPES = """
+- <encounter> Outpatient or ED encounter with ICD-10 diagnosis codes and CPT/HCPCS procedure codes
+- <hospitalization> Hospital admission with principal diagnosis ICD-10 code, length of stay, and discharge disposition
+- <lab_result> Laboratory panel results with component names, numeric values, units, and normal/abnormal flags
+- <pro_assessment> Patient-reported outcome questionnaire results with subscale scores"""
+
+STRUCTURED_DATA_REFERENCE = """
+REFERENCE SCHEMAS FOR STRUCTURED DATA EVENTS:
+
+Common Oncology ICD-10 Diagnosis Codes:
+  Cancer sites: C34.90 (lung NOS), C50.919 (breast NOS), C18.9 (colon NOS), C25.9 (pancreas NOS),
+    C61 (prostate), C56.9 (ovary), C64.9 (kidney), C67.9 (bladder), C71.9 (brain),
+    C43.9 (melanoma NOS), C90.00 (multiple myeloma), C73 (thyroid)
+  Treatment encounters: Z51.11 (chemotherapy), Z51.0 (radiation therapy), Z51.12 (immunotherapy)
+  Complications: D70.1 (chemotherapy-induced neutropenia), D64.81 (anemia of neoplastic disease),
+    N17.9 (acute kidney injury), R50.81 (fever from condition), K52.0 (radiation enteritis),
+    J18.9 (pneumonia NOS), R11.2 (nausea with vomiting), G62.0 (drug-induced polyneuropathy),
+    I26.99 (pulmonary embolism), I82.409 (DVT of unspecified deep vessels)
+  Surveillance: Z08 (encounter for follow-up after cancer treatment), Z85.x (personal history of cancer)
+
+Common CPT/HCPCS Procedure Codes:
+  Office visits: 99213 (established, low complexity), 99214 (established, moderate),
+    99215 (established, high complexity), 99205 (new patient, high complexity)
+  Chemotherapy: 96413 (IV infusion, first hour), 96415 (IV infusion, additional hour),
+    96409 (IV push), 96401 (subcutaneous/intramuscular injection)
+  Immunotherapy: 96413 (IV infusion, first hour - same code as chemo)
+  Radiation: 77427 (radiation treatment management, 5 treatments), 77385 (IMRT delivery),
+    77386 (IMRT delivery, complex)
+  Imaging: 71260 (CT chest with contrast), 74178 (CT abdomen/pelvis with contrast),
+    78816 (PET/CT whole body), 70553 (MRI brain with and without contrast)
+  Surgical: 38500 (biopsy/excision lymph node), 32405 (lung biopsy),
+    19301 (partial mastectomy), 44140 (partial colectomy)
+
+Laboratory Reference Ranges:
+  CBC: WBC 3.7-10.5 k/uL, Hgb 12.0-16.0 g/dL, Plt 150-400 k/uL, ANC 1.5-8.0 k/uL
+  CMP: Cr 0.6-1.2 mg/dL, BUN 7-20 mg/dL, Na 136-145 mEq/L, K 3.5-5.0 mEq/L,
+    AST 10-40 U/L, ALT 7-56 U/L, ALP 44-147 U/L, Bilirubin 0.1-1.2 mg/dL,
+    Albumin 3.5-5.0 g/dL, Glucose 70-100 mg/dL, Ca 8.5-10.5 mg/dL
+  Tumor markers: CEA 0-2.5 ng/mL, CA 19-9 0-37 U/mL, CA 125 0-35 U/mL,
+    AFP 0-15 ng/mL, PSA 0-4.0 ng/mL, LDH 140-280 U/L
+
+PRO Instruments:
+  EORTC QLQ-C30 (0-100 scale, higher = better for functioning, higher = worse for symptoms):
+    Functional scales: Physical Function, Role Function, Emotional Function,
+      Cognitive Function, Social Function
+    Symptom scales: Fatigue, Nausea and Vomiting, Pain, Dyspnea, Insomnia,
+      Appetite Loss, Constipation, Diarrhea, Financial Difficulties
+    Global: Global Health Status
+  PRO-CTCAE (0-4 severity scale: 0=None, 1=Mild, 2=Moderate, 3=Severe, 4=Very Severe):
+    Common symptoms: Nausea, Fatigue, Pain, Neuropathy, Diarrhea, Constipation,
+      Mouth Sores, Rash, Shortness of Breath, Insomnia, Appetite Loss, Vomiting
+"""
+
+STRUCTURED_DATA_RULES = """
+Rules for structured data events:
+13. Encounter events: Include ICD-10 codes with decimal point and full description in parentheses. Include CPT codes with description. Format: DX: CODE (description). CPT: CODE (description).
+14. Lab result events: Include test name, numeric value, unit, and (normal/low/high) flag. Group by panel (CBC, CMP, Tumor Markers). Values should reflect the patient's clinical status.
+15. Hospitalization events: Include reason for admission, Principal DX: ICD-10 code (description), LOS: N days, Discharge: disposition (home, rehab, skilled nursing, deceased).
+16. PRO assessment events: Include instrument name and all subscale scores. EORTC QLQ-C30 scores are integers 0-100. PRO-CTCAE severity scores are integers 0-4. Scores should be consistent with patient's clinical status and trajectory.
+17. Include 3-6 encounter events, 2-4 lab panels, 0-2 hospitalizations, and 1-3 PRO assessments spread across the timeline. These should reflect the patient's disease trajectory.
+18. Lab values should change over time (e.g., counts drop during chemotherapy, tumor markers may rise with progression).
+19. PRO scores should correlate with clinical status (e.g., worse functioning during active treatment or disease progression).
+"""
+
+STRUCTURED_DATA_EXAMPLES = """
+<encounter> At age 62, outpatient oncology visit. DX: C34.90 (Malignant neoplasm of unspecified part of unspecified bronchus or lung), Z51.11 (Encounter for antineoplastic chemotherapy). CPT: 99214 (Established patient visit, moderate complexity), 96413 (Chemotherapy IV infusion, first hour).
+<lab_result> At age 62, CBC: WBC 8.2 k/uL (normal), Hgb 11.5 g/dL (low), Plt 245 k/uL (normal), ANC 5.1 k/uL (normal). CMP: Cr 0.9 mg/dL (normal), AST 28 U/L (normal), ALT 22 U/L (normal), Albumin 3.8 g/dL (normal).
+<hospitalization> At age 63, admitted for febrile neutropenia. Principal DX: D70.1 (Agranulocytosis secondary to cancer chemotherapy). LOS: 4 days. Discharge: home.
+<pro_assessment> At age 63, EORTC QLQ-C30: Physical Function 60, Role Function 40, Emotional Function 55, Cognitive Function 70, Social Function 50, Fatigue 65, Nausea 20, Pain 45, Global Health 50. PRO-CTCAE: Nausea severity 2, Fatigue severity 3, Pain severity 2, Neuropathy severity 1.
+"""
+
+
+def build_event_timeline_prompt(
+    structured_data_config=None,
+) -> str:
+    """Build the event timeline prompt, optionally including structured data event types.
+
+    Args:
+        structured_data_config: StructuredDataConfig instance, or None to use base prompt
+
+    Returns:
+        The complete prompt template string (with format placeholders)
+    """
+    if structured_data_config is None or not structured_data_config.enabled:
+        return EVENT_TIMELINE_PROMPT
+
+    # Build list of enabled structured event types
+    enabled_types = []
+    if structured_data_config.include_encounters:
+        enabled_types.append("encounter")
+    if structured_data_config.include_hospitalizations:
+        enabled_types.append("hospitalization")
+    if structured_data_config.include_labs:
+        enabled_types.append("lab_result")
+    if structured_data_config.include_pros:
+        enabled_types.append("pro_assessment")
+
+    if not enabled_types:
+        return EVENT_TIMELINE_PROMPT
+
+    # Filter structured data event types to only enabled ones
+    type_lines = STRUCTURED_DATA_EVENT_TYPES.strip().split("\n")
+    filtered_types = []
+    for line in type_lines:
+        for etype in enabled_types:
+            if f"<{etype}>" in line:
+                filtered_types.append(line)
+                break
+
+    # Filter examples to only enabled types
+    example_lines = STRUCTURED_DATA_EXAMPLES.strip().split("\n")
+    filtered_examples = []
+    for line in example_lines:
+        for etype in enabled_types:
+            if line.strip().startswith(f"<{etype}>"):
+                filtered_examples.append(line)
+                break
+
+    # Filter PRO reference to only enabled instruments
+    reference_text = STRUCTURED_DATA_REFERENCE
+    if structured_data_config.include_pros:
+        pro_instruments = structured_data_config.pro_instruments
+        # The reference already includes both EORTC and PRO-CTCAE, which is fine
+        # If we add more instruments later, we'd filter here
+
+    # Build the extended prompt by inserting structured data sections
+    structured_types_section = "\n".join(filtered_types)
+    structured_examples_section = "\n".join(filtered_examples)
+
+    # Insert into the base prompt
+    prompt = EVENT_TIMELINE_PROMPT
+
+    # Add structured event types to the types list
+    prompt = prompt.replace(
+        "- <ngs_report> Next-generation sequencing report (diagnosis, specimen site, detailed genomic findings)",
+        "- <ngs_report> Next-generation sequencing report (diagnosis, specimen site, detailed genomic findings)\n"
+        + structured_types_section,
+    )
+
+    # Add structured data rules
+    prompt = prompt.replace(
+        "12. To ensure diversity, vary patient names and genders",
+        "12. To ensure diversity, vary patient names and genders\n"
+        + STRUCTURED_DATA_RULES.strip(),
+    )
+
+    # Add reference schemas before the example section
+    prompt = prompt.replace(
+        "Example format (hypothetical, just to illustrate formatting):",
+        reference_text.strip() + "\n\nExample format (hypothetical, just to illustrate formatting):",
+    )
+
+    # Add structured data examples
+    prompt = prompt.replace(
+        "Generate the event timeline now:",
+        structured_examples_section + "\n\nGenerate the event timeline now:",
+    )
+
+    return prompt
+
+
 def format_confounder_list(confounders: list) -> str:
     """Format confounders into a readable list for prompts."""
     lines = []
