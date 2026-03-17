@@ -135,20 +135,14 @@ class FrozenLLMPoolerExtractor(nn.Module):
             self._hidden_size = _get_hidden_size(self._hf_config)
 
             logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size})")
-            # Use device_map to load directly to target device, avoiding meta
-            # tensors that arise from tied weights (e.g. lm_head tied to
-            # embed_tokens in Qwen3.5).  After loading, remove accelerate
-            # dispatch hooks so the model behaves as a plain nn.Module.
+            # Load to CPU first, then move to target device.  Avoids meta
+            # tensors that device_map + remove_hook_from_module can leave
+            # for models with tied weights (e.g. lm_head tied to embed_tokens).
             self._model = AutoModelForCausalLM.from_pretrained(
                 model_name, config=self._hf_config, trust_remote_code=True,
-                dtype=torch.float16 if freeze_llm else None,
-                device_map={"": self._device},
+                torch_dtype=torch.float16 if freeze_llm else None,
             )
-            try:
-                from accelerate.hooks import remove_hook_from_module
-                remove_hook_from_module(self._model, recurse=True)
-            except ImportError:
-                pass  # accelerate not installed; device_map likely wasn't used
+            self._model = self._model.to(self._device)
 
             # Load pretrained tokenizer (right padding for pooling over all tokens)
             self._tokenizer = AutoTokenizer.from_pretrained(
@@ -303,24 +297,26 @@ class FrozenLLMPoolerExtractor(nn.Module):
             with torch.no_grad():
                 # Use autocast for memory-efficient frozen LLM forward pass
                 with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self._device.type == "cuda"):
-                    outputs = self._model(
+                    # Use base transformer (model.model) to skip lm_head logits
+                    # computation — saves memory and avoids tied-weight issues.
+                    outputs = self._model.model(
                         input_ids=input_ids,
                         attention_mask=attention_mask,
                         output_hidden_states=True,
                         return_dict=True,
                     )
-                    # Extract all token hidden states from final layer
-                    hidden_states = outputs.hidden_states[-1]  # (batch, seq_len, hidden_size)
+                    hidden_states = outputs.last_hidden_state  # (batch, seq_len, hidden_size)
             # Detach from LLM graph and cast to float32
             hidden_states = hidden_states.detach().float()
         else:
-            outputs = self._model(
+            # Use base transformer (model.model) to skip lm_head logits
+            outputs = self._model.model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 output_hidden_states=True,
                 return_dict=True,
             )
-            hidden_states = outputs.hidden_states[-1]
+            hidden_states = outputs.last_hidden_state
             # Cast BFloat16 -> Float32 if needed (Qwen3 uses BFloat16)
             if hidden_states.dtype != torch.float32:
                 hidden_states = hidden_states.float()
