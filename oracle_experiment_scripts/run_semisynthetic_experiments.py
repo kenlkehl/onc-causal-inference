@@ -81,9 +81,8 @@ from run_oracle_experiments import (
     _common_model_kwargs,
     _create_datasets_and_loaders,
     precompute_single_cache,
+    load_single_gpu_store,
 )
-
-from oci.models.hidden_state_cache import HiddenStateCache
 
 logging.basicConfig(
     level=logging.INFO,
@@ -532,32 +531,22 @@ def run_experiments(
     gpu_store = None
 
     if cache or gpu_cache:
-        cache_dir = str(parquet_file.parent / '.oci_cache')
-        hs_cache = HiddenStateCache(
-            cache_dir=cache_dir,
+        cache_info = dict(
+            parquet_file=parquet_file,
             model_name=flp_model_name,
             max_length=flp_max_length,
-            dataset_path=str(parquet_file),
+            batch_size=batch_size,
             downprojection_dim=flp_downprojection_dim,
         )
-        if not hs_cache.is_cached():
-            logger.info("Pre-computing hidden state cache...")
-            cache_info = dict(
-                parquet_file=parquet_file,
-                model_name=flp_model_name,
-                max_length=flp_max_length,
-                batch_size=batch_size,
-                downprojection_dim=flp_downprojection_dim,
-            )
-            hs_cache = precompute_single_cache(cache_info, devices)
-        else:
-            hs_cache.load()
-            logger.info(f"Loaded existing hidden state cache: {hs_cache.num_samples} samples")
+        hs_cache = precompute_single_cache(cache_info, devices)
 
         if gpu_cache:
-            from oci.models.gpu_hidden_state_store import GPUHiddenStateStore
-            gpu_store = GPUHiddenStateStore.from_cache(hs_cache, device=device)
-            logger.info(f"GPU cache loaded: {gpu_store.num_samples} samples on {device}")
+            gpu_store = load_single_gpu_store(hs_cache, cache_info, device)
+            if gpu_store is not None:
+                logger.info(f"GPU cache loaded: {gpu_store.num_samples} samples on {device}")
+            else:
+                logger.info("GPU cache failed, falling back to disk cache")
+                hidden_state_cache = hs_cache
         else:
             hidden_state_cache = hs_cache
 
