@@ -1,5 +1,5 @@
 # oci/config.py
-"""Configuration classes for CDT experiments."""
+"""Configuration classes for OCI experiments."""
 
 from dataclasses import dataclass, field, asdict
 from typing import Optional, List, Dict, Any
@@ -177,6 +177,25 @@ class TfidfForestConfig:
     inference: bool = True          # Enable confidence intervals
 
 
+# =============================================================================
+# CONFOUNDERS-ONLY CAUSAL FOREST CONFIGURATION
+# =============================================================================
+
+@dataclass
+class ConfounderForestConfig:
+    """Configuration for Confounders-Only Causal Forest (model_type="confounder_forest").
+
+    A non-neural pathway that uses only LLM-extracted confounder features with
+    CausalForestDML. No text processing, no GPU, no training epochs.
+    """
+    n_estimators: int = 200
+    max_depth: Optional[int] = None
+    min_samples_leaf: int = 10
+    max_features: str = "sqrt"
+    honest: bool = True
+    inference: bool = True
+
+
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
     Normalize feature extractor type to "frozen_llm_pooler".
@@ -242,17 +261,6 @@ class ModelArchitectureConfig:
     numeric_magnitude_bins: int = 8  # Number of log-scale magnitude bins
     numeric_type_categories: int = 10  # Number of numeric type categories
 
-    # Intra-batch contrastive learning
-    # Clusters samples by representation similarity, then applies SupCon loss within clusters
-    # to improve confounder detection among similar patients
-    contrastive_enabled: bool = False  # Master switch for contrastive loss
-    contrastive_num_clusters: int = 4  # Number of K-means clusters (K)
-    contrastive_temperature: float = 0.1  # SupCon temperature (lower = sharper)
-    contrastive_label_mode: str = "joint"  # "treatment", "outcome", or "joint" (T*2+Y)
-    contrastive_projection_dim: int = 64  # Projection head output dimension
-    contrastive_min_cluster_size: int = 2  # Minimum samples per cluster
-    contrastive_clustering_method: str = "kmeans"  # "kmeans" or "random"
-
     # Causal head dimensions (applies to all causal heads: DragonNet, RLearner, etc.)
     causal_head_representation_dim: int = 128
     causal_head_hidden_outcome_dim: int = 64
@@ -263,6 +271,9 @@ class ModelArchitectureConfig:
 
     # TF-IDF + Causal Forest config (used when model_type="tfidf_forest")
     tfidf_forest: TfidfForestConfig = field(default_factory=TfidfForestConfig)
+
+    # Confounders-Only Causal Forest config (used when model_type="confounder_forest")
+    confounder_forest: ConfounderForestConfig = field(default_factory=ConfounderForestConfig)
 
 
 @dataclass
@@ -283,8 +294,6 @@ class TrainingConfig:
     # Advanced training options for improving tau learning
     stop_grad_propensity: bool = False  # Detach features before propensity loss (prevents propensity from dominating representation)
     attention_entropy_weight: float = 0.0  # Weight for attention entropy regularization (encourages focused attention)
-    # Intra-batch contrastive loss weight (only used when contrastive_enabled=True)
-    contrastive_weight: float = 0.1  # Weight for contrastive loss term
 
 
 @dataclass
@@ -333,9 +342,6 @@ class PlasmodeConfig:
     ite_heterogeneity_scale: float = 1.0
     deep_nonlinear_hidden_dims: List[int] = field(default_factory=lambda: [64, 32])
     deep_nonlinear_dropout: float = 0.0
-    uplift_hidden_dims: List[int] = field(default_factory=list)
-    uplift_activation: str = "relu"
-    uplift_dropout: float = 0.0
 
 
 @dataclass
@@ -352,7 +358,6 @@ class AppliedInferenceConfig:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     propensity_trimming: PropensityTrimmingConfig = field(default_factory=PropensityTrimmingConfig)
     outcome_model: OutcomeModelConfig = field(default_factory=OutcomeModelConfig)
-    use_pretrained_weights: bool = False  # Not used for CNN, kept for API compatibility
     skip: bool = False  # Skip applied inference, go straight to plasmode
 
     # PSM analysis configuration (uses DragonNet's propensity scores)
@@ -383,18 +388,14 @@ class PlasmodeExperimentConfig:
 
 @dataclass
 class ExperimentConfig:
-    """Main configuration for CDT experiments."""
+    """Main configuration for OCI experiments."""
     output_dir: str = "./oci_results"
     seed: int = 42
     device: Optional[str] = None
     num_workers: int = 1
     gpu_ids: Optional[List[int]] = None
 
-    # Filter interpretation settings
-    save_filter_interpretations: bool = False  # Save post-hoc filter interpretations after training
-    filter_interpretation_top_k: int = 10  # Number of top n-grams per filter to save
-
-    # Confounder interpretation settings (for confounder extractor)
+    # Confounder interpretation settings
     save_confounder_interpretations: bool = False  # Save confounder attention interpretations after training
     confounder_interpretation_top_k: int = 5  # Number of top-attended sentences per confounder to save
 
@@ -428,6 +429,8 @@ class ExperimentConfig:
                 arch_data['causal_forest'] = CausalForestConfig(**arch_data['causal_forest'])
             if 'tfidf_forest' in arch_data and isinstance(arch_data['tfidf_forest'], dict):
                 arch_data['tfidf_forest'] = TfidfForestConfig(**arch_data['tfidf_forest'])
+            if 'confounder_forest' in arch_data and isinstance(arch_data['confounder_forest'], dict):
+                arch_data['confounder_forest'] = ConfounderForestConfig(**arch_data['confounder_forest'])
             return ModelArchitectureConfig(**arch_data)
 
         def parse_explicit_confounders_config(conf_data: Dict[str, Any]) -> ExplicitConfounderExtractionConfig:
@@ -475,8 +478,6 @@ class ExperimentConfig:
             device=data.get('device'),
             num_workers=data.get('num_workers', 1),
             gpu_ids=data.get('gpu_ids'),
-            save_filter_interpretations=data.get('save_filter_interpretations', False),
-            filter_interpretation_top_k=data.get('filter_interpretation_top_k', 10),
             save_confounder_interpretations=data.get('save_confounder_interpretations', False),
             confounder_interpretation_top_k=data.get('confounder_interpretation_top_k', 5),
             applied_inference=applied,

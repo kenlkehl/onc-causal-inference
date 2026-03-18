@@ -7,7 +7,6 @@ from .frozen_llm_pooler_extractor import FrozenLLMPoolerExtractor
 from .gated_attention_pooling import GatedAttentionPooling
 from .numeric_features import NumericFeatureVector, extract_numeric_patterns
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer, get_raw_confounder_features
-from .intra_batch_contrastive import IntraBatchContrastiveLoss
 from .hidden_state_cache import HiddenStateCache
 from .gpu_hidden_state_store import GPUHiddenStateStore
 from .causal_text import CausalText
@@ -21,7 +20,6 @@ __all__ = [
     'RLearnerNet',
     'FrozenLLMPoolerExtractor',
     'GatedAttentionPooling',
-    'IntraBatchContrastiveLoss',
     'CausalText',
     'PropensityOnlyModel',
     'PropensityNet',

@@ -38,7 +38,6 @@ def run_plasmode_experiments(
     output_path: Path,
     device: torch.device,
     cache=None,  # Kept for API compatibility
-    pretrained_weights_path: Optional[Path] = None,
     num_repeats: int = 3,
     num_workers: int = 1,
     gpu_ids: Optional[List[int]] = None
@@ -500,14 +499,6 @@ def _train_cnn_model(
         ),
         flp_skip_llm=(hidden_state_cache is not None),
         flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
-        # Contrastive learning args
-        contrastive_enabled=getattr(arch_config, 'contrastive_enabled', False),
-        contrastive_num_clusters=getattr(arch_config, 'contrastive_num_clusters', 4),
-        contrastive_temperature=getattr(arch_config, 'contrastive_temperature', 0.1),
-        contrastive_label_mode=getattr(arch_config, 'contrastive_label_mode', 'joint'),
-        contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
-        contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
-        contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
@@ -604,7 +595,6 @@ def _train_cnn_model(
     gamma_dr = getattr(train_config, 'gamma_dr', 1.0)
     stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(train_config, 'attention_entropy_weight', 0.0)
-    contrastive_weight = getattr(train_config, 'contrastive_weight', 0.1)
 
     for epoch in range(train_config.epochs):
         model.train()
@@ -625,7 +615,6 @@ def _train_cnn_model(
                 gamma_dr=gamma_dr,
                 stop_grad_propensity=stop_grad_propensity,
                 attention_entropy_weight=attention_entropy_weight,
-                contrastive_weight=contrastive_weight
             )
             losses['loss'].backward()
             optimizer.step()
@@ -651,7 +640,6 @@ def _train_cnn_model(
                     gamma_dr=gamma_dr,
                     stop_grad_propensity=stop_grad_propensity,
                     attention_entropy_weight=attention_entropy_weight,
-                    contrastive_weight=contrastive_weight
                 )
                 val_loss += losses['loss'].item()
 
@@ -857,14 +845,6 @@ def _train_causal_forest_model(
         cf_inference=cf_inference,
         cf_use_rlearner_representation=cf_use_rlearner_representation,
         cf_gamma_rlearner=cf_gamma_rlearner,
-        # Contrastive learning args
-        contrastive_enabled=getattr(arch_config, 'contrastive_enabled', False),
-        contrastive_num_clusters=getattr(arch_config, 'contrastive_num_clusters', 4),
-        contrastive_temperature=getattr(arch_config, 'contrastive_temperature', 0.1),
-        contrastive_label_mode=getattr(arch_config, 'contrastive_label_mode', 'joint'),
-        contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
-        contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
-        contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
@@ -952,7 +932,6 @@ def _train_causal_forest_model(
     stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
     label_smoothing = getattr(train_config, 'label_smoothing', 0.0)
     gamma_rlearner = cf_gamma_rlearner if model.use_rlearner_representation else 0.0
-    contrastive_weight = getattr(train_config, 'contrastive_weight', 0.1)
 
     # Stage 1: Train representation
     for epoch in range(train_config.epochs):
@@ -973,7 +952,6 @@ def _train_causal_forest_model(
                 gamma_rlearner=gamma_rlearner,
                 label_smoothing=label_smoothing,
                 stop_grad_propensity=stop_grad_propensity,
-                contrastive_weight=contrastive_weight
             )
             losses['loss'].backward()
             optimizer.step()
@@ -998,7 +976,6 @@ def _train_causal_forest_model(
                     alpha_propensity=alpha_propensity,
                     gamma_rlearner=gamma_rlearner,
                     stop_grad_propensity=stop_grad_propensity,
-                    contrastive_weight=contrastive_weight
                 )
                 val_loss += losses['loss'].item()
 

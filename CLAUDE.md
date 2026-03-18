@@ -21,7 +21,8 @@ oci/
 ├── inference/
 │   ├── applied.py             # Applied inference (CV or fixed split)
 │   ├── applied_forest.py      # Causal forest inference pipeline
-│   └── applied_tfidf_forest.py  # TF-IDF forest baseline pipeline
+│   ├── applied_tfidf_forest.py  # TF-IDF forest baseline pipeline
+│   └── applied_confounder_forest.py  # Confounders-only forest pipeline
 ├── models/
 │   ├── causal_text.py                # Main model (extractor + causal head)
 │   ├── causal_text_forest.py         # Two-stage neural + causal forest model
@@ -35,7 +36,6 @@ oci/
 │   ├── rlearner.py                   # R-Learner causal head
 │   ├── numeric_features.py           # Numeric value featurization (magnitude + type)
 │   ├── explicit_confounder_featurizer.py  # MLP featurization of extracted confounders
-│   ├── intra_batch_contrastive.py    # Intra-batch contrastive learning
 │   ├── propensity_model.py           # Propensity-only model for trimming
 │   └── outcome_model.py              # Outcome-only model for assessment
 ├── training/
@@ -87,6 +87,7 @@ The frozen LLM processes full documents (no chunking) up to the configured `flp_
 | `rlearner` | Direct tau(X) optimization, detached nuisance functions | tau directly predicts ITE |
 | `causal_forest` | Two-stage: neural features + econml CausalForestDML | tau with confidence intervals |
 | `tfidf_forest` | TF-IDF features + econml CausalForestDML (no neural network) | tau with confidence intervals |
+| `confounder_forest` | Explicit confounders only + econml CausalForestDML (no text features) | tau with confidence intervals |
 
 **R-Learner advantage**: Nuisance functions (e, m) are detached in R-loss, providing stronger gradient signal for treatment effect modifiers.
 
@@ -420,57 +421,6 @@ When `model_type="tfidf_forest"`, OCI uses a non-neural baseline: TF-IDF feature
 | `honest` | Honest estimation | `True` |
 | `inference` | Enable confidence intervals | `True` |
 
-## Intra-Batch Contrastive Learning
-
-Supervised contrastive loss (SupCon, Khosla et al. 2020) within similarity clusters improves confounder detection by encouraging the model to learn representations that discriminate treatment/outcome status among otherwise similar patients.
-
-### How It Works
-
-```
-Text -> Extractor -> Z (features) -> [K-means on detached Z] -> Within-cluster SupCon Loss
-                                   -> Causal Head -> Standard Losses
-
-Total Loss = Standard Loss + contrastive_weight x SupCon Loss
-```
-
-1. **Feature projection**: 2-layer MLP projects features to a contrastive space
-2. **Clustering**: K-means on detached features groups similar patients
-3. **Label construction**: Treatment x outcome creates 4-class labels (joint mode)
-4. **SupCon within clusters**: Contrastive loss computed independently per cluster, averaged
-
-### Why Cluster-Then-Contrast?
-
-Global SupCon would push ALL treated patients' representations together, destroying heterogeneity. Intra-cluster contrastive learning targets exactly the subtle confounders: "among clinically similar patients, the model should still distinguish treatment/outcome status."
-
-### Config Parameters
-
-**Architecture config** (`ModelArchitectureConfig`):
-
-| Param | Description | Default |
-|-------|-------------|---------|
-| `contrastive_enabled` | Enable contrastive learning | `False` |
-| `contrastive_num_clusters` | Number of K-means clusters (K) | `4` |
-| `contrastive_temperature` | SupCon temperature (lower = sharper) | `0.1` |
-| `contrastive_label_mode` | Label construction: "treatment", "outcome", or "joint" | `"joint"` |
-| `contrastive_projection_dim` | Projection head output dimension | `64` |
-| `contrastive_min_cluster_size` | Minimum samples per cluster | `2` |
-| `contrastive_clustering_method` | "kmeans" or "random" | `"kmeans"` |
-
-**Training config** (`TrainingConfig`):
-
-| Param | Description | Default |
-|-------|-------------|---------|
-| `contrastive_weight` | Weight for contrastive loss in total loss | `0.1` |
-
-In dual extractor mode (R-Learner), contrastive loss targets the **nuisance extractor** features. The effect extractor is not affected.
-
-### Edge Cases
-
-Graceful degradation (contrastive loss = 0, standard losses carry training):
-- Batch too small (< 4 samples)
-- All-same-label clusters (no negative pairs)
-- No valid clusters in batch
-
 ## Training Options for tau Learning
 
 | Option | Effect |
@@ -480,8 +430,6 @@ Graceful degradation (contrastive loss = 0, standard losses carry training):
 | `gamma_rlearner>1.0` | Stronger treatment effect signal |
 | `numeric_features_enabled=True` | Adds magnitude-aware numeric featurization from clinical text |
 | `rlearner_dual_extractors=True` | Uses separate extractors for nuisance (e,m) and effect (tau) |
-| `contrastive_enabled=True` | Enables intra-batch contrastive learning for confounder detection |
-| `contrastive_weight>0` | Weight for contrastive loss term (default 0.1) |
 
 ## Propensity Trimming
 
@@ -639,10 +587,9 @@ python -m synthetic_data.cli --config my_config.json
 | Gated attention | `oci/models/gated_attention_pooling.py` |
 | Hidden state cache | `oci/models/hidden_state_cache.py`, `oci/models/gpu_hidden_state_store.py` |
 | Numeric features | `oci/models/numeric_features.py` |
-| Contrastive learning | `oci/models/intra_batch_contrastive.py` |
 | Explicit confounders | `oci/extraction/explicit_confounders.py`, `oci/extraction/cache.py`, `oci/models/explicit_confounder_featurizer.py` |
 | Propensity/Outcome models | `oci/models/propensity_model.py`, `oci/models/outcome_model.py` |
-| Training | `oci/inference/applied.py`, `oci/inference/applied_forest.py`, `oci/inference/applied_tfidf_forest.py` |
+| Training | `oci/inference/applied.py`, `oci/inference/applied_forest.py`, `oci/inference/applied_tfidf_forest.py`, `oci/inference/applied_confounder_forest.py` |
 | Plasmode | `oci/training/plasmode.py` |
 | Config | `oci/config.py` |
 | PSM | `oci/analysis/psm_analysis.py`, `oci/analysis/statistical_analysis.py`, `oci/matching/propensity_matcher.py` |

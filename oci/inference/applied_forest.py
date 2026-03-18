@@ -38,6 +38,7 @@ def run_applied_inference_forest(
     num_workers: int = 1,
     verbose: bool = True,
     gpu_ids: Optional[List[int]] = None,
+    explicit_confounder_columns: Optional[List[str]] = None,
 ) -> None:
     """
     Run applied causal inference using two-stage neural + causal forest approach.
@@ -67,7 +68,7 @@ def run_applied_inference_forest(
     gpu_store = None
     arch_config = config.architecture
     feature_extractor_type = normalize_feature_extractor_type(
-        getattr(arch_config, 'feature_extractor_type', 'gru_pool')
+        getattr(arch_config, 'feature_extractor_type', 'frozen_llm_pooler')
     )
     if feature_extractor_type == "frozen_llm_pooler":
         flp_freeze = getattr(arch_config, 'flp_freeze_llm', True)
@@ -259,7 +260,7 @@ def _process_fold_forest(
 
     # Get feature extractor type
     feature_extractor_type = normalize_feature_extractor_type(
-        getattr(arch_config, 'feature_extractor_type', 'gru_pool')
+        getattr(arch_config, 'feature_extractor_type', 'frozen_llm_pooler')
     )
 
     # Create model (with skip_llm if cache available)
@@ -604,7 +605,7 @@ def _create_causal_forest_model(
 ) -> CausalTextForest:
     """Create CausalTextForest model from config."""
     feature_extractor_type = normalize_feature_extractor_type(
-        getattr(arch_config, 'feature_extractor_type', 'gru_pool')
+        getattr(arch_config, 'feature_extractor_type', 'frozen_llm_pooler')
     )
 
     # Get causal forest config
@@ -663,14 +664,6 @@ def _create_causal_forest_model(
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
         numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
         numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
-        # Contrastive learning args
-        contrastive_enabled=getattr(arch_config, 'contrastive_enabled', False),
-        contrastive_num_clusters=getattr(arch_config, 'contrastive_num_clusters', 4),
-        contrastive_temperature=getattr(arch_config, 'contrastive_temperature', 0.1),
-        contrastive_label_mode=getattr(arch_config, 'contrastive_label_mode', 'joint'),
-        contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
-        contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
-        contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
         # Device
         device=str(device),
         # Outcome type
@@ -804,7 +797,6 @@ def _train_representation(
 
     # R-learner representation training: get gamma from model config
     gamma_rlearner = model.cf_gamma_rlearner if model.use_rlearner_representation else 0.0
-    contrastive_weight = getattr(train_config, 'contrastive_weight', 0.1)
 
     for epoch in range(train_config.epochs):
         # Train
@@ -828,7 +820,6 @@ def _train_representation(
                 gamma_rlearner=gamma_rlearner,
                 label_smoothing=label_smoothing,
                 stop_grad_propensity=stop_grad_propensity,
-                contrastive_weight=contrastive_weight
             )
 
             losses['loss'].backward()
@@ -874,7 +865,6 @@ def _train_representation(
                     alpha_propensity=alpha_propensity,
                     gamma_rlearner=gamma_rlearner,
                     stop_grad_propensity=stop_grad_propensity,
-                    contrastive_weight=contrastive_weight
                 )
 
                 val_loss += losses['loss'].item()
@@ -940,8 +930,8 @@ def _train_representation(
                 f"Epoch {epoch+1}/{train_config.epochs} | "
                 f"Train Loss: {train_loss:.4f}{r_loss_str} | "
                 f"Val Loss: {val_loss:.4f} | "
-                f"Val AUROC Prop: {val_auroc_prop:.4f if val_auroc_prop else 'N/A'} | "
-                f"Val AUROC Outcome: {val_auroc_outcome:.4f if val_auroc_outcome else 'N/A'}"
+                f"Val AUROC Prop: {f'{val_auroc_prop:.4f}' if val_auroc_prop else 'N/A'} | "
+                f"Val AUROC Outcome: {f'{val_outcome_metric:.4f}' if val_outcome_metric else 'N/A'}"
             )
 
         # Save best

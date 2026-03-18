@@ -1,6 +1,6 @@
 # oci/experiments/runner.py
 
-"""Main experiment runner that orchestrates CDT workflows - CNN-based approach."""
+"""Main experiment runner that orchestrates OCI workflows."""
 
 import logging
 from pathlib import Path
@@ -127,8 +127,6 @@ class ExperimentRunner:
             device=self.device,
             gpu_ids=self.config.gpu_ids,
             num_workers=self.config.num_workers,
-            save_filter_interpretations=self.config.save_filter_interpretations,
-            filter_interpretation_top_k=self.config.filter_interpretation_top_k,
             save_confounder_interpretations=self.config.save_confounder_interpretations,
             confounder_interpretation_top_k=self.config.confounder_interpretation_top_k
         )

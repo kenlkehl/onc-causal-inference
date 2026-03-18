@@ -1,5 +1,5 @@
 # oci/data/dataset.py
-"""Dataset classes for CDT - CNN-based causal inference."""
+"""Dataset classes for OCI causal inference."""
 
 import logging
 from typing import List, Dict, Any, Optional

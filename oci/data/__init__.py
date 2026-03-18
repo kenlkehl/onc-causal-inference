@@ -1,6 +1,6 @@
 # oci/data/__init__.py
 
-"""Data handling modules for CDT - CNN-based approach."""
+"""Data handling modules for OCI."""
 
 from .dataset import (
     ClinicalTextDataset,

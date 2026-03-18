@@ -152,11 +152,8 @@ def run_applied_inference(
     output_path: Path,
     device: torch.device,
     cache=None,  # Kept for API compatibility, not used
-    pretrained_weights_path: Optional[Path] = None,
     gpu_ids: Optional[List[int]] = None,
     num_workers: int = 1,
-    save_filter_interpretations: bool = False,
-    filter_interpretation_top_k: int = 10,
     save_confounder_interpretations: bool = False,
     confounder_interpretation_top_k: int = 5
 ) -> None:
@@ -169,11 +166,8 @@ def run_applied_inference(
         output_path: Path to save predictions
         device: PyTorch device
         cache: Unused, kept for API compatibility
-        pretrained_weights_path: Unused, kept for API compatibility
         gpu_ids: List of GPU IDs for parallel processing
         num_workers: Number of parallel workers
-        save_filter_interpretations: Whether to save filter interpretation analysis
-        filter_interpretation_top_k: Number of top n-grams per filter to save
         save_confounder_interpretations: Whether to save confounder attention analysis
         confounder_interpretation_top_k: Number of top-attended sentences per confounder
     """
@@ -196,6 +190,20 @@ def run_applied_inference(
             num_workers=num_workers,
             explicit_confounder_columns=explicit_confounder_columns,
             gpu_ids=gpu_ids,
+        )
+        return
+
+    # Route to Confounders-Only Causal Forest if model_type is "confounder_forest"
+    if hasattr(config, 'architecture') and config.architecture.model_type == "confounder_forest":
+        logger.info("Routing to Confounders-Only Causal Forest pipeline")
+        from .applied_confounder_forest import run_applied_inference_confounder_forest
+        run_applied_inference_confounder_forest(
+            dataset=dataset,
+            config=config,
+            output_path=output_path,
+            device=device,
+            num_workers=num_workers,
+            explicit_confounder_columns=explicit_confounder_columns
         )
         return
 
@@ -387,7 +395,6 @@ def run_applied_inference(
     if config.cv_folds > 1:
         _run_cv_inference(
             dataset, config, output_path, device, gpu_ids, num_workers,
-            save_filter_interpretations, filter_interpretation_top_k,
             save_confounder_interpretations, confounder_interpretation_top_k,
             explicit_confounder_columns=explicit_confounder_columns,
             hidden_state_cache=hidden_state_cache,
@@ -396,7 +403,6 @@ def run_applied_inference(
     else:
         _run_fixed_split_inference(
             dataset, config, output_path, device,
-            save_filter_interpretations, filter_interpretation_top_k,
             save_confounder_interpretations, confounder_interpretation_top_k,
             explicit_confounder_columns=explicit_confounder_columns,
             hidden_state_cache=hidden_state_cache,
@@ -417,8 +423,6 @@ def _run_cv_inference(
     device: torch.device,
     gpu_ids: Optional[List[int]] = None,
     num_workers: int = 1,
-    save_filter_interpretations: bool = False,
-    filter_interpretation_top_k: int = 10,
     save_confounder_interpretations: bool = False,
     confounder_interpretation_top_k: int = 5,
     explicit_confounder_columns: Optional[List[str]] = None,
@@ -481,7 +485,7 @@ def _run_cv_inference(
 
     # Save filter interpretations for the last fold if requested
     # (In CV mode, we train one more model on the last fold's training data for interpretation)
-    if save_filter_interpretations or save_confounder_interpretations:
+    if save_confounder_interpretations:
         logger.info("Generating interpretations from final fold model...")
         last_fold = k - 1
         train_idx, _ = splits[last_fold]
@@ -589,8 +593,6 @@ def _run_fixed_split_inference(
     config: AppliedInferenceConfig,
     output_path: Path,
     device: torch.device,
-    save_filter_interpretations: bool = False,
-    filter_interpretation_top_k: int = 10,
     save_confounder_interpretations: bool = False,
     confounder_interpretation_top_k: int = 5,
     explicit_confounder_columns: Optional[List[str]] = None,
@@ -709,13 +711,6 @@ def _train_single_model(
             else 0
         ),
         # Contrastive learning args
-        contrastive_enabled=getattr(arch_config, 'contrastive_enabled', False),
-        contrastive_num_clusters=getattr(arch_config, 'contrastive_num_clusters', 4),
-        contrastive_temperature=getattr(arch_config, 'contrastive_temperature', 0.1),
-        contrastive_label_mode=getattr(arch_config, 'contrastive_label_mode', 'joint'),
-        contrastive_projection_dim=getattr(arch_config, 'contrastive_projection_dim', 64),
-        contrastive_min_cluster_size=getattr(arch_config, 'contrastive_min_cluster_size', 2),
-        contrastive_clustering_method=getattr(arch_config, 'contrastive_clustering_method', 'kmeans'),
         # Numeric feature args
         numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
         numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
@@ -1008,7 +1003,6 @@ def _train_epoch(
     gamma_dr = getattr(config, 'gamma_dr', 1.0)
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
-    contrastive_weight = getattr(config, 'contrastive_weight', 0.1)
 
     for batch in tqdm(loader, desc="Training", leave=False):
         # Move tensors to device
@@ -1029,7 +1023,6 @@ def _train_epoch(
             label_smoothing=label_smoothing,
             stop_grad_propensity=stop_grad_propensity,
             attention_entropy_weight=attention_entropy_weight,
-            contrastive_weight=contrastive_weight
         )
 
         losses['loss'].backward()
@@ -1076,7 +1069,6 @@ def _eval_epoch(
     gamma_dr = getattr(config, 'gamma_dr', 1.0)
     stop_grad_propensity = getattr(config, 'stop_grad_propensity', False)
     attention_entropy_weight = getattr(config, 'attention_entropy_weight', 0.0)
-    contrastive_weight = getattr(config, 'contrastive_weight', 0.1)
 
     with torch.no_grad():
         for batch in tqdm(loader, desc="Validation", leave=False):
@@ -1093,7 +1085,6 @@ def _eval_epoch(
                 gamma_dr=gamma_dr,
                 stop_grad_propensity=stop_grad_propensity,
                 attention_entropy_weight=attention_entropy_weight,
-                contrastive_weight=contrastive_weight
             )
 
             epoch_loss += losses['loss'].item()

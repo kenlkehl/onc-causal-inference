@@ -9,7 +9,7 @@ This script tests the complete pipeline:
 4. GRU-Pool feature extractor with Causal Forest
 
 Uses a 100-patient sample from synthetic_data/example_synthetic_datasets/(one_confounder/ten_confounders) dataset
-and the google/medgemma-1.5-4b-it model for extraction.
+and the Qwen/Qwen3.5-0.8B-Base for extraction.
 
 Usage:
     # Test python_api mode (default)
@@ -167,7 +167,7 @@ def run_extraction(
     specs: List[ExplicitConfounderSpec],
     mode: str = "python_api",
     server_url: str = "http://localhost:8000/v1",
-    model_name: str = "google/medgemma-1.5-4b-it",
+    model_name: str = "Qwen/Qwen3.5-0.8B-Base",
     tensor_parallel_size: int = 1,
     cache_dir: Optional[str] = None,
     skip_cache: bool = False

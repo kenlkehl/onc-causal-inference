@@ -10,7 +10,6 @@ import numpy as np
 
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
 from .explicit_confounder_featurizer import get_raw_confounder_features, ExplicitConfounderFeaturizer
-from .intra_batch_contrastive import IntraBatchContrastiveLoss
 from .extractor_factory import create_feature_extractor
 from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
 from ..data.cached_hidden_state_dataset import prepare_cached_batch
@@ -94,14 +93,6 @@ class CausalTextForest(nn.Module):
         explicit_confounder_output_dim: int = 64,
         explicit_confounder_hidden_dim: int = 128,
         explicit_confounder_dropout: float = 0.1,
-        # Intra-batch contrastive learning args
-        contrastive_enabled: bool = False,
-        contrastive_num_clusters: int = 4,
-        contrastive_temperature: float = 0.1,
-        contrastive_label_mode: str = "joint",
-        contrastive_projection_dim: int = 64,
-        contrastive_min_cluster_size: int = 2,
-        contrastive_clustering_method: str = "kmeans",
         # Device
         device: str = "cuda:0",
         # Outcome type
@@ -154,13 +145,6 @@ class CausalTextForest(nn.Module):
             'explicit_confounder_output_dim': explicit_confounder_output_dim,
             'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
             'explicit_confounder_dropout': explicit_confounder_dropout,
-            'contrastive_enabled': contrastive_enabled,
-            'contrastive_num_clusters': contrastive_num_clusters,
-            'contrastive_temperature': contrastive_temperature,
-            'contrastive_label_mode': contrastive_label_mode,
-            'contrastive_projection_dim': contrastive_projection_dim,
-            'contrastive_min_cluster_size': contrastive_min_cluster_size,
-            'contrastive_clustering_method': contrastive_clustering_method,
             'outcome_type': outcome_type,
         }
 
@@ -330,23 +314,6 @@ class CausalTextForest(nn.Module):
             random_state=cf_random_state
         )
 
-        # Intra-batch contrastive learning module
-        self.contrastive_enabled = contrastive_enabled
-        self.contrastive_loss_module = None
-
-        if contrastive_enabled:
-            self.contrastive_loss_module = IntraBatchContrastiveLoss(
-                feature_dim=self.feature_extractor.output_dim,
-                num_clusters=contrastive_num_clusters,
-                temperature=contrastive_temperature,
-                label_mode=contrastive_label_mode,
-                projection_dim=contrastive_projection_dim,
-                min_cluster_size=contrastive_min_cluster_size,
-                clustering_method=contrastive_clustering_method,
-            )
-            logger.info(f"Intra-batch contrastive loss enabled: K={contrastive_num_clusters}, "
-                       f"mode={contrastive_label_mode}, temp={contrastive_temperature}")
-
         # Move to device
         self.to(self._device)
 
@@ -422,8 +389,7 @@ class CausalTextForest(nn.Module):
         alpha_propensity: float = 1.0,
         gamma_rlearner: float = 1.0,
         label_smoothing: float = 0.0,
-        stop_grad_propensity: bool = False,
-        contrastive_weight: float = 0.1
+        stop_grad_propensity: bool = False
     ) -> Dict[str, torch.Tensor]:
         """
         Perform single representation training step.
@@ -439,7 +405,6 @@ class CausalTextForest(nn.Module):
             gamma_rlearner: Weight for R-learner loss (only used if use_rlearner_representation=True)
             label_smoothing: Label smoothing factor
             stop_grad_propensity: If True, detach features before propensity
-            contrastive_weight: Weight for intra-batch contrastive loss
 
         Returns:
             Dictionary with loss components
@@ -463,11 +428,6 @@ class CausalTextForest(nn.Module):
 
         # Extract features from text
         features = self.feature_extractor(extractor_input)
-
-        # Intra-batch contrastive loss (on raw extractor features before concatenation)
-        contrastive_loss = torch.tensor(0.0, device=self._device)
-        if self.contrastive_enabled and self.contrastive_loss_module is not None and contrastive_weight > 0:
-            contrastive_loss = self.contrastive_loss_module(features, treatments, outcomes)
 
         # Concatenate explicit confounder features if provided
         if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
@@ -536,8 +496,7 @@ class CausalTextForest(nn.Module):
         total_loss = (
             outcome_loss +
             alpha_propensity * propensity_loss +
-            gamma_rlearner * r_loss +
-            contrastive_weight * contrastive_loss
+            gamma_rlearner * r_loss
         )
 
         result = {
@@ -549,9 +508,6 @@ class CausalTextForest(nn.Module):
             'outcome_logit': outcome_logit.detach()
         }
 
-        if self.contrastive_enabled:
-            result['contrastive_loss'] = contrastive_loss.detach()
-
         return result
 
     # Alias for API consistency with CausalText
@@ -562,7 +518,6 @@ class CausalTextForest(nn.Module):
         gamma_rlearner: float = 1.0,
         label_smoothing: float = 0.0,
         stop_grad_propensity: bool = False,
-        contrastive_weight: float = 0.1,
         **kwargs  # Ignore extra args like beta_targreg for compatibility
     ) -> Dict[str, torch.Tensor]:
         """Alias for train_representation_step for API consistency."""
@@ -571,8 +526,7 @@ class CausalTextForest(nn.Module):
             alpha_propensity=alpha_propensity,
             gamma_rlearner=gamma_rlearner,
             label_smoothing=label_smoothing,
-            stop_grad_propensity=stop_grad_propensity,
-            contrastive_weight=contrastive_weight
+            stop_grad_propensity=stop_grad_propensity
         )
 
     def extract_features(
