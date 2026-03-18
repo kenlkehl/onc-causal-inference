@@ -74,11 +74,6 @@ class PropensityOnlyModel(nn.Module):
         flp_downprojection_dim: Optional[int] = None,
         flp_skip_llm: bool = False,
         flp_cached_hidden_size: int = 0,
-        # Numeric feature args
-        numeric_features_enabled: bool = False,
-        numeric_embedding_dim: int = 32,
-        numeric_magnitude_bins: int = 8,
-        numeric_type_categories: int = 10,
         # Propensity network args
         representation_dim: int = 128,
         device: str = "cuda:0"
@@ -98,10 +93,6 @@ class PropensityOnlyModel(nn.Module):
             flp_downprojection_dim: Optional downprojection dimension
             flp_skip_llm: Skip LLM (use cached hidden states)
             flp_cached_hidden_size: Size of cached hidden states
-            numeric_features_enabled: Enable numeric feature extraction
-            numeric_embedding_dim: Numeric embedding dimension
-            numeric_magnitude_bins: Number of magnitude bins
-            numeric_type_categories: Number of type categories
             representation_dim: Dimension of representation layers
             device: Device string
         """
@@ -124,10 +115,6 @@ class PropensityOnlyModel(nn.Module):
             'flp_downprojection_dim': flp_downprojection_dim,
             'flp_skip_llm': flp_skip_llm,
             'flp_cached_hidden_size': flp_cached_hidden_size,
-            'numeric_features_enabled': numeric_features_enabled,
-            'numeric_embedding_dim': numeric_embedding_dim,
-            'numeric_magnitude_bins': numeric_magnitude_bins,
-            'numeric_type_categories': numeric_type_categories,
             'representation_dim': representation_dim
         }
 
@@ -146,10 +133,6 @@ class PropensityOnlyModel(nn.Module):
             flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
-            numeric_features_enabled=numeric_features_enabled,
-            numeric_embedding_dim=numeric_embedding_dim,
-            numeric_magnitude_bins=numeric_magnitude_bins,
-            numeric_type_categories=numeric_type_categories,
         )
         logger.info(f"Propensity model using {self.feature_extractor_type.upper()} feature extractor")
 
@@ -283,11 +266,6 @@ def create_propensity_model_from_config(
         flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
         flp_skip_llm=flp_skip_llm,
         flp_cached_hidden_size=flp_cached_hidden_size,
-        # Numeric feature args
-        numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
-        numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
-        numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
-        numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
         # Propensity network args
         representation_dim=representation_dim,
         device=str(device)

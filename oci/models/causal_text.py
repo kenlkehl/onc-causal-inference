@@ -54,11 +54,6 @@ class CausalText(nn.Module):
         model_type: str = "dragonnet",  # "dragonnet" or "rlearner"
         # Auxiliary features (for hybrid text + categorical models)
         auxiliary_dim: int = 0,  # Dimension of auxiliary categorical features (0 = no auxiliary)
-        # Numeric feature args
-        numeric_features_enabled: bool = False,
-        numeric_embedding_dim: int = 32,
-        numeric_magnitude_bins: int = 8,
-        numeric_type_categories: int = 10,
         # Explicit confounder featurizer args
         explicit_confounder_specs: Optional[List[ExplicitConfounderSpec]] = None,
         explicit_confounder_output_dim: int = 64,
@@ -117,10 +112,6 @@ class CausalText(nn.Module):
             'causal_head_dropout': causal_head_dropout,
             'model_type': model_type,
             'auxiliary_dim': auxiliary_dim,
-            'numeric_features_enabled': numeric_features_enabled,
-            'numeric_embedding_dim': numeric_embedding_dim,
-            'numeric_magnitude_bins': numeric_magnitude_bins,
-            'numeric_type_categories': numeric_type_categories,
             'explicit_confounder_specs': explicit_confounder_specs,
             'explicit_confounder_output_dim': explicit_confounder_output_dim,
             'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
@@ -148,11 +139,6 @@ class CausalText(nn.Module):
             flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
-            # Numeric args
-            numeric_features_enabled=numeric_features_enabled,
-            numeric_embedding_dim=numeric_embedding_dim,
-            numeric_magnitude_bins=numeric_magnitude_bins,
-            numeric_type_categories=numeric_type_categories,
         )
 
         # Auxiliary feature projection (if enabled)
@@ -238,11 +224,6 @@ class CausalText(nn.Module):
                 flp_downprojection_dim=flp_downprojection_dim,
                 flp_skip_llm=flp_skip_llm,
                 flp_cached_hidden_size=flp_cached_hidden_size,
-                # Numeric args
-                numeric_features_enabled=numeric_features_enabled,
-                numeric_embedding_dim=numeric_embedding_dim,
-                numeric_magnitude_bins=numeric_magnitude_bins,
-                numeric_type_categories=numeric_type_categories,
             )
 
             # Simple MLP for tau(X) - takes effect extractor output, predicts treatment effect

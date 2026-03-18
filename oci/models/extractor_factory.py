@@ -31,11 +31,6 @@ def create_feature_extractor(
     flp_downprojection_dim: Optional[int] = None,
     flp_skip_llm: bool = False,
     flp_cached_hidden_size: int = 0,
-    # Numeric feature args
-    numeric_features_enabled: bool = False,
-    numeric_embedding_dim: int = 32,
-    numeric_magnitude_bins: int = 8,
-    numeric_type_categories: int = 10,
     # Model type
     model_type: str = "dragonnet",
 ) -> nn.Module:
@@ -70,10 +65,6 @@ def create_feature_extractor(
         dropout=flp_dropout,
         gradient_checkpointing=flp_gradient_checkpointing,
         downprojection_dim=flp_downprojection_dim,
-        numeric_features_enabled=numeric_features_enabled,
-        numeric_embedding_dim=numeric_embedding_dim,
-        numeric_magnitude_bins=numeric_magnitude_bins,
-        numeric_type_categories=numeric_type_categories,
         device=device,
         skip_llm=flp_skip_llm,
         cached_hidden_size=flp_cached_hidden_size,
@@ -117,9 +108,4 @@ def create_feature_extractor_from_config(
         flp_downprojection_dim=config.get('flp_downprojection_dim', None),
         flp_skip_llm=config.get('flp_skip_llm', False),
         flp_cached_hidden_size=config.get('flp_cached_hidden_size', 0),
-        # Numeric args
-        numeric_features_enabled=config.get('numeric_features_enabled', False),
-        numeric_embedding_dim=config.get('numeric_embedding_dim', 32),
-        numeric_magnitude_bins=config.get('numeric_magnitude_bins', 8),
-        numeric_type_categories=config.get('numeric_type_categories', 10),
     )

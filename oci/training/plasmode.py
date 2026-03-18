@@ -499,11 +499,6 @@ def _train_cnn_model(
         ),
         flp_skip_llm=(hidden_state_cache is not None),
         flp_cached_hidden_size=(hidden_state_cache.hidden_size if hidden_state_cache is not None else 0),
-        # Numeric feature args
-        numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
-        numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
-        numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
-        numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
         # Causal head args
         causal_head_representation_dim=arch_config.causal_head_representation_dim,
         causal_head_hidden_outcome_dim=arch_config.causal_head_hidden_outcome_dim,
@@ -845,11 +840,6 @@ def _train_causal_forest_model(
         cf_inference=cf_inference,
         cf_use_rlearner_representation=cf_use_rlearner_representation,
         cf_gamma_rlearner=cf_gamma_rlearner,
-        # Numeric feature args
-        numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
-        numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
-        numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
-        numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
         device=str(device),
         outcome_type=outcome_type
     )

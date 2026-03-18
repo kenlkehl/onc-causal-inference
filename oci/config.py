@@ -255,12 +255,6 @@ class ModelArchitectureConfig:
     flp_gpu_cache: bool = False  # Keep hidden states on GPU VRAM instead of disk (auto-fallback to disk if insufficient VRAM)
     flp_random_projection_dim: Optional[int] = None  # Random linear projection dimension for cached hidden states (None = no projection, keeps original hidden_size)
 
-    # Numeric feature extraction (magnitude-aware number encoding)
-    numeric_features_enabled: bool = False  # Enable numeric feature extraction
-    numeric_embedding_dim: int = 32  # Dimension of numeric embeddings
-    numeric_magnitude_bins: int = 8  # Number of log-scale magnitude bins
-    numeric_type_categories: int = 10  # Number of numeric type categories
-
     # Causal head dimensions (applies to all causal heads: DragonNet, RLearner, etc.)
     causal_head_representation_dim: int = 128
     causal_head_hidden_outcome_dim: int = 64

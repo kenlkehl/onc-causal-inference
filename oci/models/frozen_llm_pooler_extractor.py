@@ -20,8 +20,6 @@ Architecture:
       g = tanh(V(h)) * sigmoid(U(h))  ->  scores = v(W(LN(g)))  ->  softmax  ->  weighted sum
       Output: (batch, effective_dim)  where effective_dim = downprojection_dim or hidden_size
          |
-    [Optional] Merge numeric features
-         |
     2-layer MLP: Linear->LN->GELU->Dropout->Linear->LN
          |
     Output: (batch, projection_dim)
@@ -29,7 +27,7 @@ Architecture:
 Cached mode (skip_llm=True):
     Pre-computed hidden states loaded from cache
          |
-    GatedAttentionPooling -> [numeric merge] -> projection
+    GatedAttentionPooling -> projection
     (No LLM loaded, ~200K trainable params only)
 
 DOES NOT require fit_tokenizer() - uses pretrained tokenizer from HuggingFace.
@@ -43,7 +41,6 @@ import torch.nn as nn
 
 from .gated_attention_pooling import GatedAttentionPooling
 from .gpu_hidden_state_store import _get_hidden_size
-from .numeric_features import NumericFeatureVector
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +82,6 @@ class FrozenLLMPoolerExtractor(nn.Module):
         gradient_checkpointing: bool = True,
         downprojection_dim: Optional[int] = None,
         device: Optional[torch.device] = None,
-        numeric_features_enabled: bool = False,
-        numeric_embedding_dim: int = 32,
-        numeric_magnitude_bins: int = 8,
-        numeric_type_categories: int = 10,
         skip_llm: bool = False,
         cached_hidden_size: int = 0,
     ):
@@ -190,21 +183,6 @@ class FrozenLLMPoolerExtractor(nn.Module):
             attention_dim=gated_attention_dim,
         )
 
-        # Numeric feature vector (concatenated before projection)
-        self.numeric_features_enabled = numeric_features_enabled
-        self.numeric_feature_vector = None
-        if numeric_features_enabled:
-            self.numeric_feature_vector = NumericFeatureVector(
-                num_magnitude_bins=numeric_magnitude_bins,
-                num_type_categories=numeric_type_categories,
-                output_dim=numeric_embedding_dim,
-            )
-            self._numeric_merge = nn.Sequential(
-                nn.Linear(effective_dim + numeric_embedding_dim, effective_dim),
-                nn.LayerNorm(effective_dim),
-                nn.ReLU(),
-            )
-
         # Projection MLP
         self._output_dim = projection_dim
         self._projection = nn.Sequential(
@@ -229,8 +207,6 @@ class FrozenLLMPoolerExtractor(nn.Module):
         logger.info(f"  Effective dim (pooling input): {effective_dim}")
         logger.info(f"  Gated attention dim: {gated_attention_dim}")
         logger.info(f"  Output dim: {projection_dim}")
-        if numeric_features_enabled:
-            logger.info(f"  Numeric features: enabled (dim={numeric_embedding_dim})")
 
     @property
     def output_dim(self) -> int:
@@ -250,8 +226,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
 
         Args:
             texts_or_cached: Either a list of text strings, or a dict with
-                'cached_hidden_states' and 'cached_attention_mask' keys
-                (and optionally 'texts' for numeric features).
+                'cached_hidden_states' and 'cached_attention_mask' keys.
 
         Returns:
             Feature tensor of shape (batch_size, output_dim)
@@ -260,7 +235,6 @@ class FrozenLLMPoolerExtractor(nn.Module):
             return self.forward_cached(
                 hidden_states=texts_or_cached['cached_hidden_states'],
                 attention_mask=texts_or_cached['cached_attention_mask'],
-                texts=texts_or_cached.get('texts'),
             )
         return self._forward_from_texts(texts_or_cached)
 
@@ -330,13 +304,6 @@ class FrozenLLMPoolerExtractor(nn.Module):
             hidden_states, attention_mask=attention_mask
         )  # pooled: (batch, effective_dim)
 
-        # Add numeric features before projection
-        if self.numeric_features_enabled and self.numeric_feature_vector is not None:
-            numeric_feats = self.numeric_feature_vector(texts)
-            pooled = self._numeric_merge(
-                torch.cat([pooled, numeric_feats], dim=1)
-            )
-
         # Project to output dimension
         features = self._projection(pooled)
 
@@ -346,17 +313,15 @@ class FrozenLLMPoolerExtractor(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: torch.Tensor,
-        texts: Optional[List[str]] = None,
     ) -> torch.Tensor:
         """
         Extract features from pre-computed hidden states (cached mode).
 
-        Runs only the trainable layers: pooling -> [numeric merge] -> projection.
+        Runs only the trainable layers: pooling -> projection.
 
         Args:
             hidden_states: Pre-computed hidden states (batch, seq_len, hidden_size) float32
             attention_mask: Attention mask (batch, seq_len) float32
-            texts: Optional texts for numeric feature extraction
 
         Returns:
             Feature tensor of shape (batch_size, output_dim)
@@ -390,13 +355,6 @@ class FrozenLLMPoolerExtractor(nn.Module):
         pooled, self._last_attention_weights = self._pooling(
             hidden_states, attention_mask=attention_mask
         )  # pooled: (batch, effective_dim)
-
-        # Add numeric features before projection
-        if self.numeric_features_enabled and self.numeric_feature_vector is not None and texts is not None:
-            numeric_feats = self.numeric_feature_vector(texts)
-            pooled = self._numeric_merge(
-                torch.cat([pooled, numeric_feats], dim=1)
-            )
 
         # Project to output dimension
         features = self._projection(pooled)

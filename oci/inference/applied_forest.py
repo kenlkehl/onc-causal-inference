@@ -659,11 +659,6 @@ def _create_causal_forest_model(
         cf_use_rlearner_representation=cf_use_rlearner_representation,
         cf_gamma_rlearner=cf_gamma_rlearner,
         cf_rlearner_dual_extractors=cf_rlearner_dual_extractors,
-        # Numeric feature args
-        numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
-        numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
-        numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
-        numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
         # Device
         device=str(device),
         # Outcome type

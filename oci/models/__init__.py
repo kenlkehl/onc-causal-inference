@@ -5,7 +5,6 @@ from .dragonnet import DragonNet
 from .rlearner import RLearnerNet
 from .frozen_llm_pooler_extractor import FrozenLLMPoolerExtractor
 from .gated_attention_pooling import GatedAttentionPooling
-from .numeric_features import NumericFeatureVector, extract_numeric_patterns
 from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer, get_raw_confounder_features
 from .hidden_state_cache import HiddenStateCache
 from .gpu_hidden_state_store import GPUHiddenStateStore
@@ -25,9 +24,7 @@ __all__ = [
     'PropensityNet',
     'create_propensity_model_from_config',
     'CausalForestHead',
-    'NumericFeatureVector',
-    'extract_numeric_patterns',
-    'ExplicitConfounderFeaturizer',
+'ExplicitConfounderFeaturizer',
     'get_raw_confounder_features',
     'HiddenStateCache',
     'GPUHiddenStateStore',

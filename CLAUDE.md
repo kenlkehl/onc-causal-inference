@@ -34,7 +34,6 @@ oci/
 │   ├── extractor_factory.py          # Factory for creating feature extractors
 │   ├── dragonnet.py                  # DragonNet causal head
 │   ├── rlearner.py                   # R-Learner causal head
-│   ├── numeric_features.py           # Numeric value featurization (magnitude + type)
 │   ├── explicit_confounder_featurizer.py  # MLP featurization of extracted confounders
 │   ├── propensity_model.py           # Propensity-only model for trimming
 │   └── outcome_model.py              # Outcome-only model for assessment
@@ -226,28 +225,6 @@ When caching is enabled (`flp_cache_hidden_states: true`) and the LLM is frozen,
 | 8K | 4-8 | Good balance for most use cases |
 | 2K | 16-32 | Fast iteration |
 
-## Numeric Feature Extraction
-
-Clinical text contains numbers critical for causal inference (lab values, vitals, scores, doses, ages) that receive no special treatment from standard tokenizers. The numeric features module adds magnitude-aware numeric featurization as a parallel channel.
-
-### How It Works
-
-1. **Regex extraction**: Detects integers, decimals, and fractions (e.g., BP 120/80) in raw text
-2. **Log-scale magnitude binning**: Maps values into 8 bins: `[0, 0.1, 1, 10, 100, 1000, 10000, 100000]`
-3. **Context-based type detection**: Classifies numbers by preceding keywords into 10 categories (vitals, labs, scores, demographics, doses, etc.)
-4. **Document-level injection**: Aggregate histogram (`NumericFeatureVector`) merged before output projection
-
-### Config Parameters
-
-| Param | Description | Default |
-|-------|-------------|---------|
-| `numeric_features_enabled` | Enable numeric feature extraction | `False` |
-| `numeric_embedding_dim` | Output dimension of numeric feature vectors | `32` |
-| `numeric_magnitude_bins` | Number of log-scale magnitude bins | `8` |
-| `numeric_type_categories` | Number of numeric type categories | `10` |
-
-When `numeric_features_enabled` is `False` (default), there is no behavior change.
-
 ## Explicit Confounder Extraction
 
 Researchers can specify explicit confounder variables to be extracted from clinical text using an LLM (via vLLM). The extracted confounders are featurized and concatenated to text embeddings before the causal heads.
@@ -428,7 +405,6 @@ When `model_type="tfidf_forest"`, OCI uses a non-neural baseline: TF-IDF feature
 | `stop_grad_propensity=True` | Prevents propensity from dominating representation |
 | `attention_entropy_weight>0` | Encourages focused attention (low entropy) |
 | `gamma_rlearner>1.0` | Stronger treatment effect signal |
-| `numeric_features_enabled=True` | Adds magnitude-aware numeric featurization from clinical text |
 | `rlearner_dual_extractors=True` | Uses separate extractors for nuisance (e,m) and effect (tau) |
 
 ## Propensity Trimming
@@ -586,7 +562,6 @@ python -m synthetic_data.cli --config my_config.json
 | Extractor factory | `oci/models/extractor_factory.py` |
 | Gated attention | `oci/models/gated_attention_pooling.py` |
 | Hidden state cache | `oci/models/hidden_state_cache.py`, `oci/models/gpu_hidden_state_store.py` |
-| Numeric features | `oci/models/numeric_features.py` |
 | Explicit confounders | `oci/extraction/explicit_confounders.py`, `oci/extraction/cache.py`, `oci/models/explicit_confounder_featurizer.py` |
 | Propensity/Outcome models | `oci/models/propensity_model.py`, `oci/models/outcome_model.py` |
 | Training | `oci/inference/applied.py`, `oci/inference/applied_forest.py`, `oci/inference/applied_tfidf_forest.py`, `oci/inference/applied_confounder_forest.py` |

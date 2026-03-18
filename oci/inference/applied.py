@@ -710,12 +710,6 @@ def _train_single_model(
             else hidden_state_cache.hidden_size if hidden_state_cache is not None
             else 0
         ),
-        # Contrastive learning args
-        # Numeric feature args
-        numeric_features_enabled=getattr(arch_config, 'numeric_features_enabled', False),
-        numeric_embedding_dim=getattr(arch_config, 'numeric_embedding_dim', 32),
-        numeric_magnitude_bins=getattr(arch_config, 'numeric_magnitude_bins', 8),
-        numeric_type_categories=getattr(arch_config, 'numeric_type_categories', 10),
         # Explicit confounder featurizer args
         explicit_confounder_specs=_get_explicit_confounder_specs(config) if explicit_confounder_columns else None,
         explicit_confounder_output_dim=getattr(config.explicit_confounders, 'featurizer_output_dim', 64) if hasattr(config, 'explicit_confounders') else 64,

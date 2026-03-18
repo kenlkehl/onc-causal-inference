@@ -83,11 +83,6 @@ class CausalTextForest(nn.Module):
         cf_gamma_rlearner: float = 1.0,
         # R-learner dual extractor mode (separate extractors for nuisance vs effect)
         cf_rlearner_dual_extractors: bool = False,
-        # Numeric feature args
-        numeric_features_enabled: bool = False,
-        numeric_embedding_dim: int = 32,
-        numeric_magnitude_bins: int = 8,
-        numeric_type_categories: int = 10,
         # Explicit confounder args (raw features for causal forest, MLP for Stage 1 training)
         explicit_confounder_specs: Optional[List[ExplicitConfounderSpec]] = None,
         explicit_confounder_output_dim: int = 64,
@@ -137,10 +132,6 @@ class CausalTextForest(nn.Module):
             'cf_use_rlearner_representation': cf_use_rlearner_representation,
             'cf_gamma_rlearner': cf_gamma_rlearner,
             'cf_rlearner_dual_extractors': cf_rlearner_dual_extractors,
-            'numeric_features_enabled': numeric_features_enabled,
-            'numeric_embedding_dim': numeric_embedding_dim,
-            'numeric_magnitude_bins': numeric_magnitude_bins,
-            'numeric_type_categories': numeric_type_categories,
             'explicit_confounder_specs': explicit_confounder_specs,
             'explicit_confounder_output_dim': explicit_confounder_output_dim,
             'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
@@ -201,10 +192,6 @@ class CausalTextForest(nn.Module):
             flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
-            numeric_features_enabled=numeric_features_enabled,
-            numeric_embedding_dim=numeric_embedding_dim,
-            numeric_magnitude_bins=numeric_magnitude_bins,
-            numeric_type_categories=numeric_type_categories,
         )
 
         logger.info(f"Using {self.feature_extractor_type.upper()} feature extractor")
@@ -263,10 +250,6 @@ class CausalTextForest(nn.Module):
                     flp_downprojection_dim=flp_downprojection_dim,
                     flp_skip_llm=flp_skip_llm,
                     flp_cached_hidden_size=flp_cached_hidden_size,
-                    numeric_features_enabled=numeric_features_enabled,
-                    numeric_embedding_dim=numeric_embedding_dim,
-                    numeric_magnitude_bins=numeric_magnitude_bins,
-                    numeric_type_categories=numeric_type_categories,
                 )
 
                 # Effect MLP: takes effect extractor output, predicts τ
