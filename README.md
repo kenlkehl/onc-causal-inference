@@ -439,7 +439,6 @@ output_dir/
     predictions.parquet        # Treatment effect estimates
     training_log.csv
     psm_analysis/              # If matching analysis enabled
-  plasmode_experiments/        # If plasmode enabled
 ```
 
 The `predictions.parquet` contains:

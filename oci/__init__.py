@@ -10,7 +10,6 @@ __version__ = "0.1.0"
 from .config import (
     ExperimentConfig,
     AppliedInferenceConfig,
-    PlasmodeExperimentConfig,
     ModelArchitectureConfig,
     TrainingConfig,
     MatchingAnalysisConfig,
@@ -22,7 +21,6 @@ from .experiments import ExperimentRunner
 __all__ = [
     'ExperimentConfig',
     'AppliedInferenceConfig',
-    'PlasmodeExperimentConfig',
     'ModelArchitectureConfig',
     'TrainingConfig',
     'MatchingAnalysisConfig',

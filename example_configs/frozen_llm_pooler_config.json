@@ -51,9 +51,5 @@
     "matching_analysis": {
       "enabled": false
     }
-  },
-
-  "plasmode_experiments": {
-    "enabled": false
   }
 }

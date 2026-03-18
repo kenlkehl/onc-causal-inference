@@ -324,19 +324,6 @@ class OutcomeModelConfig:
     outcome_batch_size: int = 8  # Batch size for outcome model
 
 
-@dataclass
-class PlasmodeConfig:
-    """Configuration for plasmode simulation."""
-    outcome_type: str = "binary"  # "binary" or "continuous" (plasmode can override dataset outcome type)
-    generation_mode: str = "phi_linear"
-    preserve_observed_treatments: bool = True
-    baseline_control_outcome_rate: float = 0.20
-    target_ate_prob: float = 0.10  # Target ATE on probability scale (e.g., 0.10 = 10% increase in outcome probability)
-    outcome_heterogeneity_scale: float = 1.0
-    ite_heterogeneity_scale: float = 1.0
-    deep_nonlinear_hidden_dims: List[int] = field(default_factory=lambda: [64, 32])
-    deep_nonlinear_dropout: float = 0.0
-
 
 @dataclass
 class AppliedInferenceConfig:
@@ -352,32 +339,12 @@ class AppliedInferenceConfig:
     training: TrainingConfig = field(default_factory=TrainingConfig)
     propensity_trimming: PropensityTrimmingConfig = field(default_factory=PropensityTrimmingConfig)
     outcome_model: OutcomeModelConfig = field(default_factory=OutcomeModelConfig)
-    skip: bool = False  # Skip applied inference, go straight to plasmode
-
     # PSM analysis configuration (uses DragonNet's propensity scores)
     matching_analysis: MatchingAnalysisConfig = field(default_factory=MatchingAnalysisConfig)
 
     # Explicit confounder extraction configuration (LLM-based)
     explicit_confounders: ExplicitConfounderExtractionConfig = field(default_factory=ExplicitConfounderExtractionConfig)
 
-
-@dataclass
-class PlasmodeExperimentConfig:
-    """Configuration for plasmode sensitivity experiments."""
-    enabled: bool = False
-    num_repeats: int = 1
-    save_datasets: bool = False
-    train_fraction: float = 0.8  # Fraction of data for training (rest is eval)
-    generator_architecture: ModelArchitectureConfig = field(default_factory=ModelArchitectureConfig)
-    generator_training: TrainingConfig = field(default_factory=TrainingConfig)
-    evaluator_architecture: ModelArchitectureConfig = field(default_factory=ModelArchitectureConfig)
-    evaluator_training: TrainingConfig = field(default_factory=TrainingConfig)
-    plasmode_scenarios: List[PlasmodeConfig] = field(default_factory=list)
-    propensity_trimming: PropensityTrimmingConfig = field(default_factory=PropensityTrimmingConfig)
-    oracle_mode: bool = False  # If True, evaluator sees generator's exact features
-
-    # Explicit confounder extraction configuration (LLM-based)
-    explicit_confounders: ExplicitConfounderExtractionConfig = field(default_factory=ExplicitConfounderExtractionConfig)
 
 
 @dataclass
@@ -394,7 +361,6 @@ class ExperimentConfig:
     confounder_interpretation_top_k: int = 5  # Number of top-attended sentences per confounder to save
 
     applied_inference: AppliedInferenceConfig = field(default_factory=AppliedInferenceConfig)
-    plasmode_experiments: PlasmodeExperimentConfig = field(default_factory=PlasmodeExperimentConfig)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
@@ -450,22 +416,6 @@ class ExperimentConfig:
                for k, v in data.get('applied_inference', {}).items()}
         )
 
-        plasmode_data = data.get('plasmode_experiments', {})
-        plasmode = PlasmodeExperimentConfig(
-            enabled=plasmode_data.get('enabled', False),
-            num_repeats=plasmode_data.get('num_repeats', 1),
-            save_datasets=plasmode_data.get('save_datasets', False),
-            train_fraction=plasmode_data.get('train_fraction', 0.8),
-            generator_architecture=parse_architecture_config(plasmode_data.get('generator_architecture', {})),
-            generator_training=TrainingConfig(**plasmode_data.get('generator_training', {})),
-            evaluator_architecture=parse_architecture_config(plasmode_data.get('evaluator_architecture', {})),
-            evaluator_training=TrainingConfig(**plasmode_data.get('evaluator_training', {})),
-            plasmode_scenarios=[PlasmodeConfig(**s) for s in plasmode_data.get('plasmode_scenarios', [])],
-            propensity_trimming=PropensityTrimmingConfig(**plasmode_data.get('propensity_trimming', {})),
-            oracle_mode=plasmode_data.get('oracle_mode', False),
-            explicit_confounders=parse_explicit_confounders_config(plasmode_data.get('explicit_confounders', {}))
-        )
-
         return cls(
             output_dir=data.get('output_dir', './oci_results'),
             seed=data.get('seed', 42),
@@ -475,7 +425,6 @@ class ExperimentConfig:
             save_confounder_interpretations=data.get('save_confounder_interpretations', False),
             confounder_interpretation_top_k=data.get('confounder_interpretation_top_k', 5),
             applied_inference=applied,
-            plasmode_experiments=plasmode
         )
 
     def get_hash(self) -> str:
@@ -491,20 +440,11 @@ class ExperimentConfig:
         if not Path(self.applied_inference.dataset_path).exists():
             raise ValueError(f"Dataset not found: {self.applied_inference.dataset_path}")
 
-        if self.plasmode_experiments.enabled and not self.plasmode_experiments.plasmode_scenarios:
-            raise ValueError("plasmode_experiments.plasmode_scenarios cannot be empty when enabled=True")
-
         # Validate outcome_type
         valid_outcome_types = {"binary", "continuous"}
         if self.applied_inference.outcome_type not in valid_outcome_types:
             raise ValueError(f"applied_inference.outcome_type must be one of {valid_outcome_types}, "
                            f"got '{self.applied_inference.outcome_type}'")
-
-        # Validate plasmode outcome_type for each scenario
-        for i, scenario in enumerate(self.plasmode_experiments.plasmode_scenarios):
-            if scenario.outcome_type not in valid_outcome_types:
-                raise ValueError(f"plasmode_scenarios[{i}].outcome_type must be one of {valid_outcome_types}, "
-                               f"got '{scenario.outcome_type}'")
 
         # Validate matching config
         if self.applied_inference.matching_analysis.enabled:
@@ -534,17 +474,6 @@ def create_default_config(output_path: str) -> None:
             )
         ),
 
-        plasmode_experiments=PlasmodeExperimentConfig(
-            enabled=False,
-            num_repeats=3,
-            save_datasets=False,
-            plasmode_scenarios=[
-                PlasmodeConfig(
-                    generation_mode="phi_linear",
-                    target_ate_prob=0.10
-                )
-            ]
-        )
     )
 
     config.to_json(output_path)

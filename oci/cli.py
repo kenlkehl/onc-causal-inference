@@ -68,11 +68,6 @@ Examples:
         action='store_true',
         help='Skip pretraining even if enabled in config'
     )
-    run_parser.add_argument(
-        '--skip-plasmode',
-        action='store_true',
-        help='Skip plasmode experiments even if enabled in config'
-    )
     
     args = parser.parse_args()
     
@@ -100,8 +95,6 @@ Examples:
             config.output_dir = args.output_dir
         if args.skip_pretraining:
             config.pretraining.enabled = False
-        if args.skip_plasmode:
-            config.plasmode_experiments.enabled = False
         
         try:
             config.validate()
@@ -120,9 +113,6 @@ Examples:
             
             if results.get('applied_inference'):
                 print(f"\nApplied inference results: {results['applied_inference']}")
-            
-            if results.get('plasmode_experiments'):
-                print(f"Plasmode experiment results: {results['plasmode_experiments']}")
             
             return 0
             

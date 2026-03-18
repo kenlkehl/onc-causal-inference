@@ -14,7 +14,7 @@ oci/
 │   ├── dataset.py                    # ClinicalTextDataset
 │   ├── cached_hidden_state_dataset.py  # Dataset for pre-cached hidden states
 │   └── collators.py                  # Collator utilities (returns None for frozen LLM)
-├── experiments/runner.py  # Orchestrates inference & plasmode
+├── experiments/runner.py  # Orchestrates inference
 ├── extraction/
 │   ├── explicit_confounders.py   # LLM-based confounder extraction via vLLM
 │   └── cache.py                  # Extraction result caching
@@ -38,7 +38,6 @@ oci/
 │   ├── propensity_model.py           # Propensity-only model for trimming
 │   └── outcome_model.py              # Outcome-only model for assessment
 ├── training/
-│   ├── plasmode.py            # Plasmode simulation
 │   ├── propensity_trimming.py # Propensity score trimming
 │   └── outcome_training.py   # Standalone outcome model training
 ├── matching/
@@ -118,7 +117,7 @@ This separation prevents gradient interference between confounder learning (nuis
 
 ```bash
 oci init --output config.json
-oci run --config config.json --device cuda:0 --workers 4 [--skip-plasmode] [--skip-pretraining] [--verbose]
+oci run --config config.json --device cuda:0 --workers 4 [--skip-pretraining] [--verbose]
 
 # Apple Silicon (MPS)
 oci run --config config.json --device mps --workers 1
@@ -446,7 +445,7 @@ results = run_psm_analysis(predictions_df, config, output_dir)
 ## Workflow Modes
 
 1. **Applied Inference**: K-fold CV or fixed splits -> `predictions.parquet`
-2. **Plasmode Simulation**: Synthetic outcomes with known ATE for validation
+2. **Semi-Synthetic Simulation**: Real text + simulated T/Y with known ITE for sensitivity analysis (see `oracle_experiment_scripts/`)
 3. **PSM Analysis**: Post-hoc matching with ATT/ATE estimation, Rosenbaum bounds
 
 ## Output Files
@@ -459,8 +458,75 @@ output_dir/
 |   +-- training_log.csv
 |   +-- *_interpretations.json  # Attention interpretations
 |   +-- psm_analysis/           # If enabled
-+-- plasmode_experiments/       # If enabled
 ```
+
+## Semi-Synthetic Simulation (Sensitivity Analysis)
+
+The `oracle_experiment_scripts/` module provides a semi-synthetic simulation framework for
+evaluating how well text extractors capture confounding beyond explicitly specified confounders.
+
+### How It Works
+
+1. LLM generates K realistic confounders for the clinical question
+2. vLLM extracts confounders from real clinical text
+3. Regression equations produce simulated treatment/outcome with known true ITE
+4. Applied inference uses real text + simulated T/Y
+5. ITE correlation measures recovery of true treatment effects
+
+### Two Equation Modes
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| `random` | LLM generates regression equations with random coefficients, calibrated to target rates | Stress-testing across diverse DGPs |
+| `fitted` | Logistic regression fit on extracted confounders to predict real T/Y | Stability analysis for specific dataset |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `oracle_experiment_scripts/semisynthetic_dgp.py` | DGP generation: confounder extraction, equation generation/fitting, outcome simulation |
+| `oracle_experiment_scripts/run_semisynthetic_experiments.py` | Main runner: outer/inner loops, CLI, checkpoint/resume |
+| `oracle_experiment_scripts/analyze_semisynthetic_results.py` | Results aggregation, summary statistics, plots |
+
+### CLI
+
+```bash
+# Random mode: M=5 DGPs, N=5 repeats each
+python oracle_experiment_scripts/run_semisynthetic_experiments.py \
+    --dataset-path /path/to/real/dataset.parquet \
+    --clinical-question "Compare pembrolizumab vs docetaxel for advanced NSCLC" \
+    --output-dir ../pcori_experiments/semisynthetic \
+    --equation-mode random --num-dgps 5 --num-repeats 5 --devices cuda:0
+
+# Fitted mode: learn equations from real T/Y, measure stability
+python oracle_experiment_scripts/run_semisynthetic_experiments.py \
+    --dataset-path /path/to/real/dataset.parquet \
+    --clinical-question "Compare pembrolizumab vs docetaxel for advanced NSCLC" \
+    --output-dir ../pcori_experiments/semisynthetic_fitted \
+    --equation-mode fitted --num-dgps 5 --num-repeats 10 --devices cuda:0
+
+# Analyze results
+python oracle_experiment_scripts/analyze_semisynthetic_results.py \
+    --results-dir ../pcori_experiments/semisynthetic
+```
+
+### Experiment Arms
+
+For each DGP and confounder fraction f (0, 0.25, 0.5, 0.75, 1.0):
+- **confounder_forest**: Confounder-only CausalForestDML (no text)
+- **text_forest**: Frozen LLM pooler + CausalForestDML (with optional confounder subset)
+- **best_attainable**: All K confounders (upper bound reference)
+
+### Key Flags
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--equation-mode` | "random" or "fitted" | `random` |
+| `--num-dgps` | Number of DGPs (M) | `5` |
+| `--num-repeats` | Repeats per DGP (N) | `5` |
+| `--vary-confounders-per-dgp` | Fresh confounders per DGP | `True` for random, `False` for fitted |
+| `--cache` / `--gpu-cache` | Pre-cache frozen LLM hidden states | `False` |
+| `--resume` | Skip completed arms | `False` |
 
 ## Synthetic Data Generation
 
@@ -565,7 +631,7 @@ python -m synthetic_data.cli --config my_config.json
 | Explicit confounders | `oci/extraction/explicit_confounders.py`, `oci/extraction/cache.py`, `oci/models/explicit_confounder_featurizer.py` |
 | Propensity/Outcome models | `oci/models/propensity_model.py`, `oci/models/outcome_model.py` |
 | Training | `oci/inference/applied.py`, `oci/inference/applied_forest.py`, `oci/inference/applied_tfidf_forest.py`, `oci/inference/applied_confounder_forest.py` |
-| Plasmode | `oci/training/plasmode.py` |
+| Semi-synthetic simulation | `oracle_experiment_scripts/semisynthetic_dgp.py`, `run_semisynthetic_experiments.py` |
 | Config | `oci/config.py` |
 | PSM | `oci/analysis/psm_analysis.py`, `oci/analysis/statistical_analysis.py`, `oci/matching/propensity_matcher.py` |
 | Utilities | `oci/utils/io.py`, `oci/utils/system.py` |
@@ -595,7 +661,6 @@ When adding a new causal head type, update the following files:
 | `oci/config.py` | Add model_type validation and any new config options |
 | `oci/models/causal_text.py` | Add import, instantiation case, train_step/predict logic |
 | `oci/inference/applied.py` | Add any head-specific inference logic |
-| `oci/training/plasmode.py` | Add any head-specific plasmode logic |
 
 ## Modifying the Feature Extractor
 
