@@ -76,15 +76,15 @@ class SemiSyntheticDGPConfig:
     fitted_regularization: str = "l2"
     fitted_regularization_strength: float = 1.0
 
-    # vLLM extraction settings
+    # vLLM settings (used for both confounder extraction and generation)
     vllm_mode: str = "server"
     vllm_server_url: str = "http://localhost:8000/v1"
-    vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+    vllm_model_name: str = "openai/gpt-oss-120b"
+    vllm_tensor_parallel_size: int = 1
+    vllm_download_dir: Optional[str] = None
+    vllm_max_model_len: int = 120000
+    vllm_max_tokens: int = 5000
     extraction_batch_size: int = 32
-
-    # LLM for confounder/equation generation (random mode)
-    llm_api_base_url: str = "http://localhost:8000/v1"
-    llm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
 
     @property
     def should_vary_confounders(self) -> bool:
@@ -129,10 +129,28 @@ def generate_and_extract_confounders(
     random.seed(seed)
     np.random.seed(seed)
 
+    # If mode is start_server, create the extractor early so the server
+    # is running before the LLMClient tries to connect to the same URL.
+    extractor = None
+    if config.vllm_mode == "start_server":
+        extractor = VLLMConfounderExtractor(
+            specs=[],  # placeholder, updated after confounder generation
+            mode=config.vllm_mode,
+            server_url=config.vllm_server_url,
+            model_name=config.vllm_model_name,
+            tensor_parallel_size=config.vllm_tensor_parallel_size,
+            download_dir=config.vllm_download_dir,
+            max_model_len=config.vllm_max_model_len,
+            max_retries=3,
+            temperature=0.0,
+        )
+        extractor._ensure_initialized()
+
     # Step 1: Generate confounder definitions via LLM
     llm_config = LLMConfig(
-        api_base_url=config.llm_api_base_url,
-        model_name=config.llm_model_name,
+        api_base_url=config.vllm_server_url,
+        model_name=config.vllm_model_name,
+        max_tokens=config.vllm_max_tokens,
     )
     client = LLMClient(llm_config)
     confounders = _generate_confounders(
@@ -168,16 +186,25 @@ def generate_and_extract_confounders(
     if cached_df is not None:
         logger.info(f"DGP {dgp_index}: Using cached extraction results")
         extracted_df = cached_df
+        if extractor is not None:
+            extractor.cleanup()
     else:
         # Step 4: Extract from real text
-        extractor = VLLMConfounderExtractor(
-            specs=specs,
-            mode=config.vllm_mode,
-            server_url=config.vllm_server_url,
-            model_name=config.vllm_model_name,
-            max_retries=3,
-            temperature=0.0,
-        )
+        if extractor is not None:
+            # Reuse the already-started server, just update specs
+            extractor.specs = specs
+        else:
+            extractor = VLLMConfounderExtractor(
+                specs=specs,
+                mode=config.vllm_mode,
+                server_url=config.vllm_server_url,
+                model_name=config.vllm_model_name,
+                tensor_parallel_size=config.vllm_tensor_parallel_size,
+                download_dir=config.vllm_download_dir,
+                max_model_len=config.vllm_max_model_len,
+                max_retries=3,
+                temperature=0.0,
+            )
         extracted_df = extractor.extract_to_dataframe(
             texts, batch_size=config.extraction_batch_size
         )
@@ -337,8 +364,9 @@ def generate_random_equations(
     np.random.seed(seed)
 
     llm_config = LLMConfig(
-        api_base_url=config.llm_api_base_url,
-        model_name=config.llm_model_name,
+        api_base_url=config.vllm_server_url,
+        model_name=config.vllm_model_name,
+        max_tokens=config.vllm_max_tokens,
     )
     client = LLMClient(llm_config)
 

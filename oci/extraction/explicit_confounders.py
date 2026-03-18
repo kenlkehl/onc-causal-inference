@@ -233,6 +233,7 @@ class VLLMConfounderExtractor:
         tensor_parallel_size: int = 1,
         gpu_memory_utilization: float = 0.9,
         download_dir: Optional[str] = None,
+        max_model_len: Optional[int] = None,
         api_key: str = "EMPTY",
         max_retries: int = 3,
         temperature: float = 0.0,
@@ -248,6 +249,7 @@ class VLLMConfounderExtractor:
             tensor_parallel_size: Number of GPUs for tensor parallelism
             gpu_memory_utilization: GPU memory fraction to use
             download_dir: Model download directory
+            max_model_len: Maximum model context length (for start_server/python_api)
             api_key: API key (use "EMPTY" for local vLLM)
             max_retries: Maximum retries per patient before marking as missing
             temperature: LLM temperature (0 for deterministic)
@@ -263,6 +265,7 @@ class VLLMConfounderExtractor:
         self.tensor_parallel_size = tensor_parallel_size
         self.gpu_memory_utilization = gpu_memory_utilization
         self.download_dir = download_dir
+        self.max_model_len = max_model_len
         self.api_key = api_key
         self.max_retries = max_retries
         self.temperature = temperature
@@ -297,6 +300,8 @@ class VLLMConfounderExtractor:
         ]
         if self.download_dir:
             cmd.extend(["--download-dir", self.download_dir])
+        if self.max_model_len:
+            cmd.extend(["--max-model-len", str(self.max_model_len)])
 
         logger.info(f"Starting vLLM server: {' '.join(cmd)}")
         self._server_process = subprocess.Popen(
@@ -341,6 +346,8 @@ class VLLMConfounderExtractor:
         }
         if self.download_dir:
             kwargs["download_dir"] = self.download_dir
+        if self.max_model_len:
+            kwargs["max_model_len"] = self.max_model_len
 
         self._llm = LLM(**kwargs)
         logger.info("vLLM model loaded successfully")
@@ -528,6 +535,7 @@ def extract_explicit_confounders(
     tensor_parallel_size: int = 1,
     gpu_memory_utilization: float = 0.9,
     download_dir: Optional[str] = None,
+    max_model_len: Optional[int] = None,
     max_retries: int = 3,
     temperature: float = 0.0,
     max_tokens: int = 1024,
@@ -544,6 +552,7 @@ def extract_explicit_confounders(
         tensor_parallel_size: Number of GPUs
         gpu_memory_utilization: GPU memory fraction
         download_dir: Model download directory
+        max_model_len: Maximum model context length (for start_server/python_api)
         max_retries: Retries per patient before marking as missing
         temperature: LLM temperature
         max_tokens: Max response tokens
@@ -560,6 +569,7 @@ def extract_explicit_confounders(
         tensor_parallel_size=tensor_parallel_size,
         gpu_memory_utilization=gpu_memory_utilization,
         download_dir=download_dir,
+        max_model_len=max_model_len,
         max_retries=max_retries,
         temperature=temperature,
         max_tokens=max_tokens

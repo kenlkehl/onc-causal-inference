@@ -28,6 +28,10 @@ Usage:
         --num-dgps 5 --num-repeats 10 \
         --devices cuda:0 cuda:1
 
+        python oracle_experiment_scripts/run_semisynthetic_experiments.py --dataset-
+path ./synthetic_data/example_synthetic_datasets/ten_confounders_nsclc/dataset.parquet --clinical-question "Compare gemcitabine to vinorelbine for advanced NSCLC
+" --output-dir ../pcori_experiments/production_ten_confounders_nsclc/semisynthetic --equation-mode fitted --num-dgps 10 --num-repeats 10 --devices cuda:0 cuda:1 cuda:2 cuda:3 cuda:4 cuda:5 cuda:6 cuda:7
+
     # Quick test
     python oracle_experiment_scripts/run_semisynthetic_experiments.py \
         --dataset-path /path/to/real/dataset.parquet \
@@ -451,12 +455,14 @@ def run_experiments(
     treatment_effect_prob: float = 0.10,
     target_treatment_rate: float = 0.5,
     target_control_outcome_rate: float = 0.2,
-    # vLLM / LLM
+    # vLLM (used for both confounder extraction and generation)
     vllm_mode: str = "server",
     vllm_server_url: str = "http://localhost:8000/v1",
-    vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct",
-    llm_api_base_url: str = "http://localhost:8000/v1",
-    llm_model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+    vllm_model_name: str = "openai/gpt-oss-120b",
+    vllm_tensor_parallel_size: int = 1,
+    vllm_download_dir: Optional[str] = None,
+    vllm_max_model_len: int = 120000,
+    vllm_max_tokens: int = 5000,
     # Infrastructure
     devices: List[str] = None,
     cache: bool = False,
@@ -484,8 +490,10 @@ def run_experiments(
         vllm_mode=vllm_mode,
         vllm_server_url=vllm_server_url,
         vllm_model_name=vllm_model_name,
-        llm_api_base_url=llm_api_base_url,
-        llm_model_name=llm_model_name,
+        vllm_tensor_parallel_size=vllm_tensor_parallel_size,
+        vllm_download_dir=vllm_download_dir,
+        vllm_max_model_len=vllm_max_model_len,
+        vllm_max_tokens=vllm_max_tokens,
     )
 
     # Save config
@@ -803,13 +811,19 @@ def main():
     parser.add_argument("--target-treatment-rate", type=float, default=0.5)
     parser.add_argument("--target-control-outcome-rate", type=float, default=0.2)
 
-    # vLLM / LLM
+    # vLLM (used for both confounder extraction and generation)
     parser.add_argument("--vllm-mode", default="server",
                         choices=["server", "start_server", "python_api"])
     parser.add_argument("--vllm-server-url", default="http://localhost:8000/v1")
-    parser.add_argument("--vllm-model-name", default="Qwen/Qwen2.5-7B-Instruct")
-    parser.add_argument("--llm-api-base-url", default="http://localhost:8000/v1")
-    parser.add_argument("--llm-model-name", default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--vllm-model-name", default="openai/gpt-oss-120b")
+    parser.add_argument("--vllm-tensor-parallel-size", type=int, default=1,
+                        help="Number of GPUs for tensor parallelism (start_server/python_api)")
+    parser.add_argument("--vllm-download-dir", default=None,
+                        help="Model download directory (start_server/python_api)")
+    parser.add_argument("--vllm-max-model-len", type=int, default=120000,
+                        help="Maximum model context length (start_server/python_api)")
+    parser.add_argument("--vllm-max-tokens", type=int, default=5000,
+                        help="Maximum new tokens per LLM request")
 
     # Infrastructure
     parser.add_argument("--devices", nargs="+", default=["cuda:0"])
@@ -848,8 +862,10 @@ def main():
         vllm_mode=args.vllm_mode,
         vllm_server_url=args.vllm_server_url,
         vllm_model_name=args.vllm_model_name,
-        llm_api_base_url=args.llm_api_base_url,
-        llm_model_name=args.llm_model_name,
+        vllm_tensor_parallel_size=args.vllm_tensor_parallel_size,
+        vllm_download_dir=args.vllm_download_dir,
+        vllm_max_model_len=args.vllm_max_model_len,
+        vllm_max_tokens=args.vllm_max_tokens,
         devices=args.devices,
         cache=args.cache,
         gpu_cache=args.gpu_cache,
