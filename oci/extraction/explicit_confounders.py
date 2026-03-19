@@ -289,8 +289,8 @@ class VLLMConfounderExtractor:
         self._client = OpenAI(
             base_url=self.server_url,
             api_key=self.api_key,
-            timeout=120.0,   # 2 min per request (default is 10 min)
-            max_retries=1,   # 1 internal retry (we have our own outer retry loop)
+            timeout=30.0,    # 30s per request (default is 10 min)
+            max_retries=0,   # No internal retries (we have our own outer retry loop)
         )
         logger.info(f"Connected to vLLM server at: {self.server_url}")
 
