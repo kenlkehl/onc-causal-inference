@@ -95,71 +95,114 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# vLLM server auto-start
+# vLLM server auto-start (multi-GPU)
 # ---------------------------------------------------------------------------
 
-def _ensure_vllm_server(
+def _ensure_vllm_servers(
     server_url: str,
     model_name: str,
+    devices: List[str],
     tensor_parallel_size: int = 1,
     download_dir: Optional[str] = None,
     max_model_len: Optional[int] = None,
-) -> Optional[subprocess.Popen]:
-    """Check if a vLLM server is reachable; start one if not.
+) -> List[Tuple[Optional[subprocess.Popen], str]]:
+    """Start multiple vLLM servers across available GPUs.
+
+    Each server is pinned to specific GPU(s) via CUDA_VISIBLE_DEVICES and
+    assigned a unique port. This parallelizes confounder extraction across
+    all available GPUs.
 
     Returns:
-        subprocess.Popen if a server was started (caller must terminate),
-        or None if a server was already running.
+        List of (process, url) tuples. Process is None if server was already
+        running (only for the base port check).
     """
     import requests
+    from urllib.parse import urlparse
 
-    base_url = server_url.rstrip('/')
-    if base_url.endswith('/v1'):
-        base_url = base_url[:-3]
-    health_url = base_url + '/health'
+    parsed = urlparse(server_url.rstrip('/'))
+    base_host = parsed.hostname or 'localhost'
+    base_port = parsed.port or 8000
 
-    # Check if server is already running
+    # Check if a server is already running on the base port
     try:
-        resp = requests.get(health_url, timeout=5)
+        resp = requests.get(f"http://{base_host}:{base_port}/health", timeout=5)
         if resp.status_code == 200:
             logger.info(f"vLLM server already running at {server_url}")
-            return None
+            return [(None, server_url)]
     except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
         pass
 
-    # Start a server
-    logger.info(f"No vLLM server found at {server_url}, starting one...")
-    cmd = [
-        "python", "-m", "vllm.entrypoints.openai.api_server",
-        "--model", model_name,
-        "--tensor-parallel-size", str(tensor_parallel_size),
-        "--gpu-memory-utilization", "0.9",
-        "--trust-remote-code",
-    ]
-    if download_dir:
-        cmd.extend(["--download-dir", download_dir])
-    if max_model_len:
-        cmd.extend(["--max-model-len", str(max_model_len)])
+    # Extract GPU indices from device strings
+    gpu_ids = []
+    for d in devices:
+        if d.startswith("cuda:"):
+            gpu_ids.append(int(d.split(":")[1]))
+    if not gpu_ids:
+        gpu_ids = [0]
 
-    logger.info(f"Starting vLLM: {' '.join(cmd)}")
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    num_servers = max(1, len(gpu_ids) // tensor_parallel_size)
+    logger.info(f"Starting {num_servers} vLLM server(s) across {len(gpu_ids)} GPU(s) "
+                f"(tensor_parallel_size={tensor_parallel_size})")
 
-    # Wait for server to be ready
-    logger.info("Waiting for vLLM server to start...")
+    servers = []
+    for i in range(num_servers):
+        port = base_port + i
+        url = f"http://{base_host}:{port}/v1"
+        assigned_gpus = gpu_ids[i * tensor_parallel_size : (i + 1) * tensor_parallel_size]
+        cuda_visible = ",".join(str(g) for g in assigned_gpus)
+
+        cmd = [
+            "python", "-m", "vllm.entrypoints.openai.api_server",
+            "--model", model_name,
+            "--port", str(port),
+            "--tensor-parallel-size", str(tensor_parallel_size),
+            "--gpu-memory-utilization", "0.9",
+            "--trust-remote-code",
+        ]
+        if download_dir:
+            cmd.extend(["--download-dir", download_dir])
+        if max_model_len:
+            cmd.extend(["--max-model-len", str(max_model_len)])
+
+        env = os.environ.copy()
+        env["CUDA_VISIBLE_DEVICES"] = cuda_visible
+
+        logger.info(f"Starting vLLM server {i+1}/{num_servers} on port {port} "
+                     f"(GPUs: {cuda_visible})")
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        servers.append((proc, url))
+
+    # Wait for all servers to become ready
+    logger.info("Waiting for vLLM servers to start...")
     time.sleep(30)
-    for _ in range(60):  # Up to 5 more minutes
-        try:
-            resp = requests.get(health_url, timeout=5)
-            if resp.status_code == 200:
-                logger.info("vLLM server is ready")
-                return proc
-        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-            pass
-        time.sleep(5)
 
-    proc.terminate()
-    proc.wait()
-    raise RuntimeError(f"vLLM server failed to start within 5 minutes")
+    for i, (proc, url) in enumerate(servers):
+        port = base_port + i
+        health_url = f"http://{base_host}:{port}/health"
+        ready = False
+        for _ in range(60):  # Up to 5 more minutes each
+            try:
+                resp = requests.get(health_url, timeout=5)
+                if resp.status_code == 200:
+                    logger.info(f"vLLM server {i+1}/{num_servers} ready at {url}")
+                    ready = True
+                    break
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+                pass
+            time.sleep(5)
+
+        if not ready:
+            # Clean up all started servers
+            for p, _ in servers:
+                if p is not None:
+                    p.terminate()
+                    p.wait()
+            raise RuntimeError(
+                f"vLLM server {i+1} on port {port} failed to start within 5 minutes"
+            )
+
+    logger.info(f"All {num_servers} vLLM server(s) ready")
+    return servers
 
 
 # ---------------------------------------------------------------------------
@@ -566,25 +609,31 @@ def run_experiments(
         vllm_max_tokens=vllm_max_tokens,
     )
 
-    # Ensure vLLM server is available (auto-start if needed).
-    # Handles both "server" (check existing) and "start_server" (always start).
+    # Ensure vLLM server(s) are available (auto-start if needed).
+    # Starts multiple servers across GPUs for parallel extraction.
     # After this block, mode is set to "server" so downstream code never tries
     # to start/stop servers internally (fixing premature cleanup bugs).
-    vllm_server_proc = None
+    vllm_server_urls = []
     if dgp_config.vllm_mode in ("server", "start_server"):
-        vllm_server_proc = _ensure_vllm_server(
+        servers = _ensure_vllm_servers(
             server_url=dgp_config.vllm_server_url,
             model_name=dgp_config.vllm_model_name,
+            devices=devices,
             tensor_parallel_size=dgp_config.vllm_tensor_parallel_size,
             download_dir=dgp_config.vllm_download_dir,
             max_model_len=dgp_config.vllm_max_model_len,
         )
+        vllm_server_urls = [url for _, url in servers]
+        vllm_server_procs = [proc for proc, _ in servers if proc is not None]
         dgp_config.vllm_mode = "server"
-        if vllm_server_proc is not None:
-            def _cleanup_vllm(proc=vllm_server_proc):
-                logger.info("Stopping auto-started vLLM server...")
-                proc.terminate()
-                proc.wait()
+        dgp_config.vllm_server_url = vllm_server_urls[0]  # For LLM generation tasks
+        if vllm_server_procs:
+            def _cleanup_vllm(procs=vllm_server_procs):
+                logger.info(f"Stopping {len(procs)} auto-started vLLM server(s)...")
+                for proc in procs:
+                    proc.terminate()
+                for proc in procs:
+                    proc.wait()
             atexit.register(_cleanup_vllm)
 
     # Save config
@@ -653,6 +702,7 @@ def run_experiments(
             generate_and_extract_confounders(
                 dgp_config, texts, dataset_path, dgp_index=0,
                 cache_dir=str(output_path),
+                server_urls=vllm_server_urls or None,
             )
 
     # Experiment loop
@@ -671,6 +721,7 @@ def run_experiments(
             confounders=shared_confounders,
             specs=shared_specs,
             extracted_df=shared_extracted_df,
+            server_urls=vllm_server_urls or None,
         )
         save_dgp_metadata(dgp, output_path, dgp_idx)
 

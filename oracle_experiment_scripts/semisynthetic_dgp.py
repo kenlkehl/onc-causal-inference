@@ -109,6 +109,63 @@ class SemiSyntheticDGP:
 
 
 # ---------------------------------------------------------------------------
+# Parallel extraction across multiple vLLM servers
+# ---------------------------------------------------------------------------
+
+def _parallel_extract_to_dataframe(
+    texts: List[str],
+    specs: List[ExplicitConfounderSpec],
+    server_urls: List[str],
+    model_name: str,
+    batch_size: int = 32,
+) -> pd.DataFrame:
+    """Extract confounders in parallel across multiple vLLM servers.
+
+    Splits texts across servers using interleaving for load balancing,
+    extracts in parallel using ThreadPoolExecutor (I/O-bound HTTP calls),
+    and reassembles results in original order.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    n_servers = len(server_urls)
+
+    # Interleave texts across servers for load balancing
+    chunks = [[] for _ in range(n_servers)]
+    chunk_indices = [[] for _ in range(n_servers)]
+    for i, text in enumerate(texts):
+        server_idx = i % n_servers
+        chunks[server_idx].append(text)
+        chunk_indices[server_idx].append(i)
+
+    logger.info(f"Parallel extraction: {len(texts)} texts across {n_servers} servers "
+                f"({', '.join(str(len(c)) for c in chunks)} texts each)")
+
+    def extract_chunk(args):
+        chunk_texts, server_url = args
+        extractor = VLLMConfounderExtractor(
+            specs=specs,
+            mode="server",
+            server_url=server_url,
+            model_name=model_name,
+            max_retries=3,
+            temperature=0.0,
+        )
+        return extractor.extract_to_dataframe(chunk_texts, batch_size=batch_size)
+
+    with ThreadPoolExecutor(max_workers=n_servers) as executor:
+        results = list(executor.map(extract_chunk, zip(chunks, server_urls)))
+
+    # Reassemble in original order
+    all_dfs = []
+    for indices, chunk_df in zip(chunk_indices, results):
+        chunk_df.index = indices
+        all_dfs.append(chunk_df)
+
+    merged = pd.concat(all_dfs).sort_index().reset_index(drop=True)
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # Confounder generation and extraction
 # ---------------------------------------------------------------------------
 
@@ -118,6 +175,7 @@ def generate_and_extract_confounders(
     dataset_path: str,
     dgp_index: int,
     cache_dir: Optional[str] = None,
+    server_urls: Optional[List[str]] = None,
 ) -> Tuple[List[Dict[str, Any]], List[ExplicitConfounderSpec], pd.DataFrame]:
     """Generate confounders via LLM and extract from real text.
 
@@ -190,25 +248,33 @@ def generate_and_extract_confounders(
             extractor.cleanup()
     else:
         # Step 4: Extract from real text
-        if extractor is not None:
-            # Reuse the already-started server, just update specs
-            extractor.specs = specs
-        else:
-            extractor = VLLMConfounderExtractor(
-                specs=specs,
-                mode=config.vllm_mode,
-                server_url=config.vllm_server_url,
+        if server_urls and len(server_urls) > 1:
+            # Parallel extraction across multiple vLLM servers
+            extracted_df = _parallel_extract_to_dataframe(
+                texts, specs, server_urls,
                 model_name=config.vllm_model_name,
-                tensor_parallel_size=config.vllm_tensor_parallel_size,
-                download_dir=config.vllm_download_dir,
-                max_model_len=config.vllm_max_model_len,
-                max_retries=3,
-                temperature=0.0,
+                batch_size=config.extraction_batch_size,
             )
-        extracted_df = extractor.extract_to_dataframe(
-            texts, batch_size=config.extraction_batch_size
-        )
-        extractor.cleanup()
+        else:
+            if extractor is not None:
+                # Reuse the already-started server, just update specs
+                extractor.specs = specs
+            else:
+                extractor = VLLMConfounderExtractor(
+                    specs=specs,
+                    mode=config.vllm_mode,
+                    server_url=config.vllm_server_url,
+                    model_name=config.vllm_model_name,
+                    tensor_parallel_size=config.vllm_tensor_parallel_size,
+                    download_dir=config.vllm_download_dir,
+                    max_model_len=config.vllm_max_model_len,
+                    max_retries=3,
+                    temperature=0.0,
+                )
+            extracted_df = extractor.extract_to_dataframe(
+                texts, batch_size=config.extraction_batch_size
+            )
+            extractor.cleanup()
 
         # Save to cache
         cache.save(dataset_path, cache_config, extracted_df)
@@ -857,6 +923,7 @@ def generate_dgp(
     confounders: Optional[List[Dict[str, Any]]] = None,
     specs: Optional[List[ExplicitConfounderSpec]] = None,
     extracted_df: Optional[pd.DataFrame] = None,
+    server_urls: Optional[List[str]] = None,
 ) -> SemiSyntheticDGP:
     """Generate a complete semi-synthetic DGP.
 
@@ -882,6 +949,7 @@ def generate_dgp(
     if confounders is None or specs is None or extracted_df is None:
         confounders, specs, extracted_df = generate_and_extract_confounders(
             config, texts, dataset_path, dgp_index, cache_dir=cache_dir,
+            server_urls=server_urls,
         )
 
     # Step 2: Compute summary statistics from extracted values
