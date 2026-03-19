@@ -147,7 +147,7 @@ def _parallel_extract_to_dataframe(
             mode="server",
             server_url=server_url,
             model_name=model_name,
-            max_retries=3,
+            max_retries=2,
             temperature=0.0,
         )
         return extractor.extract_to_dataframe(chunk_texts, batch_size=batch_size)
@@ -199,7 +199,7 @@ def generate_and_extract_confounders(
             tensor_parallel_size=config.vllm_tensor_parallel_size,
             download_dir=config.vllm_download_dir,
             max_model_len=config.vllm_max_model_len,
-            max_retries=3,
+            max_retries=2,
             temperature=0.0,
         )
         extractor._ensure_initialized()
@@ -268,7 +268,7 @@ def generate_and_extract_confounders(
                     tensor_parallel_size=config.vllm_tensor_parallel_size,
                     download_dir=config.vllm_download_dir,
                     max_model_len=config.vllm_max_model_len,
-                    max_retries=3,
+                    max_retries=2,
                     temperature=0.0,
                 )
             extracted_df = extractor.extract_to_dataframe(

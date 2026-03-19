@@ -380,7 +380,8 @@ class VLLMConfounderExtractor:
                     model=self.model_name,
                     messages=[{"role": "user", "content": prompt}],
                     temperature=self.temperature,
-                    max_tokens=self.max_tokens
+                    max_tokens=self.max_tokens,
+                    timeout=30.0,  # Hard per-request cap
                 )
                 content = response.choices[0].message.content
                 if content:
