@@ -286,7 +286,12 @@ class VLLMConfounderExtractor:
         except ImportError:
             raise ImportError("openai package required. Install with: pip install openai")
 
-        self._client = OpenAI(base_url=self.server_url, api_key=self.api_key)
+        self._client = OpenAI(
+            base_url=self.server_url,
+            api_key=self.api_key,
+            timeout=120.0,   # 2 min per request (default is 10 min)
+            max_retries=1,   # 1 internal retry (we have our own outer retry loop)
+        )
         logger.info(f"Connected to vLLM server at: {self.server_url}")
 
     def _start_server(self):
@@ -367,6 +372,7 @@ class VLLMConfounderExtractor:
     def _extract_single_server(self, text: str) -> Dict[str, ExplicitConfounderValue]:
         """Extract confounders from single text using server API."""
         prompt = build_extraction_prompt(text, self.specs)
+        best_result = None
 
         for attempt in range(self.max_retries):
             try:
@@ -379,13 +385,20 @@ class VLLMConfounderExtractor:
                 content = response.choices[0].message.content
                 if content:
                     result = parse_extraction_response(content, self.specs)
-                    # Check if all values were extracted successfully
+                    # Track best partial result (fewest missing values)
+                    if best_result is None or sum(
+                        1 for v in result.values() if not v.is_missing
+                    ) > sum(1 for v in best_result.values() if not v.is_missing):
+                        best_result = result
+                    # Return immediately if all values extracted
                     if all(not v.is_missing for v in result.values()):
                         return result
             except Exception as e:
                 logger.debug(f"Extraction attempt {attempt + 1} failed: {e}")
 
-        # Return missing for all after max retries
+        # Return best partial result, or all-missing if no successful parse
+        if best_result is not None:
+            return best_result
         return {
             spec.name: ExplicitConfounderValue(
                 name=spec.name, type=spec.type, value=None, is_missing=True
