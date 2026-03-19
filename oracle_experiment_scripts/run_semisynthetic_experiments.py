@@ -43,14 +43,16 @@ path ./synthetic_data/example_synthetic_datasets/ten_confounders_nsclc/dataset.p
 """
 
 import argparse
-import atexit
 import gc
 import hashlib
 import json
 import logging
+import multiprocessing as mp
 import os
+import queue
 import random
 import subprocess
+import threading
 import time
 import traceback
 from copy import deepcopy
@@ -85,6 +87,8 @@ from run_oracle_experiments import (
     _create_datasets_and_loaders,
     precompute_single_cache,
     load_single_gpu_store,
+    resolve_workers_per_gpu,
+    _open_cache_for_worker,
 )
 
 logging.basicConfig(
@@ -203,6 +207,28 @@ def _ensure_vllm_servers(
 
     logger.info(f"All {num_servers} vLLM server(s) ready")
     return servers
+
+
+def _shutdown_vllm_servers(procs: List[subprocess.Popen]):
+    """Terminate vLLM server processes and free GPU VRAM."""
+    if not procs:
+        return
+    logger.info(f"Shutting down {len(procs)} vLLM server(s) to free GPU VRAM...")
+    for proc in procs:
+        proc.terminate()
+    for proc in procs:
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            logger.warning(f"vLLM server pid={proc.pid} did not exit, killing...")
+            proc.kill()
+            proc.wait()
+    # Give CUDA time to release memory
+    time.sleep(5)
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    logger.info("vLLM servers stopped, GPU VRAM freed")
 
 
 # ---------------------------------------------------------------------------
@@ -540,6 +566,270 @@ def is_result_done(output_dir: Path, dgp_index: int, repeat_index: int, arm: str
 
 
 # ---------------------------------------------------------------------------
+# Text forest job description (serializable for multiprocessing)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class TextForestJob:
+    """A single text_forest experiment arm to run on a GPU."""
+    dgp_idx: int
+    repeat_idx: int
+    arm_name: str
+    fraction: float
+    seed: int
+    n_confounders_used: int
+    n_confounders_total: int
+    equation_mode: str
+    # Serialized data for the worker
+    sim_df_dict: Dict[str, Any]  # sim_df as dict for serialization
+    subset_spec_dicts: List[Dict[str, Any]]  # specs as dicts
+    confounder_cols: Optional[List[str]]
+    dgp_stats: Dict[str, Any]  # pre-computed dgp stats for format_result
+
+
+def _build_text_forest_jobs(
+    dgps: list,
+    df: pd.DataFrame,
+    num_repeats: int,
+    confounder_fractions: List[float],
+    equation_mode: str,
+    output_path: Path,
+    resume: bool,
+) -> List[TextForestJob]:
+    """Build all text_forest jobs across DGPs and repeats."""
+    jobs = []
+    for dgp_idx, dgp in enumerate(dgps):
+        for repeat_idx in range(num_repeats):
+            seed = 42 + dgp_idx * 1000 + repeat_idx
+            sim_df = prepare_simulation_dataset(dgp, df, seed)
+
+            # Pre-compute dgp_stats (avoids passing full DGP to workers)
+            n_patients = len(sim_df)
+            total_missing = 0
+            for spec in dgp.confounder_specs:
+                miss_col = f"explicit_conf_{spec.name}_missing"
+                if miss_col in dgp.extracted_df.columns:
+                    total_missing += dgp.extracted_df[miss_col].sum()
+            missingness_rate = total_missing / (n_patients * len(dgp.confounder_specs)) if dgp.confounder_specs else 0
+            dgp_stats = {
+                "extraction_missingness_rate": float(missingness_rate),
+                "simulated_treatment_rate": float(sim_df['treatment_indicator'].mean()),
+                "simulated_outcome_rate": float(sim_df['outcome_indicator'].mean()),
+                "true_ate": float(sim_df['true_ite_prob'].mean()),
+                "true_ite_std": float(sim_df['true_ite_prob'].std()),
+            }
+
+            for fraction in confounder_fractions:
+                n_subset = round(len(dgp.confounder_specs) * fraction)
+                arm_name = f"text_forest_{fraction:.2f}"
+
+                if resume and is_result_done(output_path, dgp_idx, repeat_idx, arm_name):
+                    continue
+
+                subset_specs = select_confounder_subset(
+                    dgp.confounder_specs, n_subset, seed=seed
+                )
+                confounder_cols = get_confounder_cols(subset_specs, dgp.extracted_df)
+
+                jobs.append(TextForestJob(
+                    dgp_idx=dgp_idx,
+                    repeat_idx=repeat_idx,
+                    arm_name=arm_name,
+                    fraction=fraction,
+                    seed=seed,
+                    n_confounders_used=n_subset,
+                    n_confounders_total=len(dgp.confounder_specs),
+                    equation_mode=equation_mode,
+                    sim_df_dict=sim_df.to_dict(orient='list'),
+                    subset_spec_dicts=[asdict(s) for s in subset_specs] if subset_specs else [],
+                    confounder_cols=confounder_cols,
+                    dgp_stats=dgp_stats,
+                ))
+    return jobs
+
+
+def _run_text_forest_job(
+    job: TextForestJob,
+    device: str,
+    output_path: Path,
+    flp_model_name: str,
+    flp_max_length: int,
+    flp_downprojection_dim: int,
+    flp_projection_dim: int,
+    epochs: int,
+    batch_size: int,
+    learning_rate: float,
+    n_folds: int,
+    cf_n_estimators: int,
+    cf_min_samples_leaf: int,
+    hidden_state_cache=None,
+    gpu_store=None,
+) -> Optional[Dict[str, Any]]:
+    """Execute a single text_forest job. Returns formatted result or None on failure."""
+    from oci.config import ExplicitConfounderSpec
+
+    sim_df = pd.DataFrame(job.sim_df_dict)
+    subset_specs = [ExplicitConfounderSpec(**d) for d in job.subset_spec_dicts] if job.subset_spec_dicts else None
+
+    logger.info(
+        f"  Running {job.arm_name} (text + {job.n_confounders_used} confounders) "
+        f"dgp={job.dgp_idx} repeat={job.repeat_idx} on {device}..."
+    )
+    try:
+        result = run_text_forest_arm(
+            df=sim_df,
+            confounder_specs=subset_specs,
+            confounder_cols=job.confounder_cols,
+            seed=job.seed,
+            device=device,
+            flp_model_name=flp_model_name,
+            flp_max_length=flp_max_length,
+            flp_downprojection_dim=flp_downprojection_dim,
+            flp_projection_dim=flp_projection_dim,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            n_folds=n_folds,
+            cf_n_estimators=cf_n_estimators,
+            cf_min_samples_leaf=cf_min_samples_leaf,
+            hidden_state_cache=hidden_state_cache,
+            gpu_store=gpu_store,
+        )
+        formatted = {
+            "dgp_index": job.dgp_idx,
+            "repeat_index": job.repeat_idx,
+            "arm": job.arm_name,
+            "uses_text": True,
+            "n_confounders_used": job.n_confounders_used,
+            "n_confounders_total": job.n_confounders_total,
+            "confounder_fraction": job.fraction,
+            "equation_mode": job.equation_mode,
+            "metrics": result.get('metrics', {}),
+            "n_samples": result.get('n_samples', len(sim_df)),
+            "dgp_stats": job.dgp_stats,
+        }
+        save_result(formatted, output_path)
+        ite_corr = result.get('metrics', {}).get('ite_corr', 'N/A')
+        logger.info(f"    {job.arm_name} dgp={job.dgp_idx} repeat={job.repeat_idx} ITE corr: {ite_corr}")
+        return formatted
+    except Exception as e:
+        logger.error(f"    {job.arm_name} dgp={job.dgp_idx} repeat={job.repeat_idx} Failed: {e}")
+        traceback.print_exc()
+        return None
+
+
+def semisynthetic_worker_process_fn(
+    device: str,
+    job_queue: mp.Queue,
+    progress_queue: mp.Queue,
+    output_dir: str,
+    cache_hash: str,
+    cache_info: Optional[dict],
+    use_gpu_cache: bool,
+    # Model hyperparams passed as dict
+    model_kwargs: Dict[str, Any],
+):
+    """Worker process for text_forest jobs on a single GPU (multiprocessing mode)."""
+    from oci.models.hidden_state_cache import HiddenStateCache
+    from oci.models.gpu_hidden_state_store import GPUHiddenStateStore
+
+    output_path = Path(output_dir)
+    torch.set_default_dtype(torch.float32)
+
+    hidden_state_cache = None
+    gpu_store = None
+
+    if cache_info and cache_hash != "__no_cache__":
+        cache = _open_cache_for_worker(cache_hash, cache_info)
+        hidden_state_cache = cache
+
+        if use_gpu_cache:
+            store = load_single_gpu_store(cache, cache_info, device)
+            if store is not None:
+                gpu_store = store
+
+    logger.info(f"Text forest worker started on {device} (pid={os.getpid()})")
+
+    while True:
+        try:
+            job = job_queue.get(timeout=2)
+        except Exception:
+            break
+
+        result = _run_text_forest_job(
+            job=job,
+            device=device,
+            output_path=output_path,
+            hidden_state_cache=hidden_state_cache,
+            gpu_store=gpu_store,
+            **model_kwargs,
+        )
+        progress_queue.put(("done" if result else "error", job.arm_name, result))
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    # Cleanup
+    if gpu_store is not None:
+        gpu_store.free()
+    if hidden_state_cache is not None:
+        hidden_state_cache.close()
+
+    logger.info(f"Text forest worker on {device} (pid={os.getpid()}) finished")
+
+
+def semisynthetic_worker_thread(
+    device: str,
+    job_queue: queue.Queue,
+    all_results: list,
+    output_path: Path,
+    lock: threading.Lock,
+    progress_bar: tqdm,
+    hidden_state_cache,
+    gpu_store,
+    model_kwargs: Dict[str, Any],
+):
+    """Worker thread for text_forest jobs on a single GPU (non-cached mode)."""
+    while True:
+        try:
+            job = job_queue.get(timeout=1)
+        except queue.Empty:
+            break
+
+        try:
+            result = _run_text_forest_job(
+                job=job,
+                device=device,
+                output_path=output_path,
+                hidden_state_cache=hidden_state_cache,
+                gpu_store=gpu_store,
+                **model_kwargs,
+            )
+            with lock:
+                if result:
+                    all_results.append(result)
+                progress_bar.update(1)
+                if result:
+                    ite_corr = result.get('metrics', {}).get('ite_corr', 'N/A')
+                    progress_bar.set_postfix_str(
+                        f"{job.arm_name} ITE corr: {ite_corr:.3f}" if isinstance(ite_corr, float) else f"{job.arm_name}"
+                    )
+        except Exception as e:
+            with lock:
+                progress_bar.update(1)
+                progress_bar.set_postfix_str(f"Error: {str(e)[:50]}")
+            logger.error(f"Job {job.arm_name} failed: {e}")
+            traceback.print_exc()
+        finally:
+            job_queue.task_done()
+
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+
+# ---------------------------------------------------------------------------
 # Main experiment loop
 # ---------------------------------------------------------------------------
 
@@ -581,13 +871,23 @@ def run_experiments(
     cache: bool = False,
     gpu_cache: bool = False,
     resume: bool = False,
+    workers_per_gpu: str = "auto",
 ):
-    """Main experiment runner."""
+    """Main experiment runner.
+
+    Phases:
+    1. Start vLLM servers, generate all DGPs (confounders + equations)
+    2. Shut down vLLM servers to free GPU VRAM
+    3. Pre-cache frozen LLM hidden states (if --cache/--gpu-cache)
+    4. Run CPU-only arms (confounder_forest, best_attainable)
+    5. Run GPU arms (text_forest) in parallel across all devices
+    """
     if confounder_fractions is None:
         confounder_fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
     if devices is None:
         devices = ["cuda:0"]
 
+    use_cache = cache or gpu_cache
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
@@ -609,11 +909,25 @@ def run_experiments(
         vllm_max_tokens=vllm_max_tokens,
     )
 
-    # Ensure vLLM server(s) are available (auto-start if needed).
-    # Starts multiple servers across GPUs for parallel extraction.
-    # After this block, mode is set to "server" so downstream code never tries
-    # to start/stop servers internally (fixing premature cleanup bugs).
+    # Load real dataset
+    dp = Path(dataset_path)
+    if dp.is_dir():
+        parquet_file = dp / "dataset.parquet"
+    else:
+        parquet_file = dp
+    df = pd.read_parquet(parquet_file)
+    texts = df['clinical_text'].tolist()
+    logger.info(f"Loaded dataset: {len(df)} patients from {parquet_file}")
+
+    # =====================================================================
+    # PHASE 1: Start vLLM servers and generate ALL DGPs
+    # =====================================================================
+    logger.info(f"\n{'='*60}")
+    logger.info("PHASE 1: DGP generation (vLLM servers running)")
+    logger.info(f"{'='*60}")
+
     vllm_server_urls = []
+    vllm_server_procs = []
     if dgp_config.vllm_mode in ("server", "start_server"):
         servers = _ensure_vllm_servers(
             server_url=dgp_config.vllm_server_url,
@@ -626,17 +940,49 @@ def run_experiments(
         vllm_server_urls = [url for _, url in servers]
         vllm_server_procs = [proc for proc, _ in servers if proc is not None]
         dgp_config.vllm_mode = "server"
-        dgp_config.vllm_server_url = vllm_server_urls[0]  # For LLM generation tasks
-        if vllm_server_procs:
-            def _cleanup_vllm(procs=vllm_server_procs):
-                logger.info(f"Stopping {len(procs)} auto-started vLLM server(s)...")
-                for proc in procs:
-                    proc.terminate()
-                for proc in procs:
-                    proc.wait()
-            atexit.register(_cleanup_vllm)
+        dgp_config.vllm_server_url = vllm_server_urls[0]
 
-    # Save config
+    # Generate shared confounders if vary_confounders is False
+    shared_confounders = None
+    shared_specs = None
+    shared_extracted_df = None
+
+    if not dgp_config.should_vary_confounders:
+        logger.info("Generating shared confounders (vary_confounders=False)...")
+        shared_confounders, shared_specs, shared_extracted_df = \
+            generate_and_extract_confounders(
+                dgp_config, texts, dataset_path, dgp_index=0,
+                cache_dir=str(output_path),
+                server_urls=vllm_server_urls or None,
+            )
+
+    # Pre-generate ALL DGPs
+    dgps = []
+    for dgp_idx in range(num_dgps):
+        logger.info(f"\nGenerating DGP {dgp_idx + 1}/{num_dgps}...")
+        dgp = generate_dgp(
+            dgp_config, texts, df, dataset_path, dgp_idx,
+            cache_dir=str(output_path),
+            confounders=shared_confounders,
+            specs=shared_specs,
+            extracted_df=shared_extracted_df,
+            server_urls=vllm_server_urls or None,
+        )
+        save_dgp_metadata(dgp, output_path, dgp_idx)
+        dgps.append(dgp)
+    logger.info(f"All {num_dgps} DGP(s) generated")
+
+    # =====================================================================
+    # PHASE 2: Shut down vLLM servers to free GPU VRAM
+    # =====================================================================
+    if vllm_server_procs:
+        logger.info(f"\n{'='*60}")
+        logger.info("PHASE 2: Shutting down vLLM servers")
+        logger.info(f"{'='*60}")
+        _shutdown_vllm_servers(vllm_server_procs)
+        vllm_server_procs = []
+
+    # Save config (after DGP generation so dgp_config reflects final state)
     config_dict = {
         "dataset_path": dataset_path,
         "clinical_question": clinical_question,
@@ -656,22 +1002,18 @@ def run_experiments(
     with open(output_path / "config.json", "w") as f:
         json.dump(config_dict, f, indent=2, default=str)
 
-    # Load real dataset
-    dp = Path(dataset_path)
-    if dp.is_dir():
-        parquet_file = dp / "dataset.parquet"
-    else:
-        parquet_file = dp
-    df = pd.read_parquet(parquet_file)
-    texts = df['clinical_text'].tolist()
-    logger.info(f"Loaded dataset: {len(df)} patients from {parquet_file}")
-
-    # Pre-cache frozen LLM hidden states (shared across all DGPs/repeats)
-    device = devices[0]
+    # =====================================================================
+    # PHASE 3: Pre-cache frozen LLM hidden states (all GPUs free now)
+    # =====================================================================
     hidden_state_cache = None
     gpu_store = None
+    cache_info = None
 
-    if cache or gpu_cache:
+    if use_cache:
+        logger.info(f"\n{'='*60}")
+        logger.info("PHASE 3: Pre-caching frozen LLM hidden states")
+        logger.info(f"{'='*60}")
+
         cache_info = dict(
             parquet_file=parquet_file,
             model_name=flp_model_name,
@@ -682,54 +1024,35 @@ def run_experiments(
         hs_cache = precompute_single_cache(cache_info, devices)
 
         if gpu_cache:
-            gpu_store = load_single_gpu_store(hs_cache, cache_info, device)
-            if gpu_store is not None:
-                logger.info(f"GPU cache loaded: {gpu_store.num_samples} samples on {device}")
+            # For threading mode, load GPU store on first device
+            # For multiprocessing mode, workers load their own
+            if not use_cache or workers_per_gpu == "1":
+                gpu_store = load_single_gpu_store(hs_cache, cache_info, devices[0])
+                if gpu_store is not None:
+                    logger.info(f"GPU cache loaded: {gpu_store.num_samples} samples on {devices[0]}")
+                else:
+                    logger.info("GPU cache failed, falling back to disk cache")
+                    hidden_state_cache = hs_cache
             else:
-                logger.info("GPU cache failed, falling back to disk cache")
-                hidden_state_cache = hs_cache
+                # Workers will load their own GPU stores
+                hs_cache.close()
+                del hs_cache
         else:
             hidden_state_cache = hs_cache
 
-    # Generate shared confounders if vary_confounders is False
-    shared_confounders = None
-    shared_specs = None
-    shared_extracted_df = None
+    # =====================================================================
+    # PHASE 4: Run CPU-only arms (confounder_forest, best_attainable)
+    # =====================================================================
+    logger.info(f"\n{'='*60}")
+    logger.info("PHASE 4: Running CPU-only arms (confounder_forest, best_attainable)")
+    logger.info(f"{'='*60}")
 
-    if not dgp_config.should_vary_confounders:
-        logger.info("Generating shared confounders (vary_confounders=False)...")
-        shared_confounders, shared_specs, shared_extracted_df = \
-            generate_and_extract_confounders(
-                dgp_config, texts, dataset_path, dgp_index=0,
-                cache_dir=str(output_path),
-                server_urls=vllm_server_urls or None,
-            )
-
-    # Experiment loop
     all_results = []
     total_arms = 0
 
-    for dgp_idx in range(num_dgps):
-        logger.info(f"\n{'='*60}")
-        logger.info(f"DGP {dgp_idx + 1}/{num_dgps}")
-        logger.info(f"{'='*60}")
-
-        # Generate DGP
-        dgp = generate_dgp(
-            dgp_config, texts, df, dataset_path, dgp_idx,
-            cache_dir=str(output_path),
-            confounders=shared_confounders,
-            specs=shared_specs,
-            extracted_df=shared_extracted_df,
-            server_urls=vllm_server_urls or None,
-        )
-        save_dgp_metadata(dgp, output_path, dgp_idx)
-
+    for dgp_idx, dgp in enumerate(dgps):
         for repeat_idx in range(num_repeats):
             seed = 42 + dgp_idx * 1000 + repeat_idx
-            logger.info(f"\n--- DGP {dgp_idx}, Repeat {repeat_idx + 1}/{num_repeats} (seed={seed}) ---")
-
-            # Simulate T/Y
             sim_df = prepare_simulation_dataset(dgp, df, seed)
 
             # --- Confounder-only arms ---
@@ -745,11 +1068,10 @@ def run_experiments(
                     continue
 
                 if n_subset == 0:
-                    # No confounders = no features -> skip
                     logger.info(f"  Skipping {arm_name} (0 confounders)")
                     continue
 
-                logger.info(f"  Running {arm_name} ({n_subset} confounders)...")
+                logger.info(f"  Running {arm_name} ({n_subset} confounders) dgp={dgp_idx} repeat={repeat_idx}...")
                 try:
                     result = run_confounder_forest_arm(
                         sim_df, subset_specs,
@@ -776,7 +1098,7 @@ def run_experiments(
             # --- Best attainable (all confounders) ---
             arm_name = "best_attainable"
             if not (resume and is_result_done(output_path, dgp_idx, repeat_idx, arm_name)):
-                logger.info(f"  Running {arm_name} (all {len(dgp.confounder_specs)} confounders)...")
+                logger.info(f"  Running {arm_name} (all {len(dgp.confounder_specs)} confounders) dgp={dgp_idx} repeat={repeat_idx}...")
                 try:
                     result = run_confounder_forest_arm(
                         sim_df, dgp.confounder_specs,
@@ -801,68 +1123,159 @@ def run_experiments(
                     logger.error(f"    Failed: {e}")
                     traceback.print_exc()
 
-            # --- Text + confounder arms ---
-            for fraction in confounder_fractions:
-                n_subset = round(len(dgp.confounder_specs) * fraction)
-                subset_specs = select_confounder_subset(
-                    dgp.confounder_specs, n_subset, seed=seed
-                )
-                arm_name = f"text_forest_{fraction:.2f}"
+    logger.info(f"CPU arms complete: {total_arms} done")
 
-                if resume and is_result_done(output_path, dgp_idx, repeat_idx, arm_name):
-                    logger.info(f"  Skipping {arm_name} (already done)")
-                    continue
+    # =====================================================================
+    # PHASE 5: Run text_forest arms in parallel across GPUs
+    # =====================================================================
+    logger.info(f"\n{'='*60}")
+    logger.info("PHASE 5: Running text_forest arms (parallel across GPUs)")
+    logger.info(f"{'='*60}")
 
-                confounder_cols = get_confounder_cols(
-                    subset_specs, dgp.extracted_df
-                )
+    # Build all text_forest jobs
+    text_forest_jobs = _build_text_forest_jobs(
+        dgps=dgps,
+        df=df,
+        num_repeats=num_repeats,
+        confounder_fractions=confounder_fractions,
+        equation_mode=equation_mode,
+        output_path=output_path,
+        resume=resume,
+    )
 
-                logger.info(
-                    f"  Running {arm_name} (text + {n_subset} confounders) "
-                    f"on {device}..."
-                )
+    if not text_forest_jobs:
+        logger.info("No text_forest jobs to run (all done or skipped)")
+    else:
+        # Model kwargs shared by all jobs
+        model_kwargs = dict(
+            flp_model_name=flp_model_name,
+            flp_max_length=flp_max_length,
+            flp_downprojection_dim=flp_downprojection_dim,
+            flp_projection_dim=flp_projection_dim,
+            epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            n_folds=n_folds,
+            cf_n_estimators=cf_n_estimators,
+            cf_min_samples_leaf=cf_min_samples_leaf,
+        )
+
+        logger.info(f"{len(text_forest_jobs)} text_forest jobs across {len(devices)} GPU(s) "
+                     f"(workers-per-gpu: {workers_per_gpu})")
+
+        if use_cache:
+            # === MULTIPROCESSING PATH (cached mode) ===
+            from oci.models.hidden_state_cache import HiddenStateCache
+
+            # Compute cache hash for workers
+            cache_hash = HiddenStateCache.compute_cache_hash(
+                flp_model_name, flp_max_length, str(parquet_file), None,
+                downprojection_dim=flp_downprojection_dim,
+            )
+            serializable_cache_info = {
+                k: str(v) if isinstance(v, Path) else v
+                for k, v in cache_info.items()
+            }
+
+            # Close main-process cache handles (workers reopen independently)
+            if hidden_state_cache is not None:
+                hidden_state_cache.close()
+                hidden_state_cache = None
+            if gpu_store is not None:
+                gpu_store.free()
+                gpu_store = None
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+            ctx = mp.get_context('spawn')
+            job_queue = ctx.Queue()
+            progress_queue = ctx.Queue()
+
+            for job in text_forest_jobs:
+                job_queue.put(job)
+
+            # Spawn worker processes
+            n_workers_per_gpu = resolve_workers_per_gpu(workers_per_gpu, devices[0], use_cache)
+            processes = []
+            for device in devices:
+                for _ in range(n_workers_per_gpu):
+                    p = ctx.Process(
+                        target=semisynthetic_worker_process_fn,
+                        args=(device, job_queue, progress_queue, str(output_path),
+                              cache_hash, serializable_cache_info, gpu_cache,
+                              model_kwargs),
+                        name=f"worker-{device}",
+                    )
+                    p.start()
+                    processes.append(p)
+
+            logger.info(f"Spawned {len(processes)} worker processes "
+                         f"({n_workers_per_gpu} per GPU)")
+
+            # Monitor progress
+            progress_bar = tqdm(total=len(text_forest_jobs), desc="Text forest arms")
+            completed = 0
+            while completed < len(text_forest_jobs):
+                alive = [p for p in processes if p.is_alive()]
+                if not alive and completed < len(text_forest_jobs):
+                    logger.error(f"All workers died with {len(text_forest_jobs) - completed} jobs remaining")
+                    break
+
                 try:
-                    result = run_text_forest_arm(
-                        df=sim_df,
-                        confounder_specs=subset_specs if subset_specs else None,
-                        confounder_cols=confounder_cols,
-                        seed=seed,
-                        device=device,
-                        flp_model_name=flp_model_name,
-                        flp_max_length=flp_max_length,
-                        flp_downprojection_dim=flp_downprojection_dim,
-                        flp_projection_dim=flp_projection_dim,
-                        epochs=epochs,
-                        batch_size=batch_size,
-                        learning_rate=learning_rate,
-                        n_folds=n_folds,
-                        cf_n_estimators=cf_n_estimators,
-                        cf_min_samples_leaf=cf_min_samples_leaf,
-                        hidden_state_cache=hidden_state_cache,
-                        gpu_store=gpu_store,
-                    )
-                    formatted = format_result(
-                        result, dgp_idx, repeat_idx, arm_name,
-                        uses_text=True, n_confounders_used=n_subset,
-                        n_confounders_total=len(dgp.confounder_specs),
-                        confounder_fraction=fraction,
-                        equation_mode=equation_mode, dgp=dgp, sim_df=sim_df,
-                    )
-                    save_result(formatted, output_path)
-                    all_results.append(formatted)
-                    total_arms += 1
-                    ite_corr = result.get('metrics', {}).get('ite_corr', 'N/A')
-                    logger.info(f"    ITE corr: {ite_corr}")
-                except Exception as e:
-                    logger.error(f"    Failed: {e}")
-                    traceback.print_exc()
+                    status, arm_name, result = progress_queue.get(timeout=5)
+                    completed += 1
+                    progress_bar.update(1)
+                    if result:
+                        all_results.append(result)
+                        total_arms += 1
+                        ite_corr = result.get('metrics', {}).get('ite_corr', 'N/A')
+                        progress_bar.set_postfix_str(
+                            f"{arm_name} ITE corr: {ite_corr:.3f}" if isinstance(ite_corr, float) else arm_name
+                        )
+                except Exception:
+                    pass  # timeout, retry
 
-                # Clean up GPU memory
-                gc.collect()
-                if torch.cuda.is_available():
-                    torch.cuda.empty_cache()
+            progress_bar.close()
 
+            # Join workers
+            for p in processes:
+                p.join(timeout=30)
+                if p.is_alive():
+                    logger.warning(f"Worker {p.name} did not exit cleanly, terminating")
+                    p.terminate()
+
+        else:
+            # === THREADING PATH (non-cached / live LLM mode) ===
+            job_queue_t = queue.Queue()
+            for job in text_forest_jobs:
+                job_queue_t.put(job)
+
+            lock = threading.Lock()
+            progress_bar = tqdm(total=len(text_forest_jobs), desc="Text forest arms")
+
+            threads = []
+            for device in devices:
+                t = threading.Thread(
+                    target=semisynthetic_worker_thread,
+                    args=(device, job_queue_t, all_results, output_path, lock,
+                          progress_bar, hidden_state_cache, gpu_store, model_kwargs),
+                    name=f"worker-{device}",
+                )
+                t.start()
+                threads.append(t)
+
+            for t in threads:
+                t.join()
+
+            progress_bar.close()
+            # Count text_forest results added during threading
+            total_arms = len(all_results)
+
+    # =====================================================================
     # Aggregate results
+    # =====================================================================
     logger.info(f"\n{'='*60}")
     logger.info(f"Completed {total_arms} experiment arms")
     logger.info(f"{'='*60}")
@@ -965,8 +1378,21 @@ def main():
                         help="Keep hidden states on GPU VRAM")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from checkpoint (skip completed arms)")
+    parser.add_argument("--workers-per-gpu", type=str, default="auto",
+                        help="Concurrent text_forest workers per GPU: 'auto' or integer "
+                             "(default: auto). Only effective with --cache/--gpu-cache; "
+                             "non-cached mode always uses 1.")
 
     args = parser.parse_args()
+
+    # Validate --workers-per-gpu
+    if args.workers_per_gpu != "auto":
+        try:
+            wpg = int(args.workers_per_gpu)
+            if wpg < 1:
+                parser.error("--workers-per-gpu must be >= 1")
+        except ValueError:
+            parser.error(f"--workers-per-gpu must be 'auto' or an integer, got '{args.workers_per_gpu}'")
 
     run_experiments(
         dataset_path=args.dataset_path,
@@ -1002,6 +1428,7 @@ def main():
         cache=args.cache,
         gpu_cache=args.gpu_cache,
         resume=args.resume,
+        workers_per_gpu=args.workers_per_gpu,
     )
 
 
