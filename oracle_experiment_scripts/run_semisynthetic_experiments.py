@@ -43,12 +43,15 @@ path ./synthetic_data/example_synthetic_datasets/ten_confounders_nsclc/dataset.p
 """
 
 import argparse
+import atexit
 import gc
 import hashlib
 import json
 import logging
 import os
 import random
+import subprocess
+import time
 import traceback
 from copy import deepcopy
 from dataclasses import dataclass, field, asdict
@@ -89,6 +92,74 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# vLLM server auto-start
+# ---------------------------------------------------------------------------
+
+def _ensure_vllm_server(
+    server_url: str,
+    model_name: str,
+    tensor_parallel_size: int = 1,
+    download_dir: Optional[str] = None,
+    max_model_len: Optional[int] = None,
+) -> Optional[subprocess.Popen]:
+    """Check if a vLLM server is reachable; start one if not.
+
+    Returns:
+        subprocess.Popen if a server was started (caller must terminate),
+        or None if a server was already running.
+    """
+    import requests
+
+    base_url = server_url.rstrip('/')
+    if base_url.endswith('/v1'):
+        base_url = base_url[:-3]
+    health_url = base_url + '/health'
+
+    # Check if server is already running
+    try:
+        resp = requests.get(health_url, timeout=5)
+        if resp.status_code == 200:
+            logger.info(f"vLLM server already running at {server_url}")
+            return None
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+        pass
+
+    # Start a server
+    logger.info(f"No vLLM server found at {server_url}, starting one...")
+    cmd = [
+        "python", "-m", "vllm.entrypoints.openai.api_server",
+        "--model", model_name,
+        "--tensor-parallel-size", str(tensor_parallel_size),
+        "--gpu-memory-utilization", "0.9",
+        "--trust-remote-code",
+    ]
+    if download_dir:
+        cmd.extend(["--download-dir", download_dir])
+    if max_model_len:
+        cmd.extend(["--max-model-len", str(max_model_len)])
+
+    logger.info(f"Starting vLLM: {' '.join(cmd)}")
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    # Wait for server to be ready
+    logger.info("Waiting for vLLM server to start...")
+    time.sleep(30)
+    for _ in range(60):  # Up to 5 more minutes
+        try:
+            resp = requests.get(health_url, timeout=5)
+            if resp.status_code == 200:
+                logger.info("vLLM server is ready")
+                return proc
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            pass
+        time.sleep(5)
+
+    proc.terminate()
+    proc.wait()
+    raise RuntimeError(f"vLLM server failed to start within 5 minutes")
 
 
 # ---------------------------------------------------------------------------
@@ -494,6 +565,27 @@ def run_experiments(
         vllm_max_model_len=vllm_max_model_len,
         vllm_max_tokens=vllm_max_tokens,
     )
+
+    # Ensure vLLM server is available (auto-start if needed).
+    # Handles both "server" (check existing) and "start_server" (always start).
+    # After this block, mode is set to "server" so downstream code never tries
+    # to start/stop servers internally (fixing premature cleanup bugs).
+    vllm_server_proc = None
+    if dgp_config.vllm_mode in ("server", "start_server"):
+        vllm_server_proc = _ensure_vllm_server(
+            server_url=dgp_config.vllm_server_url,
+            model_name=dgp_config.vllm_model_name,
+            tensor_parallel_size=dgp_config.vllm_tensor_parallel_size,
+            download_dir=dgp_config.vllm_download_dir,
+            max_model_len=dgp_config.vllm_max_model_len,
+        )
+        dgp_config.vllm_mode = "server"
+        if vllm_server_proc is not None:
+            def _cleanup_vllm(proc=vllm_server_proc):
+                logger.info("Stopping auto-started vLLM server...")
+                proc.terminate()
+                proc.wait()
+            atexit.register(_cleanup_vllm)
 
     # Save config
     config_dict = {
