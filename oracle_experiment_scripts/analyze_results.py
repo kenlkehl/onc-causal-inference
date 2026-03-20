@@ -219,10 +219,14 @@ def analyze(df: pd.DataFrame) -> list[str]:
     lines = [
         f"Total experiments completed: {len(df)}",
         f"Datasets represented: {sorted(df['dataset_name'].unique())}",
-        f"R-learner modes: {sorted(df['rlearner_mode'].unique())}",
-        f"CLAM enabled: {sorted(df['clam_enabled'].unique())}",
-        f"Explicit confounders: {sorted(df['use_explicit_confounders'].unique())}",
     ]
+    if 'model_type' in df.columns:
+        lines.append(f"Model types: {sorted(df['model_type'].unique())}")
+    if 'rlearner_mode' in df.columns:
+        lines.append(f"R-learner modes: {sorted(df['rlearner_mode'].unique())}")
+    if 'clam_enabled' in df.columns:
+        lines.append(f"CLAM enabled: {sorted(df['clam_enabled'].unique())}")
+    lines.append(f"Explicit confounders: {sorted(df['use_explicit_confounders'].unique())}")
     if 'outcome_type' in df.columns:
         lines.append(f"Outcome types: {sorted(df['outcome_type'].unique())}")
     lines += [
@@ -257,28 +261,31 @@ def analyze(df: pd.DataFrame) -> list[str]:
     output.extend(section("0. OVERALL SUMMARY", lines))
 
     # ---------------------------------------------------------------
-    # 1. By rlearner_mode
-    # NOTE: This is the most important factor observed so far.
-    # "dual" mode has been catastrophically worse (ITE corr ~0.13 vs ~0.49
-    # for shared). If this persists with more data, dual mode has a
-    # fundamental problem: the effect extractor doesn't get enough gradient
-    # signal from R-loss alone to learn useful text representations.
+    # 1. By model type / rlearner_mode
     # ---------------------------------------------------------------
-    lines = [
-        group_summary(df, ["rlearner_mode"]),
-        "",
-        "Pairwise t-tests on ite_corr:",
-    ] + pairwise_ttest(df, "rlearner_mode", "ite_corr")
-    if "ite_spearman_corr" in df.columns:
+    primary_group = (
+        "rlearner_mode" if "rlearner_mode" in df.columns
+        else "model_type" if "model_type" in df.columns
+        else None
+    )
+    if primary_group and df[primary_group].nunique() > 1:
+        lines = [
+            group_summary(df, [primary_group]),
+            "",
+            "Pairwise t-tests on ite_corr:",
+        ] + pairwise_ttest(df, primary_group, "ite_corr")
+        if "ite_spearman_corr" in df.columns:
+            lines += [
+                "",
+                "Pairwise t-tests on ite_spearman_corr:",
+            ] + pairwise_ttest(df, primary_group, "ite_spearman_corr")
         lines += [
             "",
-            "Pairwise t-tests on ite_spearman_corr:",
-        ] + pairwise_ttest(df, "rlearner_mode", "ite_spearman_corr")
-    lines += [
-        "",
-        "Pairwise t-tests on ate_bias:",
-    ] + pairwise_ttest(df, "rlearner_mode", "ate_bias")
-    output.extend(section("1. BY R-LEARNER MODE", lines))
+            "Pairwise t-tests on ate_bias:",
+        ] + pairwise_ttest(df, primary_group, "ate_bias")
+    else:
+        lines = ["Only one model type — skipping comparison."]
+    output.extend(section(f"1. BY {(primary_group or 'MODEL').upper()}", lines))
 
     # ---------------------------------------------------------------
     # 2. By dataset
@@ -311,49 +318,49 @@ def analyze(df: pd.DataFrame) -> list[str]:
     output.extend(section("3. BY EXPLICIT CONFOUNDERS (overall)", lines))
 
     # ---------------------------------------------------------------
-    # 4. Explicit confounders WITHIN shared mode only
-    # NOTE: This is the cleanest comparison. Shared mode is the best
-    # performer, so we isolate the effect of confounders here.
-    # If confounders hurt even here, the integration mechanism is the problem.
-    # If confounders help here but hurt overall, it's because they interact
-    # badly with dual mode specifically.
+    # 4. Explicit confounders within best-performing model type
     # ---------------------------------------------------------------
-    shared_df = df[df["rlearner_mode"] == "shared"]
-    if len(shared_df) > 0:
-        lines = [
-            f"(Restricted to rlearner_mode='shared', n={len(shared_df)})",
-            "",
-            group_summary(shared_df, ["use_explicit_confounders"]),
-            "",
-            "Pairwise t-tests on ite_corr:",
-        ] + pairwise_ttest(shared_df, "use_explicit_confounders", "ite_corr")
-        if "ite_spearman_corr" in shared_df.columns:
-            lines += [
+    if primary_group and primary_group in df.columns:
+        # Pick the model type with highest mean ite_corr
+        best_type = df.groupby(primary_group)["ite_corr"].mean().idxmax()
+        sub_df = df[df[primary_group] == best_type]
+        if len(sub_df) > 0 and sub_df["use_explicit_confounders"].nunique() > 1:
+            lines = [
+                f"(Restricted to {primary_group}='{best_type}', n={len(sub_df)})",
                 "",
-                "Pairwise t-tests on ite_spearman_corr:",
-            ] + pairwise_ttest(shared_df, "use_explicit_confounders", "ite_spearman_corr")
+                group_summary(sub_df, ["use_explicit_confounders"]),
+                "",
+                "Pairwise t-tests on ite_corr:",
+            ] + pairwise_ttest(sub_df, "use_explicit_confounders", "ite_corr")
+            if "ite_spearman_corr" in sub_df.columns:
+                lines += [
+                    "",
+                    "Pairwise t-tests on ite_spearman_corr:",
+                ] + pairwise_ttest(sub_df, "use_explicit_confounders", "ite_spearman_corr")
+        else:
+            lines = [f"No variation in use_explicit_confounders within {best_type}."]
     else:
-        lines = ["No shared-mode experiments yet."]
+        lines = ["No primary grouping column available."]
     output.extend(
-        section("4. EXPLICIT CONFOUNDERS WITHIN SHARED MODE", lines)
+        section("4. EXPLICIT CONFOUNDERS WITHIN BEST MODEL TYPE", lines)
     )
 
     # ---------------------------------------------------------------
-    # 5. By CLAM
-    # NOTE: CLAM supervises top-attended chunks. In the causal forest
-    # pipeline, the benefit is indirect (better attention -> better repr).
-    # If CLAM helps, it should improve ITE corr without hurting ATE bias.
+    # 5. By CLAM (if present)
     # ---------------------------------------------------------------
-    lines = [
-        group_summary(df, ["clam_enabled"]),
-        "",
-        "Pairwise t-tests on ite_corr:",
-    ] + pairwise_ttest(df, "clam_enabled", "ite_corr")
-    if "ite_spearman_corr" in df.columns:
-        lines += [
+    if "clam_enabled" in df.columns and df["clam_enabled"].nunique() > 1:
+        lines = [
+            group_summary(df, ["clam_enabled"]),
             "",
-            "Pairwise t-tests on ite_spearman_corr:",
-        ] + pairwise_ttest(df, "clam_enabled", "ite_spearman_corr")
+            "Pairwise t-tests on ite_corr:",
+        ] + pairwise_ttest(df, "clam_enabled", "ite_corr")
+        if "ite_spearman_corr" in df.columns:
+            lines += [
+                "",
+                "Pairwise t-tests on ite_spearman_corr:",
+            ] + pairwise_ttest(df, "clam_enabled", "ite_spearman_corr")
+    else:
+        lines = ["CLAM not varied in these experiments — skipping."]
     output.extend(section("5. BY CLAM", lines))
 
     # ---------------------------------------------------------------
@@ -373,7 +380,7 @@ def analyze(df: pd.DataFrame) -> list[str]:
         ]
 
         # Correlation between num_confounders and ite_corr
-        if len(conf_df) >= 3:
+        if len(conf_df) >= 3 and conf_df["num_confounders"].nunique() > 1:
             r, p = scipy_stats.pearsonr(
                 conf_df["num_confounders"], conf_df["ite_corr"]
             )
@@ -461,8 +468,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
         # Transformer Pool hyperparameters
         "token_transformer_layers", "token_transformer_heads",
         "token_transformer_dim", "chunk_transformer_layers",
+        # Frozen LLM Pooler hyperparameters
+        "flp_max_length", "flp_downprojection_dim",
+        "flp_projection_dim", "flp_gated_attention_dim",
     ]
-    available_hp = [c for c in hp_cols if c in df.columns]
+    available_hp = [c for c in hp_cols if c in df.columns and df[c].nunique() > 1]
 
     lines = []
     for hp in available_hp:
@@ -493,112 +503,117 @@ def analyze(df: pd.DataFrame) -> list[str]:
     output.extend(section("8. HYPERPARAMETER EFFECTS", lines))
 
     # ---------------------------------------------------------------
-    # 9. Cross-tabulated: rlearner_mode x use_explicit_confounders
-    # NOTE: This reveals interaction effects. Key question: do explicit
-    # confounders help more in some modes than others? E.g., they might
-    # help "none" mode (which has no tau training signal) but hurt "dual"
-    # mode (where the extra features confuse the effect extractor).
+    # 9. Cross-tabulated: model_type x use_explicit_confounders
     # ---------------------------------------------------------------
-    lines = [
-        "Mean ITE Pearson correlation:",
-        df.pivot_table(
-            values="ite_corr",
-            index="rlearner_mode",
-            columns="use_explicit_confounders",
-            aggfunc=["mean", "count"],
-        )
-        .round(4)
-        .to_string(),
-    ]
-    if "ite_spearman_corr" in df.columns:
-        lines += [
-            "",
-            "Mean ITE Spearman correlation:",
+    if primary_group and primary_group in df.columns:
+        lines = [
+            "Mean ITE Pearson correlation:",
             df.pivot_table(
-                values="ite_spearman_corr",
-                index="rlearner_mode",
+                values="ite_corr",
+                index=primary_group,
                 columns="use_explicit_confounders",
                 aggfunc=["mean", "count"],
             )
             .round(4)
             .to_string(),
         ]
-    lines += [
-        "",
-        "Mean ATE bias:",
-        df.pivot_table(
-            values="ate_bias",
-            index="rlearner_mode",
-            columns="use_explicit_confounders",
-            aggfunc=["mean", "count"],
-        )
-        .round(4)
-        .to_string(),
-    ]
+        if "ite_spearman_corr" in df.columns:
+            lines += [
+                "",
+                "Mean ITE Spearman correlation:",
+                df.pivot_table(
+                    values="ite_spearman_corr",
+                    index=primary_group,
+                    columns="use_explicit_confounders",
+                    aggfunc=["mean", "count"],
+                )
+                .round(4)
+                .to_string(),
+            ]
+        lines += [
+            "",
+            "Mean ATE bias:",
+            df.pivot_table(
+                values="ate_bias",
+                index=primary_group,
+                columns="use_explicit_confounders",
+                aggfunc=["mean", "count"],
+            )
+            .round(4)
+            .to_string(),
+        ]
+    else:
+        lines = ["No primary grouping column — skipping cross-tab."]
     output.extend(
-        section("9. CROSS-TAB: rlearner_mode x explicit_confounders", lines)
+        section(f"9. CROSS-TAB: {(primary_group or 'model').upper()} x EXPLICIT_CONFOUNDERS", lines)
     )
 
     # ---------------------------------------------------------------
-    # 9b. Cross-tabulated: rlearner_mode x clam_enabled
+    # 9b. Cross-tabulated: model_type x clam_enabled (if present)
     # ---------------------------------------------------------------
-    lines = [
-        "Mean ITE Pearson correlation:",
-        df.pivot_table(
-            values="ite_corr",
-            index="rlearner_mode",
-            columns="clam_enabled",
-            aggfunc=["mean", "count"],
-        )
-        .round(4)
-        .to_string(),
-    ]
-    if "ite_spearman_corr" in df.columns:
-        lines += [
-            "",
-            "Mean ITE Spearman correlation:",
+    if primary_group and "clam_enabled" in df.columns and df["clam_enabled"].nunique() > 1:
+        lines = [
+            "Mean ITE Pearson correlation:",
             df.pivot_table(
-                values="ite_spearman_corr",
-                index="rlearner_mode",
+                values="ite_corr",
+                index=primary_group,
                 columns="clam_enabled",
                 aggfunc=["mean", "count"],
             )
             .round(4)
             .to_string(),
         ]
+        if "ite_spearman_corr" in df.columns:
+            lines += [
+                "",
+                "Mean ITE Spearman correlation:",
+                df.pivot_table(
+                    values="ite_spearman_corr",
+                    index=primary_group,
+                    columns="clam_enabled",
+                    aggfunc=["mean", "count"],
+                )
+                .round(4)
+                .to_string(),
+            ]
+    else:
+        lines = ["CLAM not varied — skipping cross-tab."]
     output.extend(
-        section("9b. CROSS-TAB: rlearner_mode x clam_enabled", lines)
+        section("9b. CROSS-TAB: MODEL_TYPE x CLAM_ENABLED", lines)
     )
 
     # ---------------------------------------------------------------
-    # 9c. Cross-tabulated: dataset_name x rlearner_mode
+    # 9c. Cross-tabulated: dataset_name x model_type
     # ---------------------------------------------------------------
-    lines = [
-        "Mean ITE Pearson correlation:",
-        df.pivot_table(
-            values="ite_corr",
-            index="dataset_name",
-            columns="rlearner_mode",
-            aggfunc=["mean", "count"],
-        )
-        .round(4)
-        .to_string(),
-    ]
-    if "ite_spearman_corr" in df.columns:
-        lines += [
-            "",
-            "Mean ITE Spearman correlation:",
+    if primary_group and primary_group in df.columns:
+        lines = [
+            "Mean ITE Pearson correlation:",
             df.pivot_table(
-                values="ite_spearman_corr",
+                values="ite_corr",
                 index="dataset_name",
-                columns="rlearner_mode",
+                columns=primary_group,
                 aggfunc=["mean", "count"],
             )
             .round(4)
             .to_string(),
         ]
+        if "ite_spearman_corr" in df.columns:
+            lines += [
+                "",
+                "Mean ITE Spearman correlation:",
+                df.pivot_table(
+                    values="ite_spearman_corr",
+                    index="dataset_name",
+                    columns=primary_group,
+                    aggfunc=["mean", "count"],
+                )
+                .round(4)
+                .to_string(),
+            ]
+    else:
+        lines = ["No primary grouping column — skipping cross-tab."]
     output.extend(
-        section("9c. CROSS-TAB: dataset_name x rlearner_mode", lines)
+        section(f"9c. CROSS-TAB: DATASET_NAME x {(primary_group or 'MODEL').upper()}", lines)
     )
 
     # ---------------------------------------------------------------
@@ -647,13 +662,17 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # but worse tau, or vice versa.
     # ---------------------------------------------------------------
     if "y0_mse" in df.columns and "y1_mse" in df.columns:
-        lines = [
-            "By rlearner_mode:",
-            group_summary(
-                df, ["rlearner_mode"],
-                ["y0_mse", "y1_mse", "propensity_auroc"],
-            ),
-            "",
+        lines = []
+        if primary_group and primary_group in df.columns:
+            lines += [
+                f"By {primary_group}:",
+                group_summary(
+                    df, [primary_group],
+                    ["y0_mse", "y1_mse", "propensity_auroc"],
+                ),
+                "",
+            ]
+        lines += [
             "By dataset:",
             group_summary(
                 df, ["dataset_name"],
@@ -677,11 +696,16 @@ def analyze(df: pd.DataFrame) -> list[str]:
             f"(target: 0.95)",
             f"Overall CI width:    {fmt(df['mean_ci_width'].mean())}",
             "",
-            "By rlearner_mode:",
-            group_summary(
-                df, ["rlearner_mode"], ["ci_coverage", "mean_ci_width"]
-            ),
-            "",
+        ]
+        if primary_group and primary_group in df.columns:
+            lines += [
+                f"By {primary_group}:",
+                group_summary(
+                    df, [primary_group], ["ci_coverage", "mean_ci_width"]
+                ),
+                "",
+            ]
+        lines += [
             "By dataset:",
             group_summary(
                 df, ["dataset_name"], ["ci_coverage", "mean_ci_width"]
@@ -701,25 +725,38 @@ def analyze(df: pd.DataFrame) -> list[str]:
     lines = [
         "Experiments per condition:",
         "",
-        "By rlearner_mode:",
-        df["rlearner_mode"].value_counts().sort_index().to_string(),
-        "",
+    ]
+    if primary_group and primary_group in df.columns:
+        lines += [
+            f"By {primary_group}:",
+            df[primary_group].value_counts().sort_index().to_string(),
+            "",
+        ]
+    lines += [
         "By dataset_name:",
         df["dataset_name"].value_counts().sort_index().to_string(),
         "",
-        "By clam_enabled:",
-        df["clam_enabled"].value_counts().sort_index().to_string(),
-        "",
+    ]
+    if "clam_enabled" in df.columns:
+        lines += [
+            "By clam_enabled:",
+            df["clam_enabled"].value_counts().sort_index().to_string(),
+            "",
+        ]
+    lines += [
         "By use_explicit_confounders:",
         df["use_explicit_confounders"].value_counts().sort_index().to_string(),
         "",
-        "Full cross-tab (rlearner_mode x dataset x explicit_confounders):",
-        pd.crosstab(
-            [df["rlearner_mode"], df["dataset_name"]],
-            df["use_explicit_confounders"],
-            margins=True,
-        ).to_string(),
     ]
+    if primary_group and primary_group in df.columns:
+        lines += [
+            f"Full cross-tab ({primary_group} x dataset x explicit_confounders):",
+            pd.crosstab(
+                [df[primary_group], df["dataset_name"]],
+                df["use_explicit_confounders"],
+                margins=True,
+            ).to_string(),
+        ]
     if 'outcome_type' in df.columns:
         lines += [
             "",
