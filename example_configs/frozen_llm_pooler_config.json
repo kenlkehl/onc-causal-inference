@@ -1,5 +1,5 @@
 {
-  "output_dir": "./cdt_results_frozen_llm_pooler",
+  "output_dir": "./oci_results_frozen_llm_pooler",
   "seed": 42,
   "device": "cuda:0",
   "num_workers": 1,
@@ -51,9 +51,5 @@
     "matching_analysis": {
       "enabled": false
     }
-  },
-
-  "plasmode_experiments": {
-    "enabled": false
   }
 }

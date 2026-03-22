@@ -1,7 +1,7 @@
 python -m synthetic_data.cli \
   --api-url http://localhost:8000/v1 \
   --dataset-size 500 \
-  --output-dir ./synthetic_outputs
+  --output-dir ./synthetic_data/example_synthetic_datasets/my_dataset
 
 
 python -m synthetic_data.cli \
@@ -10,9 +10,9 @@ python -m synthetic_data.cli \
   --max-tokens 50000 \
   --use-vllm-batch \
   --tensor-parallel-size 2 \
-  --output-dir ../example_synthetic_data_one_confounder
+  --output-dir ./synthetic_data/example_synthetic_datasets/one_confounder
 
-python -m synthetic_data.cli --outcome-type continuous --outcome-noise-std 1.0       --output-dir ../example_synthetic_data_ten_confounders_continuous_50K       --num-confounders 10       --dataset-size 50000       --model openai/gpt-oss-120b       --use-vllm-batch --tensor-parallel-size 1 --num-workers 8  --gpu-devices 0,1,2,3,4,5,6,7
+python -m synthetic_data.cli --outcome-type continuous --outcome-noise-std 1.0       --output-dir ./synthetic_data/example_synthetic_datasets/ten_confounders_continuous_50K       --num-confounders 10       --dataset-size 50000       --model openai/gpt-oss-120b       --use-vllm-batch --tensor-parallel-size 1 --num-workers 8  --gpu-devices 0,1,2,3,4,5,6,7
 
 
 python -m synthetic_data.cli  --use-vllm-batch  --model openai/gpt-oss-120b \
@@ -21,6 +21,6 @@ python -m synthetic_data.cli  --use-vllm-batch  --model openai/gpt-oss-120b \
 --dataset-size 1000 \
 --generation-mode two_stage \
 --num-confounders 1 \
---output-dir ./example_synthetic_data_one_confounder \
+--output-dir ./synthetic_data/example_synthetic_datasets/one_confounder \
 --vllm-download-dir /data1/ken/models
     

@@ -3,5 +3,6 @@
 __pycache__/
 .test_outputs/
 *.cdt_cache*
+*.oci_cache*
 synthetic_output*
 applied_experiments/

@@ -14,6 +14,26 @@ DEFAULT_CLINICAL_QUESTION = (
 
 
 @dataclass
+class StructuredDataConfig:
+    """Configuration for structured clinical data event generation.
+
+    When enabled, the synthetic data pipeline generates additional structured
+    clinical data events (encounter records, lab results, hospitalizations,
+    patient-reported outcomes) alongside narrative clinical notes. These are
+    converted to text using deterministic templates and interleaved
+    chronologically with narrative notes in the final clinical_text.
+    """
+    enabled: bool = False
+    include_encounters: bool = True       # ICD-10 + HCPCS/CPT encounter records
+    include_hospitalizations: bool = True  # Hospital admission/discharge records
+    include_labs: bool = True              # CBC, CMP, tumor markers
+    include_pros: bool = True              # Patient-reported outcomes
+    pro_instruments: List[str] = field(default_factory=lambda: [
+        "EORTC_QLQ_C30", "PRO_CTCAE"
+    ])
+
+
+@dataclass
 class LLMConfig:
     """Configuration for OpenAI-compatible LLM API."""
     api_base_url: str = "http://localhost:8000/v1"  # vLLM default
@@ -68,10 +88,13 @@ class SyntheticDataConfig:
     drug_perturbation_prob: float = 0.3
 
     # Output
-    output_dir: str = "./synthetic_output"
+    output_dir: str = "./synthetic_data/example_synthetic_datasets"
 
     # LLM settings
     llm: LLMConfig = field(default_factory=LLMConfig)
+
+    # Structured clinical data events
+    structured_data: StructuredDataConfig = field(default_factory=StructuredDataConfig)
 
     # Reproducibility
     seed: int = 42
@@ -98,7 +121,9 @@ class SyntheticDataConfig:
         """Create config from dictionary."""
         llm_data = data.pop('llm', {})
         llm_config = LLMConfig(**llm_data) if llm_data else LLMConfig()
-        return cls(llm=llm_config, **data)
+        structured_data_data = data.pop('structured_data', {})
+        structured_data_config = StructuredDataConfig(**structured_data_data) if structured_data_data else StructuredDataConfig()
+        return cls(llm=llm_config, structured_data=structured_data_config, **data)
     
     def validate(self) -> None:
         """Validate configuration."""
@@ -121,6 +146,15 @@ class SyntheticDataConfig:
                 raise ValueError("max_events_per_patient must be >= min_events_per_patient")
             if not (0 <= self.drug_perturbation_prob <= 1):
                 raise ValueError("drug_perturbation_prob must be between 0 and 1")
+
+        # Validate structured data config
+        if self.structured_data.enabled:
+            if self.generation_mode != "two_stage":
+                raise ValueError("structured_data requires generation_mode='two_stage'")
+            valid_instruments = {"EORTC_QLQ_C30", "PRO_CTCAE"}
+            for inst in self.structured_data.pro_instruments:
+                if inst not in valid_instruments:
+                    raise ValueError(f"Unknown PRO instrument: '{inst}'. Valid: {valid_instruments}")
 
         # Validate positivity enforcement parameters
         if self.enforce_positivity:

@@ -1,0 +1,530 @@
+Metadata-Version: 2.4
+Name: onc-causal-inference
+Version: 0.1.0
+Summary: Causal inference from clinical text using frozen LLM feature extraction
+Author-email: Ken Kehl <kenneth_kehl@dfci.harvard.edu>
+License: MIT
+Project-URL: Homepage, https://github.com/kenlkehl/onc-causal-inference
+Project-URL: Documentation, https://github.com/kenlkehl/onc-causal-inference
+Project-URL: Repository, https://github.com/kenlkehl/onc-causal-inference
+Keywords: causal inference,machine learning,clinical text,nlp,oncology
+Classifier: Development Status :: 3 - Alpha
+Classifier: Intended Audience :: Science/Research
+Classifier: Topic :: Scientific/Engineering :: Artificial Intelligence
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python :: 3
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: torch>=2.0.0
+Requires-Dist: transformers>=5.3.0
+Requires-Dist: pandas>=1.5.0
+Requires-Dist: numpy>=1.23.0
+Requires-Dist: scikit-learn>=1.2.0
+Requires-Dist: tqdm>=4.65.0
+Requires-Dist: pyarrow
+Requires-Dist: joblib>=1.2.0
+Requires-Dist: accelerate>=0.20.0
+Requires-Dist: econml>=0.14.0
+Requires-Dist: llvmlite>=0.46.0
+Requires-Dist: numba>=0.60.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Provides-Extra: extraction
+Requires-Dist: openai>=1.0.0; extra == "extraction"
+Requires-Dist: openai-harmony>=0.0.8; extra == "extraction"
+Dynamic: license-file
+
+# Oncology Causal Inference (OCI)
+
+OCI estimates treatment effects from clinical text. It uses a frozen pretrained LLM to extract patient-level feature vectors from unstructured EHR narratives, then feeds those features to causal inference heads (DragonNet, R-Learner, or Causal Forest) to estimate individual treatment effects (ITE) and average treatment effects (ATE).
+
+## Installation
+
+```bash
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
+pip install -e .
+
+# For LLM-based explicit confounder extraction (optional)
+pip install -e ".[extraction]"
+```
+
+Requires Python 3.12+. A CUDA GPU is required for the frozen LLM forward pass.
+
+## Quick Start
+
+```bash
+# Generate a default config file
+oci init --output config.json
+
+# Run an experiment
+oci run --config config.json --device cuda:0 --workers 4
+```
+
+Or use the oracle experiment script to run a grid of experiments on synthetic data:
+
+```bash
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --datasets one_confounder_twostage \
+    --epochs 20 \
+    --n-folds 5
+```
+
+## Architecture
+
+OCI has one feature extractor and four causal heads.
+
+### Feature Extractor: Frozen LLM Pooler
+
+A pretrained decoder-only LLM with frozen weights extracts per-token hidden states from clinical text. Gated attention pooling aggregates all tokens into a single patient-level feature vector. Only the downprojection, pooling, and causal head parameters are trained.
+
+```
+Clinical Text
+  -> Pretrained Tokenizer (right-padded)
+  -> Frozen LLM (no_grad, autocast float16)
+  -> All Token Hidden States
+  -> Trainable Downprojection (e.g., 1024 -> 256)
+  -> Gated Attention Pooling (tanh x sigmoid gating)
+  -> Projection MLP
+  -> Patient Feature Vector
+  -> Causal Head
+```
+
+Key parameters:
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `flp_model_name` | HuggingFace model name | `"Qwen/Qwen3.5-0.8B-Base"` |
+| `flp_max_length` | Maximum token length | `8192` |
+| `flp_downprojection_dim` | Reduce hidden dim before pooling | `256` |
+| `flp_gated_attention_dim` | Gated attention hidden dim | `128` |
+| `flp_projection_dim` | Output projection dim | `128` |
+| `flp_cache_hidden_states` | Pre-cache hidden states to disk | `false` |
+
+Handles documents up to 50K+ tokens with the pretrained tokenizer. No `fit_tokenizer()` step is needed.
+
+### Causal Heads
+
+| Type | Description | Key Output |
+|------|-------------|------------|
+| `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = P(Y=1\|T=1,X) - P(Y=1\|T=0,X) |
+| `rlearner` | Direct tau(X) optimization with detached nuisance functions | tau directly predicts ITE |
+| `causal_forest` | Two-stage: neural features + econml CausalForestDML | tau with 95% confidence intervals |
+| `tfidf_forest` | TF-IDF features + CausalForestDML (no neural network, no GPU) | tau with 95% confidence intervals |
+
+**Recommended: Causal Forest** -- trains neural features with propensity + outcome losses (optionally with R-learner loss), then fits CausalForestDML on the learned representations for doubly-robust estimation with confidence intervals.
+
+**TF-IDF Forest** is a non-neural baseline that uses sklearn `TfidfVectorizer` features directly. No GPU required.
+
+## Dataset Format
+
+OCI expects Parquet or CSV files with these columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `clinical_text` | string | Clinical narrative |
+| `treatment_indicator` | int | Binary treatment (0/1) |
+| `outcome_indicator` | int/float | Binary (0/1) or continuous outcome |
+| `split` | string | Optional: "train"/"val"/"test" for fixed splits |
+
+Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"continuous"` (MSE loss, no sigmoid). Treatment is always binary.
+
+## Configuration
+
+### Causal Forest with R-Learner Representation Training
+
+```json
+{
+  "output_dir": "./oci_results",
+  "seed": 42,
+  "device": "cuda:0",
+
+  "applied_inference": {
+    "dataset_path": "./data/clinical_notes.parquet",
+    "cv_folds": 5,
+
+    "architecture": {
+      "model_type": "causal_forest",
+      "feature_extractor_type": "frozen_llm_pooler",
+
+      "flp_model_name": "Qwen/Qwen3.5-0.8B-Base",
+      "flp_max_length": 50000,
+      "flp_freeze_llm": true,
+      "flp_downprojection_dim": 256,
+      "flp_gated_attention_dim": 128,
+      "flp_projection_dim": 128,
+      "flp_gradient_checkpointing": true,
+
+      "causal_forest": {
+        "n_estimators": 200,
+        "min_samples_leaf": 5,
+        "honest": true,
+        "inference": true,
+        "use_rlearner_representation": true,
+        "rlearner_dual_extractors": false
+      }
+    },
+
+    "training": {
+      "epochs": 30,
+      "batch_size": 2,
+      "learning_rate": 1e-4
+    }
+  }
+}
+```
+
+### R-Learner
+
+```json
+{
+  "applied_inference": {
+    "architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "frozen_llm_pooler",
+
+      "flp_model_name": "Qwen/Qwen3.5-0.8B-Base",
+      "flp_max_length": 50000,
+      "flp_downprojection_dim": 256
+    },
+    "training": {
+      "epochs": 30,
+      "gamma_rlearner": 1.0,
+      "stop_grad_propensity": false
+    }
+  }
+}
+```
+
+### DragonNet
+
+```json
+{
+  "applied_inference": {
+    "architecture": {
+      "model_type": "dragonnet",
+      "feature_extractor_type": "frozen_llm_pooler",
+
+      "flp_model_name": "Qwen/Qwen3.5-0.8B-Base",
+      "flp_max_length": 50000,
+      "flp_downprojection_dim": 256
+    },
+    "training": {
+      "epochs": 30,
+      "beta_targreg": 0.1
+    }
+  }
+}
+```
+
+### TF-IDF Forest (No GPU Baseline)
+
+```json
+{
+  "device": "cpu",
+  "applied_inference": {
+    "architecture": {
+      "model_type": "tfidf_forest",
+      "tfidf_forest": {
+        "max_features": 10000,
+        "ngram_range_min": 1,
+        "ngram_range_max": 2,
+        "n_estimators": 200,
+        "min_samples_leaf": 10,
+        "honest": true,
+        "inference": true
+      }
+    }
+  }
+}
+```
+
+See `example_configs/` for complete configuration files.
+
+## Dual Extractor Mode
+
+For R-Learner and Causal Forest, you can use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (tau). This prevents gradient interference between confounder learning and effect modifier learning.
+
+```json
+{
+  "architecture": {
+    "model_type": "rlearner",
+    "feature_extractor_type": "frozen_llm_pooler",
+    "rlearner_dual_extractors": true
+  }
+}
+```
+
+For Causal Forest with dual extractors, Stage 2 uses the effect extractor's features (optimized for tau via R-loss):
+
+```json
+{
+  "architecture": {
+    "model_type": "causal_forest",
+    "feature_extractor_type": "frozen_llm_pooler",
+    "causal_forest": {
+      "use_rlearner_representation": true,
+      "rlearner_dual_extractors": true
+    }
+  }
+}
+```
+
+Note: dual mode approximately doubles feature extraction memory and compute.
+
+## Hidden State Caching
+
+When the LLM is frozen, hidden states can be pre-computed once and reused across CV folds and experiment runs. This avoids repeated LLM forward passes.
+
+Enable in config:
+```json
+{
+  "architecture": {
+    "flp_cache_hidden_states": true
+  }
+}
+```
+
+Or pass `--cache` to the oracle experiment script. Cache files are stored in `{dataset_dir}/.oci_cache/` and are keyed by model name, max length, and dataset path. Different causal heads, learning rates, and fold counts all share the same cache.
+
+Use `--gpu-cache` to keep hidden states in GPU VRAM for fastest access (requires sufficient VRAM).
+
+## Explicit Confounder Extraction
+
+Researchers can specify confounder variables to be extracted from clinical text using an LLM (via vLLM or an OpenAI-compatible API). Extracted confounders are featurized and concatenated to the text feature vector before the causal heads.
+
+```json
+{
+  "explicit_confounders": {
+    "enabled": true,
+    "confounders": [
+      {
+        "name": "performance_status",
+        "type": "categorical",
+        "categories": ["0", "1", "2", "3", "4"],
+        "description": "ECOG performance status"
+      },
+      {
+        "name": "age_at_diagnosis",
+        "type": "continuous",
+        "description": "Patient age at diagnosis in years"
+      }
+    ],
+    "vllm_mode": "python_api",
+    "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
+    "cache_enabled": true,
+    "featurizer_output_dim": 64
+  }
+}
+```
+
+Install extraction support with `pip install -e ".[extraction]"`.
+
+Results are cached to `{dataset_dir}/.oci_cache/` and invalidated automatically if the extraction config changes.
+
+## Numeric Feature Extraction
+
+Optional magnitude-aware encoding of clinical numbers (lab values, vitals, scores, doses, ages). Numbers are detected via regex, binned on a log scale, and classified by context keywords.
+
+```json
+{
+  "architecture": {
+    "numeric_features_enabled": true,
+    "numeric_embedding_dim": 32
+  }
+}
+```
+
+Disabled by default.
+
+## Contrastive Learning
+
+Optional supervised contrastive loss (SupCon) within similarity clusters encourages the model to discriminate treatment/outcome status among clinically similar patients. Features are clustered via K-means, then SupCon is computed within each cluster using treatment x outcome as 4-class labels.
+
+```json
+{
+  "architecture": {
+    "contrastive_enabled": true,
+    "contrastive_num_clusters": 4,
+    "contrastive_temperature": 0.1,
+    "contrastive_label_mode": "joint"
+  },
+  "training": {
+    "contrastive_weight": 0.1
+  }
+}
+```
+
+## Synthetic Data Generation
+
+The `synthetic_data/` module generates synthetic clinical datasets with known causal structure for benchmarking. An LLM creates realistic confounders, treatment/outcome regression equations, and clinical narratives for each patient. Ground-truth treatment effects (ITE, ATE) are known by construction.
+
+```bash
+# Generate 500 patients with vLLM batch inference
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 \
+  --output-dir ./my_synthetic_data
+
+# Custom clinical question
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 \
+  --clinical-question "Compare pembrolizumab with nivolumab for advanced NSCLC"
+```
+
+### Structured Clinical Data Events
+
+By default, synthetic datasets contain only narrative clinical notes (progress notes, imaging reports, pathology reports, NGS reports). With `--structured-data`, the pipeline also generates structured clinical data events that simulate real-world EHR/claims data converted to text:
+
+- **Encounter records** -- ICD-10 diagnosis codes and CPT/HCPCS procedure codes
+- **Laboratory results** -- CBC, CMP, tumor markers with values, units, and reference ranges
+- **Hospitalization records** -- principal diagnosis, length of stay, discharge disposition
+- **Patient-reported outcomes** -- EORTC QLQ-C30 functional/symptom scores (0-100 scale) and PRO-CTCAE adverse event severity (0-4 scale)
+
+These structured events are generated by the LLM as part of the patient's chronological event timeline (ensuring clinical coherence), then converted to standardized text using deterministic templates. The resulting text blocks are interleaved chronologically with the narrative notes in the final `clinical_text` column.
+
+```bash
+# Enable all structured data types
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 --structured-data
+
+# Selective: only encounters and labs
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 \
+  --structured-data --no-hospitalizations --no-pros
+```
+
+Or via JSON config:
+
+```json
+{
+  "clinical_question": "Compare letrozole+palbociclib with letrozole+ribociclib ...",
+  "dataset_size": 500,
+  "generation_mode": "two_stage",
+  "structured_data": {
+    "enabled": true,
+    "include_encounters": true,
+    "include_labs": true,
+    "include_hospitalizations": true,
+    "include_pros": true,
+    "pro_instruments": ["EORTC_QLQ_C30", "PRO_CTCAE"]
+  }
+}
+```
+
+| CLI Flag | Effect |
+|----------|--------|
+| `--structured-data` | Enable structured clinical data events |
+| `--no-encounters` | Disable encounter records (ICD-10/CPT) |
+| `--no-labs` | Disable laboratory results |
+| `--no-hospitalizations` | Disable hospitalization records |
+| `--no-pros` | Disable patient-reported outcomes |
+
+## Oracle Experiment Script
+
+The `run_oracle_experiments.py` script runs a grid of experiments on synthetic datasets with known ground-truth treatment effects. It compares causal heads (causal_forest, rlearner, dragonnet) and includes a `best_attainable` upper bound computed from ground-truth confounder columns.
+
+Each configuration is repeated N times with different random seeds (default 10) so that summary statistics report mean +/- std.
+
+```bash
+# Full grid on 4 GPUs
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 cuda:1 cuda:2 cuda:3
+
+# Targeted run: causal forest only, one dataset
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --datasets one_confounder_twostage \
+    --model-types causal_forest \
+    --max-lengths 50000
+
+# Quick test: 1 experiment, 3 epochs
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --max-experiments 1 --epochs 3
+
+# With hidden state caching
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --cache
+
+# 5 repeats instead of default 10
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --n-repeats 5
+```
+
+Options:
+
+| Flag | Description |
+|------|-------------|
+| `--output-dir` | Directory for results |
+| `--devices` | GPU devices (e.g., `cuda:0 cuda:1`) |
+| `--datasets` | Filter datasets (e.g., `one_confounder_twostage`) |
+| `--model-types` | Filter model types (`causal_forest`, `rlearner`, `dragonnet`, `best_attainable`) |
+| `--max-lengths` | Filter max sequence lengths (e.g., `5000 50000`) |
+| `--epochs` | Training epochs (default: 30) |
+| `--n-folds` | CV folds (default: 5) |
+| `--n-repeats` | Repeats per config with different seeds (default: 10) |
+| `--cache` | Pre-cache LLM hidden states to disk |
+| `--gpu-cache` | Keep hidden states in GPU VRAM (implies `--cache`) |
+| `--resume` | Resume from existing results |
+| `--max-experiments` | Limit number of experiments |
+
+### Analyzing Results
+
+```bash
+python oracle_experiment_scripts/analyze_results.py \
+    --results-dir ../my_results/results
+```
+
+Produces a comprehensive analysis with group comparisons, pairwise t-tests, and cross-tabulated results across experimental factors.
+
+## Output Files
+
+```
+output_dir/
+  config.json
+  applied_inference/
+    predictions.parquet        # Treatment effect estimates
+    training_log.csv
+    psm_analysis/              # If matching analysis enabled
+  plasmode_experiments/        # If plasmode enabled
+```
+
+The `predictions.parquet` contains:
+
+| Column | Description |
+|--------|-------------|
+| `pred_y0_prob` | Predicted outcome under no treatment |
+| `pred_y1_prob` | Predicted outcome under treatment |
+| `pred_ite_prob` | Individual treatment effect (y1 - y0) |
+| `pred_propensity_prob` | Treatment propensity score |
+| `pred_ite_lower` | Lower 95% CI bound (causal forest only) |
+| `pred_ite_upper` | Upper 95% CI bound (causal forest only) |
+
+## Dependencies
+
+**Core**: torch, transformers, pandas, numpy, scikit-learn, econml, accelerate
+
+**Optional**: openai (explicit confounder extraction via `pip install -e ".[extraction]"`)
+
+## Citation
+
+```bibtex
+@software{oci2024,
+  author = {Kehl, Ken},
+  title = {Oncology Causal Inference: Treatment Effect Estimation from Clinical Text},
+  year = {2024},
+  url = {https://github.com/kenlkehl/onc-causal-inference}
+}
+```
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.

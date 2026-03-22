@@ -1,212 +1,107 @@
-# Causal DragonNet Text (CDT)
+# Oncology Causal Inference (OCI)
 
-CDT estimates treatment effects from clinical text by combining neural network feature extraction with causal inference methods. It extracts confounders from unstructured EHR narratives to estimate individual treatment effects (ITE) and average treatment effects (ATE) for comparative effectiveness research.
+OCI estimates treatment effects from clinical text. It uses a frozen pretrained LLM to extract patient-level feature vectors from unstructured EHR narratives, then feeds those features to causal inference heads (DragonNet, R-Learner, or Causal Forest) to estimate individual treatment effects (ITE) and average treatment effects (ATE).
 
-## Installation & Quickstart
-
-### 1. Install uv (if not already installed)
+## Installation
 
 ```bash
-# macOS/Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
+pip install -e .
 
-# Or with pip
-pip install uv
+# For LLM-based explicit confounder extraction (optional)
+pip install -e ".[extraction]"
 ```
 
-### 2. Clone and install
+Requires Python 3.12+. A CUDA GPU is required for the frozen LLM forward pass.
+
+## Quick Start
 
 ```bash
-git clone https://github.com/kenlkehl/causal-dragonnet-text.git
-cd causal-dragonnet-text
-uv venv --python 3.13
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-uv pip install -e .
+# Generate a default config file
+oci init --output config.json
+
+# Run an experiment
+oci run --config config.json --device cuda:0 --workers 4
 ```
 
-### 3. Run an experiment
+Or use the oracle experiment script to run a grid of experiments on synthetic data:
 
 ```bash
-python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
-    --output-dir ../quickstart_results \
-    --devices cuda:0 \
-    --datasets example_synthetic_data_one_confounder_twostage \
-    --max-lengths 50000 \
-    --epochs 20 \
-    --n-folds 3
-```
-
-This runs the frozen LLM pooler extractor across all three causal heads (causal_forest, rlearner, dragonnet) on the included synthetic dataset. The script sweeps over model types, downprojection dimensions (128, 256, 512), and explicit confounder usage (on/off), producing 18 experiments total.
-
-For CPU-only machines, CDT requires a CUDA GPU for the frozen LLM forward pass. On Apple Silicon Macs, you can also use `--device mps` with the CLI.
-
-Additional options:
-- `--cache` — pre-compute LLM hidden states to disk (avoids repeated forward passes across folds)
-- `--gpu-cache` — keep pre-computed hidden states in GPU VRAM (fastest, requires sufficient VRAM)
-- `--resume` — resume from existing results if interrupted
-- `--max-experiments N` — limit number of experiments (useful for quick testing)
-
-Results include:
-- `metrics_summary.csv` - ITE correlation, ATE bias, and CI coverage metrics
-- `results/*.json` - Per-experiment detailed results with fold-level metrics
-
-## Recommended Approach: Frozen LLM Pooler + Causal Forest
-
-The best-performing configuration uses a frozen pretrained LLM to extract token-level hidden states, pools them with gated attention into patient-level feature vectors, trains an R-learner to encourage treatment-effect-aware representations, and then feeds the learned features to econml's CausalForestDML for final effect estimation with confidence intervals.
-
-```
-Stage 1: Representation Learning
-├── Frozen LLM (e.g., Qwen3.5-0.8B-Base): Extract per-token hidden states
-├── Trainable Downprojection: Reduce hidden dim (e.g., 1024 → 256)
-├── Gated Attention Pooling: Pool all tokens into a single patient vector
-├── Propensity Head: P(T=1|X) → BCE loss
-├── Outcome Head: E[Y|X] → BCE loss
-└── [Optional] Effect Head: τ(X) → R-loss (use_rlearner_representation=True)
-
-Stage 2: Effect Estimation (Causal Forest)
-├── Extract learned representations from Stage 1
-├── Fit CausalForestDML on patient-level features
-└── Estimate τ(X) = E[Y(1)-Y(0)|X] with confidence intervals
-```
-
-**Why this architecture works best:**
-- **Pretrained LLM backbone**: Leverages rich language understanding from pretraining without the cost of fine-tuning the full model — only the downprojection, pooling, and causal heads are trained
-- **All-token pooling**: Gated attention over every token's hidden state captures information from the entire document, unlike last-token-only approaches
-- **R-learner representation training**: When enabled, the R-learner loss during Stage 1 encourages learned features to capture treatment effect heterogeneity, not just confounders
-- **Causal Forest for final estimation**: Doubly-robust estimation with honest trees provides unbiased effect estimates and built-in confidence intervals, with theoretical guarantees from the causal forest literature
-- **Long document support**: Handles documents up to 50K+ tokens with the pretrained tokenizer
-
-**Optional: Dual Extractor Mode** — Enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions (propensity, outcome) vs treatment effect (τ). In dual mode, Stage 2 uses the effect extractor's features, which are specifically optimized for treatment effect heterogeneity via the R-loss.
-
-See `oracle_experiment_scripts/run_frozen_llm_multi_architecture.py` for the full experiment script.
-
-## Architecture
-
-### Feature Extractors
-
-| Type | Description | Long docs | fit_tokenizer |
-|------|-------------|-----------|---------------|
-| `frozen_llm_pooler` | **Recommended.** Frozen pretrained LLM + trainable downprojection + gated attention pooling | Yes (50K+) | No |
-| `gru_pool` | Chunk BiGRU + transformer + gated attention pooling | Yes | Required |
-| `conv_pool` | Chunk dilated conv + transformer + gated attention pooling | Yes | Required |
-| `transformer_pool` | Chunk token transformer + cross-chunk transformer + gated attention pooling | Yes | Required |
-| `conv1d_transformer_hybrid` | Full-document dilated conv + stride downsampling + transformer (no chunking) | Yes (8K) | Required |
-| `bert_pool` | Chunk BERT [CLS] + transformer + gated attention pooling | Yes | No |
-| `gru_transformer_mil` | Chunk BiGRU + transformer + gated MIL with K confounders | Yes | Required |
-| `gated_mil_hierarchical` | Gated MIL + K confounders + task-specific weighting | Yes | No |
-| `hierarchical_transformer` | Chunk BERT + transformer pooling | Yes | No |
-| `bert_cross_chunk` | Chunk BERT + token-level cross-chunk attention + gated pooling | Yes | No |
-| `llm` | Decoder-only LLM (Qwen3) with random init or pretrained, last token embedding | Yes (32K) | No |
-| `confounder` | Perceiver-style sparse cross-attention | Yes | GRU mode only |
-| `bert` | HuggingFace transformer [CLS] | No (512 tokens) | No |
-| `gru` | BiGRU + attention | Yes | Required |
-| `cnn` | 1D CNN with optional semantic filter init | No (truncates) | Required |
-
-### Causal Heads
-
-| Type | Description | Key output |
-|------|-------------|------------|
-| `causal_forest` | **Recommended.** Two-stage: neural features + CausalForestDML; optional R-learner representation and dual extractor mode | τ with confidence intervals |
-| `rlearner` | Direct τ(X) optimization, detached nuisance functions; optional dual extractor mode | τ directly predicts ITE |
-| `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = σ(y1) - σ(y0) |
-| `uplift` | Base outcome + treatment effect parametrization | ITE from effect head |
-| `traditional_logreg` | Logistic regression with treatment as feature | ITE = σ(y\|T=1) - σ(y\|T=0) |
-| `tfidf_forest` | TF-IDF features + CausalForestDML (no neural network, no GPU) | τ with confidence intervals |
-
-**TF-IDF Forest Baseline**: A non-neural baseline that uses sklearn `TfidfVectorizer` features directly with `CausalForestDML`. No GPU required. See `example_configs/tfidf_forest_config.json`.
-
-**R-Learner Dual Extractor Mode**: For R-learner, you can optionally enable `rlearner_dual_extractors: true` to use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (τ). This prevents gradient interference between confounder learning and effect modifier learning:
-
-```json
-{
-  "architecture": {
-    "model_type": "rlearner",
-    "feature_extractor_type": "frozen_llm_pooler",
-    "rlearner_dual_extractors": true
-  }
-}
-```
-
-**Causal Forest Dual Extractor Mode**: The two-stage causal forest approach also supports dual extractors when R-learner representation training is enabled. In dual mode, Stage 2 uses features from the effect extractor (optimized for τ via R-loss) rather than the nuisance extractor:
-
-```json
-{
-  "architecture": {
-    "model_type": "causal_forest",
-    "feature_extractor_type": "frozen_llm_pooler",
-    "causal_forest": {
-      "n_estimators": 200,
-      "use_rlearner_representation": true,
-      "rlearner_dual_extractors": true
-    }
-  }
-}
-```
-
-**Note**: Dual extractor mode approximately doubles feature extraction memory/compute.
-
-## Dataset Requirements
-
-CDT expects datasets in Parquet or CSV format:
-
-| Column | Description | Type |
-|--------|-------------|------|
-| `clinical_text` | Clinical narrative text | string |
-| `treatment_indicator` | Binary treatment (0/1) | int |
-| `outcome_indicator` | Binary (0/1) or continuous outcome | int/float |
-| `split` | "train"/"val"/"test" (optional for CV) | string |
-
-Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"continuous"` (MSE loss, no sigmoid). Treatment/propensity is always binary.
-
-## Running Experiments
-
-### Experiment Script (Recommended)
-
-The `run_frozen_llm_multi_architecture.py` script runs a grid of experiments comparing causal heads (causal_forest, rlearner, dragonnet), max sequence lengths, downprojection dimensions, and explicit confounder usage:
-
-```bash
-# Full grid on one GPU
-python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
-    --output-dir ../my_results \
-    --devices cuda:0
-
-# Targeted run: causal forest only, 50K tokens, one dataset
-python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
+python oracle_experiment_scripts/run_oracle_experiments.py \
     --output-dir ../my_results \
     --devices cuda:0 \
     --datasets one_confounder_twostage \
-    --model-types causal_forest \
-    --max-lengths 50000
-
-# Multi-GPU parallel execution
-python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
-    --output-dir ../my_results \
-    --devices cuda:0 cuda:1 cuda:2 cuda:3
-
-# With hidden state pre-caching (avoids repeated LLM forward passes)
-python oracle_experiment_scripts/run_frozen_llm_multi_architecture.py \
-    --output-dir ../my_results \
-    --devices cuda:0 \
-    --cache
+    --epochs 20 \
+    --n-folds 5
 ```
 
-### CLI Usage
+## Architecture
 
-```bash
-# Generate a default configuration
-cdt init --output my_config.json
+OCI has one feature extractor and four causal heads.
 
-# Run experiment
-cdt run --config my_config.json --device cuda:0 --workers 4
+### Feature Extractor: Frozen LLM Pooler
+
+A pretrained decoder-only LLM with frozen weights extracts per-token hidden states from clinical text. Gated attention pooling aggregates all tokens into a single patient-level feature vector. Only the downprojection, pooling, and causal head parameters are trained.
+
+```
+Clinical Text
+  -> Pretrained Tokenizer (right-padded)
+  -> Frozen LLM (no_grad, autocast float16)
+  -> All Token Hidden States
+  -> Trainable Downprojection (e.g., 1024 -> 256)
+  -> Gated Attention Pooling (tanh x sigmoid gating)
+  -> Projection MLP
+  -> Patient Feature Vector
+  -> Causal Head
 ```
 
-### Configuration
+Key parameters:
 
-Example frozen LLM pooler + causal forest configuration:
+| Param | Description | Default |
+|-------|-------------|---------|
+| `flp_model_name` | HuggingFace model name | `"Qwen/Qwen3.5-0.8B-Base"` |
+| `flp_max_length` | Maximum token length | `8192` |
+| `flp_downprojection_dim` | Reduce hidden dim before pooling | `256` |
+| `flp_gated_attention_dim` | Gated attention hidden dim | `128` |
+| `flp_projection_dim` | Output projection dim | `128` |
+| `flp_cache_hidden_states` | Pre-cache hidden states to disk | `false` |
+
+Handles documents up to 50K+ tokens with the pretrained tokenizer. No `fit_tokenizer()` step is needed.
+
+### Causal Heads
+
+| Type | Description | Key Output |
+|------|-------------|------------|
+| `dragonnet` | Propensity + Y0/Y1 potential outcomes | ITE = P(Y=1\|T=1,X) - P(Y=1\|T=0,X) |
+| `rlearner` | Direct tau(X) optimization with detached nuisance functions | tau directly predicts ITE |
+| `causal_forest` | Two-stage: neural features + econml CausalForestDML | tau with 95% confidence intervals |
+| `tfidf_forest` | TF-IDF features + CausalForestDML (no neural network, no GPU) | tau with 95% confidence intervals |
+
+**Recommended: Causal Forest** -- trains neural features with propensity + outcome losses (optionally with R-learner loss), then fits CausalForestDML on the learned representations for doubly-robust estimation with confidence intervals.
+
+**TF-IDF Forest** is a non-neural baseline that uses sklearn `TfidfVectorizer` features directly. No GPU required.
+
+## Dataset Format
+
+OCI expects Parquet or CSV files with these columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `clinical_text` | string | Clinical narrative |
+| `treatment_indicator` | int | Binary treatment (0/1) |
+| `outcome_indicator` | int/float | Binary (0/1) or continuous outcome |
+| `split` | string | Optional: "train"/"val"/"test" for fixed splits |
+
+Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"continuous"` (MSE loss, no sigmoid). Treatment is always binary.
+
+## Configuration
+
+### Causal Forest with R-Learner Representation Training
 
 ```json
 {
-  "output_dir": "./cdt_results",
+  "output_dir": "./oci_results",
   "seed": 42,
   "device": "cuda:0",
 
@@ -245,166 +140,158 @@ Example frozen LLM pooler + causal forest configuration:
 }
 ```
 
-See `example_configs/` for configurations for each extractor and causal head type.
+### R-Learner
 
-## Feature Extractor Details
+```json
+{
+  "applied_inference": {
+    "architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "frozen_llm_pooler",
 
-### Frozen LLM Pooler (Recommended)
-
-Uses a pretrained decoder-only LLM with **frozen weights** and applies gated attention pooling
-over ALL token hidden states. An optional **trainable downprojection** layer reduces hidden state
-dimensionality before pooling, keeping trainable parameter count low while leveraging the full
-representational power of the pretrained model.
-
-```
-Clinical Text → Pretrained Tokenizer (right-padded)
-    → Frozen LLM (no_grad, autocast float16) → All Token Hidden States
-    → Trainable Downprojection (e.g., 1024 → 256)
-    → Gated Attention Pooling → Projection MLP
-    → Patient Feature Vector → Causal Head (or Causal Forest)
-```
-
-The frozen LLM runs a live forward pass per batch by default. Hidden state caching is available
-as an opt-in via `flp_cache_hidden_states: true` (or `--cache` in the experiment script) for
-cases where you want to avoid repeated forward passes across CV folds.
-
-Key parameters: `flp_model_name`, `flp_max_length`, `flp_downprojection_dim`, `flp_cache_hidden_states`
-
-See `example_configs/frozen_llm_pooler_config.json` for a complete configuration.
-
-### GRU-Pool
-
-Combines BiGRU chunk encoding with transformer cross-chunk context and gated attention pooling. Learns from scratch via the causal objective.
-
-```
-Long Clinical Text → Token-based Chunking → BiGRU per Chunk
-    → Transformer Cross-Chunk Context → Gated Attention Pooling
-    → Single Document Vector → Causal Head
+      "flp_model_name": "Qwen/Qwen3.5-0.8B-Base",
+      "flp_max_length": 50000,
+      "flp_downprojection_dim": 256
+    },
+    "training": {
+      "epochs": 30,
+      "gamma_rlearner": 1.0,
+      "stop_grad_propensity": false
+    }
+  }
+}
 ```
 
-Key parameters: `gru_pool_chunk_size`, `gru_pool_transformer_layers`, `gru_pool_gated_attention_dim`
+### DragonNet
 
-### Conv Pool (Dilated Convolutions)
+```json
+{
+  "applied_inference": {
+    "architecture": {
+      "model_type": "dragonnet",
+      "feature_extractor_type": "frozen_llm_pooler",
 
-Drop-in replacement for GRU-Pool that replaces BiGRU chunk encoding with a stack of dilated 1D convolutions. Uses exponentially increasing dilation rates (1, 2, 4, 8) for multi-scale pattern detection within each chunk. Fully parallelizable unlike sequential GRU.
-
-```
-Long Clinical Text → Token-based Chunking → Dilated Conv Stack per Chunk
-    → Transformer Cross-Chunk Context → Gated Attention Pooling
-    → Single Document Vector → Causal Head
-```
-
-Key parameters: `conv_pool_conv_dim`, `conv_pool_kernel_size`, `conv_pool_num_blocks`, `conv_pool_chunk_size`
-
-### Transformer Pool (Token Transformer)
-
-Drop-in replacement for GRU-Pool that replaces BiGRU chunk encoding with a small token-level Transformer. Uses custom word-level tokenization (same as GRU-Pool) and trains from scratch. Fully parallelizable within chunks unlike sequential GRU.
-
-```
-Long Clinical Text → Token-based Chunking → Token Transformer per Chunk
-    → Transformer Cross-Chunk Context → Gated Attention Pooling
-    → Single Document Vector → Causal Head
+      "flp_model_name": "Qwen/Qwen3.5-0.8B-Base",
+      "flp_max_length": 50000,
+      "flp_downprojection_dim": 256
+    },
+    "training": {
+      "epochs": 30,
+      "beta_targreg": 0.1
+    }
+  }
+}
 ```
 
-Key parameters: `tp_token_transformer_layers`, `tp_token_transformer_dim`, `tp_chunk_transformer_layers`, `tp_chunk_size`
+### TF-IDF Forest (No GPU Baseline)
 
-### Conv1d-Transformer Hybrid (Full-Document)
-
-Eliminates chunking entirely by processing full documents (up to 8192 tokens) through dilated convolutions with learned stride-based downsampling. Each block reduces sequence length by 2x, so after 4 blocks, 8192 tokens become 512 positions—making transformer self-attention practical over the whole document without artificial chunk boundaries.
-
-```
-Raw Text → Word Embedding → Projection
-    → [Dilated Conv Block + Stride Downsample (2x)] × 4
-    → 8192 → 4096 → 2048 → 1024 → 512 positions
-    → Transformer Self-Attention → Gated Attention Pooling
-    → Single Document Vector → Causal Head
-```
-
-Key parameters: `c1d_hybrid_conv_dim`, `c1d_hybrid_kernel_size`, `c1d_hybrid_num_blocks`, `c1d_hybrid_max_length`, `c1d_hybrid_pool_stride`, `c1d_hybrid_transformer_layers`
-
-### GRU-Transformer-MIL
-
-Similar to GRU-Pool but uses K confounder queries with task-specific weighting (propensity, tau, outcome can weight confounders differently).
-
-Key parameters: `gru_mil_num_confounders`, `gru_mil_chunk_size`
-
-### Gated MIL Hierarchical
-
-Uses pretrained BERT for chunk encoding with gated MIL attention and K confounder queries.
-
-Key parameters: `gated_mil_num_confounders`, `gated_mil_sentence_model`
-
-### BERT Pool
-
-Like Hierarchical Transformer but with gated attention pooling instead of [POOL] token, BERT unfrozen by default, and optional random weight initialization.
-
-```
-Long Clinical Text → Token-based Chunking → BERT [CLS] per Chunk
-    → Transformer Cross-Chunk Context → Gated Attention Pooling
-    → Single Document Vector → Causal Head
+```json
+{
+  "device": "cpu",
+  "applied_inference": {
+    "architecture": {
+      "model_type": "tfidf_forest",
+      "tfidf_forest": {
+        "max_features": 10000,
+        "ngram_range_min": 1,
+        "ngram_range_max": 2,
+        "n_estimators": 200,
+        "min_samples_leaf": 10,
+        "honest": true,
+        "inference": true
+      }
+    }
+  }
+}
 ```
 
-Key parameters: `bert_pool_sentence_model`, `bert_pool_use_pretrained`, `bert_pool_transformer_layers`, `bert_pool_gated_attention_dim`
+See `example_configs/` for complete configuration files.
 
-### Hierarchical Transformer
+## Dual Extractor Mode
 
-Simple hierarchical encoding: chunk BERT + transformer layers + learnable [POOL] token aggregation.
+For R-Learner and Causal Forest, you can use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (tau). This prevents gradient interference between confounder learning and effect modifier learning.
 
-Key parameters: `hier_transformer_num_layers`, `hier_transformer_chunk_size`
-
-### CNN with Semantic Filters
-
-1D CNN with optional semantic filter initialization from clinical concepts. Filters can be initialized from explicit phrases or learned via k-means clustering.
-
-Key parameters: `cnn_kernel_sizes`, `cnn_explicit_filter_concepts`, `cnn_num_latent_filters`
-
-### LLM (Decoder-Only)
-
-Uses a decoder-only LLM architecture (e.g., Qwen3-0.6B) with last token embedding. Supports random weight initialization (train from scratch) or pretrained weights (fine-tune end-to-end).
-
-```
-Clinical Text → Pretrained BBPE Tokenizer (left-padded)
-    → Decoder-only LLM → Last Token Hidden State → Projection MLP
-    → Document Vector → Causal Head
+```json
+{
+  "architecture": {
+    "model_type": "rlearner",
+    "feature_extractor_type": "frozen_llm_pooler",
+    "rlearner_dual_extractors": true
+  }
+}
 ```
 
-Key parameters: `llm_model_name`, `llm_max_length`, `llm_projection_dim`, `llm_gradient_checkpointing`
+For Causal Forest with dual extractors, Stage 2 uses the effect extractor's features (optimized for tau via R-loss):
 
-### Numeric Feature Extraction
+```json
+{
+  "architecture": {
+    "model_type": "causal_forest",
+    "feature_extractor_type": "frozen_llm_pooler",
+    "causal_forest": {
+      "use_rlearner_representation": true,
+      "rlearner_dual_extractors": true
+    }
+  }
+}
+```
 
-All extractors support an optional parallel numeric feature channel that provides magnitude-aware
-encoding of clinical numbers (lab values, vitals, scores, doses, ages). Numbers are detected via
-regex, binned on a log scale, and classified by context keywords. This helps models understand that
-5 < 10 < 100 and that "creatinine 1.8" carries different meaning than "ECOG 2".
+Note: dual mode approximately doubles feature extraction memory and compute.
+
+## Hidden State Caching
+
+When the LLM is frozen, hidden states can be pre-computed once and reused across CV folds and experiment runs. This avoids repeated LLM forward passes.
 
 Enable in config:
 ```json
 {
   "architecture": {
-    "numeric_features_enabled": true,
-    "numeric_embedding_dim": 32,
-    "numeric_magnitude_bins": 8,
-    "numeric_type_categories": 10
+    "flp_cache_hidden_states": true
   }
 }
 ```
 
-Disabled by default (`numeric_features_enabled: false`) — no behavior change unless enabled.
+Or pass `--cache` to the oracle experiment script. Cache files are stored in `{dataset_dir}/.oci_cache/` and are keyed by model name, max length, and dataset path. Different causal heads, learning rates, and fold counts all share the same cache.
 
-### Intra-Batch Contrastive Learning
+Use `--gpu-cache` to keep hidden states in GPU VRAM for fastest access (requires sufficient VRAM).
 
-Optional supervised contrastive loss (SupCon) within similarity clusters improves confounder
-detection by encouraging the model to discriminate treatment/outcome status among similar patients.
+## Explicit Confounder Extraction
 
-**How it works**: Features are clustered via K-means (detached, no gradient), then SupCon loss
-is computed within each cluster using treatment × outcome as 4-class labels. A projection head
-keeps the contrastive space separate from causal head features.
+Researchers can specify confounder variables to be extracted from clinical text using an LLM (via vLLM or an OpenAI-compatible API). Extracted confounders are featurized and concatenated to the text feature vector before the causal heads.
 
-**Why cluster-then-contrast?** Global SupCon would collapse all treated patients' representations
-together, destroying heterogeneity. Intra-cluster contrast targets subtle confounders among
-clinically similar patients.
+```json
+{
+  "explicit_confounders": {
+    "enabled": true,
+    "confounders": [
+      {
+        "name": "performance_status",
+        "type": "categorical",
+        "categories": ["0", "1", "2", "3", "4"],
+        "description": "ECOG performance status"
+      },
+      {
+        "name": "age_at_diagnosis",
+        "type": "continuous",
+        "description": "Patient age at diagnosis in years"
+      }
+    ],
+    "vllm_mode": "python_api",
+    "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
+    "cache_enabled": true,
+    "featurizer_output_dim": 64
+  }
+}
+```
 
-Enable in config:
+Install extraction support with `pip install -e ".[extraction]"`.
+
+Results are cached to `{dataset_dir}/.oci_cache/` and invalidated automatically if the extraction config changes.
+
+## Contrastive Learning
+
+Optional supervised contrastive loss (SupCon) within similarity clusters encourages the model to discriminate treatment/outcome status among clinically similar patients. Features are clustered via K-means, then SupCon is computed within each cluster using treatment x outcome as 4-class labels.
+
 ```json
 {
   "architecture": {
@@ -419,71 +306,166 @@ Enable in config:
 }
 ```
 
-Key parameters: `contrastive_num_clusters`, `contrastive_temperature`, `contrastive_label_mode` ("treatment", "outcome", or "joint"), `contrastive_weight`
+## Synthetic Data Generation
 
-Works with all causal heads and extractors, including dual extractor modes (targets nuisance extractor). Gracefully degrades to zero loss for small batches or uniform-label clusters.
+The `synthetic_data/` module generates synthetic clinical datasets with known causal structure for benchmarking. An LLM creates realistic confounders, treatment/outcome regression equations, and clinical narratives for each patient. Ground-truth treatment effects (ITE, ATE) are known by construction.
 
-## Workflow Modes
+```bash
+# Generate 500 patients with vLLM batch inference
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 \
+  --output-dir ./my_synthetic_data
 
-### Applied Inference
+# Custom clinical question
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 \
+  --clinical-question "Compare pembrolizumab with nivolumab for advanced NSCLC"
+```
 
-Estimates treatment effects on real clinical data using K-fold CV or fixed splits.
+### Structured Clinical Data Events
 
-### Plasmode Simulation
+By default, synthetic datasets contain only narrative clinical notes (progress notes, imaging reports, pathology reports, NGS reports). With `--structured-data`, the pipeline also generates structured clinical data events that simulate real-world EHR/claims data converted to text:
 
-Generates synthetic outcomes with known treatment effects for method validation:
+- **Encounter records** -- ICD-10 diagnosis codes and CPT/HCPCS procedure codes
+- **Laboratory results** -- CBC, CMP, tumor markers with values, units, and reference ranges
+- **Hospitalization records** -- principal diagnosis, length of stay, discharge disposition
+- **Patient-reported outcomes** -- EORTC QLQ-C30 functional/symptom scores (0-100 scale) and PRO-CTCAE adverse event severity (0-4 scale)
+
+These structured events are generated by the LLM as part of the patient's chronological event timeline (ensuring clinical coherence), then converted to standardized text using deterministic templates. The resulting text blocks are interleaved chronologically with the narrative notes in the final `clinical_text` column.
+
+```bash
+# Enable all structured data types
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 --structured-data
+
+# Selective: only encounters and labs
+python -m synthetic_data.cli --use-vllm-batch --dataset-size 500 \
+  --structured-data --no-hospitalizations --no-pros
+```
+
+Or via JSON config:
 
 ```json
 {
-  "plasmode_experiments": {
+  "clinical_question": "Compare letrozole+palbociclib with letrozole+ribociclib ...",
+  "dataset_size": 500,
+  "generation_mode": "two_stage",
+  "structured_data": {
     "enabled": true,
-    "plasmode_scenarios": [{
-      "generation_mode": "phi_linear",
-      "target_ate_prob": 0.10
-    }]
+    "include_encounters": true,
+    "include_labs": true,
+    "include_hospitalizations": true,
+    "include_pros": true,
+    "pro_instruments": ["EORTC_QLQ_C30", "PRO_CTCAE"]
   }
 }
 ```
 
-### Propensity Score Matching Analysis
+| CLI Flag | Effect |
+|----------|--------|
+| `--structured-data` | Enable structured clinical data events |
+| `--no-encounters` | Disable encounter records (ICD-10/CPT) |
+| `--no-labs` | Disable laboratory results |
+| `--no-hospitalizations` | Disable hospitalization records |
+| `--no-pros` | Disable patient-reported outcomes |
 
-Post-hoc PSM analysis using learned propensity scores:
-- ATT from matched pairs
-- ATE via IPW or stratification
-- Balance diagnostics and Rosenbaum bounds
+## Oracle Experiment Script
+
+The `run_oracle_experiments.py` script runs a grid of experiments on synthetic datasets with known ground-truth treatment effects. It compares causal heads (causal_forest, rlearner, dragonnet) and includes a `best_attainable` upper bound computed from ground-truth confounder columns.
+
+Each configuration is repeated N times with different random seeds (default 10) so that summary statistics report mean +/- std.
+
+```bash
+# Full grid on 4 GPUs
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 cuda:1 cuda:2 cuda:3
+
+# Targeted run: causal forest only, one dataset
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --datasets one_confounder_twostage \
+    --model-types causal_forest \
+    --max-lengths 50000
+
+# Quick test: 1 experiment, 3 epochs
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --max-experiments 1 --epochs 3
+
+# With hidden state caching
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --devices cuda:0 \
+    --cache
+
+# 5 repeats instead of default 10
+python oracle_experiment_scripts/run_oracle_experiments.py \
+    --output-dir ../my_results \
+    --n-repeats 5
+```
+
+Options:
+
+| Flag | Description |
+|------|-------------|
+| `--output-dir` | Directory for results |
+| `--devices` | GPU devices (e.g., `cuda:0 cuda:1`) |
+| `--datasets` | Filter datasets (e.g., `one_confounder_twostage`) |
+| `--model-types` | Filter model types (`causal_forest`, `rlearner`, `dragonnet`, `best_attainable`) |
+| `--max-lengths` | Filter max sequence lengths (e.g., `5000 50000`) |
+| `--epochs` | Training epochs (default: 30) |
+| `--n-folds` | CV folds (default: 5) |
+| `--n-repeats` | Repeats per config with different seeds (default: 10) |
+| `--cache` | Pre-cache LLM hidden states to disk |
+| `--gpu-cache` | Keep hidden states in GPU VRAM (implies `--cache`) |
+| `--resume` | Resume from existing results |
+| `--max-experiments` | Limit number of experiments |
+
+### Analyzing Results
+
+```bash
+python oracle_experiment_scripts/analyze_results.py \
+    --results-dir ../my_results/results
+```
+
+Produces a comprehensive analysis with group comparisons, pairwise t-tests, and cross-tabulated results across experimental factors.
 
 ## Output Files
 
 ```
 output_dir/
-├── config.json
-├── applied_inference/
-│   ├── predictions.parquet        # Treatment effect estimates
-│   ├── training_log.csv
-│   └── psm_analysis/              # If enabled
-└── plasmode_experiments/          # If enabled
+  config.json
+  applied_inference/
+    predictions.parquet        # Treatment effect estimates
+    training_log.csv
+    psm_analysis/              # If matching analysis enabled
 ```
 
 The `predictions.parquet` contains:
-- `pred_y0_prob`, `pred_y1_prob`: Predicted potential outcomes (probabilities for binary, raw values for continuous)
-- `pred_ite_prob`: Individual treatment effect (y1 - y0)
-- `pred_propensity_prob`: Treatment propensity (always probability)
-- `pred_ite_lower`, `pred_ite_upper`: 95% CI (causal forest only)
+
+| Column | Description |
+|--------|-------------|
+| `pred_y0_prob` | Predicted outcome under no treatment |
+| `pred_y1_prob` | Predicted outcome under treatment |
+| `pred_ite_prob` | Individual treatment effect (y1 - y0) |
+| `pred_propensity_prob` | Treatment propensity score |
+| `pred_ite_lower` | Lower 95% CI bound (causal forest only) |
+| `pred_ite_upper` | Upper 95% CI bound (causal forest only) |
 
 ## Dependencies
 
-**Core**: torch, transformers, pandas, numpy, scikit-learn, econml
+**Core**: torch, transformers, pandas, numpy, scikit-learn, econml, accelerate
 
-**Optional**: sentence-transformers (confounder extractor), entmax (sparse attention)
+**Optional**: openai (explicit confounder extraction via `pip install -e ".[extraction]"`)
 
 ## Citation
 
 ```bibtex
-@software{cdt2024,
+@software{oci2024,
   author = {Kehl, Ken},
-  title = {Causal DragonNet Text: Clinical Causal Inference from EHR Text},
+  title = {Oncology Causal Inference: Treatment Effect Estimation from Clinical Text},
   year = {2024},
-  url = {https://github.com/kenlkehl/causal-dragonnet-text}
+  url = {https://github.com/kenlkehl/onc-causal-inference}
 }
 ```
 

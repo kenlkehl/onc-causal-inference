@@ -8,8 +8,8 @@ This script tests the complete pipeline:
 3. GRU-Pool feature extractor with DragonNet causal head
 4. GRU-Pool feature extractor with Causal Forest
 
-Uses a 100-patient sample from example_synthetic_data_(one/ten)_confounders dataset
-and the google/medgemma-1.5-4b-it model for extraction.
+Uses a 100-patient sample from synthetic_data/example_synthetic_datasets/(one_confounder/ten_confounders) dataset
+and the Qwen/Qwen3.5-0.8B-Base for extraction.
 
 Usage:
     # Test python_api mode (default)
@@ -44,10 +44,10 @@ from tqdm import tqdm
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from cdt.config import ExplicitConfounderSpec, ExplicitConfounderExtractionConfig
-from cdt.data import ClinicalTextDataset, collate_batch
-from cdt.extraction import VLLMConfounderExtractor, ExtractionCache
-from cdt.models import CausalText, ExplicitConfounderFeaturizer
+from oci.config import ExplicitConfounderSpec, ExplicitConfounderExtractionConfig
+from oci.data import ClinicalTextDataset, collate_batch
+from oci.extraction import VLLMConfounderExtractor, ExtractionCache
+from oci.models import CausalText, ExplicitConfounderFeaturizer
 
 # Configure logging
 logging.basicConfig(
@@ -139,7 +139,7 @@ def get_confounder_specs() -> List[ExplicitConfounderSpec]:
 # ============================================================================
 
 def load_sample_dataset(
-    dataset_path: str = "example_synthetic_data_one_confounder/dataset.parquet",
+    dataset_path: str = "synthetic_data/example_synthetic_datasets/one_confounder/dataset.parquet",
     sample_size: int = 100,
     seed: int = 42
 ) -> pd.DataFrame:
@@ -167,7 +167,7 @@ def run_extraction(
     specs: List[ExplicitConfounderSpec],
     mode: str = "python_api",
     server_url: str = "http://localhost:8000/v1",
-    model_name: str = "google/medgemma-1.5-4b-it",
+    model_name: str = "Qwen/Qwen3.5-0.8B-Base",
     tensor_parallel_size: int = 1,
     cache_dir: Optional[str] = None,
     skip_cache: bool = False
@@ -489,7 +489,7 @@ def train_and_evaluate_causal_forest(
 
     # Check if econml is available
     try:
-        from cdt.models import CausalTextForest, ECONML_AVAILABLE
+        from oci.models import CausalTextForest, ECONML_AVAILABLE
         if not ECONML_AVAILABLE:
             logger.warning("econml not available, skipping causal forest test")
             return {'model_type': 'causal_forest', 'error': 'econml not available'}
@@ -505,16 +505,8 @@ def train_and_evaluate_causal_forest(
 
     # Create model WITH explicit confounder specs
     model = CausalTextForest(
-        feature_extractor_type="gru_pool",
-        gru_pool_embedding_dim=128,
-        gru_pool_gru_hidden_dim=128,
-        gru_pool_transformer_layers=4,
-        gru_pool_max_chunks=100,
-        gru_pool_chunk_size=128,
-        gru_pool_chunk_overlap=32,
-        gru_pool_projection_dim=128,
-        gru_pool_max_vocab=10000,
-        gru_pool_min_word_freq=2,
+        feature_extractor_type="frozen_llm_pooler",
+        flp_projection_dim=128,
         representation_dim=128,
         hidden_dim=64,
         dropout=0.0,
@@ -526,11 +518,6 @@ def train_and_evaluate_causal_forest(
         explicit_confounder_specs=specs,  # Native support for explicit confounders
         device=device
     )
-
-    # Fit tokenizer
-    train_texts = train_df['clinical_text'].tolist()
-    model.fit_tokenizer(train_texts)
-    logger.info("Fitted tokenizer")
 
     # Create datasets with explicit confounders
     train_dataset = ClinicalTextDataset(

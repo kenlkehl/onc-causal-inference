@@ -1,5 +1,5 @@
 {
-  "output_dir": "./cdt_results_tfidf_baseline",
+  "output_dir": "./oci_results_tfidf_baseline",
   "seed": 42,
   "device": "cpu",
   "num_workers": 1,
@@ -36,9 +36,5 @@
       "epochs": 1,
       "batch_size": 1
     }
-  },
-
-  "plasmode_experiments": {
-    "enabled": false
   }
 }
