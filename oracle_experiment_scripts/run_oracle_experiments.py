@@ -55,6 +55,7 @@ Usage:
 """
 
 import argparse
+import concurrent.futures
 import gc
 import hashlib
 import itertools
@@ -898,6 +899,7 @@ def build_confounder_values_from_columns(
 def run_best_attainable_experiment(
     config: ExperimentConfig,
     df: pd.DataFrame,
+    n_jobs: int = -1,
 ) -> Dict[str, Any]:
     """Run a best-attainable experiment using ground-truth confounder values.
 
@@ -981,13 +983,13 @@ def run_best_attainable_experiment(
                 n_estimators=max(50, config.cf_n_estimators // 2),
                 min_samples_leaf=config.cf_min_samples_leaf,
                 random_state=42 + config.repeat_index,
-                n_jobs=-1,
+                n_jobs=n_jobs,
             ),
             model_y=RandomForestRegressor(
                 n_estimators=max(50, config.cf_n_estimators // 2),
                 min_samples_leaf=config.cf_min_samples_leaf,
                 random_state=42 + config.repeat_index,
-                n_jobs=-1,
+                n_jobs=n_jobs,
             ),
             discrete_treatment=True,
             n_estimators=config.cf_n_estimators,
@@ -996,7 +998,7 @@ def run_best_attainable_experiment(
             honest=True,
             inference=True,
             random_state=42 + config.repeat_index,
-            n_jobs=-1,
+            n_jobs=n_jobs,
         )
         cf.fit(Y_train, T_train, X=X_train)
 
@@ -1133,7 +1135,8 @@ def generate_experiment_grid(
         ("../example_synthetic_data_ten_confounders_50K_twostage", "ten_confounders_50K_twostage"),
     ]
 
-    model_types = ["causal_forest", "rlearner", "dragonnet", "best_attainable"]
+    # best_attainable is CPU-only and doesn't use LLM params -- added separately below
+    model_types = ["causal_forest", "rlearner", "dragonnet"]
     max_lengths = [5000, 10000, 25000, 50000, 75000]
     explicit_confounder_options = [False, True]
     downprojection_dims = [128, 256, 512]
@@ -1141,7 +1144,8 @@ def generate_experiment_grid(
     if filter_datasets:
         datasets = [(p, n) for p, n in datasets if n in filter_datasets]
     if filter_model_types:
-        model_types = [m for m in model_types if m in filter_model_types]
+        model_types = [m for m in model_types if m in filter_model_types
+                       and m != "best_attainable"]
     if filter_max_lengths:
         max_lengths = [m for m in max_lengths if m in filter_max_lengths]
 
@@ -1397,6 +1401,51 @@ def worker_thread(
             torch.cuda.empty_cache()
 
 
+def _run_best_attainable_worker(args_tuple):
+    """Top-level function for ProcessPoolExecutor (must be picklable).
+
+    Runs a single best_attainable experiment and saves the result JSON.
+    Returns (config_hash, result_dict).
+    """
+    config, output_dir_str, n_jobs = args_tuple
+    output_dir = Path(output_dir_str)
+    config_hash = config.config_hash()
+
+    try:
+        parquet_file = _resolve_parquet_file(config.dataset_path)
+        if parquet_file is None:
+            result = {
+                'config': asdict(config),
+                'error': f"Dataset not found in {config.dataset_path}",
+                'skipped': True,
+            }
+        else:
+            df = pd.read_parquet(parquet_file)
+            ba_result = run_best_attainable_experiment(config, df, n_jobs=n_jobs)
+            result = {
+                'config': asdict(config),
+                'metrics': ba_result['metrics'],
+                'n_samples': ba_result['n_samples'],
+                'skipped': False,
+                'error': None,
+            }
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"best_attainable {config_hash} FAILED: {e}\n{tb}")
+        result = {
+            'config': asdict(config),
+            'error': str(e),
+            'skipped': True,
+        }
+
+    result_file = output_dir / "results" / f"{config_hash}.json"
+    result_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(result_file, 'w') as f:
+        json.dump(result, f, indent=2, default=str)
+
+    return config_hash, result
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Oracle experiment runner for CDT (causal_forest, rlearner, dragonnet, best_attainable)"
@@ -1550,21 +1599,58 @@ def main():
         logger.info("No experiments to run")
         return
 
-    # Group experiments by cache key for sequential cache processing
-    cache_groups = group_configs_by_cache_key(pending_configs, use_cache)
+    # Separate best_attainable (CPU-only) from GPU experiments
+    ba_configs = [c for c in pending_configs if c.model_type == "best_attainable"]
+    gpu_configs = [c for c in pending_configs if c.model_type != "best_attainable"]
+
+    # Run best_attainable experiments in parallel on CPU
+    if ba_configs:
+        n_cpu_workers = min(len(ba_configs), max(1, os.cpu_count() // 2))
+        # Limit per-worker sklearn threads to avoid oversubscription
+        n_jobs_per_worker = max(1, os.cpu_count() // n_cpu_workers)
+        logger.info(f"Running {len(ba_configs)} best_attainable experiments "
+                    f"in parallel ({n_cpu_workers} CPU workers, "
+                    f"{n_jobs_per_worker} threads each)")
+        ba_progress = tqdm(total=len(ba_configs), desc="best_attainable (CPU)")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=n_cpu_workers) as pool:
+            futures = {
+                pool.submit(
+                    _run_best_attainable_worker,
+                    (config, str(output_dir), n_jobs_per_worker),
+                ): config
+                for config in ba_configs
+            }
+            for future in concurrent.futures.as_completed(futures):
+                config_hash, result = future.result()
+                results_dict[config_hash] = result
+                ba_progress.update(1)
+                if not result.get('skipped'):
+                    metrics = result.get('metrics', {})
+                    ba_progress.set_postfix_str(
+                        f"ITE corr: {metrics.get('ite_corr', 'N/A'):.3f}"
+                    )
+        ba_progress.close()
+        logger.info(f"Completed {len(ba_configs)} best_attainable experiments")
+
+    if not gpu_configs:
+        logger.info("No GPU experiments to run")
+        return
+
+    # Group GPU experiments by cache key for sequential cache processing
+    cache_groups = group_configs_by_cache_key(gpu_configs, use_cache)
 
     if not use_cache and args.workers_per_gpu != "auto" and int(args.workers_per_gpu) > 1:
         logger.warning("--workers-per-gpu > 1 requires --cache or --gpu-cache (LLM uses most VRAM); forcing 1")
         args.workers_per_gpu = "1"
 
-    logger.info(f"Running {len(pending_configs)} experiments in {len(cache_groups)} cache group(s) "
+    logger.info(f"Running {len(gpu_configs)} GPU experiments in {len(cache_groups)} cache group(s) "
                 f"on {len(args.devices)} GPU(s) (workers-per-gpu: {args.workers_per_gpu})")
     if use_cache:
         logger.info("Using multiprocessing (1 process per GPU, avoids GIL contention)")
     else:
         logger.info("Using threading (non-cached mode, LLM loaded per experiment)")
 
-    progress_bar = tqdm(total=len(pending_configs), desc="Experiments")
+    progress_bar = tqdm(total=len(gpu_configs), desc="Experiments")
 
     for group_idx, (cache_hash, cache_info, group_configs) in enumerate(cache_groups):
         if not group_configs:
