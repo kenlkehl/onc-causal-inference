@@ -1126,6 +1126,7 @@ def generate_experiment_grid(
     filter_datasets: Optional[List[str]] = None,
     filter_model_types: Optional[List[str]] = None,
     filter_max_lengths: Optional[List[int]] = None,
+    model_name: str = "Qwen/Qwen3.5-0.8B-Base",
 ) -> List[ExperimentConfig]:
     """Generate all experiment configurations."""
 
@@ -1161,6 +1162,7 @@ def generate_experiment_grid(
             use_explicit_confounders=explicit_conf,
             flp_max_length=max_len,
             flp_downprojection_dim=dp_dim,
+            flp_model_name=model_name,
         ))
 
     # Add best_attainable experiments (one per dataset, no GPU needed)
@@ -1171,6 +1173,7 @@ def generate_experiment_grid(
                 dataset_name=dataset_name,
                 model_type="best_attainable",
                 use_explicit_confounders=False,
+                flp_model_name=model_name,
             ))
 
     # Shuffle so patterns emerge early
@@ -1524,6 +1527,12 @@ def main():
         help="Number of repeats per experiment config with different random seeds (default: 10)"
     )
     parser.add_argument(
+        "--model-name",
+        type=str,
+        default="Qwen/Qwen3.5-0.8B-Base",
+        help="HuggingFace model name for frozen LLM pooler (default: Qwen/Qwen3.5-0.8B-Base)"
+    )
+    parser.add_argument(
         "--workers-per-gpu",
         type=str,
         default="auto",
@@ -1550,6 +1559,7 @@ def main():
         filter_datasets=args.datasets,
         filter_model_types=args.model_types,
         filter_max_lengths=args.max_lengths,
+        model_name=args.model_name,
     )
 
     use_cache = args.cache or args.gpu_cache
