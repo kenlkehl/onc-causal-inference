@@ -972,6 +972,7 @@ Examples:
     parser.add_argument(
         "--extract-confounders",
         action="store_true",
+        default=True,
         help="After generation, extract confounders from clinical text using the same LLM and evaluate accuracy",
     )
     parser.add_argument(

@@ -1,0 +1,24 @@
+{
+  "per_confounder": {
+    "ecog_performance_status": {
+      "type": "categorical",
+      "accuracy": 0.9818731117824774,
+      "coverage": 0.993,
+      "total_samples": 1000,
+      "valid_extractions": 993,
+      "unknown_extractions": 7.0,
+      "per_category_accuracy": {
+        "0": 0.9565217391304348,
+        "1": 0.9808153477218226,
+        "2": 0.9879154078549849,
+        "3": 1.0
+      }
+    }
+  },
+  "aggregate": {
+    "categorical_accuracy": 0.9818731117824774,
+    "total_categorical_samples": 993,
+    "mean_continuous_correlation": null,
+    "num_continuous_confounders": 0
+  }
+}

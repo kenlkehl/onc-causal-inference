@@ -346,38 +346,38 @@
     "std_ite_prob": 0.134681278992384,
     "clinical_text_stats": {
       "non_empty_count": 999,
-      "mean_length": 53809.548
+      "mean_length": 52594.694
     },
     "generation_mode": "two_stage",
     "two_stage_stats": {
-      "mean_notes_per_patient": 18.877,
+      "mean_notes_per_patient": 18.837,
       "min_notes_per_patient": 0,
-      "max_notes_per_patient": 34
+      "max_notes_per_patient": 26
     },
     "structured_data_stats": {
+      "lab_result": {
+        "mean_per_patient": 3.358,
+        "min_per_patient": 0,
+        "max_per_patient": 6,
+        "total": 3358
+      },
       "hospitalization": {
-        "mean_per_patient": 1.121,
+        "mean_per_patient": 1.119,
         "min_per_patient": 0,
         "max_per_patient": 2,
-        "total": 1121
-      },
-      "pro_assessment": {
-        "mean_per_patient": 1.9,
-        "min_per_patient": 0,
-        "max_per_patient": 4,
-        "total": 1900
-      },
-      "lab_result": {
-        "mean_per_patient": 3.359,
-        "min_per_patient": 0,
-        "max_per_patient": 6,
-        "total": 3359
+        "total": 1119
       },
       "encounter": {
-        "mean_per_patient": 3.08,
+        "mean_per_patient": 3.061,
         "min_per_patient": 0,
-        "max_per_patient": 6,
-        "total": 3080
+        "max_per_patient": 5,
+        "total": 3061
+      },
+      "pro_assessment": {
+        "mean_per_patient": 1.887,
+        "min_per_patient": 0,
+        "max_per_patient": 3,
+        "total": 1887
       }
     }
   }

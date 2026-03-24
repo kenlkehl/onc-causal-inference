@@ -1,0 +1,125 @@
+{
+  "per_confounder": {
+    "age": {
+      "type": "continuous",
+      "correlation": 0.986684526933088,
+      "mae": 2.0357357357357357,
+      "rmse": 2.5713307336361346,
+      "coverage": 0.999,
+      "total_samples": 1000,
+      "valid_extractions": 999,
+      "missing_extractions": 1.0
+    },
+    "sex": {
+      "type": "categorical",
+      "accuracy": 1.0,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "unknown_extractions": 2.0,
+      "per_category_accuracy": {
+        "Male": 1.0,
+        "Female": 1.0,
+        "Other": 1.0
+      }
+    },
+    "ecog_performance_status": {
+      "type": "categorical",
+      "accuracy": 0.9899799599198397,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "unknown_extractions": 2.0,
+      "per_category_accuracy": {
+        "0": 1.0,
+        "1": 0.9972826086956522,
+        "2": 0.9966216216216216,
+        "3": 0.9576719576719577
+      }
+    },
+    "smoking_status": {
+      "type": "categorical",
+      "accuracy": 1.0,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "unknown_extractions": 2.0,
+      "per_category_accuracy": {
+        "Never": 1.0,
+        "Former": 1.0,
+        "Current": 1.0
+      }
+    },
+    "histology_subtype": {
+      "type": "categorical",
+      "accuracy": 0.968937875751503,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "unknown_extractions": 2.0,
+      "per_category_accuracy": {
+        "Squamous": 1.0,
+        "Adenocarcinoma": 1.0,
+        "Large cell": 1.0,
+        "NSCLC not otherwise specified": 0.9,
+        "Other": 0.14814814814814814
+      }
+    },
+    "baseline_renal_function": {
+      "type": "continuous",
+      "correlation": 0.9347593587354808,
+      "mae": 2.0146793587174345,
+      "rmse": 7.346396053163747,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "missing_extractions": 2.0
+    },
+    "baseline_hepatic_function": {
+      "type": "continuous",
+      "correlation": 0.9525864309194729,
+      "mae": 0.03739478957915831,
+      "rmse": 0.1526144893669322,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "missing_extractions": 2.0
+    },
+    "prior_lines_of_therapy": {
+      "type": "continuous",
+      "correlation": 0.5568814056681434,
+      "mae": 0.5661623246492986,
+      "rmse": 0.7533776315443822,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "missing_extractions": 2.0
+    },
+    "pd_l1_expression": {
+      "type": "continuous",
+      "correlation": 0.943458251086788,
+      "mae": 1.9247494989979959,
+      "rmse": 7.951555285786916,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "missing_extractions": 2.0
+    },
+    "comorbidity_score": {
+      "type": "continuous",
+      "correlation": 0.8919455724444227,
+      "mae": 0.38543086172344687,
+      "rmse": 1.1638092213965376,
+      "coverage": 0.998,
+      "total_samples": 1000,
+      "valid_extractions": 998,
+      "missing_extractions": 2.0
+    }
+  },
+  "aggregate": {
+    "categorical_accuracy": 0.9897294589178357,
+    "total_categorical_samples": 3992,
+    "mean_continuous_correlation": 0.8777192576312327,
+    "num_continuous_confounders": 6
+  }
+}
