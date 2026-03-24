@@ -20,36 +20,48 @@ Output is compatible with analyze_results.py.
 Usage:
     # Run full grid on 4 GPUs (default)
     python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets ../example_synthetic_data_ten_confounders_50K_twostage \
+        --output-dir ../pcori_experiments/oracle_experiments
+
+    # Multiple datasets
+    python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets path/to/dataset1 path/to/dataset2 \
         --output-dir ../pcori_experiments/oracle_experiments
 
     # Run on specific GPUs
     python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets ../example_synthetic_data_ten_confounders_50K_twostage \
         --output-dir ../pcori_experiments/oracle_experiments \
         --devices cuda:0 cuda:1
 
     # Run subset for testing
     python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets ../example_synthetic_data_ten_confounders_50K_twostage \
         --output-dir ../pcori_experiments/oracle_experiments \
         --devices cuda:1 \
         --max-experiments 1 --epochs 3 --n-folds 5
 
     # Run with 5 repeats instead of default 10
     python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets ../example_synthetic_data_ten_confounders_50K_twostage \
         --output-dir ../pcori_experiments/oracle_experiments \
         --n-repeats 5
 
     # Resume from checkpoint
     python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets ../example_synthetic_data_ten_confounders_50K_twostage \
         --output-dir ../pcori_experiments/oracle_experiments \
         --resume
 
     # Run multiple experiments per GPU (cached mode only)
     python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets ../example_synthetic_data_ten_confounders_50K_twostage \
         --output-dir ../pcori_experiments/oracle_experiments \
         --cache --gpu-cache --workers-per-gpu auto
 
     # Fixed 4 workers per GPU
     python oracle_experiment_scripts/run_oracle_experiments.py \
+        --datasets ../example_synthetic_data_ten_confounders_50K_twostage \
         --output-dir ../pcori_experiments/oracle_experiments \
         --cache --workers-per-gpu 4
 """
@@ -1123,18 +1135,14 @@ def run_single_experiment(
 
 
 def generate_experiment_grid(
-    filter_datasets: Optional[List[str]] = None,
+    dataset_paths: List[str],
     filter_model_types: Optional[List[str]] = None,
     filter_max_lengths: Optional[List[int]] = None,
     model_name: str = "Qwen/Qwen3.5-0.8B-Base",
 ) -> List[ExperimentConfig]:
     """Generate all experiment configurations."""
 
-    datasets = [
-        #("synthetic_data/example_synthetic_datasets/one_confounder_twostage", "one_confounder_twostage"),
-        #("synthetic_data/example_synthetic_datasets/ten_confounders_twostage", "ten_confounders_twostage"),
-        ("../example_synthetic_data_ten_confounders_50K_twostage", "ten_confounders_50K_twostage"),
-    ]
+    datasets = [(p, Path(p).name) for p in dataset_paths]
 
     # best_attainable is CPU-only and doesn't use LLM params -- added separately below
     model_types = ["causal_forest", "rlearner", "dragonnet"]
@@ -1142,8 +1150,6 @@ def generate_experiment_grid(
     explicit_confounder_options = [False, True]
     downprojection_dims = [128, 256, 512]
 
-    if filter_datasets:
-        datasets = [(p, n) for p, n in datasets if n in filter_datasets]
     if filter_model_types:
         model_types = [m for m in model_types if m in filter_model_types
                        and m != "best_attainable"]
@@ -1481,8 +1487,8 @@ def main():
         "--datasets",
         type=str,
         nargs="+",
-        default=None,
-        help="Filter datasets (one_confounder_twostage, ten_confounders_twostage, ten_confounders_50K_twostage)"
+        required=True,
+        help="Dataset directory paths (each must contain dataset.parquet or dataset_with_extraction.parquet)"
     )
     parser.add_argument(
         "--model-types",
@@ -1555,8 +1561,13 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Save command line invocation
+    cmdline_file = output_dir / "command_line.txt"
+    cmdline_file.write_text(" ".join(sys.argv) + "\n")
+    logger.info(f"Command line saved to {cmdline_file}")
+
     base_configs = generate_experiment_grid(
-        filter_datasets=args.datasets,
+        dataset_paths=args.datasets,
         filter_model_types=args.model_types,
         filter_max_lengths=args.max_lengths,
         model_name=args.model_name,
