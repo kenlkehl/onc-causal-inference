@@ -1,0 +1,19 @@
+{
+  "per_confounder": {
+    "metastatic_disease_distribution": {
+      "type": "categorical",
+      "accuracy": 0.0,
+      "coverage": 1.0,
+      "total_samples": 1000,
+      "valid_extractions": 1000,
+      "unknown_extractions": 0.0,
+      "per_category_accuracy": {}
+    }
+  },
+  "aggregate": {
+    "categorical_accuracy": 0.0,
+    "total_categorical_samples": 1000,
+    "mean_continuous_correlation": null,
+    "num_continuous_confounders": 0
+  }
+}

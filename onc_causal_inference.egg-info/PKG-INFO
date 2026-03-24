@@ -328,21 +328,6 @@ Install extraction support with `pip install -e ".[extraction]"`.
 
 Results are cached to `{dataset_dir}/.oci_cache/` and invalidated automatically if the extraction config changes.
 
-## Numeric Feature Extraction
-
-Optional magnitude-aware encoding of clinical numbers (lab values, vitals, scores, doses, ages). Numbers are detected via regex, binned on a log scale, and classified by context keywords.
-
-```json
-{
-  "architecture": {
-    "numeric_features_enabled": true,
-    "numeric_embedding_dim": 32
-  }
-}
-```
-
-Disabled by default.
-
 ## Contrastive Learning
 
 Optional supervised contrastive loss (SupCon) within similarity clusters encourages the model to discriminate treatment/outcome status among clinically similar patients. Features are clustered via K-means, then SupCon is computed within each cluster using treatment x outcome as 4-class labels.
@@ -494,7 +479,6 @@ output_dir/
     predictions.parquet        # Treatment effect estimates
     training_log.csv
     psm_analysis/              # If matching analysis enabled
-  plasmode_experiments/        # If plasmode enabled
 ```
 
 The `predictions.parquet` contains:

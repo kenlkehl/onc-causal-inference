@@ -1,0 +1,156 @@
+{
+  "config": {
+    "clinical_question": "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC.",
+    "dataset_size": 1000,
+    "treatment_effect_prob": 0.2,
+    "target_treatment_rate": 0.5,
+    "target_control_outcome_rate": 0.5,
+    "enforce_positivity": false,
+    "min_treatment_rate_per_stratum": 0.1,
+    "max_treatment_rate_per_stratum": 0.9,
+    "main_coefficient_scale": 0.3,
+    "interaction_coefficient_scale": 0.1,
+    "target_logit_std": 2.0,
+    "num_confounders": 1,
+    "outcome_type": "binary",
+    "outcome_noise_std": 1.0,
+    "generation_mode": "two_stage",
+    "min_events_per_patient": 15,
+    "max_events_per_patient": 30,
+    "note_types_to_expand": [
+      "clinical_note",
+      "imaging_report",
+      "pathology_report",
+      "ngs_report"
+    ],
+    "note_separator": "\n\n<new_note>\n\n",
+    "drug_perturbation_prob": 0.3,
+    "output_dir": "./synthetic_data/example_synthetic_datasets/one_confounder_nsclc_with_structured",
+    "llm": {
+      "api_base_url": "http://localhost:8000/v1",
+      "api_key": "",
+      "model_name": "openai/gpt-oss-120b",
+      "temperature": 0.7,
+      "max_tokens": 50000,
+      "timeout": 300.0
+    },
+    "structured_data": {
+      "enabled": true,
+      "include_encounters": true,
+      "include_hospitalizations": true,
+      "include_labs": true,
+      "include_pros": true,
+      "pro_instruments": [
+        "EORTC_QLQ_C30",
+        "PRO_CTCAE"
+      ]
+    },
+    "seed": 42
+  },
+  "confounders": [
+    {
+      "name": "ecog_performance_status",
+      "type": "categorical",
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ],
+      "description": "ECOG performance status score reflecting patient functional status, influencing treatment choice and survival"
+    }
+  ],
+  "treatment_equation": {
+    "intercept": 2.254042270593855,
+    "coefficients": {
+      "ecog_performance_status_1": -1.4190380671449008,
+      "ecog_performance_status_2": -3.784101512386402,
+      "ecog_performance_status_3": -7.095190335724504
+    },
+    "interactions": [],
+    "original_intercept": 0.2
+  },
+  "outcome_equation": {
+    "intercept": 2.8209292662164853,
+    "coefficients": {
+      "ecog_performance_status_1": -1.9938887476115161,
+      "ecog_performance_status_2": -4.486249682125911,
+      "ecog_performance_status_3": -6.978610616640307
+    },
+    "interactions": [],
+    "treatment_coefficient": 0.2,
+    "treatment_interactions": [
+      {
+        "term": "ecog_performance_status_1",
+        "coefficient": -0.41692174217820344
+      },
+      {
+        "term": "ecog_performance_status_2",
+        "coefficient": 1.497790306563768
+      },
+      {
+        "term": "ecog_performance_status_3",
+        "coefficient": 0.7709501834863358
+      }
+    ],
+    "original_intercept": -0.5
+  },
+  "summary_statistics": {
+    "ecog_performance_status": {
+      "type": "categorical",
+      "proportions": {
+        "0": 0.15,
+        "1": 0.45,
+        "2": 0.3,
+        "3": 0.1
+      }
+    }
+  },
+  "dataset_statistics": {
+    "n_patients": 1000,
+    "treatment_rate": 0.475,
+    "outcome_rate": 0.469,
+    "mean_treatment_prob": 0.4777558495325428,
+    "std_treatment_prob": 0.3157202564433151,
+    "mean_outcome_prob": 0.48810612331360115,
+    "std_outcome_prob": 0.31032904664477245,
+    "mean_ite_prob": 0.09984065065196569,
+    "std_ite_prob": 0.17763127006487023,
+    "clinical_text_stats": {
+      "non_empty_count": 997,
+      "mean_length": 52280.722
+    },
+    "generation_mode": "two_stage",
+    "two_stage_stats": {
+      "mean_notes_per_patient": 19.093,
+      "min_notes_per_patient": 0,
+      "max_notes_per_patient": 25
+    },
+    "structured_data_stats": {
+      "hospitalization": {
+        "mean_per_patient": 1.067,
+        "min_per_patient": 0,
+        "max_per_patient": 2,
+        "total": 1067
+      },
+      "encounter": {
+        "mean_per_patient": 3.077,
+        "min_per_patient": 0,
+        "max_per_patient": 6,
+        "total": 3077
+      },
+      "lab_result": {
+        "mean_per_patient": 3.327,
+        "min_per_patient": 0,
+        "max_per_patient": 5,
+        "total": 3327
+      },
+      "pro_assessment": {
+        "mean_per_patient": 1.99,
+        "min_per_patient": 0,
+        "max_per_patient": 3,
+        "total": 1990
+      }
+    }
+  }
+}

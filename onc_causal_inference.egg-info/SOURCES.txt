@@ -19,6 +19,7 @@ oci/extraction/cache.py
 oci/extraction/explicit_confounders.py
 oci/inference/__init__.py
 oci/inference/applied.py
+oci/inference/applied_confounder_forest.py
 oci/inference/applied_forest.py
 oci/inference/applied_tfidf_forest.py
 oci/matching/__init__.py
@@ -34,14 +35,11 @@ oci/models/frozen_llm_pooler_extractor.py
 oci/models/gated_attention_pooling.py
 oci/models/gpu_hidden_state_store.py
 oci/models/hidden_state_cache.py
-oci/models/intra_batch_contrastive.py
-oci/models/numeric_features.py
 oci/models/outcome_model.py
 oci/models/propensity_model.py
 oci/models/rlearner.py
 oci/training/__init__.py
 oci/training/outcome_training.py
-oci/training/plasmode.py
 oci/training/propensity_trimming.py
 oci/utils/__init__.py
 oci/utils/io.py
@@ -52,4 +50,5 @@ onc_causal_inference.egg-info/dependency_links.txt
 onc_causal_inference.egg-info/entry_points.txt
 onc_causal_inference.egg-info/requires.txt
 onc_causal_inference.egg-info/top_level.txt
+tests/test_e2e_workflows.py
 tests/test_explicit_confounders_e2e.py

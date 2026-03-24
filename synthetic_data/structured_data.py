@@ -12,6 +12,16 @@ from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_hyphens(text: str) -> str:
+    """Replace common Unicode hyphens/dashes with ASCII hyphen-minus (U+002D).
+
+    LLMs frequently produce non-breaking hyphens (U+2011), en dashes (U+2013),
+    and other Unicode dash variants that break regex patterns expecting ASCII hyphens.
+    """
+    return re.sub(r'[\u2010\u2011\u2012\u2013\u2014\u2015\u2212\uFE58\uFE63\uFF0D]', '-', text)
+
+
 # ============================================================================
 # Constants
 # ============================================================================
@@ -123,6 +133,13 @@ def parse_encounter_event(event_text: str) -> Dict[str, Any]:
     enc_match = re.match(r'(.*?)(?:\.\s*DX:|DX:|\.\s*CPT:|CPT:|$)', rest, re.IGNORECASE)
     if enc_match:
         result["encounter_type"] = enc_match.group(1).strip().rstrip('.')
+        # Truncate qualifying phrases to match structured EHR format
+        result["encounter_type"] = re.sub(
+            r'\s+(?:for|to|regarding|focusing on|about)\s+.*$',
+            '',
+            result["encounter_type"],
+            flags=re.IGNORECASE,
+        )
 
     # Extract diagnosis codes: pattern like C34.90 (description) or D70.1 (description)
     dx_section_match = re.search(r'DX:\s*(.*?)(?:\.\s*CPT:|CPT:|$)', rest, re.IGNORECASE | re.DOTALL)
@@ -330,7 +347,7 @@ def parse_pro_assessment_event(event_text: str) -> Dict[str, Any]:
 
     # Split by instrument names
     instrument_pattern = re.compile(
-        r'(EORTC QLQ-?C30|PRO-?CTCAE|FACT-?G|EQ-?5D-?5L|PROMIS-?29):\s*',
+        r'(EORTC QLQ-?C30|PRO-?CTCAE|FACT-?G|EQ-?5D-?5L|PROMIS-?29)[^:]*:\s*',
         re.IGNORECASE
     )
     inst_matches = list(instrument_pattern.finditer(rest))
@@ -544,6 +561,7 @@ def convert_structured_event_to_text(event_type: str, event_text: str) -> Option
         Formatted text string, or None if parsing fails
     """
     try:
+        event_text = _normalize_hyphens(event_text)
         if event_type == "encounter":
             parsed = parse_encounter_event(event_text)
             return encounter_to_text(parsed)

@@ -21,6 +21,8 @@ python -m synthetic_data.cli  --use-vllm-batch  --model openai/gpt-oss-120b \
 --dataset-size 1000 \
 --generation-mode two_stage \
 --num-confounders 1 \
---output-dir ./synthetic_data/example_synthetic_datasets/one_confounder \
+--structured-data \
+--output-dir ./synthetic_data/example_synthetic_datasets/one_confounder_nsclc_with_structured \
+--clinical-question "Compare vinorelbine to gemcitabine for advanced/metastatic NSCLC." \
 --vllm-download-dir /data1/ken/models
     
