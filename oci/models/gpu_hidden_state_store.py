@@ -322,6 +322,10 @@ class GPUHiddenStateStore:
                 )
                 hidden_states = outputs.hidden_states[-1]  # (batch, seq, hidden)
 
+            # Sanitize NaN/Inf (some models overflow in float16)
+            from .hidden_state_cache import _sanitize_hidden_states
+            hidden_states = _sanitize_hidden_states(hidden_states, context="gpu_store")
+
             # Apply frozen downprojection before storing
             if downproj_layer is not None:
                 with torch.no_grad():

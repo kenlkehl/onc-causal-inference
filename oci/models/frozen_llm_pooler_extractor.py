@@ -280,6 +280,9 @@ class FrozenLLMPoolerExtractor(nn.Module):
                         return_dict=True,
                     )
                     hidden_states = outputs.last_hidden_state  # (batch, seq_len, hidden_size)
+            # Sanitize NaN/Inf (some models overflow in float16)
+            from .hidden_state_cache import _sanitize_hidden_states
+            hidden_states = _sanitize_hidden_states(hidden_states, context="live_forward")
             # Detach from LLM graph and cast to float32
             hidden_states = hidden_states.detach().float()
         else:
@@ -291,6 +294,9 @@ class FrozenLLMPoolerExtractor(nn.Module):
                 return_dict=True,
             )
             hidden_states = outputs.last_hidden_state
+            # Sanitize NaN/Inf (some models overflow in float16)
+            from .hidden_state_cache import _sanitize_hidden_states
+            hidden_states = _sanitize_hidden_states(hidden_states, context="live_forward_trainable")
             # Cast BFloat16 -> Float32 if needed (Qwen3 uses BFloat16)
             if hidden_states.dtype != torch.float32:
                 hidden_states = hidden_states.float()
@@ -331,6 +337,10 @@ class FrozenLLMPoolerExtractor(nn.Module):
             hidden_states = hidden_states.float()
         if attention_mask.dtype != torch.float32:
             attention_mask = attention_mask.float()
+
+        # Sanitize NaN/Inf that may have been stored in cache
+        from .hidden_state_cache import _sanitize_hidden_states
+        hidden_states = _sanitize_hidden_states(hidden_states, context="forward_cached")
 
         assert hidden_states.dtype == torch.float32, (
             f"forward_cached: hidden_states is {hidden_states.dtype} after .float() cast"

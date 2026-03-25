@@ -41,6 +41,28 @@ from .gpu_hidden_state_store import _get_hidden_size, _make_downprojection
 logger = logging.getLogger(__name__)
 
 
+def _sanitize_hidden_states(hidden_states: torch.Tensor, context: str = "") -> torch.Tensor:
+    """Replace NaN/Inf values in hidden states with 0.
+
+    Some models (e.g., MedGemma) produce NaN or Inf in float16 hidden states
+    when activation magnitudes exceed the float16 range (~65504).
+    """
+    nan_mask = torch.isnan(hidden_states)
+    inf_mask = torch.isinf(hidden_states)
+    bad_mask = nan_mask | inf_mask
+    if bad_mask.any():
+        n_bad = bad_mask.sum().item()
+        total = hidden_states.numel()
+        logger.warning(
+            f"Hidden states contain {n_bad}/{total} NaN/Inf values "
+            f"({n_bad/total:.4%}){' [' + context + ']' if context else ''}. "
+            f"Replacing with 0."
+        )
+        hidden_states = hidden_states.clone()
+        hidden_states[bad_mask] = 0.0
+    return hidden_states
+
+
 class VariableLengthArray:
     """Array-like wrapper for variable-length sequences stored in a flat array.
 
@@ -476,6 +498,9 @@ class HiddenStateCache:
                 )
                 hidden_states = outputs.last_hidden_state  # (batch, batch_max_len, hidden_size)
 
+                # Sanitize NaN/Inf (some models overflow in float16)
+                hidden_states = _sanitize_hidden_states(hidden_states, context="precompute")
+
                 # Apply random projection on GPU before transfer
                 if rp_matrix_gpu is not None:
                     hidden_states = hidden_states.float() @ rp_matrix_gpu
@@ -750,6 +775,11 @@ class HiddenStateCache:
                         return_dict=True,
                     )
                     hidden_states = outputs.last_hidden_state
+
+                    # Sanitize NaN/Inf (some models overflow in float16)
+                    hidden_states = _sanitize_hidden_states(
+                        hidden_states, context=f"precompute_multi_gpu/{device}"
+                    )
 
                     # Apply random projection on GPU before transfer
                     if rp_gpu is not None:
