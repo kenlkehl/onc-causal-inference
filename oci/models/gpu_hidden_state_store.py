@@ -27,6 +27,42 @@ import torch
 logger = logging.getLogger(__name__)
 
 
+def _get_model_dtype(config) -> torch.dtype:
+    """Determine the preferred compute dtype for a model.
+
+    Many models (e.g., Gemma/MedGemma) are trained in bfloat16 and produce
+    NaN/Inf when forced into float16 due to overflow.  This reads the
+    ``torch_dtype`` from the HF config and returns the appropriate dtype.
+
+    Falls back to bfloat16 if CUDA supports it, otherwise float16.
+    """
+    # Check HF config's torch_dtype (set by model authors)
+    cfg_dtype = getattr(config, "torch_dtype", None)
+    # Also check nested text_config for multimodal models
+    if cfg_dtype is None and hasattr(config, "text_config"):
+        cfg_dtype = getattr(config.text_config, "torch_dtype", None)
+
+    if cfg_dtype is not None:
+        # HF configs store this as a string like "bfloat16" or a torch.dtype
+        if isinstance(cfg_dtype, str):
+            dtype_map = {
+                "bfloat16": torch.bfloat16,
+                "float16": torch.float16,
+                "float32": torch.float32,
+            }
+            resolved = dtype_map.get(cfg_dtype)
+            if resolved is not None:
+                return resolved
+        elif isinstance(cfg_dtype, torch.dtype):
+            if cfg_dtype in (torch.bfloat16, torch.float16):
+                return cfg_dtype
+
+    # Default: bfloat16 if hardware supports it (Ampere+), else float16
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return torch.bfloat16
+    return torch.float16
+
+
 def _get_hidden_size(config) -> int:
     """Resolve hidden_size from an HF config, handling multimodal models.
 
@@ -248,6 +284,8 @@ class GPUHiddenStateStore:
         logger.info("  Loading LLM for hidden state extraction...")
         hf_config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(hf_config)
+        compute_dtype = _get_model_dtype(hf_config)
+        logger.info(f"  Compute dtype: {compute_dtype}")
         self._hidden_size = hidden_size
 
         # Load directly to target device to avoid meta tensors with
@@ -256,7 +294,7 @@ class GPUHiddenStateStore:
             model_name,
             config=hf_config,
             trust_remote_code=True,
-            dtype=torch.float16,
+            torch_dtype=compute_dtype,
             device_map={"": device},
         )
         from accelerate.hooks import remove_hook_from_module
@@ -313,7 +351,7 @@ class GPUHiddenStateStore:
             input_ids = encoding["input_ids"].to(device)
             attention_mask = encoding["attention_mask"].to(device)
 
-            with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
+            with torch.no_grad(), torch.autocast(device_type=device.type, dtype=compute_dtype):
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,

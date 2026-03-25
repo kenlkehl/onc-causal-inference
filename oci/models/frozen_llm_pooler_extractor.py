@@ -105,6 +105,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
                     "cached_hidden_size must be > 0 when skip_llm=True"
                 )
             self._hidden_size = cached_hidden_size
+            self._compute_dtype = None
             self._model = None
             self._tokenizer = None
             logger.info(
@@ -127,13 +128,16 @@ class FrozenLLMPoolerExtractor(nn.Module):
             self._hf_config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
             self._hidden_size = _get_hidden_size(self._hf_config)
 
-            logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size})")
+            # Use model's preferred dtype (bfloat16 for Gemma/MedGemma, float16 for Qwen)
+            from .gpu_hidden_state_store import _get_model_dtype
+            self._compute_dtype = _get_model_dtype(self._hf_config) if freeze_llm else None
+            logger.info(f"Loading pretrained weights from {model_name} (hidden_size={self._hidden_size}, dtype={self._compute_dtype})")
             # Load to CPU first, then move to target device.  Avoids meta
             # tensors that device_map + remove_hook_from_module can leave
             # for models with tied weights (e.g. lm_head tied to embed_tokens).
             self._model = AutoModelForCausalLM.from_pretrained(
                 model_name, config=self._hf_config, trust_remote_code=True,
-                torch_dtype=torch.float16 if freeze_llm else None,
+                torch_dtype=self._compute_dtype,
             )
             self._model = self._model.to(self._device)
 
@@ -270,7 +274,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
         if self._freeze_llm:
             with torch.no_grad():
                 # Use autocast for memory-efficient frozen LLM forward pass
-                with torch.amp.autocast("cuda", dtype=torch.float16, enabled=self._device.type == "cuda"):
+                with torch.amp.autocast("cuda", dtype=self._compute_dtype, enabled=self._device.type == "cuda"):
                     # Use base transformer (model.model) to skip lm_head logits
                     # computation — saves memory and avoids tied-weight issues.
                     outputs = self._model.model(

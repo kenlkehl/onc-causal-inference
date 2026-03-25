@@ -36,7 +36,7 @@ from typing import List, Optional, Tuple
 import numpy as np
 import torch
 
-from .gpu_hidden_state_store import _get_hidden_size, _make_downprojection
+from .gpu_hidden_state_store import _get_hidden_size, _get_model_dtype, _make_downprojection
 
 logger = logging.getLogger(__name__)
 
@@ -405,13 +405,15 @@ class HiddenStateCache:
         logger.info("Loading LLM for hidden state extraction...")
         hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(hf_config)
+        compute_dtype = _get_model_dtype(hf_config)
+        logger.info(f"  Compute dtype: {compute_dtype}")
 
         # Load model directly to target device.
         # Using device_map={"": device} avoids meta tensors that break .to()
         # for models with tied weights (e.g. Qwen3.5).
         model = AutoModelForCausalLM.from_pretrained(
             self._model_name, config=hf_config, trust_remote_code=True,
-            torch_dtype=torch.float16,
+            torch_dtype=compute_dtype,
             device_map={"": device},
         )
         # Remove accelerate dispatch hooks so the model behaves like a normal nn.Module
@@ -487,7 +489,7 @@ class HiddenStateCache:
             input_ids = encoding['input_ids'].to(device)
             attention_mask = encoding['attention_mask'].to(device)
 
-            with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
+            with torch.no_grad(), torch.autocast(device_type=device.type, dtype=compute_dtype):
                 # Use base transformer (model.model) to skip lm_head logits
                 # computation, which would allocate vocab_size * seq_len floats
                 outputs = model.model(
@@ -498,7 +500,7 @@ class HiddenStateCache:
                 )
                 hidden_states = outputs.last_hidden_state  # (batch, batch_max_len, hidden_size)
 
-                # Sanitize NaN/Inf (some models overflow in float16)
+                # Sanitize NaN/Inf (safety net for models that still overflow)
                 hidden_states = _sanitize_hidden_states(hidden_states, context="precompute")
 
                 # Apply random projection on GPU before transfer
@@ -511,6 +513,7 @@ class HiddenStateCache:
                     hidden_states = downproj_layer(hidden_states.float()).half()
 
             # Write only real (non-padding) tokens to flat memmap
+            # Always store as float16 for cache efficiency
             hs_cpu = hidden_states.cpu().to(torch.float16).numpy()
             for j in range(len(batch_texts)):
                 sample_len = batch_lengths[j]
@@ -644,9 +647,11 @@ class HiddenStateCache:
         for i, length in enumerate(sequence_lengths):
             offsets[i + 1] = offsets[i] + length
 
-        # Get hidden size from config (no model load yet)
+        # Get hidden size and compute dtype from config (no model load yet)
         hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(hf_config)
+        compute_dtype = _get_model_dtype(hf_config)
+        logger.info(f"  Compute dtype: {compute_dtype}")
         needs_resize = tokenizer.pad_token == '[PAD]'
         vocab_size = len(tokenizer)
 
@@ -727,7 +732,7 @@ class HiddenStateCache:
             # tied-weight models (e.g. Qwen3.5).
             mdl = AutoModelForCausalLM.from_pretrained(
                 self._model_name, config=hf_config, trust_remote_code=True,
-                torch_dtype=torch.float16,
+                torch_dtype=compute_dtype,
                 device_map={"": device},
             )
             from accelerate.hooks import remove_hook_from_module
@@ -766,7 +771,7 @@ class HiddenStateCache:
                 input_ids = encoding['input_ids'].to(device)
                 attention_mask = encoding['attention_mask'].to(device)
 
-                with torch.no_grad(), torch.autocast(device_type=device.type, dtype=torch.float16):
+                with torch.no_grad(), torch.autocast(device_type=device.type, dtype=compute_dtype):
                     # Use base transformer (mdl.model) to skip lm_head logits
                     outputs = mdl.model(
                         input_ids=input_ids,
