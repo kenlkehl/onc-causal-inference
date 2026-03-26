@@ -296,10 +296,14 @@ def group_configs_by_cache_key(
 def precompute_single_cache(
     cache_info: dict,
     devices: List[str],
+    cache_base_dir: Optional[str] = None,
 ) -> HiddenStateCache:
     """Compute (if needed) and open a single hidden state cache.
 
     Returns an opened HiddenStateCache with data preloaded to RAM.
+
+    Args:
+        cache_base_dir: Directory to store caches in. Defaults to dataset dir/.oci_cache.
     """
     parquet_file = cache_info['parquet_file']
     model_name = cache_info['model_name']
@@ -307,7 +311,7 @@ def precompute_single_cache(
     batch_size = cache_info['batch_size']
     dp_dim = cache_info['downprojection_dim']
 
-    cache_dir = str(parquet_file.parent / '.oci_cache')
+    cache_dir = cache_base_dir if cache_base_dir else str(parquet_file.parent / '.oci_cache')
     cache = HiddenStateCache(
         cache_dir=cache_dir,
         model_name=model_name,
@@ -1237,14 +1241,14 @@ def resolve_workers_per_gpu(
         return int(workers_per_gpu_arg)
 
 
-def _open_cache_for_worker(cache_hash: str, cache_info: dict) -> HiddenStateCache:
+def _open_cache_for_worker(cache_hash: str, cache_info: dict, cache_base_dir: Optional[str] = None) -> HiddenStateCache:
     """Open and preload a hidden state cache from disk in a worker process.
 
     Each worker process calls this independently to get its own cache handle.
     The OS page cache ensures that memmap reads are fast after the first load.
     """
     parquet_file = Path(cache_info['parquet_file'])
-    cache_dir = str(parquet_file.parent / '.oci_cache')
+    cache_dir = cache_base_dir if cache_base_dir else str(parquet_file.parent / '.oci_cache')
     cache = HiddenStateCache(
         cache_dir=cache_dir,
         model_name=cache_info['model_name'],
@@ -1266,6 +1270,7 @@ def worker_process_fn(
     cache_hash: str,
     cache_info: Optional[dict],
     use_gpu_cache: bool,
+    cache_base_dir: Optional[str] = None,
 ):
     """Worker process for a single GPU.
 
@@ -1281,7 +1286,7 @@ def worker_process_fn(
     gpu_store_registry = {}
 
     if cache_info and cache_hash != "__no_cache__":
-        cache = _open_cache_for_worker(cache_hash, cache_info)
+        cache = _open_cache_for_worker(cache_hash, cache_info, cache_base_dir=cache_base_dir)
         cache_registry[cache_hash] = cache
 
         if use_gpu_cache:
@@ -1657,6 +1662,9 @@ def main():
         logger.info("No GPU experiments to run")
         return
 
+    # Cache directory lives in the experiment output directory
+    cache_base_dir = str(output_dir / '.oci_cache')
+
     # Group GPU experiments by cache key for sequential cache processing
     cache_groups = group_configs_by_cache_key(gpu_configs, use_cache)
 
@@ -1690,7 +1698,7 @@ def main():
         if use_cache and cache_hash != "__no_cache__":
             # === MULTIPROCESSING PATH (cached mode) ===
             # 1. Precompute cache in main process (multi-GPU LLM inference)
-            cache = precompute_single_cache(cache_info, args.devices)
+            cache = precompute_single_cache(cache_info, args.devices, cache_base_dir=cache_base_dir)
             torch.set_default_dtype(torch.float32)
             cache.close()  # Close in main process; workers reopen independently
             del cache
@@ -1719,7 +1727,8 @@ def main():
                 p = ctx.Process(
                     target=worker_process_fn,
                     args=(device, job_queue, progress_queue, str(output_dir),
-                          cache_hash, serializable_cache_info, args.gpu_cache),
+                          cache_hash, serializable_cache_info, args.gpu_cache,
+                          cache_base_dir),
                     name=f"worker-{device}",
                 )
                 p.start()
