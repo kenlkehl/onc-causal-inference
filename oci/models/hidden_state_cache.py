@@ -134,6 +134,7 @@ class HiddenStateCache:
         dataset_path: str,
         random_projection_dim: Optional[int] = None,
         downprojection_dim: Optional[int] = None,
+        chat_template_prompt: Optional[str] = None,
     ):
         if random_projection_dim is not None and downprojection_dim is not None:
             raise ValueError(
@@ -146,9 +147,10 @@ class HiddenStateCache:
         self._dataset_path = dataset_path
         self._random_projection_dim = random_projection_dim
         self._downprojection_dim = downprojection_dim
+        self._chat_template_prompt = chat_template_prompt
         self._cache_hash = self.compute_cache_hash(
             model_name, max_length, dataset_path, random_projection_dim,
-            downprojection_dim,
+            downprojection_dim, chat_template_prompt,
         )
 
         # Actual cache location
@@ -169,6 +171,7 @@ class HiddenStateCache:
         dataset_path: str,
         random_projection_dim: Optional[int] = None,
         downprojection_dim: Optional[int] = None,
+        chat_template_prompt: Optional[str] = None,
     ) -> str:
         """Compute deterministic hash for cache identification."""
         key = f"{model_name}|{max_length}|{os.path.abspath(dataset_path)}"
@@ -176,6 +179,8 @@ class HiddenStateCache:
             key += f"|rp{random_projection_dim}"
         if downprojection_dim is not None:
             key += f"|dp{downprojection_dim}"
+        if chat_template_prompt is not None:
+            key += f"|ctp{hashlib.md5(chat_template_prompt.encode()).hexdigest()[:8]}"
         return hashlib.md5(key.encode()).hexdigest()[:12]
 
     @property
@@ -333,6 +338,30 @@ class HiddenStateCache:
         W *= 1.0 / np.sqrt(projection_dim)
         return W
 
+    @staticmethod
+    def _apply_chat_template(
+        texts: List[str],
+        tokenizer,
+        chat_template_prompt: Optional[str],
+    ) -> List[str]:
+        """Apply chat template to texts if prompt is configured."""
+        if chat_template_prompt is None:
+            return texts
+        if not hasattr(tokenizer, 'chat_template') or tokenizer.chat_template is None:
+            logger.warning(
+                "chat_template_prompt is set but tokenizer has no chat_template. "
+                "Using raw text instead."
+            )
+            return texts
+        prepared = []
+        for text in texts:
+            messages = [{"role": "user", "content": f"{chat_template_prompt}{text}"}]
+            formatted = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=False
+            )
+            prepared.append(formatted)
+        return prepared
+
     def precompute(
         self,
         texts: List[str],
@@ -370,6 +399,11 @@ class HiddenStateCache:
                 tokenizer.pad_token_id = tokenizer.eos_token_id
             else:
                 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+        # Apply chat template if configured
+        texts = self._apply_chat_template(texts, tokenizer, self._chat_template_prompt)
+        if self._chat_template_prompt is not None:
+            logger.info(f"  Chat template prompt applied ({len(self._chat_template_prompt)} chars)")
 
         # First pass: compute per-sample tokenized lengths
         logger.info("Pass 1/2: Computing per-sample tokenized lengths...")
@@ -536,6 +570,7 @@ class HiddenStateCache:
             'original_hidden_size': hidden_size,
             'random_projection_dim': self._random_projection_dim,
             'downprojection_dim': self._downprojection_dim,
+            'chat_template_prompt': self._chat_template_prompt,
             'num_samples': num_samples,
             'actual_max_len': actual_max_len,
             'total_tokens': total_tokens,
@@ -618,6 +653,11 @@ class HiddenStateCache:
                 tokenizer.pad_token_id = tokenizer.eos_token_id
             else:
                 tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+        # Apply chat template if configured
+        texts = self._apply_chat_template(texts, tokenizer, self._chat_template_prompt)
+        if self._chat_template_prompt is not None:
+            logger.info(f"  Chat template prompt applied ({len(self._chat_template_prompt)} chars)")
 
         sequence_lengths = []
         for i in range(0, num_samples, batch_size * 4):
@@ -835,6 +875,7 @@ class HiddenStateCache:
             'original_hidden_size': hidden_size,
             'random_projection_dim': self._random_projection_dim,
             'downprojection_dim': self._downprojection_dim,
+            'chat_template_prompt': self._chat_template_prompt,
             'num_samples': num_samples,
             'actual_max_len': actual_max_len,
             'total_tokens': total_tokens,

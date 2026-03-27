@@ -143,6 +143,7 @@ class GPUHiddenStateStore:
         model_name: str,
         max_length: int,
         downprojection_dim: Optional[int] = None,
+        chat_template_prompt: Optional[str] = None,
     ) -> float:
         """Estimate VRAM needed without loading the model.
 
@@ -171,6 +172,17 @@ class GPUHiddenStateStore:
                 tokenizer.pad_token = tokenizer.eos_token
             else:
                 tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+
+        # Apply chat template if configured
+        if chat_template_prompt is not None:
+            if hasattr(tokenizer, 'chat_template') and tokenizer.chat_template is not None:
+                texts = [
+                    tokenizer.apply_chat_template(
+                        [{"role": "user", "content": f"{chat_template_prompt}{t}"}],
+                        tokenize=False, add_generation_prompt=False,
+                    )
+                    for t in texts
+                ]
 
         config = AutoConfig.from_pretrained(model_name, trust_remote_code=True)
         hidden_size = _get_hidden_size(config)
@@ -207,6 +219,7 @@ class GPUHiddenStateStore:
         device: torch.device,
         batch_size: int = 4,
         downprojection_dim: Optional[int] = None,
+        chat_template_prompt: Optional[str] = None,
     ) -> None:
         """Pre-compute LLM hidden states for all texts and store on GPU.
 
@@ -250,6 +263,23 @@ class GPUHiddenStateStore:
                 tokenizer.pad_token_id = tokenizer.eos_token_id
             else:
                 tokenizer.add_special_tokens({"pad_token": "[PAD]"})
+
+        # Apply chat template if configured
+        if chat_template_prompt is not None:
+            if hasattr(tokenizer, 'chat_template') and tokenizer.chat_template is not None:
+                texts = [
+                    tokenizer.apply_chat_template(
+                        [{"role": "user", "content": f"{chat_template_prompt}{t}"}],
+                        tokenize=False, add_generation_prompt=False,
+                    )
+                    for t in texts
+                ]
+                logger.info(f"  Chat template prompt applied ({len(chat_template_prompt)} chars)")
+            else:
+                logger.warning(
+                    "chat_template_prompt is set but tokenizer has no chat_template. "
+                    "Using raw text instead."
+                )
 
         # First pass: compute per-sample tokenized lengths
         logger.info("  Pass 1/2: Computing per-sample tokenized lengths...")

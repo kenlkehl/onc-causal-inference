@@ -404,6 +404,7 @@ def run_text_forest_arm(
     gamma_rlearner: float = 1.0,
     hidden_state_cache=None,
     gpu_store=None,
+    flp_chat_template_prompt: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run causal forest with text features + optional confounders.
 
@@ -420,6 +421,7 @@ def run_text_forest_arm(
         flp_downprojection_dim=flp_downprojection_dim,
         flp_projection_dim=flp_projection_dim,
         flp_gated_attention_dim=flp_gated_attention_dim,
+        flp_chat_template_prompt=flp_chat_template_prompt,
         epochs=epochs,
         batch_size=batch_size,
         learning_rate=learning_rate,
@@ -664,6 +666,7 @@ def _run_text_forest_job(
     cf_min_samples_leaf: int,
     hidden_state_cache=None,
     gpu_store=None,
+    flp_chat_template_prompt: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Execute a single text_forest job. Returns formatted result or None on failure."""
     from oci.config import ExplicitConfounderSpec
@@ -694,6 +697,7 @@ def _run_text_forest_job(
             cf_min_samples_leaf=cf_min_samples_leaf,
             hidden_state_cache=hidden_state_cache,
             gpu_store=gpu_store,
+            flp_chat_template_prompt=flp_chat_template_prompt,
         )
         formatted = {
             "dgp_index": job.dgp_idx,
@@ -854,6 +858,7 @@ def run_experiments(
     n_folds: int = 5,
     cf_n_estimators: int = 200,
     cf_min_samples_leaf: int = 5,
+    flp_chat_template_prompt: Optional[str] = None,
     # DGP params
     treatment_effect_prob: float = 0.10,
     target_treatment_rate: float = 0.5,
@@ -1020,6 +1025,7 @@ def run_experiments(
             max_length=flp_max_length,
             batch_size=batch_size,
             downprojection_dim=flp_downprojection_dim,
+            chat_template_prompt=flp_chat_template_prompt,
         )
         hs_cache = precompute_single_cache(cache_info, devices)
 
@@ -1152,6 +1158,7 @@ def run_experiments(
             flp_max_length=flp_max_length,
             flp_downprojection_dim=flp_downprojection_dim,
             flp_projection_dim=flp_projection_dim,
+            flp_chat_template_prompt=flp_chat_template_prompt,
             epochs=epochs,
             batch_size=batch_size,
             learning_rate=learning_rate,
@@ -1171,6 +1178,7 @@ def run_experiments(
             cache_hash = HiddenStateCache.compute_cache_hash(
                 flp_model_name, flp_max_length, str(parquet_file), None,
                 downprojection_dim=flp_downprojection_dim,
+                chat_template_prompt=flp_chat_template_prompt,
             )
             serializable_cache_info = {
                 k: str(v) if isinstance(v, Path) else v
@@ -1350,6 +1358,8 @@ def main():
     parser.add_argument("--n-folds", type=int, default=5)
     parser.add_argument("--cf-n-estimators", type=int, default=200)
     parser.add_argument("--cf-min-samples-leaf", type=int, default=5)
+    parser.add_argument("--chat-template-prompt", type=str, default=None,
+                        help="Chat template prompt for instruct models (default: None = disabled)")
 
     # DGP params
     parser.add_argument("--treatment-effect-prob", type=float, default=0.10)
@@ -1414,6 +1424,7 @@ def main():
         n_folds=args.n_folds,
         cf_n_estimators=args.cf_n_estimators,
         cf_min_samples_leaf=args.cf_min_samples_leaf,
+        flp_chat_template_prompt=args.chat_template_prompt,
         treatment_effect_prob=args.treatment_effect_prob,
         target_treatment_rate=args.target_treatment_rate,
         target_control_outcome_rate=args.target_control_outcome_rate,

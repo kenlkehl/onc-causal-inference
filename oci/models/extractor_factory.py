@@ -31,6 +31,7 @@ def create_feature_extractor(
     flp_downprojection_dim: Optional[int] = None,
     flp_skip_llm: bool = False,
     flp_cached_hidden_size: int = 0,
+    flp_chat_template_prompt: Optional[str] = None,
     # Model type
     model_type: str = "dragonnet",
 ) -> nn.Module:
@@ -68,6 +69,7 @@ def create_feature_extractor(
         device=device,
         skip_llm=flp_skip_llm,
         cached_hidden_size=flp_cached_hidden_size,
+        chat_template_prompt=flp_chat_template_prompt,
     )
     mode = "cached" if flp_skip_llm else ("frozen" if flp_freeze_llm else "trainable")
     logger.info(f"Created Frozen LLM Pooler extractor: {flp_model_name} "
@@ -108,4 +110,5 @@ def create_feature_extractor_from_config(
         flp_downprojection_dim=config.get('flp_downprojection_dim', None),
         flp_skip_llm=config.get('flp_skip_llm', False),
         flp_cached_hidden_size=config.get('flp_cached_hidden_size', 0),
+        flp_chat_template_prompt=config.get('flp_chat_template_prompt', None),
     )

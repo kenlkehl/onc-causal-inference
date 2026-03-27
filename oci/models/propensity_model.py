@@ -74,6 +74,7 @@ class PropensityOnlyModel(nn.Module):
         flp_downprojection_dim: Optional[int] = None,
         flp_skip_llm: bool = False,
         flp_cached_hidden_size: int = 0,
+        flp_chat_template_prompt: Optional[str] = None,
         # Propensity network args
         representation_dim: int = 128,
         device: str = "cuda:0"
@@ -115,6 +116,7 @@ class PropensityOnlyModel(nn.Module):
             'flp_downprojection_dim': flp_downprojection_dim,
             'flp_skip_llm': flp_skip_llm,
             'flp_cached_hidden_size': flp_cached_hidden_size,
+            'flp_chat_template_prompt': flp_chat_template_prompt,
             'representation_dim': representation_dim
         }
 
@@ -133,6 +135,7 @@ class PropensityOnlyModel(nn.Module):
             flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
+            flp_chat_template_prompt=flp_chat_template_prompt,
         )
         logger.info(f"Propensity model using {self.feature_extractor_type.upper()} feature extractor")
 
@@ -266,6 +269,7 @@ def create_propensity_model_from_config(
         flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
         flp_skip_llm=flp_skip_llm,
         flp_cached_hidden_size=flp_cached_hidden_size,
+        flp_chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
         # Propensity network args
         representation_dim=representation_dim,
         device=str(device)

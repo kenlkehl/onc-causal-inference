@@ -135,6 +135,7 @@ class ExperimentConfig:
     flp_gated_attention_dim: int = 128
     flp_downprojection_dim: Optional[int] = 256  # Frozen downprojection dim applied during caching (None = full hidden size)
     flp_cache_hidden_states: bool = False  # If True, pre-cache hidden states to disk
+    flp_chat_template_prompt: Optional[str] = None  # Chat template prompt for instruct models
 
     # Fixed parameters
     flp_model_name: str = "Qwen/Qwen3.5-0.8B-Base"
@@ -272,6 +273,7 @@ def group_configs_by_cache_key(
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file), None,
             downprojection_dim=config.flp_downprojection_dim,
+            chat_template_prompt=config.flp_chat_template_prompt,
         )
         if cache_hash not in groups:
             cache_info = dict(
@@ -281,6 +283,7 @@ def group_configs_by_cache_key(
                 batch_size=config.batch_size,
                 downprojection_dim=config.flp_downprojection_dim,
                 dataset_name=config.dataset_name,
+                chat_template_prompt=config.flp_chat_template_prompt,
             )
             groups[cache_hash] = (cache_info, [])
         groups[cache_hash][1].append(config)
@@ -311,6 +314,8 @@ def precompute_single_cache(
     batch_size = cache_info['batch_size']
     dp_dim = cache_info['downprojection_dim']
 
+    ctp = cache_info.get('chat_template_prompt', None)
+
     cache_dir = cache_base_dir if cache_base_dir else str(parquet_file.parent / '.oci_cache')
     cache = HiddenStateCache(
         cache_dir=cache_dir,
@@ -319,6 +324,7 @@ def precompute_single_cache(
         dataset_path=str(parquet_file),
         random_projection_dim=None,
         downprojection_dim=dp_dim,
+        chat_template_prompt=ctp,
     )
 
     df = pd.read_parquet(parquet_file)
@@ -456,6 +462,7 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file),
             None, downprojection_dim=config.flp_downprojection_dim,
+            chat_template_prompt=config.flp_chat_template_prompt,
         )
         if gpu_store_registry is not None:
             gpu_store = gpu_store_registry.get(cache_hash)
@@ -479,6 +486,7 @@ def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs
         flp_gradient_checkpointing=config.flp_gradient_checkpointing,
         # Downprojection already applied during caching — disable in model
         flp_downprojection_dim=None if use_cache else config.flp_downprojection_dim,
+        flp_chat_template_prompt=config.flp_chat_template_prompt,
         device=str(device),
     )
 
@@ -1143,8 +1151,14 @@ def generate_experiment_grid(
     filter_model_types: Optional[List[str]] = None,
     filter_max_lengths: Optional[List[int]] = None,
     model_name: str = "Qwen/Qwen3.5-0.8B-Base",
+    chat_template_prompt: Optional[str] = None,
 ) -> List[ExperimentConfig]:
-    """Generate all experiment configurations."""
+    """Generate all experiment configurations.
+
+    When chat_template_prompt is provided, both None (raw text) and the
+    prompt string are included as a grid dimension so that experiments
+    run with and without the chat template for comparison.
+    """
 
     datasets = [(p, Path(p).name) for p in dataset_paths]
 
@@ -1154,6 +1168,11 @@ def generate_experiment_grid(
     explicit_confounder_options = [False, True]
     downprojection_dims = [128, 256, 512]
 
+    # Chat template: when a prompt is provided, compare with vs without
+    chat_template_options = [None]
+    if chat_template_prompt is not None:
+        chat_template_options = [None, chat_template_prompt]
+
     if filter_model_types:
         model_types = [m for m in model_types if m in filter_model_types
                        and m != "best_attainable"]
@@ -1162,8 +1181,8 @@ def generate_experiment_grid(
 
     configs = []
 
-    for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim in itertools.product(
-        datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims
+    for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim, ctp in itertools.product(
+        datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims, chat_template_options
     ):
         configs.append(ExperimentConfig(
             dataset_path=dataset_path,
@@ -1173,6 +1192,7 @@ def generate_experiment_grid(
             flp_max_length=max_len,
             flp_downprojection_dim=dp_dim,
             flp_model_name=model_name,
+            flp_chat_template_prompt=ctp,
         ))
 
     # Add best_attainable experiments (one per dataset, no GPU needed)
@@ -1256,6 +1276,7 @@ def _open_cache_for_worker(cache_hash: str, cache_info: dict, cache_base_dir: Op
         dataset_path=str(parquet_file),
         random_projection_dim=None,
         downprojection_dim=cache_info['downprojection_dim'],
+        chat_template_prompt=cache_info.get('chat_template_prompt', None),
     )
     cache.open()
     cache.preload_to_ram()
@@ -1544,6 +1565,13 @@ def main():
         help="HuggingFace model name for frozen LLM pooler (default: Qwen/Qwen3.5-0.8B-Base)"
     )
     parser.add_argument(
+        "--chat-template-prompt",
+        type=str,
+        default=None,
+        help="Chat template prompt for instruct models. Wraps each text in the model's "
+             "chat template with this prompt preceding the clinical text. (default: None = disabled)"
+    )
+    parser.add_argument(
         "--workers-per-gpu",
         type=str,
         default="auto",
@@ -1576,6 +1604,7 @@ def main():
         filter_model_types=args.model_types,
         filter_max_lengths=args.max_lengths,
         model_name=args.model_name,
+        chat_template_prompt=args.chat_template_prompt,
     )
 
     use_cache = args.cache or args.gpu_cache

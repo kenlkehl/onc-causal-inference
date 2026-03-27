@@ -325,6 +325,7 @@ def run_applied_inference(
                 estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
                     all_texts, model_name, max_length,
                     downprojection_dim=flp_downprojection_dim,
+                    chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
                 )
                 free_vram_gb = torch.cuda.mem_get_info(device)[0] / 1e9
                 if estimated_gb < free_vram_gb * 0.8:
@@ -337,6 +338,7 @@ def run_applied_inference(
                         all_texts, model_name, max_length, device,
                         batch_size=batch_size,
                         downprojection_dim=flp_downprojection_dim,
+                        chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
                     )
                 else:
                     logger.warning(
@@ -360,6 +362,7 @@ def run_applied_inference(
                 dataset_path=dataset_path,
                 random_projection_dim=flp_random_projection_dim,
                 downprojection_dim=flp_downprojection_dim,
+                chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
             )
 
             if not hidden_state_cache.is_valid(len(dataset)):
@@ -710,6 +713,7 @@ def _train_single_model(
             else hidden_state_cache.hidden_size if hidden_state_cache is not None
             else 0
         ),
+        flp_chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
         # Explicit confounder featurizer args
         explicit_confounder_specs=_get_explicit_confounder_specs(config) if explicit_confounder_columns else None,
         explicit_confounder_output_dim=getattr(config.explicit_confounders, 'featurizer_output_dim', 64) if hasattr(config, 'explicit_confounders') else 64,

@@ -92,6 +92,7 @@ def run_applied_inference_forest(
                 estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
                     all_texts, model_name, max_length,
                     downprojection_dim=flp_downprojection_dim,
+                    chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
                 )
                 free_vram_gb = torch.cuda.mem_get_info(device)[0] / 1e9
                 if estimated_gb < free_vram_gb * 0.8:
@@ -104,6 +105,7 @@ def run_applied_inference_forest(
                         all_texts, model_name, max_length, device,
                         batch_size=batch_size,
                         downprojection_dim=flp_downprojection_dim,
+                        chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
                     )
                 else:
                     logger.warning(
@@ -127,6 +129,7 @@ def run_applied_inference_forest(
                 dataset_path=dataset_path,
                 random_projection_dim=flp_random_projection_dim,
                 downprojection_dim=flp_downprojection_dim,
+                chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
             )
 
             if not hidden_state_cache.is_valid(len(dataset)):
@@ -644,6 +647,7 @@ def _create_causal_forest_model(
         flp_downprojection_dim=flp_downprojection_dim,
         flp_skip_llm=flp_skip_llm,
         flp_cached_hidden_size=flp_cached_hidden_size,
+        flp_chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
         # Head args
         representation_dim=getattr(arch_config, 'causal_head_representation_dim', 128),
         hidden_dim=getattr(arch_config, 'causal_head_hidden_outcome_dim', 64),

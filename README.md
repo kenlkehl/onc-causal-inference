@@ -66,8 +66,11 @@ Key parameters:
 | `flp_gated_attention_dim` | Gated attention hidden dim | `128` |
 | `flp_projection_dim` | Output projection dim | `128` |
 | `flp_cache_hidden_states` | Pre-cache hidden states to disk | `false` |
+| `flp_chat_template_prompt` | Chat template prompt for instruct models | `null` |
 
 Handles documents up to 50K+ tokens with the pretrained tokenizer. No `fit_tokenizer()` step is needed.
+
+**Instruct model support**: Set `flp_chat_template_prompt` to wrap clinical text in the model's chat template. Recommended prompt: `"You are an expert clinical cancer researcher. Read this patient history, and then extract a set of features that will predict the patient's next treatment and their outcome on that treatment. The history is: "`
 
 ### Causal Heads
 

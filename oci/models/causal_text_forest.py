@@ -66,6 +66,7 @@ class CausalTextForest(nn.Module):
         flp_downprojection_dim: Optional[int] = None,
         flp_skip_llm: bool = False,
         flp_cached_hidden_size: int = 0,
+        flp_chat_template_prompt: Optional[str] = None,
         # Simple heads args
         representation_dim: int = 128,
         hidden_dim: int = 64,
@@ -119,6 +120,7 @@ class CausalTextForest(nn.Module):
             'flp_downprojection_dim': flp_downprojection_dim,
             'flp_skip_llm': flp_skip_llm,
             'flp_cached_hidden_size': flp_cached_hidden_size,
+            'flp_chat_template_prompt': flp_chat_template_prompt,
             'representation_dim': representation_dim,
             'hidden_dim': hidden_dim,
             'dropout': dropout,
@@ -192,6 +194,7 @@ class CausalTextForest(nn.Module):
             flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
+            flp_chat_template_prompt=flp_chat_template_prompt,
         )
 
         logger.info(f"Using {self.feature_extractor_type.upper()} feature extractor")
@@ -250,6 +253,7 @@ class CausalTextForest(nn.Module):
                     flp_downprojection_dim=flp_downprojection_dim,
                     flp_skip_llm=flp_skip_llm,
                     flp_cached_hidden_size=flp_cached_hidden_size,
+                    flp_chat_template_prompt=flp_chat_template_prompt,
                 )
 
                 # Effect MLP: takes effect extractor output, predicts τ

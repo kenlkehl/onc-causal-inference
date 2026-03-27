@@ -84,6 +84,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
         device: Optional[torch.device] = None,
         skip_llm: bool = False,
         cached_hidden_size: int = 0,
+        chat_template_prompt: Optional[str] = None,
     ):
         super().__init__()
 
@@ -97,6 +98,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
         self._gradient_checkpointing = gradient_checkpointing
         self._downprojection_dim = downprojection_dim
         self._skip_llm = skip_llm
+        self._chat_template_prompt = chat_template_prompt
 
         if skip_llm:
             # Cached mode: no LLM loaded, use provided hidden_size
@@ -160,6 +162,18 @@ class FrozenLLMPoolerExtractor(nn.Module):
 
             logger.info(f"Tokenizer vocab size: {len(self._tokenizer)}")
             logger.info(f"Pad token: {self._tokenizer.pad_token} (id={self._tokenizer.pad_token_id})")
+
+            # Validate chat template availability
+            if chat_template_prompt is not None:
+                if not hasattr(self._tokenizer, 'chat_template') or self._tokenizer.chat_template is None:
+                    logger.warning(
+                        f"chat_template_prompt is set but tokenizer for {model_name} "
+                        f"has no chat_template. The prompt will be ignored. "
+                        f"Use an instruct model for chat template support."
+                    )
+                    self._chat_template_prompt = None
+                else:
+                    logger.info(f"Chat template prompt enabled ({len(chat_template_prompt)} chars)")
 
             # Freeze LLM parameters if requested
             if freeze_llm:
@@ -242,6 +256,30 @@ class FrozenLLMPoolerExtractor(nn.Module):
             )
         return self._forward_from_texts(texts_or_cached)
 
+    def _prepare_texts(self, texts: List[str]) -> List[str]:
+        """Wrap texts in the model's chat template if configured.
+
+        When chat_template_prompt is set, each text is formatted as a single
+        user message: [{role: "user", content: "{prompt}{text}"}] using the
+        tokenizer's apply_chat_template method.
+
+        Args:
+            texts: Raw clinical text strings.
+
+        Returns:
+            Formatted text strings (or originals if no chat template).
+        """
+        if self._chat_template_prompt is None:
+            return texts
+        prepared = []
+        for text in texts:
+            messages = [{"role": "user", "content": f"{self._chat_template_prompt}{text}"}]
+            formatted = self._tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=False
+            )
+            prepared.append(formatted)
+        return prepared
+
     def _forward_from_texts(self, texts: List[str]) -> torch.Tensor:
         """
         Extract features from raw texts using the LLM.
@@ -257,6 +295,9 @@ class FrozenLLMPoolerExtractor(nn.Module):
                 "LLM is not loaded (skip_llm=True). Use forward_cached() "
                 "or provide cached hidden states via a dict input."
             )
+
+        # Apply chat template if configured
+        texts = self._prepare_texts(texts)
 
         # Tokenize with right padding
         encoding = self._tokenizer(
@@ -389,6 +430,7 @@ class FrozenLLMPoolerExtractor(nn.Module):
             'hidden_size': self._hidden_size,
             'output_dim': self._output_dim,
             'skip_llm': self._skip_llm,
+            'chat_template_prompt': self._chat_template_prompt,
         }
 
     def to(self, device):
@@ -441,7 +483,8 @@ class FrozenLLMPoolerExtractor(nn.Module):
         results = []
         weights = self._last_attention_weights  # (batch, seq_len)
 
-        for i, text in enumerate(texts):
+        prepared_texts = self._prepare_texts(texts)
+        for i, text in enumerate(prepared_texts):
             encoding = self._tokenizer(
                 text,
                 truncation=True,

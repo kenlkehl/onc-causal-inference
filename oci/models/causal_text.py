@@ -46,6 +46,7 @@ class CausalText(nn.Module):
         flp_downprojection_dim: Optional[int] = None,
         flp_skip_llm: bool = False,
         flp_cached_hidden_size: int = 0,
+        flp_chat_template_prompt: Optional[str] = None,
         # Causal head args (applies to all causal heads: DragonNet, RLearner)
         causal_head_representation_dim: int = 128,
         causal_head_hidden_outcome_dim: int = 64,
@@ -107,6 +108,7 @@ class CausalText(nn.Module):
             'flp_downprojection_dim': flp_downprojection_dim,
             'flp_skip_llm': flp_skip_llm,
             'flp_cached_hidden_size': flp_cached_hidden_size,
+            'flp_chat_template_prompt': flp_chat_template_prompt,
             'causal_head_representation_dim': causal_head_representation_dim,
             'causal_head_hidden_outcome_dim': causal_head_hidden_outcome_dim,
             'causal_head_dropout': causal_head_dropout,
@@ -139,6 +141,7 @@ class CausalText(nn.Module):
             flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
+            flp_chat_template_prompt=flp_chat_template_prompt,
         )
 
         # Auxiliary feature projection (if enabled)
@@ -224,6 +227,7 @@ class CausalText(nn.Module):
                 flp_downprojection_dim=flp_downprojection_dim,
                 flp_skip_llm=flp_skip_llm,
                 flp_cached_hidden_size=flp_cached_hidden_size,
+                flp_chat_template_prompt=flp_chat_template_prompt,
             )
 
             # Simple MLP for tau(X) - takes effect extractor output, predicts treatment effect

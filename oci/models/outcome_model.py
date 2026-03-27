@@ -77,6 +77,7 @@ class OutcomeOnlyModel(nn.Module):
         flp_downprojection_dim: Optional[int] = None,
         flp_skip_llm: bool = False,
         flp_cached_hidden_size: int = 0,
+        flp_chat_template_prompt: Optional[str] = None,
         # Outcome network args
         representation_dim: int = 128,
         device: str = "cuda:0",
@@ -121,6 +122,7 @@ class OutcomeOnlyModel(nn.Module):
             'flp_downprojection_dim': flp_downprojection_dim,
             'flp_skip_llm': flp_skip_llm,
             'flp_cached_hidden_size': flp_cached_hidden_size,
+            'flp_chat_template_prompt': flp_chat_template_prompt,
             'representation_dim': representation_dim
         }
 
@@ -139,6 +141,7 @@ class OutcomeOnlyModel(nn.Module):
             flp_downprojection_dim=flp_downprojection_dim,
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
+            flp_chat_template_prompt=flp_chat_template_prompt,
         )
         logger.info(f"Outcome model using {self.feature_extractor_type} feature extractor")
 
@@ -265,6 +268,7 @@ def create_outcome_model_from_config(
         flp_dropout=getattr(arch_config, 'flp_dropout', 0.1),
         flp_gradient_checkpointing=getattr(arch_config, 'flp_gradient_checkpointing', True),
         flp_downprojection_dim=getattr(arch_config, 'flp_downprojection_dim', None),
+        flp_chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
         # Outcome network args
         representation_dim=representation_dim,
         device=str(device),

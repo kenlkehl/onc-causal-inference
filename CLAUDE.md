@@ -199,6 +199,7 @@ Pretrained decoder-only LLM with frozen weights + GatedAttentionPooling over all
 | `flp_cache_hidden_states` | Pre-compute and cache LLM hidden states to disk | `False` |
 | `flp_gpu_cache` | Keep hidden states on GPU VRAM instead of disk | `False` |
 | `flp_random_projection_dim` | Random linear projection for cached hidden states | `None` |
+| `flp_chat_template_prompt` | Chat template prompt for instruct models. Wraps each text in the model's chat template with this prompt preceding the clinical text. `None` = disabled (raw text). | `None` |
 
 Interpretability: `interpret_attention()`, `get_attention_weights()` (not available in cached mode).
 
