@@ -125,6 +125,9 @@ class ExperimentConfig:
     # Explicit confounders (use all when True)
     use_explicit_confounders: bool
 
+    # Feature extractor type
+    feature_extractor_type: str = "frozen_llm_pooler"
+
     # Repeat index for N-repeat capability (different random seed per repeat)
     repeat_index: int = 0
 
@@ -151,6 +154,48 @@ class ExperimentConfig:
     # Causal forest specific
     cf_n_estimators: int = 200
     cf_min_samples_leaf: int = 5
+
+    # Hierarchical LLM hyperparameters
+    hlm_model_name: str = "Qwen/Qwen3.5-0.8B-Base"
+    hlm_chunk_size: int = 12000
+    hlm_chunk_overlap: int = 256
+    hlm_max_chunks: int = 16
+    hlm_downprojection_dim: Optional[int] = 256
+    hlm_freeze_llm: bool = True
+    hlm_chat_template_prompt: Optional[str] = None
+
+    # Hierarchical CNN hyperparameters
+    hcnn_embedding_dim: int = 256
+    hcnn_conv_dim: int = 256
+    hcnn_kernel_size: int = 5
+    hcnn_num_conv_blocks: int = 4
+    hcnn_chunk_size: int = 12000
+    hcnn_chunk_overlap: int = 64
+    hcnn_max_chunks: int = 32
+    hcnn_vocab_size: int = 50000
+    hcnn_projection_dim: int = 128
+    hcnn_dropout: float = 0.1
+
+    # Hierarchical GRU hyperparameters
+    hgru_embedding_dim: int = 256
+    hgru_gru_hidden_dim: int = 256
+    hgru_num_gru_layers: int = 2
+    hgru_chunk_size: int = 12000
+    hgru_chunk_overlap: int = 64
+    hgru_max_chunks: int = 32
+    hgru_vocab_size: int = 50000
+    hgru_projection_dim: int = 128
+    hgru_dropout: float = 0.1
+
+    # Simple CNN hyperparameters
+    scnn_embedding_dim: int = 256
+    scnn_conv_dim: int = 256
+    scnn_kernel_size: int = 5
+    scnn_num_conv_blocks: int = 4
+    scnn_max_length: int = 20000
+    scnn_vocab_size: int = 50000
+    scnn_projection_dim: int = 128
+    scnn_dropout: float = 0.1
 
     def config_hash(self) -> str:
         """Generate unique hash for this config."""
@@ -261,12 +306,27 @@ def group_configs_by_cache_key(
     Returns list of (cache_hash, cache_info_dict, configs) tuples,
     sorted by (max_length, dataset_name, dp_dim) so smaller caches run first.
     Non-cached mode returns a single group.
+
+    Trainable extractor configs (no caching) are grouped separately with
+    a unique key so they skip the caching step even when --cache is used.
     """
+    from oci.config import CACHEABLE_EXTRACTOR_TYPES
+
     if not use_cache:
         return [("__no_cache__", {}, configs)]
 
-    groups: Dict[str, tuple] = {}  # cache_hash -> (cache_info, [configs])
+    # Separate cacheable from non-cacheable configs
+    cacheable_configs = []
+    non_cacheable_configs: Dict[str, list] = {}  # ext_type -> [configs]
     for config in configs:
+        if config.feature_extractor_type in CACHEABLE_EXTRACTOR_TYPES:
+            cacheable_configs.append(config)
+        else:
+            key = f"__no_cache__{config.feature_extractor_type}"
+            non_cacheable_configs.setdefault(key, []).append(config)
+
+    groups: Dict[str, tuple] = {}  # cache_hash -> (cache_info, [configs])
+    for config in cacheable_configs:
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
@@ -293,6 +353,11 @@ def group_configs_by_cache_key(
     for cache_hash, (cache_info, cfgs) in groups.items():
         result.append((cache_hash, cache_info, cfgs))
     result.sort(key=lambda x: (x[1]['max_length'], x[1]['dataset_name'], x[1]['downprojection_dim']))
+
+    # Append non-cacheable groups (trainable extractors skip cache precomputation)
+    for key, cfgs in non_cacheable_configs.items():
+        result.append((key, {}, cfgs))
+
     return result
 
 
@@ -454,11 +519,21 @@ def _create_datasets_and_loaders(
 
 
 def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
-    """Look up GPU store or disk cache for a config."""
+    """Look up GPU store or disk cache for a config.
+
+    Only frozen_llm_pooler and hierarchical_llm support caching.
+    Trainable extractors (hierarchical_cnn, hierarchical_gru, simple_cnn) return (None, None).
+    """
+    from oci.config import CACHEABLE_EXTRACTOR_TYPES
     gpu_store = None
     hidden_state_cache = None
 
-    if config.flp_freeze_llm and config.flp_cache_hidden_states:
+    ext_type = config.feature_extractor_type
+
+    if ext_type not in CACHEABLE_EXTRACTOR_TYPES:
+        return gpu_store, hidden_state_cache
+
+    if ext_type == "frozen_llm_pooler" and config.flp_freeze_llm and config.flp_cache_hidden_states:
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file),
             None, downprojection_dim=config.flp_downprojection_dim,
@@ -468,35 +543,92 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
             gpu_store = gpu_store_registry.get(cache_hash)
         if gpu_store is None and cache_registry is not None:
             hidden_state_cache = cache_registry.get(cache_hash)
+    elif ext_type == "hierarchical_llm" and config.hlm_freeze_llm and config.flp_cache_hidden_states:
+        # TODO: hierarchical LLM caching not yet fully supported in oracle scripts
+        pass
 
     return gpu_store, hidden_state_cache
 
 
 def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs, device):
-    """Build common model kwargs for frozen_llm_pooler extractor."""
+    """Build common model kwargs for any extractor type."""
+    ext_type = config.feature_extractor_type
     use_cache = gpu_store is not None or hidden_state_cache is not None
+
     kwargs = dict(
-        feature_extractor_type="frozen_llm_pooler",
-        flp_model_name=config.flp_model_name,
-        flp_max_length=config.flp_max_length,
-        flp_freeze_llm=config.flp_freeze_llm,
-        flp_gated_attention_dim=config.flp_gated_attention_dim,
-        flp_projection_dim=config.flp_projection_dim,
-        flp_dropout=config.flp_dropout,
-        flp_gradient_checkpointing=config.flp_gradient_checkpointing,
-        # Downprojection already applied during caching — disable in model
-        flp_downprojection_dim=None if use_cache else config.flp_downprojection_dim,
-        flp_chat_template_prompt=config.flp_chat_template_prompt,
+        feature_extractor_type=ext_type,
         device=str(device),
     )
 
-    # Enable cached mode (skip loading the LLM) only when caching
-    if gpu_store is not None:
-        kwargs['flp_skip_llm'] = True
-        kwargs['flp_cached_hidden_size'] = gpu_store.hidden_size
-    elif hidden_state_cache is not None:
-        kwargs['flp_skip_llm'] = True
-        kwargs['flp_cached_hidden_size'] = hidden_state_cache.hidden_size
+    if ext_type == "frozen_llm_pooler":
+        kwargs.update(
+            flp_model_name=config.flp_model_name,
+            flp_max_length=config.flp_max_length,
+            flp_freeze_llm=config.flp_freeze_llm,
+            flp_gated_attention_dim=config.flp_gated_attention_dim,
+            flp_projection_dim=config.flp_projection_dim,
+            flp_dropout=config.flp_dropout,
+            flp_gradient_checkpointing=config.flp_gradient_checkpointing,
+            flp_downprojection_dim=None if use_cache else config.flp_downprojection_dim,
+            flp_chat_template_prompt=config.flp_chat_template_prompt,
+        )
+        if gpu_store is not None:
+            kwargs['flp_skip_llm'] = True
+            kwargs['flp_cached_hidden_size'] = gpu_store.hidden_size
+        elif hidden_state_cache is not None:
+            kwargs['flp_skip_llm'] = True
+            kwargs['flp_cached_hidden_size'] = hidden_state_cache.hidden_size
+    elif ext_type == "hierarchical_llm":
+        kwargs.update(
+            hlm_model_name=config.hlm_model_name,
+            hlm_chunk_size=config.hlm_chunk_size,
+            hlm_chunk_overlap=config.hlm_chunk_overlap,
+            hlm_max_chunks=config.hlm_max_chunks,
+            hlm_freeze_llm=config.hlm_freeze_llm,
+            hlm_gated_attention_dim=getattr(config, 'hlm_gated_attention_dim', 128),
+            hlm_projection_dim=getattr(config, 'hlm_projection_dim', 128),
+            hlm_dropout=getattr(config, 'hlm_dropout', 0.1),
+            hlm_gradient_checkpointing=getattr(config, 'hlm_gradient_checkpointing', True),
+            hlm_downprojection_dim=None if use_cache else config.hlm_downprojection_dim,
+            hlm_chat_template_prompt=config.hlm_chat_template_prompt,
+        )
+        # TODO: hierarchical LLM caching not yet supported in oracle scripts
+    elif ext_type == "hierarchical_cnn":
+        kwargs.update(
+            hcnn_embedding_dim=config.hcnn_embedding_dim,
+            hcnn_conv_dim=config.hcnn_conv_dim,
+            hcnn_kernel_size=config.hcnn_kernel_size,
+            hcnn_num_conv_blocks=config.hcnn_num_conv_blocks,
+            hcnn_chunk_size=config.hcnn_chunk_size,
+            hcnn_chunk_overlap=config.hcnn_chunk_overlap,
+            hcnn_max_chunks=config.hcnn_max_chunks,
+            hcnn_vocab_size=config.hcnn_vocab_size,
+            hcnn_projection_dim=config.hcnn_projection_dim,
+            hcnn_dropout=config.hcnn_dropout,
+        )
+    elif ext_type == "hierarchical_gru":
+        kwargs.update(
+            hgru_embedding_dim=config.hgru_embedding_dim,
+            hgru_gru_hidden_dim=config.hgru_gru_hidden_dim,
+            hgru_num_gru_layers=config.hgru_num_gru_layers,
+            hgru_chunk_size=config.hgru_chunk_size,
+            hgru_chunk_overlap=config.hgru_chunk_overlap,
+            hgru_max_chunks=config.hgru_max_chunks,
+            hgru_vocab_size=config.hgru_vocab_size,
+            hgru_projection_dim=config.hgru_projection_dim,
+            hgru_dropout=config.hgru_dropout,
+        )
+    elif ext_type == "simple_cnn":
+        kwargs.update(
+            scnn_embedding_dim=config.scnn_embedding_dim,
+            scnn_conv_dim=config.scnn_conv_dim,
+            scnn_kernel_size=config.scnn_kernel_size,
+            scnn_num_conv_blocks=config.scnn_num_conv_blocks,
+            scnn_max_length=config.scnn_max_length,
+            scnn_vocab_size=config.scnn_vocab_size,
+            scnn_projection_dim=config.scnn_projection_dim,
+            scnn_dropout=config.scnn_dropout,
+        )
 
     return kwargs
 
@@ -542,6 +674,10 @@ def run_causal_forest_experiment(
         ))
 
         model = CausalTextForest(**model_kwargs)
+
+        from oci.config import TRAINABLE_EXTRACTOR_TYPES
+        if config.feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES:
+            model.fit_tokenizer(train_df[text_column].tolist())
 
         # Verify all parameters are float32 (diagnose dtype leakage)
         for name, param in model.named_parameters():
@@ -738,6 +874,10 @@ def run_neural_experiment(
         ))
 
         model = CausalText(**model_kwargs)
+
+        from oci.config import TRAINABLE_EXTRACTOR_TYPES
+        if config.feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES:
+            model.fit_tokenizer(train_df[text_column].tolist())
 
         # Verify all parameters are float32 (diagnose dtype leakage)
         for name, param in model.named_parameters():
@@ -1152,48 +1292,139 @@ def generate_experiment_grid(
     filter_max_lengths: Optional[List[int]] = None,
     model_name: str = "Qwen/Qwen3.5-0.8B-Base",
     chat_template_prompt: Optional[str] = None,
+    filter_extractor_types: Optional[List[str]] = None,
 ) -> List[ExperimentConfig]:
     """Generate all experiment configurations.
 
     When chat_template_prompt is provided, both None (raw text) and the
     prompt string are included as a grid dimension so that experiments
     run with and without the chat template for comparison.
+
+    When filter_extractor_types is provided, only those extractor types are
+    included.  Each extractor type generates its own relevant hyperparameter
+    sub-grid.
     """
 
     datasets = [(p, Path(p).name) for p in dataset_paths]
 
     # best_attainable is CPU-only and doesn't use LLM params -- added separately below
     model_types = ["causal_forest", "rlearner", "dragonnet"]
-    max_lengths = [5000, 10000, 25000, 50000, 75000]
     explicit_confounder_options = [False, True]
-    downprojection_dims = [128, 256, 512]
-
-    # Chat template: when a prompt is provided, compare with vs without
-    chat_template_options = [None]
-    if chat_template_prompt is not None:
-        chat_template_options = [None, chat_template_prompt]
 
     if filter_model_types:
         model_types = [m for m in model_types if m in filter_model_types
                        and m != "best_attainable"]
-    if filter_max_lengths:
-        max_lengths = [m for m in max_lengths if m in filter_max_lengths]
+
+    # Determine which extractor types to include
+    all_extractor_types = ["frozen_llm_pooler", "hierarchical_llm",
+                           "hierarchical_cnn", "hierarchical_gru", "simple_cnn"]
+    extractor_types = all_extractor_types
+    if filter_extractor_types:
+        extractor_types = [e for e in all_extractor_types if e in filter_extractor_types]
 
     configs = []
 
-    for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim, ctp in itertools.product(
-        datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims, chat_template_options
-    ):
-        configs.append(ExperimentConfig(
-            dataset_path=dataset_path,
-            dataset_name=dataset_name,
-            model_type=model_type,
-            use_explicit_confounders=explicit_conf,
-            flp_max_length=max_len,
-            flp_downprojection_dim=dp_dim,
-            flp_model_name=model_name,
-            flp_chat_template_prompt=ctp,
-        ))
+    for ext_type in extractor_types:
+        if ext_type == "frozen_llm_pooler":
+            # frozen_llm_pooler grid: max_lengths x downprojection_dims x confounders x chat_template
+            max_lengths = [5000, 10000, 25000, 50000, 75000]
+            downprojection_dims = [128, 256, 512]
+
+            chat_template_options = [None]
+            if chat_template_prompt is not None:
+                chat_template_options = [None, chat_template_prompt]
+
+            if filter_max_lengths:
+                max_lengths = [m for m in max_lengths if m in filter_max_lengths]
+
+            for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim, ctp in itertools.product(
+                datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims, chat_template_options
+            ):
+                configs.append(ExperimentConfig(
+                    dataset_path=dataset_path,
+                    dataset_name=dataset_name,
+                    model_type=model_type,
+                    use_explicit_confounders=explicit_conf,
+                    feature_extractor_type="frozen_llm_pooler",
+                    flp_max_length=max_len,
+                    flp_downprojection_dim=dp_dim,
+                    flp_model_name=model_name,
+                    flp_chat_template_prompt=ctp,
+                ))
+
+        elif ext_type == "hierarchical_llm":
+            # hierarchical_llm grid: effective_lengths (chunk_size*max_chunks) x downprojection_dims x confounders
+            chunk_size = 2048
+            chunk_overlap = 256
+            max_chunks_options = [4, 8, 16]  # effective: 2048*4=8K, 2048*8=16K, 2048*16=32K
+            downprojection_dims = [128, 256, 512]
+
+            for (dataset_path, dataset_name), model_type, n_chunks, explicit_conf, dp_dim in itertools.product(
+                datasets, model_types, max_chunks_options, explicit_confounder_options, downprojection_dims
+            ):
+                configs.append(ExperimentConfig(
+                    dataset_path=dataset_path,
+                    dataset_name=dataset_name,
+                    model_type=model_type,
+                    use_explicit_confounders=explicit_conf,
+                    feature_extractor_type="hierarchical_llm",
+                    hlm_model_name=model_name,
+                    hlm_chunk_size=chunk_size,
+                    hlm_chunk_overlap=chunk_overlap,
+                    hlm_max_chunks=n_chunks,
+                    hlm_downprojection_dim=dp_dim,
+                ))
+
+        elif ext_type == "hierarchical_cnn":
+            # hierarchical_cnn grid: chunk_sizes x confounders
+            chunk_sizes = [256, 512]
+
+            for (dataset_path, dataset_name), model_type, explicit_conf, cs in itertools.product(
+                datasets, model_types, explicit_confounder_options, chunk_sizes
+            ):
+                configs.append(ExperimentConfig(
+                    dataset_path=dataset_path,
+                    dataset_name=dataset_name,
+                    model_type=model_type,
+                    use_explicit_confounders=explicit_conf,
+                    feature_extractor_type="hierarchical_cnn",
+                    hcnn_chunk_size=cs,
+                ))
+
+        elif ext_type == "hierarchical_gru":
+            # hierarchical_gru grid: chunk_sizes x confounders
+            chunk_sizes = [256, 512]
+
+            for (dataset_path, dataset_name), model_type, explicit_conf, cs in itertools.product(
+                datasets, model_types, explicit_confounder_options, chunk_sizes
+            ):
+                configs.append(ExperimentConfig(
+                    dataset_path=dataset_path,
+                    dataset_name=dataset_name,
+                    model_type=model_type,
+                    use_explicit_confounders=explicit_conf,
+                    feature_extractor_type="hierarchical_gru",
+                    hgru_chunk_size=cs,
+                ))
+
+        elif ext_type == "simple_cnn":
+            # simple_cnn grid: max_lengths x confounders
+            scnn_max_lengths = [5000, 10000, 25000]
+
+            if filter_max_lengths:
+                scnn_max_lengths = [m for m in scnn_max_lengths if m in filter_max_lengths]
+
+            for (dataset_path, dataset_name), model_type, explicit_conf, max_len in itertools.product(
+                datasets, model_types, explicit_confounder_options, scnn_max_lengths
+            ):
+                configs.append(ExperimentConfig(
+                    dataset_path=dataset_path,
+                    dataset_name=dataset_name,
+                    model_type=model_type,
+                    use_explicit_confounders=explicit_conf,
+                    feature_extractor_type="simple_cnn",
+                    scnn_max_length=max_len,
+                ))
 
     # Add best_attainable experiments (one per dataset, no GPU needed)
     if not filter_model_types or "best_attainable" in filter_model_types:
@@ -1342,7 +1573,8 @@ def worker_process_fn(
             tb = traceback.format_exc()
             logger.error(
                 f"Experiment {config_hash} FAILED "
-                f"(model={config.model_type}, ds={config.dataset_name}, "
+                f"(extractor={config.feature_extractor_type}, "
+                f"model={config.model_type}, ds={config.dataset_name}, "
                 f"dp={config.flp_downprojection_dim}, "
                 f"conf={config.use_explicit_confounders}): {error_msg}\n{tb}"
             )
@@ -1423,7 +1655,8 @@ def worker_thread(
                 tb = traceback.format_exc()
                 logger.error(
                     f"Experiment {config_hash} FAILED "
-                    f"(model={config.model_type}, ds={config.dataset_name}, "
+                    f"(extractor={config.feature_extractor_type}, "
+                    f"model={config.model_type}, ds={config.dataset_name}, "
                     f"dp={config.flp_downprojection_dim}, "
                     f"conf={config.use_explicit_confounders}): {error_msg}\n{tb}"
                 )
@@ -1579,6 +1812,15 @@ def main():
              "or an integer (default: auto). Only effective with --cache/--gpu-cache; "
              "non-cached mode always uses 1."
     )
+    parser.add_argument(
+        "--filter-extractor-types",
+        type=str,
+        nargs="+",
+        default=None,
+        help="Filter feature extractor types to include in the grid "
+             "(frozen_llm_pooler, hierarchical_llm, hierarchical_cnn, "
+             "hierarchical_gru, simple_cnn). Default: all."
+    )
 
     args = parser.parse_args()
 
@@ -1605,6 +1847,7 @@ def main():
         filter_max_lengths=args.max_lengths,
         model_name=args.model_name,
         chat_template_prompt=args.chat_template_prompt,
+        filter_extractor_types=args.filter_extractor_types,
     )
 
     use_cache = args.cache or args.gpu_cache
@@ -1846,8 +2089,8 @@ def main():
         results_df.to_parquet(output_dir / "all_results.parquet", index=False)
 
         # Group by config excluding repeat_index to aggregate across repeats
-        group_cols = ['dataset_name', 'model_type', 'flp_max_length',
-                      'flp_downprojection_dim', 'use_explicit_confounders']
+        group_cols = ['dataset_name', 'feature_extractor_type', 'model_type',
+                      'flp_max_length', 'flp_downprojection_dim', 'use_explicit_confounders']
         # Only group by columns that exist in the results
         group_cols = [c for c in group_cols if c in results_df.columns]
 

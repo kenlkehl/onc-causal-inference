@@ -1,0 +1,28 @@
+{
+  "applied_inference": {
+    "architecture": {
+      "model_type": "rlearner",
+      "feature_extractor_type": "hierarchical_llm",
+      "hlm_model_name": "Qwen/Qwen3-0.6B-Base",
+      "hlm_chunk_size": 2048,
+      "hlm_chunk_overlap": 256,
+      "hlm_max_chunks": 16,
+      "hlm_freeze_llm": true,
+      "hlm_gated_attention_dim": 128,
+      "hlm_projection_dim": 128,
+      "hlm_downprojection_dim": 256,
+      "hlm_dropout": 0.1,
+      "hlm_gradient_checkpointing": true,
+      "hlm_cache_hidden_states": false
+    },
+    "training": {
+      "learning_rate": 1e-4,
+      "epochs": 20,
+      "batch_size": 2,
+      "alpha_propensity": 1.0,
+      "gamma_rlearner": 1.0,
+      "weight_decay": 0.01,
+      "gradient_clip_norm": 1.0
+    }
+  }
+}

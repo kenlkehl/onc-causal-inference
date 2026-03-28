@@ -124,9 +124,11 @@ def _make_config(
         'causal_head_dropout': 0.0,
     }
 
-    # Apply architecture overrides
+    # Apply architecture overrides (all extractor prefixes + special flags)
+    extractor_prefixes = ('flp_', 'hlm_', 'hcnn_', 'hgru_', 'scnn_')
+    special_arch_keys = ('rlearner_dual_extractors', 'feature_extractor_type')
     for k in list(overrides.keys()):
-        if k.startswith('flp_') or k in ('rlearner_dual_extractors',):
+        if any(k.startswith(p) for p in extractor_prefixes) or k in special_arch_keys:
             arch_kwargs[k] = overrides.pop(k)
 
     # Causal forest config with tiny params
@@ -370,3 +372,48 @@ class TestConfounderForest:
 
         results_df = pd.read_parquet(output_path)
         _verify_forest_predictions(results_df, n_expected=len(df))
+
+
+# ---------------------------------------------------------------------------
+# Trainable extractor tests (no LLM loading, fast)
+# ---------------------------------------------------------------------------
+
+class TestTrainableExtractors:
+    """Test trainable-from-scratch extractors with DragonNet CV."""
+
+    @pytest.mark.parametrize("extractor_type,extra_kwargs", [
+        ("simple_cnn", {
+            "scnn_embedding_dim": 32, "scnn_conv_dim": 32, "scnn_kernel_size": 3,
+            "scnn_num_conv_blocks": 2, "scnn_max_length": 100, "scnn_vocab_size": 1000,
+            "scnn_gated_attention_dim": 16, "scnn_projection_dim": 32, "scnn_dropout": 0.0,
+        }),
+        ("hierarchical_cnn", {
+            "hcnn_embedding_dim": 32, "hcnn_conv_dim": 32, "hcnn_kernel_size": 3,
+            "hcnn_num_conv_blocks": 2, "hcnn_chunk_size": 30, "hcnn_chunk_overlap": 5,
+            "hcnn_max_chunks": 8, "hcnn_vocab_size": 1000,
+            "hcnn_gated_attention_dim": 16, "hcnn_projection_dim": 32, "hcnn_dropout": 0.0,
+        }),
+        ("hierarchical_gru", {
+            "hgru_embedding_dim": 32, "hgru_gru_hidden_dim": 16, "hgru_num_gru_layers": 1,
+            "hgru_chunk_size": 30, "hgru_chunk_overlap": 5, "hgru_max_chunks": 8,
+            "hgru_vocab_size": 1000,
+            "hgru_gated_attention_dim": 16, "hgru_projection_dim": 32, "hgru_dropout": 0.0,
+        }),
+    ])
+    def test_dragonnet_cv(self, test_dataset, tmp_path, device, extractor_type, extra_kwargs):
+        df, dataset_path = test_dataset
+        output_path = tmp_path / "applied_inference" / "predictions.parquet"
+
+        config = _make_config(
+            "dragonnet", dataset_path,
+            feature_extractor_type=extractor_type,
+            **extra_kwargs,
+        )
+
+        run_applied_inference(
+            dataset=df, config=config, output_path=output_path,
+            device=device, num_workers=0,
+        )
+
+        results_df = pd.read_parquet(output_path)
+        _verify_neural_predictions(results_df, n_expected=len(df))

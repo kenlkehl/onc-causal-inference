@@ -1,0 +1,28 @@
+{
+  "applied_inference": {
+    "architecture": {
+      "model_type": "dragonnet",
+      "feature_extractor_type": "hierarchical_cnn",
+      "hcnn_embedding_dim": 256,
+      "hcnn_conv_dim": 256,
+      "hcnn_kernel_size": 5,
+      "hcnn_num_conv_blocks": 4,
+      "hcnn_chunk_size": 512,
+      "hcnn_chunk_overlap": 64,
+      "hcnn_max_chunks": 32,
+      "hcnn_vocab_size": 50000,
+      "hcnn_gated_attention_dim": 128,
+      "hcnn_projection_dim": 128,
+      "hcnn_dropout": 0.1
+    },
+    "training": {
+      "learning_rate": 1e-3,
+      "epochs": 30,
+      "batch_size": 16,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1,
+      "weight_decay": 0.01,
+      "gradient_clip_norm": 1.0
+    }
+  }
+}

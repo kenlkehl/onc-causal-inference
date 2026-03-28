@@ -1,0 +1,26 @@
+{
+  "applied_inference": {
+    "architecture": {
+      "model_type": "dragonnet",
+      "feature_extractor_type": "simple_cnn",
+      "scnn_embedding_dim": 256,
+      "scnn_conv_dim": 256,
+      "scnn_kernel_size": 5,
+      "scnn_num_conv_blocks": 4,
+      "scnn_max_length": 10000,
+      "scnn_vocab_size": 50000,
+      "scnn_gated_attention_dim": 128,
+      "scnn_projection_dim": 128,
+      "scnn_dropout": 0.1
+    },
+    "training": {
+      "learning_rate": 1e-3,
+      "epochs": 30,
+      "batch_size": 16,
+      "alpha_propensity": 1.0,
+      "beta_targreg": 0.1,
+      "weight_decay": 0.01,
+      "gradient_clip_norm": 1.0
+    }
+  }
+}

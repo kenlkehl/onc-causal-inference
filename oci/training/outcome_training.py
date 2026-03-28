@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig, OutcomeModelConfig
+from ..config import AppliedInferenceConfig, OutcomeModelConfig, normalize_feature_extractor_type, TRAINABLE_EXTRACTOR_TYPES
 from ..models.outcome_model import OutcomeOnlyModel, create_outcome_model_from_config
 from ..data import ClinicalTextDataset, collate_batch
 from ..utils import cuda_cleanup, get_memory_info
@@ -221,8 +221,13 @@ def _train_outcome_model(
         device=device,
         outcome_type=getattr(config, 'outcome_type', 'binary')
     )
-    # frozen_llm_pooler uses pretrained tokenizer; no fit_tokenizer() needed
-    logger.info("Using frozen_llm_pooler feature extractor (pretrained tokenizer)")
+    extractor_type = normalize_feature_extractor_type(arch_config.feature_extractor_type)
+    if extractor_type in TRAINABLE_EXTRACTOR_TYPES:
+        train_texts = train_df[config.text_column].tolist()
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Fitted tokenizer for {extractor_type} feature extractor on {len(train_texts)} texts")
+
+    logger.info(f"Using {extractor_type} feature extractor for outcome model")
 
     # Create datasets
     train_dataset = ClinicalTextDataset(

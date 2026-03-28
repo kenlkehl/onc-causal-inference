@@ -14,7 +14,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig, PropensityTrimmingConfig
+from ..config import AppliedInferenceConfig, PropensityTrimmingConfig, normalize_feature_extractor_type, TRAINABLE_EXTRACTOR_TYPES
 from ..models.propensity_model import PropensityOnlyModel, create_propensity_model_from_config
 from ..models.hidden_state_cache import HiddenStateCache
 from ..data import ClinicalTextDataset, collate_batch, CachedHiddenStateDataset, collate_cached_batch, prepare_cached_batch
@@ -243,8 +243,13 @@ def _train_propensity_model(
         flp_cached_hidden_size=hidden_state_cache.hidden_size if hidden_state_cache is not None else 0
     )
 
-    logger.info(f"Using Frozen LLM Pooler feature extractor: {getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')} "
-               f"({'frozen' if getattr(arch_config, 'flp_freeze_llm', True) else 'trainable'})")
+    extractor_type = normalize_feature_extractor_type(arch_config.feature_extractor_type)
+    if extractor_type in TRAINABLE_EXTRACTOR_TYPES:
+        train_texts = train_df[config.text_column].tolist()
+        model.fit_tokenizer(train_texts)
+        logger.info(f"Fitted tokenizer for {extractor_type} feature extractor on {len(train_texts)} texts")
+
+    logger.info(f"Using {extractor_type} feature extractor for propensity model")
 
     # Create datasets
     if hidden_state_cache is not None and train_indices is not None and val_indices is not None:

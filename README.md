@@ -38,9 +38,21 @@ python oracle_experiment_scripts/run_oracle_experiments.py \
 
 ## Architecture
 
-OCI has one feature extractor and four causal heads.
+OCI has five feature extractors and four causal heads.
 
-### Feature Extractor: Frozen LLM Pooler
+### Feature Extractors
+
+| Type | Description |
+|------|-------------|
+| `frozen_llm_pooler` | Frozen pretrained LLM + gated attention pooling (default) |
+| `hierarchical_llm` | Frozen LLM on overlapping text chunks + two-level pooling |
+| `hierarchical_cnn` | Trainable dilated CNN on chunks + two-level pooling |
+| `hierarchical_gru` | Trainable BiGRU on chunks + two-level pooling |
+| `simple_cnn` | Trainable dilated CNN on whole text + pooling |
+
+Trainable extractors (`hierarchical_cnn`, `hierarchical_gru`, `simple_cnn`) learn from scratch and require `fit_tokenizer()` before training.
+
+#### Frozen LLM Pooler (default)
 
 A pretrained decoder-only LLM with frozen weights extracts per-token hidden states from clinical text. Gated attention pooling aggregates all tokens into a single patient-level feature vector. Only the downprojection, pooling, and causal head parameters are trained.
 
@@ -208,7 +220,7 @@ Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"cont
 }
 ```
 
-See `example_configs/` for complete configuration files.
+See `example_configs/` for complete configuration files, including configs for each feature extractor type.
 
 ## Dual Extractor Mode
 

@@ -1,5 +1,5 @@
 # oci/inference/applied.py
-"""Applied causal inference on real clinical data with frozen LLM pooler feature extraction."""
+"""Applied causal inference on real clinical data with multiple feature extractor types."""
 
 import gc
 import json
@@ -15,7 +15,7 @@ from sklearn.model_selection import KFold
 from sklearn.metrics import roc_auc_score
 from joblib import Parallel, delayed
 
-from ..config import AppliedInferenceConfig, normalize_feature_extractor_type, ExplicitConfounderSpec
+from ..config import AppliedInferenceConfig, normalize_feature_extractor_type, TRAINABLE_EXTRACTOR_TYPES, CACHEABLE_EXTRACTOR_TYPES, ExplicitConfounderSpec
 from ..models.causal_text import CausalText
 from ..data import (
     ClinicalTextDataset,
@@ -296,36 +296,49 @@ def run_applied_inference(
         logger.info("CONTINUING WITH DRAGONNET TRAINING")
         logger.info("=" * 80)
 
-    # Pre-compute and cache LLM hidden states for frozen_llm_pooler
+    # Pre-compute and cache LLM hidden states (for cacheable extractor types)
     hidden_state_cache = None
     gpu_store = None
     arch_config = config.architecture
     feature_extractor_type = normalize_feature_extractor_type(
         getattr(arch_config, 'feature_extractor_type', 'frozen_llm_pooler')
     )
-    if feature_extractor_type == "frozen_llm_pooler":
-        flp_freeze = getattr(arch_config, 'flp_freeze_llm', True)
-        flp_cache_enabled = getattr(arch_config, 'flp_cache_hidden_states', True)
-        flp_gpu_cache = getattr(arch_config, 'flp_gpu_cache', False)
+    if feature_extractor_type in CACHEABLE_EXTRACTOR_TYPES:
+        # Resolve cache-related params based on extractor type
+        if feature_extractor_type == "frozen_llm_pooler":
+            _freeze = getattr(arch_config, 'flp_freeze_llm', True)
+            _cache_enabled = getattr(arch_config, 'flp_cache_hidden_states', True)
+            _gpu_cache = getattr(arch_config, 'flp_gpu_cache', False)
+            model_name = getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
+            max_length = getattr(arch_config, 'flp_max_length', 8192)
+            _downprojection_dim = getattr(arch_config, 'flp_downprojection_dim', None)
+            _random_projection_dim = getattr(arch_config, 'flp_random_projection_dim', None)
+            _chat_template_prompt = getattr(arch_config, 'flp_chat_template_prompt', None)
+        else:  # hierarchical_llm
+            _freeze = getattr(arch_config, 'hlm_freeze_llm', True)
+            _cache_enabled = getattr(arch_config, 'hlm_cache_hidden_states', False)
+            _gpu_cache = getattr(arch_config, 'hlm_gpu_cache', False)
+            model_name = getattr(arch_config, 'hlm_model_name', 'Qwen/Qwen3-0.6B-Base')
+            max_length = getattr(arch_config, 'hlm_chunk_size', 2048) * getattr(arch_config, 'hlm_max_chunks', 16)
+            _downprojection_dim = getattr(arch_config, 'hlm_downprojection_dim', None)
+            _random_projection_dim = None
+            _chat_template_prompt = getattr(arch_config, 'hlm_chat_template_prompt', None)
 
         dataset_path = config.dataset_path
-        model_name = getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')
-        max_length = getattr(arch_config, 'flp_max_length', 8192)
         batch_size = config.training.batch_size
-        flp_downprojection_dim = getattr(arch_config, 'flp_downprojection_dim', None)
 
         # Reset index for consistent cache indices
         dataset = dataset.reset_index(drop=True)
         all_texts = dataset[config.text_column].tolist()
 
         # Try GPU cache first if requested
-        if flp_gpu_cache and flp_freeze and device.type == "cuda":
+        if _gpu_cache and _freeze and device.type == "cuda":
             from ..models.gpu_hidden_state_store import GPUHiddenStateStore
             try:
                 estimated_gb = GPUHiddenStateStore.estimate_vram_gb(
                     all_texts, model_name, max_length,
-                    downprojection_dim=flp_downprojection_dim,
-                    chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
+                    downprojection_dim=_downprojection_dim,
+                    chat_template_prompt=_chat_template_prompt,
                 )
                 free_vram_gb = torch.cuda.mem_get_info(device)[0] / 1e9
                 if estimated_gb < free_vram_gb * 0.8:
@@ -337,8 +350,8 @@ def run_applied_inference(
                     gpu_store.precompute(
                         all_texts, model_name, max_length, device,
                         batch_size=batch_size,
-                        downprojection_dim=flp_downprojection_dim,
-                        chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
+                        downprojection_dim=_downprojection_dim,
+                        chat_template_prompt=_chat_template_prompt,
                     )
                 else:
                     logger.warning(
@@ -352,17 +365,16 @@ def run_applied_inference(
                     gpu_store = None
 
         # Fall back to disk cache if GPU cache not available
-        if gpu_store is None and flp_cache_enabled and flp_freeze:
+        if gpu_store is None and _cache_enabled and _freeze:
             cache_dir = str(Path(dataset_path).parent / ".oci_cache")
-            flp_random_projection_dim = getattr(arch_config, 'flp_random_projection_dim', None)
             hidden_state_cache = HiddenStateCache(
                 cache_dir=cache_dir,
                 model_name=model_name,
                 max_length=max_length,
                 dataset_path=dataset_path,
-                random_projection_dim=flp_random_projection_dim,
-                downprojection_dim=flp_downprojection_dim,
-                chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
+                random_projection_dim=_random_projection_dim,
+                downprojection_dim=_downprojection_dim,
+                chat_template_prompt=_chat_template_prompt,
             )
 
             if not hidden_state_cache.is_valid(len(dataset)):
@@ -388,9 +400,9 @@ def run_applied_inference(
             if hidden_state_cache is not None:
                 hidden_state_cache.open()
                 hidden_state_cache.preload_to_ram()
-        elif gpu_store is None and flp_cache_enabled and not flp_freeze:
+        elif gpu_store is None and _cache_enabled and not _freeze:
             logger.warning(
-                "flp_cache_hidden_states=True but flp_freeze_llm=False. "
+                f"Cache enabled but LLM is not frozen for {feature_extractor_type}. "
                 "Caching is only supported with frozen LLM. Skipping cache."
             )
 
@@ -690,6 +702,14 @@ def _train_single_model(
         getattr(arch_config, 'feature_extractor_type', 'frozen_llm_pooler')
     )
 
+    # Determine if caching is active (for skipping LLM loading)
+    _use_cache = hidden_state_cache is not None or gpu_store is not None
+    _cached_hidden_size = (
+        gpu_store.hidden_size if gpu_store is not None
+        else hidden_state_cache.hidden_size if hidden_state_cache is not None
+        else 0
+    )
+
     # Create model
     model = CausalText(
         feature_extractor_type=feature_extractor_type,
@@ -704,16 +724,60 @@ def _train_single_model(
         # When caching is active, downprojection was already applied during
         # precomputation — don't create a redundant trainable layer in the model.
         flp_downprojection_dim=(
-            None if (hidden_state_cache is not None or gpu_store is not None)
-            else getattr(arch_config, 'flp_downprojection_dim', None)
+            None if _use_cache else getattr(arch_config, 'flp_downprojection_dim', None)
         ),
-        flp_skip_llm=hidden_state_cache is not None or gpu_store is not None,
-        flp_cached_hidden_size=(
-            gpu_store.hidden_size if gpu_store is not None
-            else hidden_state_cache.hidden_size if hidden_state_cache is not None
-            else 0
-        ),
+        flp_skip_llm=_use_cache,
+        flp_cached_hidden_size=_cached_hidden_size,
         flp_chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
+        # Hierarchical LLM args
+        hlm_model_name=getattr(arch_config, 'hlm_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        hlm_chunk_size=getattr(arch_config, 'hlm_chunk_size', 2048),
+        hlm_chunk_overlap=getattr(arch_config, 'hlm_chunk_overlap', 256),
+        hlm_max_chunks=getattr(arch_config, 'hlm_max_chunks', 16),
+        hlm_freeze_llm=getattr(arch_config, 'hlm_freeze_llm', True),
+        hlm_gated_attention_dim=getattr(arch_config, 'hlm_gated_attention_dim', 128),
+        hlm_projection_dim=getattr(arch_config, 'hlm_projection_dim', 128),
+        hlm_dropout=getattr(arch_config, 'hlm_dropout', 0.1),
+        hlm_gradient_checkpointing=getattr(arch_config, 'hlm_gradient_checkpointing', True),
+        hlm_downprojection_dim=(
+            None if _use_cache else getattr(arch_config, 'hlm_downprojection_dim', None)
+        ),
+        hlm_skip_llm=_use_cache,
+        hlm_cached_hidden_size=_cached_hidden_size,
+        hlm_chat_template_prompt=getattr(arch_config, 'hlm_chat_template_prompt', None),
+        # Hierarchical CNN args
+        hcnn_embedding_dim=getattr(arch_config, 'hcnn_embedding_dim', 256),
+        hcnn_conv_dim=getattr(arch_config, 'hcnn_conv_dim', 256),
+        hcnn_kernel_size=getattr(arch_config, 'hcnn_kernel_size', 5),
+        hcnn_num_conv_blocks=getattr(arch_config, 'hcnn_num_conv_blocks', 4),
+        hcnn_chunk_size=getattr(arch_config, 'hcnn_chunk_size', 512),
+        hcnn_chunk_overlap=getattr(arch_config, 'hcnn_chunk_overlap', 64),
+        hcnn_max_chunks=getattr(arch_config, 'hcnn_max_chunks', 32),
+        hcnn_vocab_size=getattr(arch_config, 'hcnn_vocab_size', 50000),
+        hcnn_gated_attention_dim=getattr(arch_config, 'hcnn_gated_attention_dim', 128),
+        hcnn_projection_dim=getattr(arch_config, 'hcnn_projection_dim', 128),
+        hcnn_dropout=getattr(arch_config, 'hcnn_dropout', 0.1),
+        # Hierarchical GRU args
+        hgru_embedding_dim=getattr(arch_config, 'hgru_embedding_dim', 256),
+        hgru_gru_hidden_dim=getattr(arch_config, 'hgru_gru_hidden_dim', 256),
+        hgru_num_gru_layers=getattr(arch_config, 'hgru_num_gru_layers', 2),
+        hgru_chunk_size=getattr(arch_config, 'hgru_chunk_size', 512),
+        hgru_chunk_overlap=getattr(arch_config, 'hgru_chunk_overlap', 64),
+        hgru_max_chunks=getattr(arch_config, 'hgru_max_chunks', 32),
+        hgru_vocab_size=getattr(arch_config, 'hgru_vocab_size', 50000),
+        hgru_gated_attention_dim=getattr(arch_config, 'hgru_gated_attention_dim', 128),
+        hgru_projection_dim=getattr(arch_config, 'hgru_projection_dim', 128),
+        hgru_dropout=getattr(arch_config, 'hgru_dropout', 0.1),
+        # Simple CNN args
+        scnn_embedding_dim=getattr(arch_config, 'scnn_embedding_dim', 256),
+        scnn_conv_dim=getattr(arch_config, 'scnn_conv_dim', 256),
+        scnn_kernel_size=getattr(arch_config, 'scnn_kernel_size', 5),
+        scnn_num_conv_blocks=getattr(arch_config, 'scnn_num_conv_blocks', 4),
+        scnn_max_length=getattr(arch_config, 'scnn_max_length', 10000),
+        scnn_vocab_size=getattr(arch_config, 'scnn_vocab_size', 50000),
+        scnn_gated_attention_dim=getattr(arch_config, 'scnn_gated_attention_dim', 128),
+        scnn_projection_dim=getattr(arch_config, 'scnn_projection_dim', 128),
+        scnn_dropout=getattr(arch_config, 'scnn_dropout', 0.1),
         # Explicit confounder featurizer args
         explicit_confounder_specs=_get_explicit_confounder_specs(config) if explicit_confounder_columns else None,
         explicit_confounder_output_dim=getattr(config.explicit_confounders, 'featurizer_output_dim', 64) if hasattr(config, 'explicit_confounders') else 64,
@@ -731,9 +795,12 @@ def _train_single_model(
         outcome_type=getattr(config, 'outcome_type', 'binary'),
     )
 
-    # Frozen LLM Pooler uses pretrained tokenizer, no fit_tokenizer needed
-    logger.info(f"Using Frozen LLM Pooler feature extractor: {getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base')} "
-               f"({'frozen' if getattr(arch_config, 'flp_freeze_llm', True) else 'trainable'})")
+    # Fit tokenizer for trainable extractors (CNN, GRU variants)
+    if feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES:
+        train_texts = train_df[config.text_column].tolist()
+        model.fit_tokenizer(train_texts)
+
+    logger.info(f"Using {feature_extractor_type} feature extractor")
 
     # Fit explicit confounder featurizer if specs provided
     if explicit_confounder_columns and model.explicit_confounder_featurizer is not None:

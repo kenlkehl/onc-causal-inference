@@ -2,7 +2,7 @@
 
 ## Overview
 
-OCI estimates treatment effects from clinical text by combining frozen LLM feature extraction with causal inference heads. It extracts confounders from unstructured EHR narratives to estimate individual (ITE) and average (ATE) treatment effects.
+OCI estimates treatment effects from clinical text by combining text feature extraction with causal inference heads. It extracts confounders from unstructured EHR narratives to estimate individual (ITE) and average (ATE) treatment effects.
 
 ## Repository Structure
 
@@ -28,6 +28,12 @@ oci/
 │   ├── causal_text_forest.py         # Two-stage neural + causal forest model
 │   ├── causal_forest_head.py         # CausalForestDML wrapper
 │   ├── frozen_llm_pooler_extractor.py  # Frozen LLM + gated attention pooling
+│   ├── hierarchical_llm_extractor.py  # Frozen LLM on overlapping chunks + two-level pooling
+│   ├── hierarchical_cnn_extractor.py  # Dilated CNN on overlapping chunks + two-level pooling
+│   ├── hierarchical_gru_extractor.py  # BiGRU on overlapping chunks + two-level pooling
+│   ├── simple_cnn_extractor.py        # Dilated CNN on whole text + gated attention pooling
+│   ├── text_chunking.py               # Shared token-based overlapping chunking utility
+│   ├── learned_tokenizer.py           # Word-level tokenizer (learned from training data)
 │   ├── gated_attention_pooling.py    # GatedAttentionPooling module
 │   ├── hidden_state_cache.py         # Disk-based hidden state cache
 │   ├── gpu_hidden_state_store.py     # GPU-resident hidden state store
@@ -63,19 +69,19 @@ synthetic_data/              # LLM-based synthetic data generation
 
 ## Architecture
 
-### Feature Extractor
+### Feature Extractors
 
-OCI uses a single feature extractor: **Frozen LLM Pooler**.
+| Type | Description | Chunking | Tokenizer | Requires fit_tokenizer | Config Prefix |
+|------|-------------|----------|-----------|----------------------|---------------|
+| `frozen_llm_pooler` | Frozen pretrained LLM + gated attention pooling | No | Pretrained HF | No | `flp_*` |
+| `hierarchical_llm` | Frozen pretrained LLM on overlapping chunks + two-level pooling | Yes (token-based) | Pretrained HF | No | `hlm_*` |
+| `hierarchical_cnn` | Dilated 1D CNN on overlapping chunks + two-level pooling | Yes (token-based) | Learned (word-level) | Yes | `hcnn_*` |
+| `hierarchical_gru` | BiGRU on overlapping chunks + two-level pooling | Yes (token-based) | Learned (word-level) | Yes | `hgru_*` |
+| `simple_cnn` | Dilated 1D CNN on whole text + gated attention pooling | No | Learned (word-level) | Yes | `scnn_*` |
 
-| Stage | Component | Description |
-|-------|-----------|-------------|
-| Tokenization | Pretrained HF tokenizer | Right-padded (all tokens used with mask) |
-| Backbone | Decoder-only LLM (frozen, autocast float16) | All token hidden states from final layer |
-| Downprojection | `nn.Linear(hidden_size, downprojection_dim)` (trainable, optional) | Reduces per-token dim before pooling |
-| Pooling | GatedAttentionPooling | tanh x sigmoid gating + softmax attention |
-| Projection | 2-layer MLP | Linear->LN->GELU->Dropout->Linear->LN |
+All extractors produce a fixed-size feature vector per document and share a common two-stage structure: encode token sequences, then pool into a single vector via `GatedAttentionPooling` (tanh x sigmoid gating + softmax attention). Hierarchical extractors add a second pooling level: tokens are pooled within each chunk, then chunk vectors are pooled into a document vector.
 
-The frozen LLM processes full documents (no chunking) up to the configured `flp_max_length`. No `fit_tokenizer()` is required -- it uses the pretrained HuggingFace tokenizer.
+Extractors are instantiated via `extractor_factory.py`, which centralizes all creation logic used by `CausalText`, `CausalTextForest`, `PropensityOnlyModel`, and `OutcomeOnlyModel`.
 
 ### Causal Heads
 
@@ -91,7 +97,7 @@ The frozen LLM processes full documents (no chunking) up to the configured `flp_
 
 ### R-Learner Dual Extractor Mode
 
-When `rlearner_dual_extractors=True`, the R-Learner uses two independent frozen LLM pooler extractors:
+When `rlearner_dual_extractors=True`, the R-Learner uses two independent feature extractors (of the same type):
 
 | Component | Purpose | Training Signal |
 |-----------|---------|-----------------|
@@ -225,6 +231,134 @@ When caching is enabled (`flp_cache_hidden_states: true`) and the LLM is frozen,
 | 8K | 4-8 | Good balance for most use cases |
 | 2K | 16-32 | Fast iteration |
 
+## Hierarchical LLM Details
+
+Frozen pretrained LLM applied to overlapping token chunks with two-level gated attention pooling. Handles documents longer than the LLM's context window by splitting into overlapping chunks, running the LLM on each chunk independently, then aggregating with two pooling layers.
+
+```
+Raw text
+  -> Pretrained tokenizer (full text, truncated to chunk_size * max_chunks)
+  -> Overlapping token-based chunking (chunk_size tokens, chunk_overlap overlap)
+  -> For each chunk: Frozen LLM -> hidden states -> [optional downprojection]
+     -> GatedAttentionPooling (token-level) -> chunk_vector
+  -> All chunk vectors -> GatedAttentionPooling (document-level) -> document_vector
+  -> 2-layer Projection MLP -> (batch, output_dim)
+```
+
+Supports hidden state caching (`hlm_cache_hidden_states`) with the same disk/GPU cache infrastructure as `frozen_llm_pooler`. No `fit_tokenizer()` required.
+
+### Config Parameters
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `hlm_model_name` | HuggingFace model name | `"Qwen/Qwen3-0.6B-Base"` |
+| `hlm_chunk_size` | Tokens per chunk | `2048` |
+| `hlm_chunk_overlap` | Overlapping tokens between consecutive chunks | `256` |
+| `hlm_max_chunks` | Maximum chunks per document | `16` |
+| `hlm_freeze_llm` | Freeze LLM backbone | `True` |
+| `hlm_gated_attention_dim` | Hidden dim for gated attention pooling | `128` |
+| `hlm_projection_dim` | Final output dimension | `128` |
+| `hlm_dropout` | Dropout rate | `0.1` |
+| `hlm_gradient_checkpointing` | Gradient checkpointing (when not frozen) | `True` |
+| `hlm_downprojection_dim` | Trainable linear projection before pooling (None = no downprojection) | `None` |
+| `hlm_cache_hidden_states` | Pre-compute and cache LLM hidden states to disk | `False` |
+| `hlm_gpu_cache` | Keep hidden states on GPU VRAM instead of disk | `False` |
+| `hlm_chat_template_prompt` | Chat template prompt for instruct models (None = disabled) | `None` |
+
+Interpretability: `interpret_attention()` returns chunk-level attention weights (not available in cached mode).
+
+## Hierarchical CNN Details
+
+Dilated 1D CNN applied to overlapping token chunks with two-level gated attention pooling. Trains entirely from scratch with a learned word-level tokenizer. Lightweight alternative to LLM-based extractors.
+
+```
+Raw text
+  -> LearnedTokenizer (word-level, truncated to chunk_size * max_chunks)
+  -> Overlapping token-based chunking
+  -> For each chunk: nn.Embedding -> DilatedConvStack (dilation 1,2,4,8,...)
+     -> GatedAttentionPooling (token-level) -> chunk_vector
+  -> All chunk vectors -> GatedAttentionPooling (document-level) -> document_vector
+  -> 2-layer Projection MLP -> (batch, output_dim)
+```
+
+The `DilatedConvStack` uses residual blocks with exponentially increasing dilation (1, 2, 4, 8, ...) for a wide receptive field. Shared CNN weights process all chunks. Requires `fit_tokenizer()` before training.
+
+### Config Parameters
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `hcnn_embedding_dim` | Word embedding dimension | `256` |
+| `hcnn_conv_dim` | CNN hidden dimension | `256` |
+| `hcnn_kernel_size` | Convolution kernel size | `5` |
+| `hcnn_num_conv_blocks` | Number of dilated residual conv blocks | `4` |
+| `hcnn_chunk_size` | Tokens per chunk | `512` |
+| `hcnn_chunk_overlap` | Overlapping tokens between consecutive chunks | `64` |
+| `hcnn_max_chunks` | Maximum chunks per document | `32` |
+| `hcnn_vocab_size` | Vocabulary size | `50000` |
+| `hcnn_gated_attention_dim` | Hidden dim for gated attention pooling | `128` |
+| `hcnn_projection_dim` | Final output dimension | `128` |
+| `hcnn_dropout` | Dropout rate | `0.1` |
+
+## Hierarchical GRU Details
+
+Bidirectional GRU applied to overlapping token chunks with two-level gated attention pooling. Trains entirely from scratch with a learned word-level tokenizer. Uses packed sequences for efficient variable-length processing.
+
+```
+Raw text
+  -> LearnedTokenizer (word-level, truncated to chunk_size * max_chunks)
+  -> Overlapping token-based chunking
+  -> For each chunk: nn.Embedding -> BiGRU (output = 2 * gru_hidden_dim)
+     -> GatedAttentionPooling (token-level) -> chunk_vector
+  -> All chunk vectors -> GatedAttentionPooling (document-level) -> document_vector
+  -> 2-layer Projection MLP -> (batch, output_dim)
+```
+
+Shared BiGRU weights process all chunks. The bidirectional GRU produces forward + backward hidden states concatenated to `2 * gru_hidden_dim`. Requires `fit_tokenizer()` before training.
+
+### Config Parameters
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `hgru_embedding_dim` | Word embedding dimension | `256` |
+| `hgru_gru_hidden_dim` | Hidden dimension per GRU direction (output = 2x) | `256` |
+| `hgru_num_gru_layers` | Number of stacked BiGRU layers | `2` |
+| `hgru_chunk_size` | Tokens per chunk | `512` |
+| `hgru_chunk_overlap` | Overlapping tokens between consecutive chunks | `64` |
+| `hgru_max_chunks` | Maximum chunks per document | `32` |
+| `hgru_vocab_size` | Vocabulary size | `50000` |
+| `hgru_gated_attention_dim` | Hidden dim for gated attention pooling | `128` |
+| `hgru_projection_dim` | Final output dimension | `128` |
+| `hgru_dropout` | Dropout rate | `0.1` |
+
+## Simple CNN Details
+
+Dilated 1D CNN applied to the whole document (no chunking) with gated attention pooling. Trains from scratch with a learned word-level tokenizer. Simplest and fastest extractor -- suitable for shorter documents or as a baseline.
+
+```
+Raw text
+  -> LearnedTokenizer (word-level, truncated to max_length)
+  -> nn.Embedding
+  -> DilatedConvStack (dilation 1,2,4,8,...)
+  -> GatedAttentionPooling -> document_vector
+  -> 2-layer Projection MLP -> (batch, output_dim)
+```
+
+No chunking -- processes the full tokenized sequence up to `scnn_max_length`. Requires `fit_tokenizer()` before training.
+
+### Config Parameters
+
+| Param | Description | Default |
+|-------|-------------|---------|
+| `scnn_embedding_dim` | Word embedding dimension | `256` |
+| `scnn_conv_dim` | CNN hidden dimension | `256` |
+| `scnn_kernel_size` | Convolution kernel size | `5` |
+| `scnn_num_conv_blocks` | Number of dilated residual conv blocks | `4` |
+| `scnn_max_length` | Maximum token sequence length | `10000` |
+| `scnn_vocab_size` | Vocabulary size | `50000` |
+| `scnn_gated_attention_dim` | Hidden dim for gated attention pooling | `128` |
+| `scnn_projection_dim` | Final output dimension | `128` |
+| `scnn_dropout` | Dropout rate | `0.1` |
+
 ## Explicit Confounder Extraction
 
 Researchers can specify explicit confounder variables to be extracted from clinical text using an LLM (via vLLM). The extracted confounders are featurized and concatenated to text embeddings before the causal heads.
@@ -236,7 +370,7 @@ Researchers can specify explicit confounder variables to be extracted from clini
 2. vLLM extracts confounders from clinical text (preprocessing step)
 3. Generates structured values per patient with missingness flags
 4. ExplicitConfounderFeaturizer MLP encodes confounders
-5. Concatenated to frozen LLM pooler output
+5. Concatenated to feature extractor output
 6. Combined representation -> Causal heads (DragonNet, R-Learner, etc.)
 
 For Causal Forest: Raw confounder features added directly to neural features
@@ -625,8 +759,10 @@ python -m synthetic_data.cli --config my_config.json
 | Main model | `oci/models/causal_text.py` |
 | Causal forest model | `oci/models/causal_text_forest.py`, `oci/models/causal_forest_head.py` |
 | Causal heads | `oci/models/dragonnet.py`, `oci/models/rlearner.py` |
-| Feature extractor | `oci/models/frozen_llm_pooler_extractor.py` |
+| Feature extractors | `oci/models/frozen_llm_pooler_extractor.py`, `oci/models/hierarchical_llm_extractor.py`, `oci/models/hierarchical_cnn_extractor.py`, `oci/models/hierarchical_gru_extractor.py`, `oci/models/simple_cnn_extractor.py` |
 | Extractor factory | `oci/models/extractor_factory.py` |
+| Text chunking | `oci/models/text_chunking.py` |
+| Learned tokenizer | `oci/models/learned_tokenizer.py` |
 | Gated attention | `oci/models/gated_attention_pooling.py` |
 | Hidden state cache | `oci/models/hidden_state_cache.py`, `oci/models/gpu_hidden_state_store.py` |
 | Explicit confounders | `oci/extraction/explicit_confounders.py`, `oci/extraction/cache.py`, `oci/models/explicit_confounder_featurizer.py` |
@@ -663,25 +799,32 @@ When adding a new causal head type, update the following files:
 | `oci/models/causal_text.py` | Add import, instantiation case, train_step/predict logic |
 | `oci/inference/applied.py` | Add any head-specific inference logic |
 
-## Modifying the Feature Extractor
+## Adding a New Feature Extractor
 
-Since there is only one extractor (`frozen_llm_pooler`), changes are centralized:
+All extractors are created via `extractor_factory.py`. When adding a new extractor type, update the following files:
 
-| File | Purpose |
-|------|---------|
-| `oci/models/frozen_llm_pooler_extractor.py` | Core extractor implementation |
-| `oci/models/extractor_factory.py` | Factory function (delegates to FrozenLLMPoolerExtractor) |
-| `oci/config.py` | `flp_*` config parameters in `ModelArchitectureConfig` |
-| `oci/models/causal_text.py` | Extractor instantiation and usage |
-| `oci/models/propensity_model.py` | Uses extractor factory for propensity-only models |
-| `oci/models/outcome_model.py` | Uses extractor factory for outcome-only models |
+| File | What to Update |
+|------|----------------|
+| `oci/models/new_extractor.py` | Create the new extractor module (must implement `forward()`, `output_dim`, `get_state()`, `fit_tokenizer()` if needed) |
+| `oci/models/__init__.py` | Add exports for new classes |
+| `oci/config.py` | Add `normalize_feature_extractor_type()` entry, add to `VALID_EXTRACTOR_TYPES`, add config parameters with prefix |
+| `oci/models/extractor_factory.py` | Add instantiation case in `create_feature_extractor()` |
+| `oci/models/causal_text.py` | Add fit_tokenizer path if extractor requires it |
+| `oci/inference/applied.py` | Add fit_tokenizer path if extractor requires it |
+| `oci/training/propensity_trimming.py` | Uses extractor factory (no changes needed unless extractor has special requirements) |
+| `oci/training/outcome_training.py` | Uses extractor factory (no changes needed unless extractor has special requirements) |
+| `example_configs/` | Create example configuration file |
+| `CLAUDE.md` | Update Feature Extractors table, add architecture section, update Key Files |
+
+The factory pattern means `propensity_model.py`, `outcome_model.py`, and `causal_text_forest.py` automatically support new extractors without code changes -- they all delegate to `extractor_factory.create_feature_extractor()`.
 
 ## Quick Reference
 
 - **ITE**: `preds['y1_prob'] - preds['y0_prob']` (probability scale for binary, raw values for continuous)
 - **Outcome type**: `outcome_type="binary"` (BCE + sigmoid) or `"continuous"` (MSE, no sigmoid). Treatment always binary.
-- **No fit_tokenizer**: Uses pretrained HF tokenizer from the frozen LLM
-- **Interpretability**: `interpret_attention()`, `get_attention_weights()` (not available in cached mode)
+- **fit_tokenizer**: Required for `hierarchical_cnn`, `hierarchical_gru`, `simple_cnn`. Not needed for `frozen_llm_pooler`, `hierarchical_llm`.
+- **Long docs**: Use `hierarchical_llm`, `hierarchical_cnn`, or `hierarchical_gru` (chunked). `frozen_llm_pooler` truncates at `flp_max_length`. `simple_cnn` truncates at `scnn_max_length`.
+- **Interpretability**: `interpret_attention()`, `get_attention_weights()` (not available in cached mode for LLM extractors)
 - **R-Learner vs DragonNet**: R-Learner for heterogeneous treatment effects; DragonNet for general use
 - **TF-IDF Forest baseline**: `model_type="tfidf_forest"` -- no neural network, pure TF-IDF + CausalForestDML
 - **Causal head dims**: `causal_head_representation_dim`, `causal_head_hidden_outcome_dim`, `causal_head_dropout` apply to all neural causal heads

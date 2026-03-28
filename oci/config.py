@@ -196,31 +196,48 @@ class ConfounderForestConfig:
     inference: bool = True
 
 
+EXTRACTOR_ALIASES = {
+    "frozen_llm_pooler": {"frozen_llm_pooler", "frozen_llm", "llm_pooler", "llm_pool", "flp"},
+    "hierarchical_llm": {"hierarchical_llm", "hier_llm", "hlm"},
+    "hierarchical_cnn": {"hierarchical_cnn", "hier_cnn", "hcnn"},
+    "hierarchical_gru": {"hierarchical_gru", "hier_gru", "hgru"},
+    "simple_cnn": {"simple_cnn", "scnn"},
+}
+
+VALID_EXTRACTOR_TYPES = set(EXTRACTOR_ALIASES.keys())
+
+# Extractors that require fit_tokenizer() before training
+TRAINABLE_EXTRACTOR_TYPES = {"hierarchical_cnn", "hierarchical_gru", "simple_cnn"}
+
+# Extractors that support hidden state caching
+CACHEABLE_EXTRACTOR_TYPES = {"frozen_llm_pooler", "hierarchical_llm"}
+
+
 def normalize_feature_extractor_type(feature_type: str) -> str:
     """
-    Normalize feature extractor type to "frozen_llm_pooler".
+    Normalize feature extractor type string to its canonical name.
 
     Args:
         feature_type: The raw feature extractor type string
 
     Returns:
-        Normalized type: "frozen_llm_pooler"
+        Normalized type string
 
     Raises:
-        ValueError: If the feature extractor type is not a frozen_llm_pooler variant
+        ValueError: If the feature extractor type is not recognized
     """
     if feature_type is None:
         return "frozen_llm_pooler"
 
-    feature_type_lower = feature_type.lower()
+    feature_type_lower = feature_type.lower().strip()
 
-    # Check for Frozen LLM Pooler
-    if feature_type_lower in ("frozen_llm_pooler", "frozen_llm", "llm_pooler", "llm_pool"):
-        return "frozen_llm_pooler"
+    for canonical, aliases in EXTRACTOR_ALIASES.items():
+        if feature_type_lower in aliases:
+            return canonical
 
     raise ValueError(
         f"Unsupported feature_extractor_type: '{feature_type}'. "
-        f"Only 'frozen_llm_pooler' is supported."
+        f"Supported types: {sorted(VALID_EXTRACTOR_TYPES)}"
     )
 
 
@@ -255,6 +272,57 @@ class ModelArchitectureConfig:
     flp_gpu_cache: bool = False  # Keep hidden states on GPU VRAM instead of disk (auto-fallback to disk if insufficient VRAM)
     flp_random_projection_dim: Optional[int] = None  # Random linear projection dimension for cached hidden states (None = no projection, keeps original hidden_size)
     flp_chat_template_prompt: Optional[str] = None  # Chat template prompt for instruct models. When set, wraps each text in the model's chat template with this prompt preceding the clinical text. None = disabled (raw text). Recommended for instruct models: "You are an expert clinical cancer researcher. Read this patient history, and then extract a set of features that will predict the patient's next treatment and their outcome on that treatment. The history is: "
+
+    # Hierarchical LLM extractor (frozen LLM on overlapping chunks + two-level pooling)
+    hlm_model_name: str = "Qwen/Qwen3-0.6B-Base"
+    hlm_chunk_size: int = 2048          # tokens per chunk
+    hlm_chunk_overlap: int = 256        # overlapping tokens between chunks
+    hlm_max_chunks: int = 16            # maximum chunks per document
+    hlm_freeze_llm: bool = True
+    hlm_gated_attention_dim: int = 128
+    hlm_projection_dim: int = 128
+    hlm_dropout: float = 0.1
+    hlm_gradient_checkpointing: bool = True
+    hlm_downprojection_dim: Optional[int] = None
+    hlm_cache_hidden_states: bool = False
+    hlm_gpu_cache: bool = False
+    hlm_chat_template_prompt: Optional[str] = None
+
+    # Hierarchical CNN extractor (dilated CNN on chunks + two-level pooling, trains from scratch)
+    hcnn_embedding_dim: int = 256
+    hcnn_conv_dim: int = 256
+    hcnn_kernel_size: int = 5
+    hcnn_num_conv_blocks: int = 4
+    hcnn_chunk_size: int = 512
+    hcnn_chunk_overlap: int = 64
+    hcnn_max_chunks: int = 32
+    hcnn_vocab_size: int = 50000
+    hcnn_gated_attention_dim: int = 128
+    hcnn_projection_dim: int = 128
+    hcnn_dropout: float = 0.1
+
+    # Hierarchical GRU extractor (BiGRU on chunks + two-level pooling, trains from scratch)
+    hgru_embedding_dim: int = 256
+    hgru_gru_hidden_dim: int = 256
+    hgru_num_gru_layers: int = 2
+    hgru_chunk_size: int = 512
+    hgru_chunk_overlap: int = 64
+    hgru_max_chunks: int = 32
+    hgru_vocab_size: int = 50000
+    hgru_gated_attention_dim: int = 128
+    hgru_projection_dim: int = 128
+    hgru_dropout: float = 0.1
+
+    # Simple CNN extractor (dilated CNN on whole text, trains from scratch)
+    scnn_embedding_dim: int = 256
+    scnn_conv_dim: int = 256
+    scnn_kernel_size: int = 5
+    scnn_num_conv_blocks: int = 4
+    scnn_max_length: int = 10000
+    scnn_vocab_size: int = 50000
+    scnn_gated_attention_dim: int = 128
+    scnn_projection_dim: int = 128
+    scnn_dropout: float = 0.1
 
     # Causal head dimensions (applies to all causal heads: DragonNet, RLearner, etc.)
     causal_head_representation_dim: int = 128

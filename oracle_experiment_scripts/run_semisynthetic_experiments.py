@@ -405,16 +405,19 @@ def run_text_forest_arm(
     hidden_state_cache=None,
     gpu_store=None,
     flp_chat_template_prompt: Optional[str] = None,
+    feature_extractor_type: str = "frozen_llm_pooler",
 ) -> Dict[str, Any]:
     """Run causal forest with text features + optional confounders.
 
     Wraps run_causal_forest_experiment with the right config.
+    Supports multiple feature extractor types via feature_extractor_type.
     """
     config = ExperimentConfig(
         dataset_path="",  # Not used by the experiment runner directly
         dataset_name="semisynthetic",
         model_type="causal_forest",
         use_explicit_confounders=bool(confounder_specs),
+        feature_extractor_type=feature_extractor_type,
         repeat_index=seed - 42,  # For KFold seeding
         flp_model_name=flp_model_name,
         flp_max_length=flp_max_length,
@@ -430,6 +433,15 @@ def run_text_forest_arm(
         cf_min_samples_leaf=cf_min_samples_leaf,
         gamma_rlearner=gamma_rlearner,
     )
+
+    # For hierarchical_llm, derive hlm_* params from flp_* CLI params
+    if feature_extractor_type == "hierarchical_llm":
+        config.hlm_model_name = flp_model_name
+        config.hlm_downprojection_dim = flp_downprojection_dim
+        config.hlm_chat_template_prompt = flp_chat_template_prompt
+    # For simple_cnn, set max_length from flp_max_length
+    elif feature_extractor_type == "simple_cnn":
+        config.scnn_max_length = flp_max_length
 
     device_obj = torch.device(device)
 
@@ -587,6 +599,7 @@ class TextForestJob:
     subset_spec_dicts: List[Dict[str, Any]]  # specs as dicts
     confounder_cols: Optional[List[str]]
     dgp_stats: Dict[str, Any]  # pre-computed dgp stats for format_result
+    feature_extractor_type: str = "frozen_llm_pooler"
 
 
 def _build_text_forest_jobs(
@@ -597,8 +610,12 @@ def _build_text_forest_jobs(
     equation_mode: str,
     output_path: Path,
     resume: bool,
+    extractor_types: List[str] = None,
 ) -> List[TextForestJob]:
-    """Build all text_forest jobs across DGPs and repeats."""
+    """Build all text_forest jobs across DGPs, repeats, and extractor types."""
+    if extractor_types is None:
+        extractor_types = ["frozen_llm_pooler"]
+
     jobs = []
     for dgp_idx, dgp in enumerate(dgps):
         for repeat_idx in range(num_repeats):
@@ -621,32 +638,38 @@ def _build_text_forest_jobs(
                 "true_ite_std": float(sim_df['true_ite_prob'].std()),
             }
 
-            for fraction in confounder_fractions:
-                n_subset = round(len(dgp.confounder_specs) * fraction)
-                arm_name = f"text_forest_{fraction:.2f}"
+            for extractor_type in extractor_types:
+                for fraction in confounder_fractions:
+                    n_subset = round(len(dgp.confounder_specs) * fraction)
+                    # Include extractor type in arm name for multi-extractor runs
+                    if len(extractor_types) > 1:
+                        arm_name = f"text_forest_{extractor_type}_{fraction:.2f}"
+                    else:
+                        arm_name = f"text_forest_{fraction:.2f}"
 
-                if resume and is_result_done(output_path, dgp_idx, repeat_idx, arm_name):
-                    continue
+                    if resume and is_result_done(output_path, dgp_idx, repeat_idx, arm_name):
+                        continue
 
-                subset_specs = select_confounder_subset(
-                    dgp.confounder_specs, n_subset, seed=seed
-                )
-                confounder_cols = get_confounder_cols(subset_specs, dgp.extracted_df)
+                    subset_specs = select_confounder_subset(
+                        dgp.confounder_specs, n_subset, seed=seed
+                    )
+                    confounder_cols = get_confounder_cols(subset_specs, dgp.extracted_df)
 
-                jobs.append(TextForestJob(
-                    dgp_idx=dgp_idx,
-                    repeat_idx=repeat_idx,
-                    arm_name=arm_name,
-                    fraction=fraction,
-                    seed=seed,
-                    n_confounders_used=n_subset,
-                    n_confounders_total=len(dgp.confounder_specs),
-                    equation_mode=equation_mode,
-                    sim_df_dict=sim_df.to_dict(orient='list'),
-                    subset_spec_dicts=[asdict(s) for s in subset_specs] if subset_specs else [],
-                    confounder_cols=confounder_cols,
-                    dgp_stats=dgp_stats,
-                ))
+                    jobs.append(TextForestJob(
+                        dgp_idx=dgp_idx,
+                        repeat_idx=repeat_idx,
+                        arm_name=arm_name,
+                        fraction=fraction,
+                        seed=seed,
+                        n_confounders_used=n_subset,
+                        n_confounders_total=len(dgp.confounder_specs),
+                        equation_mode=equation_mode,
+                        sim_df_dict=sim_df.to_dict(orient='list'),
+                        subset_spec_dicts=[asdict(s) for s in subset_specs] if subset_specs else [],
+                        confounder_cols=confounder_cols,
+                        dgp_stats=dgp_stats,
+                        feature_extractor_type=extractor_type,
+                    ))
     return jobs
 
 
@@ -669,13 +692,17 @@ def _run_text_forest_job(
     flp_chat_template_prompt: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """Execute a single text_forest job. Returns formatted result or None on failure."""
-    from oci.config import ExplicitConfounderSpec
+    from oci.config import ExplicitConfounderSpec, CACHEABLE_EXTRACTOR_TYPES
 
     sim_df = pd.DataFrame(job.sim_df_dict)
     subset_specs = [ExplicitConfounderSpec(**d) for d in job.subset_spec_dicts] if job.subset_spec_dicts else None
 
+    # Only pass cache/gpu_store for cacheable extractor types
+    job_hidden_state_cache = hidden_state_cache if job.feature_extractor_type in CACHEABLE_EXTRACTOR_TYPES else None
+    job_gpu_store = gpu_store if job.feature_extractor_type in CACHEABLE_EXTRACTOR_TYPES else None
+
     logger.info(
-        f"  Running {job.arm_name} (text + {job.n_confounders_used} confounders) "
+        f"  Running {job.arm_name} ({job.feature_extractor_type}, text + {job.n_confounders_used} confounders) "
         f"dgp={job.dgp_idx} repeat={job.repeat_idx} on {device}..."
     )
     try:
@@ -695,9 +722,10 @@ def _run_text_forest_job(
             n_folds=n_folds,
             cf_n_estimators=cf_n_estimators,
             cf_min_samples_leaf=cf_min_samples_leaf,
-            hidden_state_cache=hidden_state_cache,
-            gpu_store=gpu_store,
+            hidden_state_cache=job_hidden_state_cache,
+            gpu_store=job_gpu_store,
             flp_chat_template_prompt=flp_chat_template_prompt,
+            feature_extractor_type=job.feature_extractor_type,
         )
         formatted = {
             "dgp_index": job.dgp_idx,
@@ -877,6 +905,8 @@ def run_experiments(
     gpu_cache: bool = False,
     resume: bool = False,
     workers_per_gpu: str = "auto",
+    # Feature extractor types for text_forest arms
+    extractor_types: List[str] = None,
 ):
     """Main experiment runner.
 
@@ -891,6 +921,8 @@ def run_experiments(
         confounder_fractions = [0.0, 0.25, 0.5, 0.75, 1.0]
     if devices is None:
         devices = ["cuda:0"]
+    if extractor_types is None:
+        extractor_types = ["frozen_llm_pooler"]
 
     use_cache = cache or gpu_cache
     output_path = Path(output_dir)
@@ -1003,6 +1035,7 @@ def run_experiments(
         "batch_size": batch_size,
         "learning_rate": learning_rate,
         "n_folds": n_folds,
+        "extractor_types": extractor_types,
     }
     with open(output_path / "config.json", "w") as f:
         json.dump(config_dict, f, indent=2, default=str)
@@ -1014,7 +1047,11 @@ def run_experiments(
     gpu_store = None
     cache_info = None
 
-    if use_cache:
+    # Only cache if at least one extractor type supports caching
+    from oci.config import CACHEABLE_EXTRACTOR_TYPES
+    has_cacheable_extractor = any(et in CACHEABLE_EXTRACTOR_TYPES for et in extractor_types)
+
+    if use_cache and has_cacheable_extractor:
         logger.info(f"\n{'='*60}")
         logger.info("PHASE 3: Pre-caching frozen LLM hidden states")
         logger.info(f"{'='*60}")
@@ -1147,6 +1184,7 @@ def run_experiments(
         equation_mode=equation_mode,
         output_path=output_path,
         resume=resume,
+        extractor_types=extractor_types,
     )
 
     if not text_forest_jobs:
@@ -1392,6 +1430,10 @@ def main():
                         help="Concurrent text_forest workers per GPU: 'auto' or integer "
                              "(default: auto). Only effective with --cache/--gpu-cache; "
                              "non-cached mode always uses 1.")
+    parser.add_argument("--extractor-types", nargs="+", default=["frozen_llm_pooler"],
+                        help="Feature extractor types for text_forest arms "
+                             "(default: frozen_llm_pooler). Multiple types create separate "
+                             "arms per extractor.")
 
     args = parser.parse_args()
 
@@ -1440,6 +1482,7 @@ def main():
         gpu_cache=args.gpu_cache,
         resume=args.resume,
         workers_per_gpu=args.workers_per_gpu,
+        extractor_types=args.extractor_types,
     )
 
 

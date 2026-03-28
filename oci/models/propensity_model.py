@@ -75,6 +75,53 @@ class PropensityOnlyModel(nn.Module):
         flp_skip_llm: bool = False,
         flp_cached_hidden_size: int = 0,
         flp_chat_template_prompt: Optional[str] = None,
+        # Hierarchical LLM args
+        hlm_model_name: str = "Qwen/Qwen3-0.6B-Base",
+        hlm_chunk_size: int = 2048,
+        hlm_chunk_overlap: int = 256,
+        hlm_max_chunks: int = 16,
+        hlm_freeze_llm: bool = True,
+        hlm_gated_attention_dim: int = 128,
+        hlm_projection_dim: int = 128,
+        hlm_dropout: float = 0.1,
+        hlm_gradient_checkpointing: bool = True,
+        hlm_downprojection_dim: Optional[int] = None,
+        hlm_skip_llm: bool = False,
+        hlm_cached_hidden_size: int = 0,
+        hlm_chat_template_prompt: Optional[str] = None,
+        # Hierarchical CNN args
+        hcnn_embedding_dim: int = 256,
+        hcnn_conv_dim: int = 256,
+        hcnn_kernel_size: int = 5,
+        hcnn_num_conv_blocks: int = 4,
+        hcnn_chunk_size: int = 512,
+        hcnn_chunk_overlap: int = 64,
+        hcnn_max_chunks: int = 32,
+        hcnn_vocab_size: int = 50000,
+        hcnn_gated_attention_dim: int = 128,
+        hcnn_projection_dim: int = 128,
+        hcnn_dropout: float = 0.1,
+        # Hierarchical GRU args
+        hgru_embedding_dim: int = 256,
+        hgru_gru_hidden_dim: int = 256,
+        hgru_num_gru_layers: int = 2,
+        hgru_chunk_size: int = 512,
+        hgru_chunk_overlap: int = 64,
+        hgru_max_chunks: int = 32,
+        hgru_vocab_size: int = 50000,
+        hgru_gated_attention_dim: int = 128,
+        hgru_projection_dim: int = 128,
+        hgru_dropout: float = 0.1,
+        # Simple CNN args
+        scnn_embedding_dim: int = 256,
+        scnn_conv_dim: int = 256,
+        scnn_kernel_size: int = 5,
+        scnn_num_conv_blocks: int = 4,
+        scnn_max_length: int = 10000,
+        scnn_vocab_size: int = 50000,
+        scnn_gated_attention_dim: int = 128,
+        scnn_projection_dim: int = 128,
+        scnn_dropout: float = 0.1,
         # Propensity network args
         representation_dim: int = 128,
         device: str = "cuda:0"
@@ -83,17 +130,12 @@ class PropensityOnlyModel(nn.Module):
         Initialize propensity-only model.
 
         Args:
-            feature_extractor_type: Feature extractor type (only "frozen_llm_pooler" supported)
-            flp_model_name: HuggingFace model name for frozen LLM
-            flp_max_length: Maximum sequence length
-            flp_freeze_llm: Whether to freeze LLM weights
-            flp_gated_attention_dim: Gated attention dimension
-            flp_projection_dim: Projection dimension
-            flp_dropout: Dropout rate
-            flp_gradient_checkpointing: Enable gradient checkpointing
-            flp_downprojection_dim: Optional downprojection dimension
-            flp_skip_llm: Skip LLM (use cached hidden states)
-            flp_cached_hidden_size: Size of cached hidden states
+            feature_extractor_type: Feature extractor type
+            flp_*: Frozen LLM Pooler args (see extractor_factory.py)
+            hlm_*: Hierarchical LLM args (see extractor_factory.py)
+            hcnn_*: Hierarchical CNN args (see extractor_factory.py)
+            hgru_*: Hierarchical GRU args (see extractor_factory.py)
+            scnn_*: Simple CNN args (see extractor_factory.py)
             representation_dim: Dimension of representation layers
             device: Device string
         """
@@ -117,6 +159,49 @@ class PropensityOnlyModel(nn.Module):
             'flp_skip_llm': flp_skip_llm,
             'flp_cached_hidden_size': flp_cached_hidden_size,
             'flp_chat_template_prompt': flp_chat_template_prompt,
+            'hlm_model_name': hlm_model_name,
+            'hlm_chunk_size': hlm_chunk_size,
+            'hlm_chunk_overlap': hlm_chunk_overlap,
+            'hlm_max_chunks': hlm_max_chunks,
+            'hlm_freeze_llm': hlm_freeze_llm,
+            'hlm_gated_attention_dim': hlm_gated_attention_dim,
+            'hlm_projection_dim': hlm_projection_dim,
+            'hlm_dropout': hlm_dropout,
+            'hlm_gradient_checkpointing': hlm_gradient_checkpointing,
+            'hlm_downprojection_dim': hlm_downprojection_dim,
+            'hlm_skip_llm': hlm_skip_llm,
+            'hlm_cached_hidden_size': hlm_cached_hidden_size,
+            'hlm_chat_template_prompt': hlm_chat_template_prompt,
+            'hcnn_embedding_dim': hcnn_embedding_dim,
+            'hcnn_conv_dim': hcnn_conv_dim,
+            'hcnn_kernel_size': hcnn_kernel_size,
+            'hcnn_num_conv_blocks': hcnn_num_conv_blocks,
+            'hcnn_chunk_size': hcnn_chunk_size,
+            'hcnn_chunk_overlap': hcnn_chunk_overlap,
+            'hcnn_max_chunks': hcnn_max_chunks,
+            'hcnn_vocab_size': hcnn_vocab_size,
+            'hcnn_gated_attention_dim': hcnn_gated_attention_dim,
+            'hcnn_projection_dim': hcnn_projection_dim,
+            'hcnn_dropout': hcnn_dropout,
+            'hgru_embedding_dim': hgru_embedding_dim,
+            'hgru_gru_hidden_dim': hgru_gru_hidden_dim,
+            'hgru_num_gru_layers': hgru_num_gru_layers,
+            'hgru_chunk_size': hgru_chunk_size,
+            'hgru_chunk_overlap': hgru_chunk_overlap,
+            'hgru_max_chunks': hgru_max_chunks,
+            'hgru_vocab_size': hgru_vocab_size,
+            'hgru_gated_attention_dim': hgru_gated_attention_dim,
+            'hgru_projection_dim': hgru_projection_dim,
+            'hgru_dropout': hgru_dropout,
+            'scnn_embedding_dim': scnn_embedding_dim,
+            'scnn_conv_dim': scnn_conv_dim,
+            'scnn_kernel_size': scnn_kernel_size,
+            'scnn_num_conv_blocks': scnn_num_conv_blocks,
+            'scnn_max_length': scnn_max_length,
+            'scnn_vocab_size': scnn_vocab_size,
+            'scnn_gated_attention_dim': scnn_gated_attention_dim,
+            'scnn_projection_dim': scnn_projection_dim,
+            'scnn_dropout': scnn_dropout,
             'representation_dim': representation_dim
         }
 
@@ -136,6 +221,49 @@ class PropensityOnlyModel(nn.Module):
             flp_skip_llm=flp_skip_llm,
             flp_cached_hidden_size=flp_cached_hidden_size,
             flp_chat_template_prompt=flp_chat_template_prompt,
+            hlm_model_name=hlm_model_name,
+            hlm_chunk_size=hlm_chunk_size,
+            hlm_chunk_overlap=hlm_chunk_overlap,
+            hlm_max_chunks=hlm_max_chunks,
+            hlm_freeze_llm=hlm_freeze_llm,
+            hlm_gated_attention_dim=hlm_gated_attention_dim,
+            hlm_projection_dim=hlm_projection_dim,
+            hlm_dropout=hlm_dropout,
+            hlm_gradient_checkpointing=hlm_gradient_checkpointing,
+            hlm_downprojection_dim=hlm_downprojection_dim,
+            hlm_skip_llm=hlm_skip_llm,
+            hlm_cached_hidden_size=hlm_cached_hidden_size,
+            hlm_chat_template_prompt=hlm_chat_template_prompt,
+            hcnn_embedding_dim=hcnn_embedding_dim,
+            hcnn_conv_dim=hcnn_conv_dim,
+            hcnn_kernel_size=hcnn_kernel_size,
+            hcnn_num_conv_blocks=hcnn_num_conv_blocks,
+            hcnn_chunk_size=hcnn_chunk_size,
+            hcnn_chunk_overlap=hcnn_chunk_overlap,
+            hcnn_max_chunks=hcnn_max_chunks,
+            hcnn_vocab_size=hcnn_vocab_size,
+            hcnn_gated_attention_dim=hcnn_gated_attention_dim,
+            hcnn_projection_dim=hcnn_projection_dim,
+            hcnn_dropout=hcnn_dropout,
+            hgru_embedding_dim=hgru_embedding_dim,
+            hgru_gru_hidden_dim=hgru_gru_hidden_dim,
+            hgru_num_gru_layers=hgru_num_gru_layers,
+            hgru_chunk_size=hgru_chunk_size,
+            hgru_chunk_overlap=hgru_chunk_overlap,
+            hgru_max_chunks=hgru_max_chunks,
+            hgru_vocab_size=hgru_vocab_size,
+            hgru_gated_attention_dim=hgru_gated_attention_dim,
+            hgru_projection_dim=hgru_projection_dim,
+            hgru_dropout=hgru_dropout,
+            scnn_embedding_dim=scnn_embedding_dim,
+            scnn_conv_dim=scnn_conv_dim,
+            scnn_kernel_size=scnn_kernel_size,
+            scnn_num_conv_blocks=scnn_num_conv_blocks,
+            scnn_max_length=scnn_max_length,
+            scnn_vocab_size=scnn_vocab_size,
+            scnn_gated_attention_dim=scnn_gated_attention_dim,
+            scnn_projection_dim=scnn_projection_dim,
+            scnn_dropout=scnn_dropout,
         )
         logger.info(f"Propensity model using {self.feature_extractor_type.upper()} feature extractor")
 
@@ -154,6 +282,11 @@ class PropensityOnlyModel(nn.Module):
         logger.info(f"  Feature extractor output: {input_dim}")
         logger.info(f"  Representation dim: {representation_dim}")
         logger.info(f"  Device: {self._device}")
+
+    def fit_tokenizer(self, texts):
+        """Fit tokenizer for trainable-from-scratch extractors. No-op for LLM-based."""
+        if hasattr(self.feature_extractor, 'fit_tokenizer'):
+            self.feature_extractor.fit_tokenizer(texts)
 
     @staticmethod
     def _get_extractor_input(batch, texts):
@@ -270,6 +403,53 @@ def create_propensity_model_from_config(
         flp_skip_llm=flp_skip_llm,
         flp_cached_hidden_size=flp_cached_hidden_size,
         flp_chat_template_prompt=getattr(arch_config, 'flp_chat_template_prompt', None),
+        # Hierarchical LLM args
+        hlm_model_name=getattr(arch_config, 'hlm_model_name', 'Qwen/Qwen3-0.6B-Base'),
+        hlm_chunk_size=getattr(arch_config, 'hlm_chunk_size', 2048),
+        hlm_chunk_overlap=getattr(arch_config, 'hlm_chunk_overlap', 256),
+        hlm_max_chunks=getattr(arch_config, 'hlm_max_chunks', 16),
+        hlm_freeze_llm=getattr(arch_config, 'hlm_freeze_llm', True),
+        hlm_gated_attention_dim=getattr(arch_config, 'hlm_gated_attention_dim', 128),
+        hlm_projection_dim=getattr(arch_config, 'hlm_projection_dim', 128),
+        hlm_dropout=getattr(arch_config, 'hlm_dropout', 0.1),
+        hlm_gradient_checkpointing=getattr(arch_config, 'hlm_gradient_checkpointing', True),
+        hlm_downprojection_dim=getattr(arch_config, 'hlm_downprojection_dim', None),
+        hlm_skip_llm=getattr(arch_config, 'hlm_skip_llm', False),
+        hlm_cached_hidden_size=getattr(arch_config, 'hlm_cached_hidden_size', 0),
+        hlm_chat_template_prompt=getattr(arch_config, 'hlm_chat_template_prompt', None),
+        # Hierarchical CNN args
+        hcnn_embedding_dim=getattr(arch_config, 'hcnn_embedding_dim', 256),
+        hcnn_conv_dim=getattr(arch_config, 'hcnn_conv_dim', 256),
+        hcnn_kernel_size=getattr(arch_config, 'hcnn_kernel_size', 5),
+        hcnn_num_conv_blocks=getattr(arch_config, 'hcnn_num_conv_blocks', 4),
+        hcnn_chunk_size=getattr(arch_config, 'hcnn_chunk_size', 512),
+        hcnn_chunk_overlap=getattr(arch_config, 'hcnn_chunk_overlap', 64),
+        hcnn_max_chunks=getattr(arch_config, 'hcnn_max_chunks', 32),
+        hcnn_vocab_size=getattr(arch_config, 'hcnn_vocab_size', 50000),
+        hcnn_gated_attention_dim=getattr(arch_config, 'hcnn_gated_attention_dim', 128),
+        hcnn_projection_dim=getattr(arch_config, 'hcnn_projection_dim', 128),
+        hcnn_dropout=getattr(arch_config, 'hcnn_dropout', 0.1),
+        # Hierarchical GRU args
+        hgru_embedding_dim=getattr(arch_config, 'hgru_embedding_dim', 256),
+        hgru_gru_hidden_dim=getattr(arch_config, 'hgru_gru_hidden_dim', 256),
+        hgru_num_gru_layers=getattr(arch_config, 'hgru_num_gru_layers', 2),
+        hgru_chunk_size=getattr(arch_config, 'hgru_chunk_size', 512),
+        hgru_chunk_overlap=getattr(arch_config, 'hgru_chunk_overlap', 64),
+        hgru_max_chunks=getattr(arch_config, 'hgru_max_chunks', 32),
+        hgru_vocab_size=getattr(arch_config, 'hgru_vocab_size', 50000),
+        hgru_gated_attention_dim=getattr(arch_config, 'hgru_gated_attention_dim', 128),
+        hgru_projection_dim=getattr(arch_config, 'hgru_projection_dim', 128),
+        hgru_dropout=getattr(arch_config, 'hgru_dropout', 0.1),
+        # Simple CNN args
+        scnn_embedding_dim=getattr(arch_config, 'scnn_embedding_dim', 256),
+        scnn_conv_dim=getattr(arch_config, 'scnn_conv_dim', 256),
+        scnn_kernel_size=getattr(arch_config, 'scnn_kernel_size', 5),
+        scnn_num_conv_blocks=getattr(arch_config, 'scnn_num_conv_blocks', 4),
+        scnn_max_length=getattr(arch_config, 'scnn_max_length', 10000),
+        scnn_vocab_size=getattr(arch_config, 'scnn_vocab_size', 50000),
+        scnn_gated_attention_dim=getattr(arch_config, 'scnn_gated_attention_dim', 128),
+        scnn_projection_dim=getattr(arch_config, 'scnn_projection_dim', 128),
+        scnn_dropout=getattr(arch_config, 'scnn_dropout', 0.1),
         # Propensity network args
         representation_dim=representation_dim,
         device=str(device)
