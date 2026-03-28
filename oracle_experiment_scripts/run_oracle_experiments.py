@@ -1290,7 +1290,7 @@ def generate_experiment_grid(
     dataset_paths: List[str],
     filter_model_types: Optional[List[str]] = None,
     filter_max_lengths: Optional[List[int]] = None,
-    model_name: str = "Qwen/Qwen3.5-0.8B-Base",
+    model_names: Optional[List[str]] = None,
     chat_template_prompt: Optional[str] = None,
     filter_extractor_types: Optional[List[str]] = None,
 ) -> List[ExperimentConfig]:
@@ -1303,7 +1303,14 @@ def generate_experiment_grid(
     When filter_extractor_types is provided, only those extractor types are
     included.  Each extractor type generates its own relevant hyperparameter
     sub-grid.
+
+    When multiple model_names are provided, each frozen LLM model name
+    becomes a dimension of the experiment grid for LLM-based extractors
+    (frozen_llm_pooler, hierarchical_llm).
     """
+
+    if model_names is None:
+        model_names = ["Qwen/Qwen3.5-0.8B-Base", "Qwen/Qwen3.5-0.8B", "google/medgemma-1.5-4b-it"]
 
     datasets = [(p, Path(p).name) for p in dataset_paths]
 
@@ -1322,11 +1329,15 @@ def generate_experiment_grid(
     if filter_extractor_types:
         extractor_types = [e for e in all_extractor_types if e in filter_extractor_types]
 
+    # Training hyperparameters shared across all neural extractors
+    learning_rates = [1e-5, 1e-4]
+    epoch_counts = [5, 10, 25, 50]
+
     configs = []
 
     for ext_type in extractor_types:
         if ext_type == "frozen_llm_pooler":
-            # frozen_llm_pooler grid: max_lengths x downprojection_dims x confounders x chat_template
+            # frozen_llm_pooler grid: max_lengths x downprojection_dims x confounders x chat_template x model_names x lr x epochs
             max_lengths = [5000, 10000, 25000, 50000, 75000]
             downprojection_dims = [128, 256, 512]
 
@@ -1337,8 +1348,8 @@ def generate_experiment_grid(
             if filter_max_lengths:
                 max_lengths = [m for m in max_lengths if m in filter_max_lengths]
 
-            for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim, ctp in itertools.product(
-                datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims, chat_template_options
+            for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim, ctp, mn, lr, ep in itertools.product(
+                datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims, chat_template_options, model_names, learning_rates, epoch_counts
             ):
                 configs.append(ExperimentConfig(
                     dataset_path=dataset_path,
@@ -1348,8 +1359,10 @@ def generate_experiment_grid(
                     feature_extractor_type="frozen_llm_pooler",
                     flp_max_length=max_len,
                     flp_downprojection_dim=dp_dim,
-                    flp_model_name=model_name,
+                    flp_model_name=mn,
                     flp_chat_template_prompt=ctp,
+                    learning_rate=lr,
+                    epochs=ep,
                 ))
 
         elif ext_type == "hierarchical_llm":
@@ -1359,8 +1372,8 @@ def generate_experiment_grid(
             max_chunks_options = [4, 8, 16]  # effective: 2048*4=8K, 2048*8=16K, 2048*16=32K
             downprojection_dims = [128, 256, 512]
 
-            for (dataset_path, dataset_name), model_type, n_chunks, explicit_conf, dp_dim in itertools.product(
-                datasets, model_types, max_chunks_options, explicit_confounder_options, downprojection_dims
+            for (dataset_path, dataset_name), model_type, n_chunks, explicit_conf, dp_dim, mn, lr, ep in itertools.product(
+                datasets, model_types, max_chunks_options, explicit_confounder_options, downprojection_dims, model_names, learning_rates, epoch_counts
             ):
                 configs.append(ExperimentConfig(
                     dataset_path=dataset_path,
@@ -1368,19 +1381,21 @@ def generate_experiment_grid(
                     model_type=model_type,
                     use_explicit_confounders=explicit_conf,
                     feature_extractor_type="hierarchical_llm",
-                    hlm_model_name=model_name,
+                    hlm_model_name=mn,
                     hlm_chunk_size=chunk_size,
                     hlm_chunk_overlap=chunk_overlap,
                     hlm_max_chunks=n_chunks,
                     hlm_downprojection_dim=dp_dim,
+                    learning_rate=lr,
+                    epochs=ep,
                 ))
 
         elif ext_type == "hierarchical_cnn":
             # hierarchical_cnn grid: chunk_sizes x confounders
             chunk_sizes = [256, 512]
 
-            for (dataset_path, dataset_name), model_type, explicit_conf, cs in itertools.product(
-                datasets, model_types, explicit_confounder_options, chunk_sizes
+            for (dataset_path, dataset_name), model_type, explicit_conf, cs, lr, ep in itertools.product(
+                datasets, model_types, explicit_confounder_options, chunk_sizes, learning_rates, epoch_counts
             ):
                 configs.append(ExperimentConfig(
                     dataset_path=dataset_path,
@@ -1389,14 +1404,16 @@ def generate_experiment_grid(
                     use_explicit_confounders=explicit_conf,
                     feature_extractor_type="hierarchical_cnn",
                     hcnn_chunk_size=cs,
+                    learning_rate=lr,
+                    epochs=ep,
                 ))
 
         elif ext_type == "hierarchical_gru":
             # hierarchical_gru grid: chunk_sizes x confounders
             chunk_sizes = [256, 512]
 
-            for (dataset_path, dataset_name), model_type, explicit_conf, cs in itertools.product(
-                datasets, model_types, explicit_confounder_options, chunk_sizes
+            for (dataset_path, dataset_name), model_type, explicit_conf, cs, lr, ep in itertools.product(
+                datasets, model_types, explicit_confounder_options, chunk_sizes, learning_rates, epoch_counts
             ):
                 configs.append(ExperimentConfig(
                     dataset_path=dataset_path,
@@ -1405,6 +1422,8 @@ def generate_experiment_grid(
                     use_explicit_confounders=explicit_conf,
                     feature_extractor_type="hierarchical_gru",
                     hgru_chunk_size=cs,
+                    learning_rate=lr,
+                    epochs=ep,
                 ))
 
         elif ext_type == "simple_cnn":
@@ -1414,8 +1433,8 @@ def generate_experiment_grid(
             if filter_max_lengths:
                 scnn_max_lengths = [m for m in scnn_max_lengths if m in filter_max_lengths]
 
-            for (dataset_path, dataset_name), model_type, explicit_conf, max_len in itertools.product(
-                datasets, model_types, explicit_confounder_options, scnn_max_lengths
+            for (dataset_path, dataset_name), model_type, explicit_conf, max_len, lr, ep in itertools.product(
+                datasets, model_types, explicit_confounder_options, scnn_max_lengths, learning_rates, epoch_counts
             ):
                 configs.append(ExperimentConfig(
                     dataset_path=dataset_path,
@@ -1424,6 +1443,8 @@ def generate_experiment_grid(
                     use_explicit_confounders=explicit_conf,
                     feature_extractor_type="simple_cnn",
                     scnn_max_length=max_len,
+                    learning_rate=lr,
+                    epochs=ep,
                 ))
 
     # Add best_attainable experiments (one per dataset, no GPU needed)
@@ -1434,7 +1455,6 @@ def generate_experiment_grid(
                 dataset_name=dataset_name,
                 model_type="best_attainable",
                 use_explicit_confounders=False,
-                flp_model_name=model_name,
             ))
 
     # Shuffle so patterns emerge early
@@ -1764,12 +1784,6 @@ def main():
         help="Filter max lengths (5000, 10000, 25000, 50000, 100000)"
     )
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=30,
-        help="Number of training epochs"
-    )
-    parser.add_argument(
         "--n-folds",
         type=int,
         default=5,
@@ -1792,10 +1806,13 @@ def main():
         help="Number of repeats per experiment config with different random seeds (default: 10)"
     )
     parser.add_argument(
-        "--model-name",
+        "--model-names",
         type=str,
-        default="Qwen/Qwen3.5-0.8B-Base",
-        help="HuggingFace model name for frozen LLM pooler (default: Qwen/Qwen3.5-0.8B-Base)"
+        nargs="+",
+        default=["Qwen/Qwen3.5-0.8B-Base", "Qwen/Qwen3.5-0.8B", "google/medgemma-1.5-4b-it"],
+        help="HuggingFace model name(s) for frozen LLM extractors. "
+             "Multiple names create a grid dimension "
+             "(default: Qwen3.5-0.8B-Base, Qwen3.5-0.8B, medgemma-1.5-4b-it)"
     )
     parser.add_argument(
         "--chat-template-prompt",
@@ -1845,7 +1862,7 @@ def main():
         dataset_paths=args.datasets,
         filter_model_types=args.model_types,
         filter_max_lengths=args.max_lengths,
-        model_name=args.model_name,
+        model_names=args.model_names,
         chat_template_prompt=args.chat_template_prompt,
         filter_extractor_types=args.filter_extractor_types,
     )
@@ -1858,7 +1875,6 @@ def main():
         for repeat_idx in range(args.n_repeats):
             config = deepcopy(base_config)
             config.repeat_index = repeat_idx
-            config.epochs = args.epochs
             config.n_folds = args.n_folds
             config.flp_cache_hidden_states = use_cache
             configs.append(config)
@@ -1895,6 +1911,52 @@ def main():
 
     if not pending_configs:
         logger.info("No experiments to run")
+        return
+
+    # Print experiment summary and ask for confirmation
+    ba_pending = [c for c in pending_configs if c.model_type == "best_attainable"]
+    gpu_pending = [c for c in pending_configs if c.model_type != "best_attainable"]
+
+    model_type_summary = {}
+    for c in pending_configs:
+        model_type_summary[c.model_type] = model_type_summary.get(c.model_type, 0) + 1
+
+    extractor_summary = {}
+    for c in pending_configs:
+        extractor_summary[c.feature_extractor_type] = extractor_summary.get(c.feature_extractor_type, 0) + 1
+
+    llm_model_summary = {}
+    for c in pending_configs:
+        if c.feature_extractor_type in ('frozen_llm_pooler',):
+            llm_model_summary[c.flp_model_name] = llm_model_summary.get(c.flp_model_name, 0) + 1
+        elif c.feature_extractor_type in ('hierarchical_llm',):
+            llm_model_summary[c.hlm_model_name] = llm_model_summary.get(c.hlm_model_name, 0) + 1
+
+    dataset_names = sorted(set(c.dataset_name for c in pending_configs))
+
+    print(f"\n{'='*60}")
+    print(f"Experiment Grid Summary")
+    print(f"{'='*60}")
+    print(f"Total experiments to run: {len(pending_configs)}")
+    if completed_hashes:
+        print(f"  Already completed (skipped): {len(completed_hashes)}")
+    print(f"  best_attainable (CPU): {len(ba_pending)}")
+    print(f"  GPU experiments: {len(gpu_pending)}")
+    print(f"\nModel types: {', '.join(f'{k}({v})' for k, v in sorted(model_type_summary.items()))}")
+    print(f"Extractors:  {', '.join(f'{k}({v})' for k, v in sorted(extractor_summary.items()))}")
+    if llm_model_summary:
+        print(f"Frozen LLMs: {', '.join(f'{k}({v})' for k, v in sorted(llm_model_summary.items()))}")
+    lr_values = sorted(set(c.learning_rate for c in pending_configs))
+    epoch_values = sorted(set(c.epochs for c in pending_configs))
+    print(f"Datasets:    {', '.join(dataset_names)}")
+    print(f"LR values:   {', '.join(str(v) for v in lr_values)}")
+    print(f"Epoch counts:{', '.join(str(v) for v in epoch_values)}")
+    print(f"Repeats:     {args.n_repeats}")
+    print(f"{'='*60}")
+
+    response = input("Proceed? [y/N] ").strip()
+    if response.lower() not in ('y', 'yes'):
+        print("Aborted.")
         return
 
     # Separate best_attainable (CPU-only) from GPU experiments
@@ -2090,7 +2152,9 @@ def main():
 
         # Group by config excluding repeat_index to aggregate across repeats
         group_cols = ['dataset_name', 'feature_extractor_type', 'model_type',
-                      'flp_max_length', 'flp_downprojection_dim', 'use_explicit_confounders']
+                      'flp_model_name', 'hlm_model_name',
+                      'flp_max_length', 'flp_downprojection_dim',
+                      'use_explicit_confounders', 'learning_rate', 'epochs']
         # Only group by columns that exist in the results
         group_cols = [c for c in group_cols if c in results_df.columns]
 
