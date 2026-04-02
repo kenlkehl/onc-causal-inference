@@ -85,18 +85,20 @@ EXPERIMENTAL FACTORS:
 
 WHAT TO LOOK FOR IN THE OUTPUT:
 1. "Overall" section: How many experiments done, overall performance range.
-2. "By rlearner_mode": Is shared > none > dual? If dual is much worse,
-   the dual extractor design has fundamental issues in this pipeline.
+2. "By extractor type": Which feature extractor performs best? Are LLM-based
+   extractors (frozen_llm_pooler, hierarchical_llm) better than learned-from-
+   scratch extractors (hierarchical_cnn, hierarchical_gru, simple_cnn)?
 3. "By dataset": Is ten_confounders much harder? If so, need more capacity.
 4. "By explicit_confounders": Do oracle confounders help? If not, why?
-5. "Confounders within shared mode": Controls for rlearner_mode to isolate
+5. "Confounders within best model type": Controls for model type to isolate
    the effect of explicit confounders.
-6. "By num_sampled_confounders": Does adding more confounders help linearly,
+6. "By CLAM": Does CLAM instance-level loss help?
+7. "By num_sampled_confounders": Does adding more confounders help linearly,
    or is there a sweet spot?
-7. "Specific confounders": Are certain confounders consistently helpful?
-8. "Hyperparameter effects": Do larger models help? Is there a sweet spot?
-9. "Cross-tabulated": Interaction effects between factors.
-10. "Top/bottom experiments": What distinguishes the best from the worst?
+8. "Specific confounders": Are certain confounders consistently helpful?
+9. "Hyperparameter effects": Do larger models help? Is there a sweet spot?
+10. "Cross-tabulated": Interaction effects between factors.
+11. "Top/bottom experiments": What distinguishes the best from the worst?
 ============================================================================
 """
 
@@ -222,6 +224,8 @@ def analyze(df: pd.DataFrame) -> list[str]:
     ]
     if 'model_type' in df.columns:
         lines.append(f"Model types: {sorted(df['model_type'].unique())}")
+    if 'feature_extractor_type' in df.columns:
+        lines.append(f"Extractor types: {sorted(df['feature_extractor_type'].unique())}")
     if 'rlearner_mode' in df.columns:
         lines.append(f"R-learner modes: {sorted(df['rlearner_mode'].unique())}")
     if 'clam_enabled' in df.columns:
@@ -288,19 +292,41 @@ def analyze(df: pd.DataFrame) -> list[str]:
     output.extend(section(f"1. BY {(primary_group or 'MODEL').upper()}", lines))
 
     # ---------------------------------------------------------------
-    # 2. By dataset
+    # 2. By feature extractor type
+    # ---------------------------------------------------------------
+    if "feature_extractor_type" in df.columns and df["feature_extractor_type"].nunique() > 1:
+        lines = [
+            group_summary(df, ["feature_extractor_type"]),
+            "",
+            "Pairwise t-tests on ite_corr:",
+        ] + pairwise_ttest(df, "feature_extractor_type", "ite_corr")
+        if "ite_spearman_corr" in df.columns:
+            lines += [
+                "",
+                "Pairwise t-tests on ite_spearman_corr:",
+            ] + pairwise_ttest(df, "feature_extractor_type", "ite_spearman_corr")
+        lines += [
+            "",
+            "Pairwise t-tests on ate_bias:",
+        ] + pairwise_ttest(df, "feature_extractor_type", "ate_bias")
+    else:
+        lines = ["Only one extractor type — skipping comparison."]
+    output.extend(section("2. BY FEATURE EXTRACTOR TYPE", lines))
+
+    # ---------------------------------------------------------------
+    # 3. By dataset
     # NOTE: ten_confounders is much harder. Low propensity AUROC (~0.68)
     # means the extractor can't even separate T=0/T=1, let alone estimate
     # heterogeneous effects. Could need more capacity, more epochs, or
     # the 50K-row version to have enough signal.
     # ---------------------------------------------------------------
     lines = [group_summary(df, ["dataset_name"])]
-    output.extend(section("2. BY DATASET", lines))
+    output.extend(section("3. BY DATASET", lines))
 
     # ---------------------------------------------------------------
-    # 3. By explicit confounders (overall)
+    # 4. By explicit confounders (overall)
     # NOTE: This comparison is confounded by rlearner_mode distribution.
-    # Look at section 4 (within shared mode) for a cleaner comparison.
+    # Look at section 5 (within shared mode) for a cleaner comparison.
     # If explicit confounders hurt even within shared mode, the issue is
     # not just mode selection but something about how the confounders are
     # integrated (featurizer capacity, concatenation approach, etc.).
@@ -315,10 +341,10 @@ def analyze(df: pd.DataFrame) -> list[str]:
             "",
             "Pairwise t-tests on ite_spearman_corr:",
         ] + pairwise_ttest(df, "use_explicit_confounders", "ite_spearman_corr")
-    output.extend(section("3. BY EXPLICIT CONFOUNDERS (overall)", lines))
+    output.extend(section("4. BY EXPLICIT CONFOUNDERS (overall)", lines))
 
     # ---------------------------------------------------------------
-    # 4. Explicit confounders within best-performing model type
+    # 5. Explicit confounders within best-performing model type
     # ---------------------------------------------------------------
     if primary_group and primary_group in df.columns:
         # Pick the model type with highest mean ite_corr
@@ -342,11 +368,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
     else:
         lines = ["No primary grouping column available."]
     output.extend(
-        section("4. EXPLICIT CONFOUNDERS WITHIN BEST MODEL TYPE", lines)
+        section("5. EXPLICIT CONFOUNDERS WITHIN BEST MODEL TYPE", lines)
     )
 
     # ---------------------------------------------------------------
-    # 5. By CLAM (if present)
+    # 6. By CLAM (if present)
     # ---------------------------------------------------------------
     if "clam_enabled" in df.columns and df["clam_enabled"].nunique() > 1:
         lines = [
@@ -361,10 +387,10 @@ def analyze(df: pd.DataFrame) -> list[str]:
             ] + pairwise_ttest(df, "clam_enabled", "ite_spearman_corr")
     else:
         lines = ["CLAM not varied in these experiments — skipping."]
-    output.extend(section("5. BY CLAM", lines))
+    output.extend(section("6. BY CLAM", lines))
 
     # ---------------------------------------------------------------
-    # 6. By number of sampled confounders
+    # 7. By number of sampled confounders
     # NOTE: Only relevant for use_explicit_confounders=True experiments.
     # Look for a dose-response: does adding more confounders improve ITE
     # correlation? Or is there a sweet spot (e.g., 1-3 is good, >5 hurts)?
@@ -399,11 +425,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
     else:
         lines = ["No explicit-confounder experiments yet."]
     output.extend(
-        section("6. BY NUMBER OF SAMPLED CONFOUNDERS", lines)
+        section("7. BY NUMBER OF SAMPLED CONFOUNDERS", lines)
     )
 
     # ---------------------------------------------------------------
-    # 7. Which specific confounders appear in best/worst experiments?
+    # 8. Which specific confounders appear in best/worst experiments?
     # NOTE: Since confounders are randomly sampled, we can check whether
     # certain confounders consistently appear in high-performing runs.
     # This is exploratory — small sample sizes mean low power.
@@ -449,11 +475,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
     else:
         lines = ["No explicit-confounder experiments yet."]
     output.extend(
-        section("7. INDIVIDUAL CONFOUNDER EFFECTS (exploratory)", lines)
+        section("8. INDIVIDUAL CONFOUNDER EFFECTS (exploratory)", lines)
     )
 
     # ---------------------------------------------------------------
-    # 8. Hyperparameter effects
+    # 9. Hyperparameter effects
     # NOTE: The grid varies embedding_dim, gru_hidden_dim, gru_num_layers,
     # transformer_layers, transformer_heads. Since the grid is shuffled and
     # experiments are still running, these correlations are noisy. Look for
@@ -500,10 +526,10 @@ def analyze(df: pd.DataFrame) -> list[str]:
 
     if not lines:
         lines = ["Insufficient hyperparameter variation in results so far."]
-    output.extend(section("8. HYPERPARAMETER EFFECTS", lines))
+    output.extend(section("9. HYPERPARAMETER EFFECTS", lines))
 
     # ---------------------------------------------------------------
-    # 9. Cross-tabulated: model_type x use_explicit_confounders
+    # 10. Cross-tabulated: model_type x use_explicit_confounders
     # ---------------------------------------------------------------
     if primary_group and primary_group in df.columns:
         lines = [
@@ -545,11 +571,11 @@ def analyze(df: pd.DataFrame) -> list[str]:
     else:
         lines = ["No primary grouping column — skipping cross-tab."]
     output.extend(
-        section(f"9. CROSS-TAB: {(primary_group or 'model').upper()} x EXPLICIT_CONFOUNDERS", lines)
+        section(f"10. CROSS-TAB: {(primary_group or 'model').upper()} x EXPLICIT_CONFOUNDERS", lines)
     )
 
     # ---------------------------------------------------------------
-    # 9b. Cross-tabulated: model_type x clam_enabled (if present)
+    # 10b. Cross-tabulated: model_type x clam_enabled (if present)
     # ---------------------------------------------------------------
     if primary_group and "clam_enabled" in df.columns and df["clam_enabled"].nunique() > 1:
         lines = [
@@ -579,19 +605,19 @@ def analyze(df: pd.DataFrame) -> list[str]:
     else:
         lines = ["CLAM not varied — skipping cross-tab."]
     output.extend(
-        section("9b. CROSS-TAB: MODEL_TYPE x CLAM_ENABLED", lines)
+        section("10b. CROSS-TAB: MODEL_TYPE x CLAM_ENABLED", lines)
     )
 
     # ---------------------------------------------------------------
-    # 9c. Cross-tabulated: dataset_name x model_type
+    # 10c. Cross-tabulated: dataset_name x extractor_type
     # ---------------------------------------------------------------
-    if primary_group and primary_group in df.columns:
+    if "feature_extractor_type" in df.columns and df["feature_extractor_type"].nunique() > 1:
         lines = [
             "Mean ITE Pearson correlation:",
             df.pivot_table(
                 values="ite_corr",
                 index="dataset_name",
-                columns=primary_group,
+                columns="feature_extractor_type",
                 aggfunc=["mean", "count"],
             )
             .round(4)
@@ -604,27 +630,27 @@ def analyze(df: pd.DataFrame) -> list[str]:
                 df.pivot_table(
                     values="ite_spearman_corr",
                     index="dataset_name",
-                    columns=primary_group,
+                    columns="feature_extractor_type",
                     aggfunc=["mean", "count"],
                 )
                 .round(4)
                 .to_string(),
             ]
     else:
-        lines = ["No primary grouping column — skipping cross-tab."]
+        lines = ["Only one extractor type — skipping cross-tab."]
     output.extend(
-        section(f"9c. CROSS-TAB: DATASET_NAME x {(primary_group or 'MODEL').upper()}", lines)
+        section("10c. CROSS-TAB: DATASET_NAME x FEATURE_EXTRACTOR_TYPE", lines)
     )
 
     # ---------------------------------------------------------------
-    # 10. Top and bottom experiments
+    # 11. Top and bottom experiments
     # NOTE: Look at what distinguishes the best from worst runs.
     # Consistent patterns across top-5 (e.g., all shared mode, all
     # one_confounder) confirm the factor-level findings. If top-5 has
     # a mix, hyperparameters or specific confounders matter more.
     # ---------------------------------------------------------------
     display_cols = [
-        "file", "dataset_name", "outcome_type",
+        "file", "dataset_name", "feature_extractor_type", "outcome_type",
         "rlearner_mode", "clam_enabled",
         "use_explicit_confounders", "num_confounders",
         "confounder_names_str",
@@ -651,10 +677,10 @@ def analyze(df: pd.DataFrame) -> list[str]:
         f"Bottom {n_show} by ITE correlation:",
         bottom.to_string(index=False),
     ]
-    output.extend(section("10. TOP AND BOTTOM EXPERIMENTS", lines))
+    output.extend(section("11. TOP AND BOTTOM EXPERIMENTS", lines))
 
     # ---------------------------------------------------------------
-    # 11. Outcome model quality
+    # 12. Outcome model quality
     # NOTE: y0_mse and y1_mse measure how well the model predicts
     # potential outcomes. If the model can't predict outcomes well, it
     # can't estimate treatment effects well either. Compare across modes:
@@ -672,6 +698,15 @@ def analyze(df: pd.DataFrame) -> list[str]:
                 ),
                 "",
             ]
+        if "feature_extractor_type" in df.columns and df["feature_extractor_type"].nunique() > 1:
+            lines += [
+                "By feature_extractor_type:",
+                group_summary(
+                    df, ["feature_extractor_type"],
+                    ["y0_mse", "y1_mse", "propensity_auroc"],
+                ),
+                "",
+            ]
         lines += [
             "By dataset:",
             group_summary(
@@ -681,10 +716,10 @@ def analyze(df: pd.DataFrame) -> list[str]:
         ]
     else:
         lines = ["y0_mse/y1_mse not available."]
-    output.extend(section("11. OUTCOME MODEL QUALITY", lines))
+    output.extend(section("12. OUTCOME MODEL QUALITY", lines))
 
     # ---------------------------------------------------------------
-    # 12. CI calibration
+    # 13. CI calibration
     # NOTE: Ideal ci_coverage is 0.95 for 95% CIs. Systematically low
     # coverage means the causal forest is overconfident. Check if
     # coverage varies by condition — e.g., dual mode may have tighter
@@ -705,6 +740,14 @@ def analyze(df: pd.DataFrame) -> list[str]:
                 ),
                 "",
             ]
+        if "feature_extractor_type" in df.columns and df["feature_extractor_type"].nunique() > 1:
+            lines += [
+                "By feature_extractor_type:",
+                group_summary(
+                    df, ["feature_extractor_type"], ["ci_coverage", "mean_ci_width"]
+                ),
+                "",
+            ]
         lines += [
             "By dataset:",
             group_summary(
@@ -713,10 +756,10 @@ def analyze(df: pd.DataFrame) -> list[str]:
         ]
     else:
         lines = ["CI metrics not available."]
-    output.extend(section("12. CONFIDENCE INTERVAL CALIBRATION", lines))
+    output.extend(section("13. CONFIDENCE INTERVAL CALIBRATION", lines))
 
     # ---------------------------------------------------------------
-    # 13. Progress tracking
+    # 14. Progress tracking
     # NOTE: The full grid is very large (3 datasets x 3 modes x 2 CLAM
     # x 2 explicit x 3 emb x 3 gru x 2 layers x 3 trans_layers x 3 heads
     # = ~1944+ configs, minus some filtered). Track coverage to know
@@ -743,6 +786,12 @@ def analyze(df: pd.DataFrame) -> list[str]:
             df["clam_enabled"].value_counts().sort_index().to_string(),
             "",
         ]
+    if "feature_extractor_type" in df.columns:
+        lines += [
+            "By feature_extractor_type:",
+            df["feature_extractor_type"].value_counts().sort_index().to_string(),
+            "",
+        ]
     lines += [
         "By use_explicit_confounders:",
         df["use_explicit_confounders"].value_counts().sort_index().to_string(),
@@ -757,13 +806,23 @@ def analyze(df: pd.DataFrame) -> list[str]:
                 margins=True,
             ).to_string(),
         ]
+    if "feature_extractor_type" in df.columns and df["feature_extractor_type"].nunique() > 1:
+        lines += [
+            "",
+            "Full cross-tab (feature_extractor_type x dataset):",
+            pd.crosstab(
+                df["feature_extractor_type"],
+                df["dataset_name"],
+                margins=True,
+            ).to_string(),
+        ]
     if 'outcome_type' in df.columns:
         lines += [
             "",
             "By outcome_type:",
             df["outcome_type"].value_counts().sort_index().to_string(),
         ]
-    output.extend(section("13. EXPERIMENT COVERAGE / PROGRESS", lines))
+    output.extend(section("14. EXPERIMENT COVERAGE / PROGRESS", lines))
 
     return output
 

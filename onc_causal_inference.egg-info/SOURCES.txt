@@ -35,9 +35,15 @@ oci/models/frozen_llm_pooler_extractor.py
 oci/models/gated_attention_pooling.py
 oci/models/gpu_hidden_state_store.py
 oci/models/hidden_state_cache.py
+oci/models/hierarchical_cnn_extractor.py
+oci/models/hierarchical_gru_extractor.py
+oci/models/hierarchical_llm_extractor.py
+oci/models/learned_tokenizer.py
 oci/models/outcome_model.py
 oci/models/propensity_model.py
 oci/models/rlearner.py
+oci/models/simple_cnn_extractor.py
+oci/models/text_chunking.py
 oci/training/__init__.py
 oci/training/outcome_training.py
 oci/training/propensity_trimming.py
@@ -52,3 +58,5 @@ onc_causal_inference.egg-info/requires.txt
 onc_causal_inference.egg-info/top_level.txt
 tests/test_e2e_workflows.py
 tests/test_explicit_confounders_e2e.py
+tests/test_extractors.py
+tests/test_text_chunking.py

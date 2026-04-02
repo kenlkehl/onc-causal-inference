@@ -78,9 +78,21 @@ python oracle_experiment_scripts/run_oracle_experiments.py \
 
 ## Architecture
 
-OCI has one feature extractor and four causal heads.
+OCI has five feature extractors and four causal heads.
 
-### Feature Extractor: Frozen LLM Pooler
+### Feature Extractors
+
+| Type | Description |
+|------|-------------|
+| `frozen_llm_pooler` | Frozen pretrained LLM + gated attention pooling (default) |
+| `hierarchical_llm` | Frozen LLM on overlapping text chunks + two-level pooling |
+| `hierarchical_cnn` | Trainable dilated CNN on chunks + two-level pooling |
+| `hierarchical_gru` | Trainable BiGRU on chunks + two-level pooling |
+| `simple_cnn` | Trainable dilated CNN on whole text + pooling |
+
+Trainable extractors (`hierarchical_cnn`, `hierarchical_gru`, `simple_cnn`) learn from scratch and require `fit_tokenizer()` before training.
+
+#### Frozen LLM Pooler (default)
 
 A pretrained decoder-only LLM with frozen weights extracts per-token hidden states from clinical text. Gated attention pooling aggregates all tokens into a single patient-level feature vector. Only the downprojection, pooling, and causal head parameters are trained.
 
@@ -106,8 +118,11 @@ Key parameters:
 | `flp_gated_attention_dim` | Gated attention hidden dim | `128` |
 | `flp_projection_dim` | Output projection dim | `128` |
 | `flp_cache_hidden_states` | Pre-cache hidden states to disk | `false` |
+| `flp_chat_template_prompt` | Chat template prompt for instruct models | `null` |
 
 Handles documents up to 50K+ tokens with the pretrained tokenizer. No `fit_tokenizer()` step is needed.
+
+**Instruct model support**: Set `flp_chat_template_prompt` to wrap clinical text in the model's chat template. Recommended prompt: `"You are an expert clinical cancer researcher. Read this patient history, and then extract a set of features that will predict the patient's next treatment and their outcome on that treatment. The history is: "`
 
 ### Causal Heads
 
@@ -245,7 +260,7 @@ Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"cont
 }
 ```
 
-See `example_configs/` for complete configuration files.
+See `example_configs/` for complete configuration files, including configs for each feature extractor type.
 
 ## Dual Extractor Mode
 
