@@ -444,11 +444,14 @@ class CausalText(nn.Module):
     def _get_extractor_input(batch, texts):
         """Return preprocessed batch if available, otherwise raw texts."""
         if 'cached_hidden_states' in batch:
-            return {
+            result = {
                 'cached_hidden_states': batch['cached_hidden_states'],
                 'cached_attention_mask': batch['cached_attention_mask'],
                 'texts': texts,
             }
+            if 'sample_chunk_counts' in batch:
+                result['sample_chunk_counts'] = batch['sample_chunk_counts']
+            return result
         if 'chunk_input_ids' in batch or 'chunk_token_ids' in batch:
             return batch
         return texts

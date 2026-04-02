@@ -51,6 +51,7 @@ class CachedHiddenStateDataset(Dataset):
         explicit_confounder_columns: Optional[List[str]] = None,
         cache_hidden_states: Optional[np.ndarray] = None,
         cache_attention_masks: Optional[np.ndarray] = None,
+        cache_chunk_counts: Optional[List[int]] = None,
     ):
         self.data = data.reset_index(drop=True)
         self.text_column = text_column
@@ -59,6 +60,7 @@ class CachedHiddenStateDataset(Dataset):
         # Store cache arrays for direct loading in __getitem__
         self._cache_hs = cache_hidden_states
         self._cache_mask = cache_attention_masks
+        self._chunk_counts = cache_chunk_counts
 
         self.texts = data[text_column].tolist()
         self.outcomes = torch.tensor(
@@ -118,6 +120,10 @@ class CachedHiddenStateDataset(Dataset):
             # Legacy path: return index for deferred loading in training loop
             item['cache_index'] = int(global_idx)
 
+        if self._chunk_counts is not None:
+            global_idx_for_chunks = self.dataset_indices[idx]
+            item['chunk_count'] = self._chunk_counts[global_idx_for_chunks]
+
         if self.explicit_confounder_values is not None:
             item['explicit_confounder_values'] = self.explicit_confounder_values[idx]
 
@@ -165,6 +171,9 @@ def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     elif 'cache_index' in batch[0]:
         # Legacy path: collect indices for deferred loading
         result['cache_indices'] = [item['cache_index'] for item in batch]
+
+    if 'chunk_count' in batch[0]:
+        result['sample_chunk_counts'] = [item['chunk_count'] for item in batch]
 
     if 'explicit_confounder_values' in batch[0]:
         result['explicit_confounder_values'] = [

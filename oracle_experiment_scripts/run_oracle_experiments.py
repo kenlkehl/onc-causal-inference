@@ -138,6 +138,7 @@ class ExperimentConfig:
     flp_gated_attention_dim: int = 128
     flp_downprojection_dim: Optional[int] = 256  # Frozen downprojection dim applied during caching (None = full hidden size)
     flp_cache_hidden_states: bool = False  # If True, pre-cache hidden states to disk
+    hlm_cache_hidden_states: bool = False  # If True, pre-cache hidden states to disk (hierarchical LLM)
     flp_chat_template_prompt: Optional[str] = None  # Chat template prompt for instruct models
 
     # Fixed parameters
@@ -197,9 +198,43 @@ class ExperimentConfig:
     scnn_projection_dim: int = 128
     scnn_dropout: float = 0.1
 
+    # Extractor-specific field prefixes -- used by config_hash() to exclude
+    # parameters that belong to *other* extractors so adding a new extractor
+    # type never invalidates existing result hashes.
+    _EXTRACTOR_PREFIXES = {
+        "frozen_llm_pooler": {"flp_"},
+        "hierarchical_llm": {"hlm_"},
+        "hierarchical_cnn": {"hcnn_"},
+        "hierarchical_gru": {"hgru_"},
+        "simple_cnn": {"scnn_"},
+    }
+    _ALL_EXTRACTOR_PREFIXES = set().union(*_EXTRACTOR_PREFIXES.values())
+
     def config_hash(self) -> str:
-        """Generate unique hash for this config."""
-        config_str = json.dumps(asdict(self), sort_keys=True)
+        """Generate unique hash for this config.
+
+        Only includes fields relevant to the experiment's extractor type,
+        so adding params for new extractors doesn't invalidate existing hashes.
+        """
+        d = asdict(self)
+
+        # Determine which extractor prefixes to keep
+        if self.model_type == "best_attainable":
+            # No neural extractor -- exclude all extractor-specific fields
+            keep_prefixes = set()
+        else:
+            keep_prefixes = self._EXTRACTOR_PREFIXES.get(
+                self.feature_extractor_type, set()
+            )
+
+        # Remove fields belonging to OTHER extractors
+        remove_prefixes = self._ALL_EXTRACTOR_PREFIXES - keep_prefixes
+        d = {
+            k: v for k, v in d.items()
+            if not any(k.startswith(p) for p in remove_prefixes)
+        }
+
+        config_str = json.dumps(d, sort_keys=True)
         return hashlib.md5(config_str.encode()).hexdigest()[:12]
 
 
@@ -330,20 +365,41 @@ def group_configs_by_cache_key(
         parquet_file = _resolve_parquet_file(config.dataset_path)
         if parquet_file is None:
             continue
+
+        # Resolve cache params based on extractor type
+        if config.feature_extractor_type == "hierarchical_llm":
+            _model_name = config.hlm_model_name
+            _max_length = config.hlm_chunk_size * config.hlm_max_chunks
+            _dp_dim = config.hlm_downprojection_dim
+            _ctp = config.hlm_chat_template_prompt
+        else:  # frozen_llm_pooler
+            _model_name = config.flp_model_name
+            _max_length = config.flp_max_length
+            _dp_dim = config.flp_downprojection_dim
+            _ctp = config.flp_chat_template_prompt
+
+        _cs = config.hlm_chunk_size if config.feature_extractor_type == "hierarchical_llm" else None
+        _co = config.hlm_chunk_overlap if config.feature_extractor_type == "hierarchical_llm" else None
+        _mc = config.hlm_max_chunks if config.feature_extractor_type == "hierarchical_llm" else None
+
         cache_hash = HiddenStateCache.compute_cache_hash(
-            config.flp_model_name, config.flp_max_length, str(parquet_file), None,
-            downprojection_dim=config.flp_downprojection_dim,
-            chat_template_prompt=config.flp_chat_template_prompt,
+            _model_name, _max_length, str(parquet_file), None,
+            downprojection_dim=_dp_dim,
+            chat_template_prompt=_ctp,
+            chunk_size=_cs, chunk_overlap=_co, max_chunks=_mc,
         )
         if cache_hash not in groups:
             cache_info = dict(
                 parquet_file=parquet_file,
-                model_name=config.flp_model_name,
-                max_length=config.flp_max_length,
+                model_name=_model_name,
+                max_length=_max_length,
                 batch_size=config.batch_size,
-                downprojection_dim=config.flp_downprojection_dim,
+                downprojection_dim=_dp_dim,
                 dataset_name=config.dataset_name,
-                chat_template_prompt=config.flp_chat_template_prompt,
+                chat_template_prompt=_ctp,
+                chunk_size=_cs,
+                chunk_overlap=_co,
+                max_chunks=_mc,
             )
             groups[cache_hash] = (cache_info, [])
         groups[cache_hash][1].append(config)
@@ -380,6 +436,9 @@ def precompute_single_cache(
     dp_dim = cache_info['downprojection_dim']
 
     ctp = cache_info.get('chat_template_prompt', None)
+    cs = cache_info.get('chunk_size', None)
+    co = cache_info.get('chunk_overlap', None)
+    mc = cache_info.get('max_chunks', None)
 
     cache_dir = cache_base_dir if cache_base_dir else str(parquet_file.parent / '.oci_cache')
     cache = HiddenStateCache(
@@ -390,6 +449,9 @@ def precompute_single_cache(
         random_projection_dim=None,
         downprojection_dim=dp_dim,
         chat_template_prompt=ctp,
+        chunk_size=cs,
+        chunk_overlap=co,
+        max_chunks=mc,
     )
 
     df = pd.read_parquet(parquet_file)
@@ -400,7 +462,10 @@ def precompute_single_cache(
         logger.info(f"  Precomputing on {len(gpu_devices)} GPU(s) "
                     f"({model_name}, max_len={max_length}, {len(df)} samples)...")
         all_texts = df['clinical_text'].tolist()
-        cache.precompute_multi_gpu(all_texts, gpu_devices, batch_size=batch_size)
+        if cs is not None:
+            cache.precompute_chunked_multi_gpu(all_texts, gpu_devices, batch_size=batch_size)
+        else:
+            cache.precompute_multi_gpu(all_texts, gpu_devices, batch_size=batch_size)
         logger.info(f"  Precomputation complete")
 
     cache.open()
@@ -452,6 +517,7 @@ def _create_datasets_and_loaders(
 ):
     """Create train/test datasets and DataLoaders with appropriate caching."""
     use_cache = hidden_state_cache is not None
+    chunk_counts = hidden_state_cache.chunk_counts if use_cache else None
 
     if gpu_store is not None:
         train_dataset = CachedHiddenStateDataset(
@@ -459,12 +525,14 @@ def _create_datasets_and_loaders(
             outcome_column='outcome_indicator', treatment_column='treatment_indicator',
             dataset_indices=np.array(train_idx),
             explicit_confounder_columns=confounder_cols,
+            cache_chunk_counts=chunk_counts,
         )
         test_dataset = CachedHiddenStateDataset(
             data=test_df, text_column=text_column,
             outcome_column='outcome_indicator', treatment_column='treatment_indicator',
             dataset_indices=np.array(test_idx),
             explicit_confounder_columns=confounder_cols,
+            cache_chunk_counts=chunk_counts,
         )
         collate_fn = collate_cached_batch
     elif use_cache:
@@ -475,6 +543,7 @@ def _create_datasets_and_loaders(
             explicit_confounder_columns=confounder_cols,
             cache_hidden_states=hidden_state_cache.hidden_states_array,
             cache_attention_masks=hidden_state_cache.attention_mask_array,
+            cache_chunk_counts=chunk_counts,
         )
         test_dataset = CachedHiddenStateDataset(
             data=test_df, text_column=text_column,
@@ -483,6 +552,7 @@ def _create_datasets_and_loaders(
             explicit_confounder_columns=confounder_cols,
             cache_hidden_states=hidden_state_cache.hidden_states_array,
             cache_attention_masks=hidden_state_cache.attention_mask_array,
+            cache_chunk_counts=chunk_counts,
         )
         collate_fn = collate_cached_batch
     else:
@@ -543,9 +613,20 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
             gpu_store = gpu_store_registry.get(cache_hash)
         if gpu_store is None and cache_registry is not None:
             hidden_state_cache = cache_registry.get(cache_hash)
-    elif ext_type == "hierarchical_llm" and config.hlm_freeze_llm and config.flp_cache_hidden_states:
-        # TODO: hierarchical LLM caching not yet fully supported in oracle scripts
-        pass
+    elif ext_type == "hierarchical_llm" and config.hlm_freeze_llm and config.hlm_cache_hidden_states:
+        _max_length = config.hlm_chunk_size * config.hlm_max_chunks
+        cache_hash = HiddenStateCache.compute_cache_hash(
+            config.hlm_model_name, _max_length, str(parquet_file),
+            None, downprojection_dim=config.hlm_downprojection_dim,
+            chat_template_prompt=config.hlm_chat_template_prompt,
+            chunk_size=config.hlm_chunk_size,
+            chunk_overlap=config.hlm_chunk_overlap,
+            max_chunks=config.hlm_max_chunks,
+        )
+        if gpu_store_registry is not None:
+            gpu_store = gpu_store_registry.get(cache_hash)
+        if gpu_store is None and cache_registry is not None:
+            hidden_state_cache = cache_registry.get(cache_hash)
 
     return gpu_store, hidden_state_cache
 
@@ -592,7 +673,12 @@ def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs
             hlm_downprojection_dim=None if use_cache else config.hlm_downprojection_dim,
             hlm_chat_template_prompt=config.hlm_chat_template_prompt,
         )
-        # TODO: hierarchical LLM caching not yet supported in oracle scripts
+        if gpu_store is not None:
+            kwargs['hlm_skip_llm'] = True
+            kwargs['hlm_cached_hidden_size'] = gpu_store.hidden_size
+        elif hidden_state_cache is not None:
+            kwargs['hlm_skip_llm'] = True
+            kwargs['hlm_cached_hidden_size'] = hidden_state_cache.hidden_size
     elif ext_type == "hierarchical_cnn":
         kwargs.update(
             hcnn_embedding_dim=config.hcnn_embedding_dim,
@@ -1528,6 +1614,9 @@ def _open_cache_for_worker(cache_hash: str, cache_info: dict, cache_base_dir: Op
         random_projection_dim=None,
         downprojection_dim=cache_info['downprojection_dim'],
         chat_template_prompt=cache_info.get('chat_template_prompt', None),
+        chunk_size=cache_info.get('chunk_size', None),
+        chunk_overlap=cache_info.get('chunk_overlap', None),
+        max_chunks=cache_info.get('max_chunks', None),
     )
     cache.open()
     cache.preload_to_ram()
@@ -1877,6 +1966,7 @@ def main():
             config.repeat_index = repeat_idx
             config.n_folds = args.n_folds
             config.flp_cache_hidden_states = use_cache
+            config.hlm_cache_hidden_states = use_cache
             configs.append(config)
 
     # Re-shuffle with repeats included

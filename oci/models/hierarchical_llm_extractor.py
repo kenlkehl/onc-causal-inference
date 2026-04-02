@@ -301,16 +301,37 @@ class HierarchicalLLMExtractor(nn.Module):
         )
 
     def _forward_cached_hierarchical(self, batch: dict) -> torch.Tensor:
-        """Forward from pre-computed per-chunk hidden states.
+        """Forward from pre-computed hidden states.
 
-        Expects batch dict with:
-          - 'chunk_hidden_states': (total_chunks, chunk_len, hidden_size) float32
-          - 'chunk_attention_mask': (total_chunks, chunk_len) float32
-          - 'sample_chunk_counts': List[int] — chunks per sample
+        Supports two input formats:
+          1. Pre-chunked with chunk_counts: 'cached_hidden_states' (batch, seq_len, H),
+             'cached_attention_mask' (batch, seq_len),
+             'sample_chunk_counts' List[int] — from precompute_chunked().
+             Each sample stores N_chunks * chunk_size tokens; reshape directly.
+          2. Legacy pre-chunked: 'chunk_hidden_states' (total_chunks, chunk_len, H),
+             'chunk_attention_mask' (total_chunks, chunk_len),
+             'sample_chunk_counts' List[int]
         """
-        hidden_states = batch.get('chunk_hidden_states', batch.get('cached_hidden_states'))
-        attention_mask = batch.get('chunk_attention_mask', batch.get('cached_attention_mask'))
-        sample_chunk_counts = batch.get('sample_chunk_counts', [hidden_states.shape[0]])
+        if 'chunk_hidden_states' in batch:
+            # Legacy pre-chunked path
+            hidden_states = batch['chunk_hidden_states']
+            attention_mask = batch['chunk_attention_mask']
+            sample_chunk_counts = batch['sample_chunk_counts']
+        elif 'sample_chunk_counts' in batch:
+            # Chunked cache path: reshape per-sample data into per-chunk tensors
+            hidden_states, attention_mask, sample_chunk_counts = (
+                self._reshape_chunked_hidden_states(
+                    batch['cached_hidden_states'],
+                    batch['cached_attention_mask'],
+                    batch['sample_chunk_counts'],
+                )
+            )
+        else:
+            raise RuntimeError(
+                "HierarchicalLLMExtractor in cached mode requires "
+                "'sample_chunk_counts' in batch. Ensure cache was produced "
+                "with precompute_chunked()."
+            )
 
         if hidden_states.dtype != torch.float32:
             hidden_states = hidden_states.float()
@@ -321,6 +342,46 @@ class HierarchicalLLMExtractor(nn.Module):
         hidden_states = _sanitize_hidden_states(hidden_states, context="hierarchical_cached")
 
         return self._two_level_pool(hidden_states, attention_mask, sample_chunk_counts)
+
+    def _reshape_chunked_hidden_states(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: torch.Tensor,
+        sample_chunk_counts: List[int],
+    ):
+        """Reshape pre-chunked cached hidden states into per-chunk tensors.
+
+        When cache was produced by precompute_chunked(), each sample stores
+        exactly N_chunks * chunk_size tokens (each chunk was independently
+        processed by the LLM). This method reshapes without re-chunking.
+
+        Args:
+            hidden_states: (batch, padded_seq_len, hidden_size) — padded by collator
+            attention_mask: (batch, padded_seq_len)
+            sample_chunk_counts: Per-sample chunk counts from cache metadata.
+
+        Returns:
+            chunked_hs: (total_chunks, chunk_size, hidden_size)
+            chunked_mask: (total_chunks, chunk_size)
+            sample_chunk_counts: List[int] (pass-through)
+        """
+        chunk_size = self._chunk_size
+        H = hidden_states.shape[-1]
+
+        all_chunk_hs = []
+        all_chunk_mask = []
+
+        for b, n_chunks in enumerate(sample_chunk_counts):
+            stored_len = n_chunks * chunk_size
+            # Reshape: (N_chunks * chunk_size, H) -> (N_chunks, chunk_size, H)
+            hs_b = hidden_states[b, :stored_len].view(n_chunks, chunk_size, H)
+            mask_b = attention_mask[b, :stored_len].view(n_chunks, chunk_size)
+            all_chunk_hs.append(hs_b)
+            all_chunk_mask.append(mask_b)
+
+        chunked_hs = torch.cat(all_chunk_hs, dim=0)    # (total_chunks, chunk_size, H)
+        chunked_mask = torch.cat(all_chunk_mask, dim=0)  # (total_chunks, chunk_size)
+        return chunked_hs, chunked_mask, sample_chunk_counts
 
     def _two_level_pool(
         self,

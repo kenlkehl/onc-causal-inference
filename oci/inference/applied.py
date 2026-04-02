@@ -316,10 +316,13 @@ def run_applied_inference(
             _chat_template_prompt = getattr(arch_config, 'flp_chat_template_prompt', None)
         else:  # hierarchical_llm
             _freeze = getattr(arch_config, 'hlm_freeze_llm', True)
-            _cache_enabled = getattr(arch_config, 'hlm_cache_hidden_states', False)
+            _cache_enabled = getattr(arch_config, 'hlm_cache_hidden_states', True)
             _gpu_cache = getattr(arch_config, 'hlm_gpu_cache', False)
             model_name = getattr(arch_config, 'hlm_model_name', 'Qwen/Qwen3-0.6B-Base')
-            max_length = getattr(arch_config, 'hlm_chunk_size', 2048) * getattr(arch_config, 'hlm_max_chunks', 16)
+            _chunk_size = getattr(arch_config, 'hlm_chunk_size', 2048)
+            _chunk_overlap = getattr(arch_config, 'hlm_chunk_overlap', 256)
+            _max_chunks = getattr(arch_config, 'hlm_max_chunks', 16)
+            max_length = _chunk_size * _max_chunks
             _downprojection_dim = getattr(arch_config, 'hlm_downprojection_dim', None)
             _random_projection_dim = None
             _chat_template_prompt = getattr(arch_config, 'hlm_chat_template_prompt', None)
@@ -364,6 +367,12 @@ def run_applied_inference(
                     gpu_store.free()
                     gpu_store = None
 
+        # Chunk params for hierarchical_llm (None for frozen_llm_pooler)
+        _is_hierarchical = feature_extractor_type == "hierarchical_llm"
+        _cache_chunk_size = _chunk_size if _is_hierarchical else None
+        _cache_chunk_overlap = _chunk_overlap if _is_hierarchical else None
+        _cache_max_chunks = _max_chunks if _is_hierarchical else None
+
         # Fall back to disk cache if GPU cache not available
         if gpu_store is None and _cache_enabled and _freeze:
             cache_dir = str(Path(dataset_path).parent / ".oci_cache")
@@ -375,6 +384,9 @@ def run_applied_inference(
                 random_projection_dim=_random_projection_dim,
                 downprojection_dim=_downprojection_dim,
                 chat_template_prompt=_chat_template_prompt,
+                chunk_size=_cache_chunk_size,
+                chunk_overlap=_cache_chunk_overlap,
+                max_chunks=_cache_max_chunks,
             )
 
             if not hidden_state_cache.is_valid(len(dataset)):
@@ -384,13 +396,23 @@ def run_applied_inference(
                     precompute_devices = [device]
                     if gpu_ids and device.type == "cuda":
                         precompute_devices = [torch.device(f"cuda:{i}") for i in gpu_ids]
-                    if len(precompute_devices) > 1:
-                        logger.info(f"Using {len(precompute_devices)} GPUs for parallel precomputation")
-                        hidden_state_cache.precompute_multi_gpu(
-                            all_texts, precompute_devices, batch_size=batch_size
-                        )
+                    if _is_hierarchical:
+                        # Chunked precompute: each chunk processed independently
+                        if len(precompute_devices) > 1:
+                            logger.info(f"Using {len(precompute_devices)} GPUs for parallel chunked precomputation")
+                            hidden_state_cache.precompute_chunked_multi_gpu(
+                                all_texts, precompute_devices, batch_size=batch_size
+                            )
+                        else:
+                            hidden_state_cache.precompute_chunked(all_texts, device, batch_size=batch_size)
                     else:
-                        hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
+                        if len(precompute_devices) > 1:
+                            logger.info(f"Using {len(precompute_devices)} GPUs for parallel precomputation")
+                            hidden_state_cache.precompute_multi_gpu(
+                                all_texts, precompute_devices, batch_size=batch_size
+                            )
+                        else:
+                            hidden_state_cache.precompute(all_texts, device, batch_size=batch_size)
                 except Exception as e:
                     logger.warning(f"Hidden state caching failed: {e}. Falling back to non-cached mode.")
                     hidden_state_cache = None
@@ -400,6 +422,8 @@ def run_applied_inference(
             if hidden_state_cache is not None:
                 hidden_state_cache.open()
                 hidden_state_cache.preload_to_ram()
+                if hidden_state_cache.is_chunked:
+                    logger.info(f"Chunked cache: {sum(hidden_state_cache.chunk_counts)} total chunks")
         elif gpu_store is None and _cache_enabled and not _freeze:
             logger.warning(
                 f"Cache enabled but LLM is not frozen for {feature_extractor_type}. "
@@ -818,6 +842,7 @@ def _train_single_model(
         logger.info(f"Fitted explicit confounder featurizer on {len(train_confounder_values)} training samples")
 
     # Create datasets
+    _chunk_counts = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
     if gpu_store is not None and train_indices is not None and val_indices is not None:
         # GPU cache mode: use cache_index path (no inline loading — data is on GPU)
         train_dataset = CachedHiddenStateDataset(
@@ -827,6 +852,7 @@ def _train_single_model(
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
             explicit_confounder_columns=explicit_confounder_columns,
+            cache_chunk_counts=_chunk_counts,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
@@ -835,6 +861,7 @@ def _train_single_model(
             treatment_column=config.treatment_column,
             dataset_indices=val_indices,
             explicit_confounder_columns=explicit_confounder_columns,
+            cache_chunk_counts=_chunk_counts,
         )
         collate_fn = collate_cached_batch
         logger.info("Using GPU-resident hidden state store (zero-copy batch access)")
@@ -851,6 +878,7 @@ def _train_single_model(
             explicit_confounder_columns=explicit_confounder_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_chunk_counts,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
@@ -861,6 +889,7 @@ def _train_single_model(
             explicit_confounder_columns=explicit_confounder_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_chunk_counts,
         )
         collate_fn = collate_cached_batch
         logger.info("Using cached hidden state datasets (LLM not loaded)")
@@ -983,6 +1012,7 @@ def _predict_dataset(
     gpu_store=None
 ) -> dict:
     """Generate predictions for a dataframe."""
+    _chunk_counts = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
     if gpu_store is not None and dataset_indices is not None:
         # GPU cache mode: cache_index path (data on GPU)
         dataset = CachedHiddenStateDataset(
@@ -992,6 +1022,7 @@ def _predict_dataset(
             treatment_column=config.treatment_column,
             dataset_indices=dataset_indices,
             explicit_confounder_columns=explicit_confounder_columns,
+            cache_chunk_counts=_chunk_counts,
         )
         predict_collate_fn = collate_cached_batch
     elif hidden_state_cache is not None and dataset_indices is not None:
@@ -1004,6 +1035,7 @@ def _predict_dataset(
             explicit_confounder_columns=explicit_confounder_columns,
             cache_hidden_states=hidden_state_cache.hidden_states_array,
             cache_attention_masks=hidden_state_cache.attention_mask_array,
+            cache_chunk_counts=_chunk_counts,
         )
         predict_collate_fn = collate_cached_batch
     else:

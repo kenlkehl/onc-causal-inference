@@ -135,6 +135,9 @@ class HiddenStateCache:
         random_projection_dim: Optional[int] = None,
         downprojection_dim: Optional[int] = None,
         chat_template_prompt: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
+        max_chunks: Optional[int] = None,
     ):
         if random_projection_dim is not None and downprojection_dim is not None:
             raise ValueError(
@@ -148,9 +151,13 @@ class HiddenStateCache:
         self._random_projection_dim = random_projection_dim
         self._downprojection_dim = downprojection_dim
         self._chat_template_prompt = chat_template_prompt
+        self._chunk_size = chunk_size
+        self._chunk_overlap = chunk_overlap
+        self._max_chunks = max_chunks
         self._cache_hash = self.compute_cache_hash(
             model_name, max_length, dataset_path, random_projection_dim,
             downprojection_dim, chat_template_prompt,
+            chunk_size, chunk_overlap, max_chunks,
         )
 
         # Actual cache location
@@ -172,6 +179,9 @@ class HiddenStateCache:
         random_projection_dim: Optional[int] = None,
         downprojection_dim: Optional[int] = None,
         chat_template_prompt: Optional[str] = None,
+        chunk_size: Optional[int] = None,
+        chunk_overlap: Optional[int] = None,
+        max_chunks: Optional[int] = None,
     ) -> str:
         """Compute deterministic hash for cache identification."""
         key = f"{model_name}|{max_length}|{os.path.abspath(dataset_path)}"
@@ -181,6 +191,8 @@ class HiddenStateCache:
             key += f"|dp{downprojection_dim}"
         if chat_template_prompt is not None:
             key += f"|ctp{hashlib.md5(chat_template_prompt.encode()).hexdigest()[:8]}"
+        if chunk_size is not None:
+            key += f"|chunk{chunk_size}_{chunk_overlap}_{max_chunks}"
         return hashlib.md5(key.encode()).hexdigest()[:12]
 
     @property
@@ -230,6 +242,20 @@ class HiddenStateCache:
         if self._metadata is None:
             self._load_metadata()
         return self._metadata['actual_max_len']
+
+    @property
+    def is_chunked(self) -> bool:
+        """Whether cache was produced by chunk-level inference."""
+        if self._metadata is None:
+            self._load_metadata()
+        return self._metadata.get('chunked', False)
+
+    @property
+    def chunk_counts(self) -> Optional[List[int]]:
+        """Per-sample chunk counts (only for chunked caches)."""
+        if self._metadata is None:
+            self._load_metadata()
+        return self._metadata.get('chunk_counts')
 
     def _load_metadata(self):
         """Load metadata from disk."""
@@ -305,6 +331,21 @@ class HiddenStateCache:
                     f"expected {self._downprojection_dim}, got {cached_dp}"
                 )
                 return False
+
+            # Check chunk params match
+            if self._chunk_size is not None:
+                if not self._metadata.get('chunked', False):
+                    logger.warning("Expected chunked cache but found non-chunked")
+                    return False
+                if self._metadata.get('chunk_size') != self._chunk_size:
+                    logger.warning("Cache chunk_size mismatch")
+                    return False
+                if self._metadata.get('chunk_overlap') != self._chunk_overlap:
+                    logger.warning("Cache chunk_overlap mismatch")
+                    return False
+                if self._metadata.get('max_chunks') != self._max_chunks:
+                    logger.warning("Cache max_chunks mismatch")
+                    return False
 
             logger.info(
                 f"Valid hidden state cache found: {expected_num_samples} samples, "
@@ -604,6 +645,464 @@ class HiddenStateCache:
             f", total_tokens={total_tokens:,}, savings={savings_pct:.1%}"
         )
         logger.info(msg)
+
+    def precompute_chunked(
+        self,
+        texts: List[str],
+        device: torch.device,
+        batch_size: int = 4,
+    ) -> None:
+        """Pre-compute LLM hidden states per-chunk for hierarchical extractors.
+
+        Each text is tokenized, chunked with overlap (matching the live path),
+        and each chunk is processed independently through the LLM. Hidden states
+        are stored per-chunk (padded to chunk_size) so the cached representation
+        matches the live hierarchical path exactly.
+
+        Storage: each sample stores N_chunks * chunk_size tokens in the flat array.
+        A companion attention_masks.npy stores per-token masks (last chunk may
+        have padding). chunk_counts stored in metadata.
+
+        Args:
+            texts: All texts in the dataset (in order).
+            device: Device to run the LLM on.
+            batch_size: Number of chunks to process per LLM forward pass.
+        """
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+        from .text_chunking import chunk_token_ids
+
+        chunk_size = self._chunk_size
+        chunk_overlap = self._chunk_overlap
+        max_chunks = self._max_chunks
+
+        if chunk_size is None or chunk_overlap is None or max_chunks is None:
+            raise ValueError("chunk_size, chunk_overlap, max_chunks must be set for chunked precompute")
+
+        num_samples = len(texts)
+        max_total_tokens = chunk_size * max_chunks
+        logger.info(f"Pre-computing chunked hidden states for {num_samples} texts...")
+        logger.info(f"  Model: {self._model_name}")
+        logger.info(f"  Chunk: size={chunk_size}, overlap={chunk_overlap}, max={max_chunks}")
+        logger.info(f"  Cache path: {self._cache_path}")
+
+        # Load tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(
+            self._model_name, trust_remote_code=True,
+            padding_side="right", truncation_side="left",
+        )
+        if tokenizer.pad_token is None:
+            if tokenizer.eos_token is not None:
+                tokenizer.pad_token = tokenizer.eos_token
+                tokenizer.pad_token_id = tokenizer.eos_token_id
+            else:
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+        # Apply chat template if configured
+        texts = self._apply_chat_template(texts, tokenizer, self._chat_template_prompt)
+
+        # Pass 1: tokenize, chunk, and compute per-sample chunk counts + offsets
+        logger.info("Pass 1/2: Tokenizing and chunking...")
+        all_sample_chunks = []  # List[List[List[int]]] — per-sample chunk token IDs
+        chunk_counts = []
+        for i in range(0, num_samples, batch_size * 4):
+            batch_texts = texts[i:i + batch_size * 4]
+            encodings = tokenizer(
+                batch_texts, truncation=True, max_length=max_total_tokens,
+                padding=False,
+            )
+            for token_ids in encodings['input_ids']:
+                chunks = chunk_token_ids(token_ids, chunk_size, chunk_overlap, max_chunks)
+                all_sample_chunks.append(chunks)
+                chunk_counts.append(len(chunks))
+
+        # Each sample stores N_chunks * chunk_size tokens
+        total_tokens = sum(n * chunk_size for n in chunk_counts)
+        total_chunks_all = sum(chunk_counts)
+        logger.info(f"  Total chunks: {total_chunks_all:,}, Total tokens: {total_tokens:,}")
+        logger.info(f"  Mean chunks/sample: {total_chunks_all / num_samples:.1f}")
+
+        # Compute offsets
+        offsets = np.zeros(num_samples + 1, dtype=np.int64)
+        for i, n in enumerate(chunk_counts):
+            offsets[i + 1] = offsets[i] + n * chunk_size
+
+        # Load model
+        logger.info("Loading LLM for hidden state extraction...")
+        hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
+        hidden_size = _get_hidden_size(hf_config)
+        compute_dtype = _get_model_dtype(hf_config)
+
+        model = AutoModelForCausalLM.from_pretrained(
+            self._model_name, config=hf_config, trust_remote_code=True,
+            torch_dtype=compute_dtype, device_map={"": device},
+        )
+        from accelerate.hooks import remove_hook_from_module
+        remove_hook_from_module(model, recurse=True)
+        if tokenizer.pad_token == '[PAD]':
+            model.resize_token_embeddings(len(tokenizer))
+        model.eval()
+        for param in model.parameters():
+            param.requires_grad = False
+
+        # Downprojection setup
+        downproj_layer = None
+        store_dim = hidden_size
+        if self._downprojection_dim is not None and self._downprojection_dim < hidden_size:
+            downproj_layer = _make_downprojection(
+                hidden_size, self._downprojection_dim, self._model_name
+            ).float().to(device)
+            store_dim = self._downprojection_dim
+            logger.info(f"  Downprojection: {hidden_size} -> {store_dim}")
+
+        # Create cache files
+        self._cache_path.mkdir(parents=True, exist_ok=True)
+        hs_path = self._cache_path / "hidden_states.npy"
+        mask_path = self._cache_path / "attention_masks.npy"
+        offsets_path = self._cache_path / "offsets.npy"
+
+        hs_mmap = np.lib.format.open_memmap(
+            str(hs_path), mode='w+', dtype=np.float16,
+            shape=(total_tokens, store_dim)
+        )
+        mask_mmap = np.lib.format.open_memmap(
+            str(mask_path), mode='w+', dtype=np.uint8,
+            shape=(total_tokens,)
+        )
+        np.save(str(offsets_path), offsets)
+
+        # Pass 2: process chunks through LLM
+        logger.info("Pass 2/2: Computing per-chunk hidden states...")
+        pad_token_id = tokenizer.pad_token_id
+
+        # Accumulate chunks into batches of `batch_size` for efficient GPU usage
+        pending_chunks = []     # (padded_ids, mask, sample_idx, chunk_idx_within_sample)
+        processed_samples = 0
+
+        def _flush_pending():
+            """Run accumulated chunks through LLM and write to memmap."""
+            if not pending_chunks:
+                return
+            # Stack into batch
+            input_ids = torch.stack([c[0] for c in pending_chunks]).to(device)
+            attn_mask = torch.stack([c[1] for c in pending_chunks]).to(device)
+
+            with torch.no_grad(), torch.autocast(device_type=device.type, dtype=compute_dtype):
+                outputs = model.model(
+                    input_ids=input_ids, attention_mask=attn_mask,
+                    output_hidden_states=True, return_dict=True,
+                )
+                hidden_states = outputs.last_hidden_state
+                hidden_states = _sanitize_hidden_states(hidden_states, context="precompute_chunked")
+
+            if downproj_layer is not None:
+                with torch.no_grad():
+                    hidden_states = downproj_layer(hidden_states.float()).half()
+
+            hs_cpu = hidden_states.cpu().to(torch.float16).numpy()
+            mask_cpu = attn_mask.cpu().numpy().astype(np.uint8)
+
+            for j, (_, _, sample_idx, chunk_idx) in enumerate(pending_chunks):
+                sample_offset = int(offsets[sample_idx]) + chunk_idx * chunk_size
+                hs_mmap[sample_offset:sample_offset + chunk_size] = hs_cpu[j, :chunk_size]
+                mask_mmap[sample_offset:sample_offset + chunk_size] = mask_cpu[j, :chunk_size]
+
+            pending_chunks.clear()
+
+        for sample_idx in range(num_samples):
+            chunks = all_sample_chunks[sample_idx]
+            for chunk_idx, chunk_ids in enumerate(chunks):
+                # Pad chunk to chunk_size
+                real_len = len(chunk_ids)
+                padded = chunk_ids + [pad_token_id] * (chunk_size - real_len)
+                mask = [1] * real_len + [0] * (chunk_size - real_len)
+                pending_chunks.append((
+                    torch.tensor(padded[:chunk_size], dtype=torch.long),
+                    torch.tensor(mask[:chunk_size], dtype=torch.long),
+                    sample_idx, chunk_idx,
+                ))
+                if len(pending_chunks) >= batch_size:
+                    _flush_pending()
+
+            processed_samples += 1
+            if processed_samples % 100 == 0 or processed_samples == num_samples:
+                logger.info(f"  Processed {processed_samples}/{num_samples} texts")
+
+        _flush_pending()
+
+        # Flush to disk
+        hs_mmap.flush()
+        mask_mmap.flush()
+        del hs_mmap, mask_mmap, downproj_layer
+
+        # Write metadata
+        metadata = {
+            'model_name': self._model_name,
+            'max_length': self._max_length,
+            'hidden_size': store_dim,
+            'original_hidden_size': hidden_size,
+            'downprojection_dim': self._downprojection_dim,
+            'chat_template_prompt': self._chat_template_prompt,
+            'num_samples': num_samples,
+            'total_tokens': total_tokens,
+            'total_chunks': total_chunks_all,
+            'chunk_counts': chunk_counts,
+            'chunk_size': chunk_size,
+            'chunk_overlap': chunk_overlap,
+            'max_chunks': max_chunks,
+            'chunked': True,
+            'storage_format': 'variable_length',
+            'actual_max_len': max(n * chunk_size for n in chunk_counts),
+            'dataset_path': os.path.abspath(self._dataset_path),
+            'cache_hash': self._cache_hash,
+            'created_at': datetime.now().isoformat(),
+            'dtype': 'float16',
+        }
+        with open(self._cache_path / "metadata.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
+        self._metadata = metadata
+
+        # Unload LLM
+        logger.info("Unloading LLM from GPU...")
+        del model, tokenizer
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        total_bytes = total_tokens * store_dim * 2
+        logger.info(
+            f"Chunked hidden state cache created: {total_bytes / 1e9:.2f} GB, "
+            f"{total_chunks_all:,} chunks across {num_samples} samples"
+        )
+
+    def precompute_chunked_multi_gpu(
+        self,
+        texts: List[str],
+        devices: List[torch.device],
+        batch_size: int = 4,
+    ) -> None:
+        """Pre-compute chunked hidden states in parallel across multiple GPUs.
+
+        Same as precompute_chunked() but shards samples across GPUs.
+        Falls back to single-GPU when only one device is given.
+        """
+        if len(devices) <= 1:
+            device = devices[0] if devices else torch.device('cuda:0')
+            return self.precompute_chunked(texts, device, batch_size)
+
+        from transformers import AutoConfig, AutoModelForCausalLM, AutoTokenizer
+        from .text_chunking import chunk_token_ids
+
+        chunk_size = self._chunk_size
+        chunk_overlap = self._chunk_overlap
+        max_chunks = self._max_chunks
+
+        if chunk_size is None or chunk_overlap is None or max_chunks is None:
+            raise ValueError("chunk_size, chunk_overlap, max_chunks must be set")
+
+        num_samples = len(texts)
+        num_devices = len(devices)
+        max_total_tokens = chunk_size * max_chunks
+        logger.info(f"Pre-computing chunked hidden states for {num_samples} texts "
+                     f"across {num_devices} GPUs...")
+        logger.info(f"  Chunk: size={chunk_size}, overlap={chunk_overlap}, max={max_chunks}")
+
+        # Load tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(
+            self._model_name, trust_remote_code=True,
+            padding_side="right", truncation_side="left",
+        )
+        if tokenizer.pad_token is None:
+            if tokenizer.eos_token is not None:
+                tokenizer.pad_token = tokenizer.eos_token
+                tokenizer.pad_token_id = tokenizer.eos_token_id
+            else:
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+
+        texts = self._apply_chat_template(texts, tokenizer, self._chat_template_prompt)
+
+        # Pass 1: tokenize and chunk all samples
+        logger.info("Pass 1/2: Tokenizing and chunking...")
+        all_sample_chunks = []
+        chunk_counts = []
+        for i in range(0, num_samples, batch_size * 4):
+            batch_texts = texts[i:i + batch_size * 4]
+            encodings = tokenizer(
+                batch_texts, truncation=True, max_length=max_total_tokens, padding=False,
+            )
+            for token_ids in encodings['input_ids']:
+                chunks = chunk_token_ids(token_ids, chunk_size, chunk_overlap, max_chunks)
+                all_sample_chunks.append(chunks)
+                chunk_counts.append(len(chunks))
+
+        total_tokens = sum(n * chunk_size for n in chunk_counts)
+        total_chunks_all = sum(chunk_counts)
+        logger.info(f"  Total chunks: {total_chunks_all:,}, Total tokens: {total_tokens:,}")
+
+        offsets = np.zeros(num_samples + 1, dtype=np.int64)
+        for i, n in enumerate(chunk_counts):
+            offsets[i + 1] = offsets[i] + n * chunk_size
+
+        # Get model config
+        hf_config = AutoConfig.from_pretrained(self._model_name, trust_remote_code=True)
+        hidden_size = _get_hidden_size(hf_config)
+        compute_dtype = _get_model_dtype(hf_config)
+        needs_resize = tokenizer.pad_token == '[PAD]'
+        vocab_size = len(tokenizer)
+        pad_token_id = tokenizer.pad_token_id
+
+        use_downprojection = (
+            self._downprojection_dim is not None
+            and self._downprojection_dim < hidden_size
+        )
+        store_dim = self._downprojection_dim if use_downprojection else hidden_size
+
+        # Create cache files
+        self._cache_path.mkdir(parents=True, exist_ok=True)
+        hs_path = self._cache_path / "hidden_states.npy"
+        mask_path = self._cache_path / "attention_masks.npy"
+        offsets_path = self._cache_path / "offsets.npy"
+
+        hs_mmap = np.lib.format.open_memmap(
+            str(hs_path), mode='w+', dtype=np.float16, shape=(total_tokens, store_dim)
+        )
+        mask_mmap = np.lib.format.open_memmap(
+            str(mask_path), mode='w+', dtype=np.uint8, shape=(total_tokens,)
+        )
+        np.save(str(offsets_path), offsets)
+
+        # Shard samples across devices
+        shard_size = (num_samples + num_devices - 1) // num_devices
+        shards = []
+        for d_idx in range(num_devices):
+            start = d_idx * shard_size
+            end = min(start + shard_size, num_samples)
+            if start >= num_samples:
+                break
+            shards.append((devices[d_idx], start, end))
+
+        logger.info(f"Pass 2/2: Computing hidden states across {len(shards)} shards...")
+        progress_lock = threading.Lock()
+        progress = [0]
+
+        def _compute_shard(device, shard_start, shard_end):
+            tok = AutoTokenizer.from_pretrained(
+                self._model_name, trust_remote_code=True,
+                padding_side="right", truncation_side="left",
+            )
+            if tok.pad_token is None:
+                if tok.eos_token is not None:
+                    tok.pad_token = tok.eos_token
+                    tok.pad_token_id = tok.eos_token_id
+                else:
+                    tok.add_special_tokens({'pad_token': '[PAD]'})
+
+            mdl = AutoModelForCausalLM.from_pretrained(
+                self._model_name, config=hf_config, trust_remote_code=True,
+                torch_dtype=compute_dtype, device_map={"": device},
+            )
+            from accelerate.hooks import remove_hook_from_module
+            remove_hook_from_module(mdl, recurse=True)
+            if needs_resize:
+                mdl.resize_token_embeddings(vocab_size)
+            mdl.eval()
+            for param in mdl.parameters():
+                param.requires_grad = False
+
+            dp_layer = None
+            if use_downprojection:
+                dp_layer = _make_downprojection(
+                    hidden_size, self._downprojection_dim, self._model_name
+                ).float().to(device)
+
+            pending = []
+
+            def flush():
+                if not pending:
+                    return
+                input_ids = torch.stack([c[0] for c in pending]).to(device)
+                attn_mask = torch.stack([c[1] for c in pending]).to(device)
+                with torch.no_grad(), torch.autocast(device_type=device.type, dtype=compute_dtype):
+                    outputs = mdl.model(
+                        input_ids=input_ids, attention_mask=attn_mask,
+                        output_hidden_states=True, return_dict=True,
+                    )
+                    hs = outputs.last_hidden_state
+                    hs = _sanitize_hidden_states(hs, context=f"chunked_multi_gpu/{device}")
+                if dp_layer is not None:
+                    with torch.no_grad():
+                        hs = dp_layer(hs.float()).half()
+                hs_cpu = hs.cpu().to(torch.float16).numpy()
+                mask_cpu = attn_mask.cpu().numpy().astype(np.uint8)
+                for j, (_, _, si, ci) in enumerate(pending):
+                    off = int(offsets[si]) + ci * chunk_size
+                    hs_mmap[off:off + chunk_size] = hs_cpu[j, :chunk_size]
+                    mask_mmap[off:off + chunk_size] = mask_cpu[j, :chunk_size]
+                pending.clear()
+
+            for sample_idx in range(shard_start, shard_end):
+                for chunk_idx, chunk_ids in enumerate(all_sample_chunks[sample_idx]):
+                    real_len = len(chunk_ids)
+                    padded = chunk_ids + [pad_token_id] * (chunk_size - real_len)
+                    mask = [1] * real_len + [0] * (chunk_size - real_len)
+                    pending.append((
+                        torch.tensor(padded[:chunk_size], dtype=torch.long),
+                        torch.tensor(mask[:chunk_size], dtype=torch.long),
+                        sample_idx, chunk_idx,
+                    ))
+                    if len(pending) >= batch_size:
+                        flush()
+                with progress_lock:
+                    progress[0] += 1
+                    if progress[0] % 100 == 0 or progress[0] == num_samples:
+                        logger.info(f"  Processed {progress[0]}/{num_samples} texts")
+            flush()
+
+            del mdl, tok, dp_layer
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(shards)) as executor:
+            futures = [executor.submit(_compute_shard, dev, s, e) for dev, s, e in shards]
+            for fut in concurrent.futures.as_completed(futures):
+                fut.result()
+
+        hs_mmap.flush()
+        mask_mmap.flush()
+        del hs_mmap, mask_mmap
+
+        metadata = {
+            'model_name': self._model_name,
+            'max_length': self._max_length,
+            'hidden_size': store_dim,
+            'original_hidden_size': hidden_size,
+            'downprojection_dim': self._downprojection_dim,
+            'chat_template_prompt': self._chat_template_prompt,
+            'num_samples': num_samples,
+            'total_tokens': total_tokens,
+            'total_chunks': total_chunks_all,
+            'chunk_counts': chunk_counts,
+            'chunk_size': chunk_size,
+            'chunk_overlap': chunk_overlap,
+            'max_chunks': max_chunks,
+            'chunked': True,
+            'storage_format': 'variable_length',
+            'actual_max_len': max(n * chunk_size for n in chunk_counts),
+            'dataset_path': os.path.abspath(self._dataset_path),
+            'cache_hash': self._cache_hash,
+            'created_at': datetime.now().isoformat(),
+            'dtype': 'float16',
+            'num_gpus_used': len(shards),
+        }
+        with open(self._cache_path / "metadata.json", 'w') as f:
+            json.dump(metadata, f, indent=2)
+        self._metadata = metadata
+
+        total_bytes = total_tokens * store_dim * 2
+        logger.info(
+            f"Chunked hidden state cache created ({len(shards)} GPUs): "
+            f"{total_bytes / 1e9:.2f} GB, {total_chunks_all:,} chunks"
+        )
 
     def precompute_multi_gpu(
         self,
@@ -922,10 +1421,18 @@ class HiddenStateCache:
         self._offsets = np.load(str(offsets_path))
 
         self._hs_mmap = VariableLengthArray(self._flat_mmap, self._offsets)
-        self._mask_mmap = VariableLengthMaskArray(self._offsets)
 
+        # Chunked caches store explicit attention masks (last chunk may have padding)
+        mask_path = self._cache_path / "attention_masks.npy"
+        if self._metadata.get('chunked', False) and mask_path.exists():
+            flat_mask = np.load(str(mask_path), mmap_mode='r')
+            self._mask_mmap = VariableLengthArray(flat_mask, self._offsets)
+        else:
+            self._mask_mmap = VariableLengthMaskArray(self._offsets)
+
+        chunked_str = " (chunked)" if self._metadata.get('chunked', False) else ""
         logger.info(
-            f"Hidden state cache opened: {len(self._hs_mmap)} samples, "
+            f"Hidden state cache opened{chunked_str}: {len(self._hs_mmap)} samples, "
             f"total_tokens={self._metadata.get('total_tokens', 'unknown')}"
         )
 
@@ -949,7 +1456,10 @@ class HiddenStateCache:
         ram_flat = np.array(self._flat_mmap)
         self._flat_mmap = ram_flat
         self._hs_mmap = VariableLengthArray(ram_flat, self._offsets)
-        # _mask_mmap stays as VariableLengthMaskArray (generates on-the-fly, no I/O)
+        # For chunked caches, also preload mask memmap
+        if isinstance(self._mask_mmap, VariableLengthArray):
+            ram_mask = np.array(self._mask_mmap.flat)
+            self._mask_mmap = VariableLengthArray(ram_mask, self._offsets)
         self._preloaded = True
 
         logger.info(

@@ -90,6 +90,16 @@ def run_applied_inference_forest(
         _chat_template_prompt = getattr(arch_config, f'{_prefix}_chat_template_prompt', None)
         _random_projection_dim = getattr(arch_config, 'flp_random_projection_dim', None) if _prefix == "flp" else None
 
+        # Chunk params for hierarchical_llm
+        _is_hierarchical = feature_extractor_type == "hierarchical_llm"
+        if _is_hierarchical:
+            _chunk_size = getattr(arch_config, 'hlm_chunk_size', 2048)
+            _chunk_overlap = getattr(arch_config, 'hlm_chunk_overlap', 256)
+            _max_chunks = getattr(arch_config, 'hlm_max_chunks', 16)
+            max_length = _chunk_size * _max_chunks
+        else:
+            _chunk_size = _chunk_overlap = _max_chunks = None
+
         # Reset index for consistent cache indices
         dataset = dataset.reset_index(drop=True)
         all_texts = dataset[config.text_column].tolist()
@@ -138,10 +148,10 @@ def run_applied_inference_forest(
                 random_projection_dim=_random_projection_dim,
                 downprojection_dim=_downprojection_dim,
                 chat_template_prompt=_chat_template_prompt,
+                chunk_size=_chunk_size if _is_hierarchical else None,
+                chunk_overlap=_chunk_overlap if _is_hierarchical else None,
+                max_chunks=_max_chunks if _is_hierarchical else None,
             )
-            # Remove None max_length for hierarchical_llm (uses chunk_size instead)
-            if max_length is None:
-                del cache_kwargs['max_length']
             hidden_state_cache = HiddenStateCache(**cache_kwargs)
 
             if not hidden_state_cache.is_valid(len(dataset)):
@@ -151,7 +161,15 @@ def run_applied_inference_forest(
                     precompute_devices = [device]
                     if gpu_ids and device.type == "cuda":
                         precompute_devices = [torch.device(f"cuda:{i}") for i in gpu_ids]
-                    if len(precompute_devices) > 1:
+                    if _is_hierarchical:
+                        if len(precompute_devices) > 1:
+                            logger.info(f"Using {len(precompute_devices)} GPUs for parallel chunked precomputation")
+                            hidden_state_cache.precompute_chunked_multi_gpu(
+                                all_texts, precompute_devices, batch_size=batch_size
+                            )
+                        else:
+                            hidden_state_cache.precompute_chunked(all_texts, device, batch_size=batch_size)
+                    elif len(precompute_devices) > 1:
                         logger.info(f"Using {len(precompute_devices)} GPUs for parallel precomputation")
                         hidden_state_cache.precompute_multi_gpu(
                             all_texts, precompute_devices, batch_size=batch_size
@@ -328,6 +346,7 @@ def _process_fold_forest(
     )
 
     # Create DataLoaders for Stage 2 feature extraction and prediction
+    _cc = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
     if gpu_store is not None and train_indices is not None and test_indices is not None:
         # GPU cache mode: cache_index path
         train_dataset = CachedHiddenStateDataset(
@@ -336,6 +355,7 @@ def _process_fold_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
+            cache_chunk_counts=_cc,
         )
         test_dataset = CachedHiddenStateDataset(
             data=test_df,
@@ -343,6 +363,7 @@ def _process_fold_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=test_indices,
+            cache_chunk_counts=_cc,
         )
         collate_fn = collate_cached_batch
     elif hidden_state_cache is not None and train_indices is not None and test_indices is not None:
@@ -356,6 +377,7 @@ def _process_fold_forest(
             dataset_indices=train_indices,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_cc,
         )
         test_dataset = CachedHiddenStateDataset(
             data=test_df,
@@ -365,6 +387,7 @@ def _process_fold_forest(
             dataset_indices=test_indices,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_cc,
         )
         collate_fn = collate_cached_batch
     else:
@@ -531,6 +554,7 @@ def _run_fixed_split_inference_forest(
     # Stage 2: Train causal forest on full train + val
     logger.info("\n--- Stage 2: Training causal forest ---")
     combined_df = pd.concat([train_df, val_df])
+    _cc = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
 
     if gpu_store is not None and train_indices is not None and val_indices is not None:
         combined_indices = np.concatenate([train_indices, val_indices])
@@ -540,6 +564,7 @@ def _run_fixed_split_inference_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=combined_indices,
+            cache_chunk_counts=_cc,
         )
         combined_collate_fn = collate_cached_batch
     elif hidden_state_cache is not None and train_indices is not None and val_indices is not None:
@@ -554,6 +579,7 @@ def _run_fixed_split_inference_forest(
             dataset_indices=combined_indices,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_cc,
         )
         combined_collate_fn = collate_cached_batch
     else:
@@ -593,6 +619,7 @@ def _run_fixed_split_inference_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=test_indices,
+            cache_chunk_counts=_cc,
         )
         test_collate_fn = collate_cached_batch
     elif hidden_state_cache is not None and test_indices is not None:
@@ -606,6 +633,7 @@ def _run_fixed_split_inference_forest(
             dataset_indices=test_indices,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_cc,
         )
         test_collate_fn = collate_cached_batch
     else:
@@ -786,6 +814,7 @@ def _train_representation(
 ) -> List[Dict[str, Any]]:
     """Train representation (Stage 1)."""
     train_config = config.training
+    _cc = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
 
     # Create datasets
     if gpu_store is not None and train_indices is not None and val_indices is not None:
@@ -796,6 +825,7 @@ def _train_representation(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
+            cache_chunk_counts=_cc,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
@@ -803,6 +833,7 @@ def _train_representation(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=val_indices,
+            cache_chunk_counts=_cc,
         )
         collate_fn = collate_cached_batch
         logger.info("Using GPU-resident hidden states for Stage 1 training")
@@ -817,6 +848,7 @@ def _train_representation(
             dataset_indices=train_indices,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_cc,
         )
         val_dataset = CachedHiddenStateDataset(
             data=val_df,
@@ -826,6 +858,7 @@ def _train_representation(
             dataset_indices=val_indices,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
+            cache_chunk_counts=_cc,
         )
         collate_fn = collate_cached_batch
         logger.info("Using cached hidden state datasets for Stage 1 training")

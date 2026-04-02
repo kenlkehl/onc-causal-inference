@@ -439,6 +439,7 @@ def run_text_forest_arm(
         config.hlm_model_name = flp_model_name
         config.hlm_downprojection_dim = flp_downprojection_dim
         config.hlm_chat_template_prompt = flp_chat_template_prompt
+        config.hlm_cache_hidden_states = config.flp_cache_hidden_states
     # For simple_cnn, set max_length from flp_max_length
     elif feature_extractor_type == "simple_cnn":
         config.scnn_max_length = flp_max_length
@@ -760,6 +761,8 @@ def semisynthetic_worker_process_fn(
     use_gpu_cache: bool,
     # Model hyperparams passed as dict
     model_kwargs: Dict[str, Any],
+    # Per-extractor-type cache info for multi-extractor support
+    cache_info_by_type: Optional[Dict[str, dict]] = None,
 ):
     """Worker process for text_forest jobs on a single GPU (multiprocessing mode)."""
     from oci.models.hidden_state_cache import HiddenStateCache
@@ -768,19 +771,64 @@ def semisynthetic_worker_process_fn(
     output_path = Path(output_dir)
     torch.set_default_dtype(torch.float32)
 
-    hidden_state_cache = None
-    gpu_store = None
+    # Open per-extractor-type caches
+    cache_registry = {}   # cache_hash -> HiddenStateCache
+    gpu_store_registry = {}  # cache_hash -> GPUHiddenStateStore
 
-    if cache_info and cache_hash != "__no_cache__":
+    if cache_info_by_type:
+        for et, ci in cache_info_by_type.items():
+            ch = HiddenStateCache.compute_cache_hash(
+                ci['model_name'], ci['max_length'], str(ci['parquet_file']), None,
+                downprojection_dim=ci['downprojection_dim'],
+                chat_template_prompt=ci.get('chat_template_prompt'),
+                chunk_size=ci.get('chunk_size'),
+                chunk_overlap=ci.get('chunk_overlap'),
+                max_chunks=ci.get('max_chunks'),
+            )
+            cache = _open_cache_for_worker(ch, ci)
+            cache_registry[ch] = cache
+            if use_gpu_cache:
+                store = load_single_gpu_store(cache, ci, device)
+                if store is not None:
+                    gpu_store_registry[ch] = store
+    elif cache_info and cache_hash != "__no_cache__":
+        # Legacy single-cache path
         cache = _open_cache_for_worker(cache_hash, cache_info)
-        hidden_state_cache = cache
-
+        cache_registry[cache_hash] = cache
         if use_gpu_cache:
             store = load_single_gpu_store(cache, cache_info, device)
             if store is not None:
-                gpu_store = store
+                gpu_store_registry[cache_hash] = store
 
-    logger.info(f"Text forest worker started on {device} (pid={os.getpid()})")
+    # Resolve cache for each job's extractor type
+    def _resolve_cache(extractor_type):
+        """Find the right cache/gpu_store for this extractor type."""
+        from oci.config import CACHEABLE_EXTRACTOR_TYPES
+        if extractor_type not in CACHEABLE_EXTRACTOR_TYPES:
+            return None, None
+        if cache_info_by_type and extractor_type in cache_info_by_type:
+            ci = cache_info_by_type[extractor_type]
+            ch = HiddenStateCache.compute_cache_hash(
+                ci['model_name'], ci['max_length'], str(ci['parquet_file']), None,
+                downprojection_dim=ci['downprojection_dim'],
+                chat_template_prompt=ci.get('chat_template_prompt'),
+                chunk_size=ci.get('chunk_size'),
+                chunk_overlap=ci.get('chunk_overlap'),
+                max_chunks=ci.get('max_chunks'),
+            )
+            gs = gpu_store_registry.get(ch)
+            hsc = cache_registry.get(ch) if gs is None else None
+            return hsc, gs
+        # Legacy single-cache fallback
+        if cache_registry:
+            ch = list(cache_registry.keys())[0]
+            gs = gpu_store_registry.get(ch)
+            hsc = cache_registry.get(ch) if gs is None else None
+            return hsc, gs
+        return None, None
+
+    logger.info(f"Text forest worker started on {device} (pid={os.getpid()}, "
+                f"{len(cache_registry)} cache(s))")
 
     while True:
         try:
@@ -788,12 +836,13 @@ def semisynthetic_worker_process_fn(
         except Exception:
             break
 
+        hsc, gs = _resolve_cache(job.feature_extractor_type)
         result = _run_text_forest_job(
             job=job,
             device=device,
             output_path=output_path,
-            hidden_state_cache=hidden_state_cache,
-            gpu_store=gpu_store,
+            hidden_state_cache=hsc,
+            gpu_store=gs,
             **model_kwargs,
         )
         progress_queue.put(("done" if result else "error", job.arm_name, result))
@@ -803,10 +852,10 @@ def semisynthetic_worker_process_fn(
             torch.cuda.empty_cache()
 
     # Cleanup
-    if gpu_store is not None:
-        gpu_store.free()
-    if hidden_state_cache is not None:
-        hidden_state_cache.close()
+    for store in gpu_store_registry.values():
+        store.free()
+    for cache in cache_registry.values():
+        cache.close()
 
     logger.info(f"Text forest worker on {device} (pid={os.getpid()}) finished")
 
@@ -822,7 +871,11 @@ def semisynthetic_worker_thread(
     gpu_store,
     model_kwargs: Dict[str, Any],
 ):
-    """Worker thread for text_forest jobs on a single GPU (non-cached mode)."""
+    """Worker thread for text_forest jobs on a single GPU (non-cached mode).
+
+    In non-cached mode, hidden_state_cache and gpu_store are typically None.
+    The model loads the LLM live per experiment.
+    """
     while True:
         try:
             job = job_queue.get(timeout=1)
@@ -830,12 +883,16 @@ def semisynthetic_worker_thread(
             break
 
         try:
+            # Non-cacheable extractors should not get cache/gpu_store
+            from oci.config import CACHEABLE_EXTRACTOR_TYPES
+            job_hsc = hidden_state_cache if job.feature_extractor_type in CACHEABLE_EXTRACTOR_TYPES else None
+            job_gs = gpu_store if job.feature_extractor_type in CACHEABLE_EXTRACTOR_TYPES else None
             result = _run_text_forest_job(
                 job=job,
                 device=device,
                 output_path=output_path,
-                hidden_state_cache=hidden_state_cache,
-                gpu_store=gpu_store,
+                hidden_state_cache=job_hsc,
+                gpu_store=job_gs,
                 **model_kwargs,
             )
             with lock:
@@ -1046,42 +1103,78 @@ def run_experiments(
     hidden_state_cache = None
     gpu_store = None
     cache_info = None
+    cache_info_by_type = {}
 
     # Only cache if at least one extractor type supports caching
     from oci.config import CACHEABLE_EXTRACTOR_TYPES
     has_cacheable_extractor = any(et in CACHEABLE_EXTRACTOR_TYPES for et in extractor_types)
+    cacheable_in_use = [et for et in extractor_types if et in CACHEABLE_EXTRACTOR_TYPES]
 
     if use_cache and has_cacheable_extractor:
         logger.info(f"\n{'='*60}")
-        logger.info("PHASE 3: Pre-caching frozen LLM hidden states")
+        logger.info("PHASE 3: Pre-caching LLM hidden states")
+        logger.info(f"  Cacheable extractors: {cacheable_in_use}")
         logger.info(f"{'='*60}")
 
-        cache_info = dict(
-            parquet_file=parquet_file,
-            model_name=flp_model_name,
-            max_length=flp_max_length,
-            batch_size=batch_size,
-            downprojection_dim=flp_downprojection_dim,
-            chat_template_prompt=flp_chat_template_prompt,
-        )
-        hs_cache = precompute_single_cache(cache_info, devices)
+        # Build per-extractor-type cache_info (different extractors need different caches)
+        # Use the first cacheable type as the "primary" for backward compat with single-cache paths
+        cache_info_by_type = {}
+        for et in cacheable_in_use:
+            if et == "frozen_llm_pooler":
+                cache_info_by_type[et] = dict(
+                    parquet_file=parquet_file,
+                    model_name=flp_model_name,
+                    max_length=flp_max_length,
+                    batch_size=batch_size,
+                    downprojection_dim=flp_downprojection_dim,
+                    chat_template_prompt=flp_chat_template_prompt,
+                )
+            elif et == "hierarchical_llm":
+                # Use ExperimentConfig defaults for chunk params
+                _hlm_chunk_size = ExperimentConfig.hlm_chunk_size
+                _hlm_chunk_overlap = ExperimentConfig.hlm_chunk_overlap
+                _hlm_max_chunks = ExperimentConfig.hlm_max_chunks
+                cache_info_by_type[et] = dict(
+                    parquet_file=parquet_file,
+                    model_name=flp_model_name,
+                    max_length=_hlm_chunk_size * _hlm_max_chunks,
+                    batch_size=batch_size,
+                    downprojection_dim=flp_downprojection_dim,
+                    chat_template_prompt=flp_chat_template_prompt,
+                    chunk_size=_hlm_chunk_size,
+                    chunk_overlap=_hlm_chunk_overlap,
+                    max_chunks=_hlm_max_chunks,
+                )
+
+        # Precompute each cache
+        cache_by_type = {}
+        for et, ci in cache_info_by_type.items():
+            logger.info(f"  Precomputing cache for {et}...")
+            cache_by_type[et] = precompute_single_cache(ci, devices)
+
+        # Use the first cacheable type as the primary cache for backward compat
+        primary_type = cacheable_in_use[0]
+        cache_info = cache_info_by_type[primary_type]
 
         if gpu_cache:
-            # For threading mode, load GPU store on first device
-            # For multiprocessing mode, workers load their own
-            if not use_cache or workers_per_gpu == "1":
-                gpu_store = load_single_gpu_store(hs_cache, cache_info, devices[0])
+            if workers_per_gpu == "1":
+                gpu_store = load_single_gpu_store(cache_by_type[primary_type], cache_info, devices[0])
                 if gpu_store is not None:
                     logger.info(f"GPU cache loaded: {gpu_store.num_samples} samples on {devices[0]}")
                 else:
                     logger.info("GPU cache failed, falling back to disk cache")
-                    hidden_state_cache = hs_cache
+                    hidden_state_cache = cache_by_type[primary_type]
             else:
                 # Workers will load their own GPU stores
-                hs_cache.close()
-                del hs_cache
+                for c in cache_by_type.values():
+                    c.close()
         else:
-            hidden_state_cache = hs_cache
+            hidden_state_cache = cache_by_type[primary_type]
+
+        # Close non-primary caches (workers reopen independently)
+        for et, c in cache_by_type.items():
+            if et != primary_type or (gpu_cache and workers_per_gpu != "1"):
+                c.close()
 
     # =====================================================================
     # PHASE 4: Run CPU-only arms (confounder_forest, best_attainable)
@@ -1212,7 +1305,16 @@ def run_experiments(
             # === MULTIPROCESSING PATH (cached mode) ===
             from oci.models.hidden_state_cache import HiddenStateCache
 
-            # Compute cache hash for workers
+            # Serialize per-extractor-type cache info for workers
+            serializable_cache_info_by_type = {}
+            if cache_info_by_type:
+                for et, ci in cache_info_by_type.items():
+                    serializable_cache_info_by_type[et] = {
+                        k: str(v) if isinstance(v, Path) else v
+                        for k, v in ci.items()
+                    }
+
+            # Legacy single-cache hash (for backward compat arg)
             cache_hash = HiddenStateCache.compute_cache_hash(
                 flp_model_name, flp_max_length, str(parquet_file), None,
                 downprojection_dim=flp_downprojection_dim,
@@ -1221,7 +1323,7 @@ def run_experiments(
             serializable_cache_info = {
                 k: str(v) if isinstance(v, Path) else v
                 for k, v in cache_info.items()
-            }
+            } if cache_info else {}
 
             # Close main-process cache handles (workers reopen independently)
             if hidden_state_cache is not None:
@@ -1252,6 +1354,7 @@ def run_experiments(
                         args=(device, job_queue, progress_queue, str(output_path),
                               cache_hash, serializable_cache_info, gpu_cache,
                               model_kwargs),
+                        kwargs=dict(cache_info_by_type=serializable_cache_info_by_type),
                         name=f"worker-{device}",
                     )
                     p.start()
