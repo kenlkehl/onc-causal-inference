@@ -853,6 +853,7 @@ def run_causal_forest_experiment(
         combined_T = combined_df['treatment_indicator'].values
         combined_Y = combined_df['outcome_indicator'].values
 
+        chunk_counts = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
         if gpu_store is not None:
             combined_indices = np.concatenate([train_idx, test_idx])
             combined_dataset = CachedHiddenStateDataset(
@@ -860,6 +861,7 @@ def run_causal_forest_experiment(
                 outcome_column='outcome_indicator', treatment_column='treatment_indicator',
                 dataset_indices=combined_indices,
                 explicit_confounder_columns=confounder_cols,
+                cache_chunk_counts=chunk_counts,
             )
             combined_collate = collate_cached_batch
         elif hidden_state_cache is not None:
@@ -871,6 +873,7 @@ def run_causal_forest_experiment(
                 explicit_confounder_columns=confounder_cols,
                 cache_hidden_states=hidden_state_cache.hidden_states_array,
                 cache_attention_masks=hidden_state_cache.attention_mask_array,
+                cache_chunk_counts=chunk_counts,
             )
             combined_collate = collate_cached_batch
         else:
@@ -1409,8 +1412,10 @@ def generate_experiment_grid(
                        and m != "best_attainable"]
 
     # Determine which extractor types to include
-    all_extractor_types = ["frozen_llm_pooler", "hierarchical_llm",
+    # temporarily dropped frozen llm pooler
+    all_extractor_types = ["hierarchical_llm",
                            "hierarchical_cnn", "hierarchical_gru", "simple_cnn"]
+
     extractor_types = all_extractor_types
     if filter_extractor_types:
         extractor_types = [e for e in all_extractor_types if e in filter_extractor_types]
