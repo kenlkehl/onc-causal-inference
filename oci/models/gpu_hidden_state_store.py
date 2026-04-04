@@ -132,6 +132,7 @@ class GPUHiddenStateStore:
         self._hidden_size: int = 0
         self._device: Optional[torch.device] = None
         self._num_samples: int = 0
+        self._chunk_counts: Optional[List[int]] = None
 
     # ------------------------------------------------------------------
     # Static helpers
@@ -487,6 +488,11 @@ class GPUHiddenStateStore:
         return self._hidden_size
 
     @property
+    def chunk_counts(self) -> Optional[List[int]]:
+        """Return per-sample chunk counts (set when loaded from a chunked cache)."""
+        return self._chunk_counts
+
+    @property
     def estimated_vram_gb(self) -> float:
         """Return current VRAM usage of stored hidden states in GB."""
         if self._flat_tensor is None:
@@ -519,6 +525,9 @@ class GPUHiddenStateStore:
             device: GPU device to store the tensor on.
         """
         self._device = device
+
+        # Preserve chunk metadata for hierarchical extractors
+        self._chunk_counts = disk_cache.chunk_counts
 
         # Access the underlying flat array and offsets
         hs_array = disk_cache.hidden_states_array

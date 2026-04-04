@@ -517,7 +517,12 @@ def _create_datasets_and_loaders(
 ):
     """Create train/test datasets and DataLoaders with appropriate caching."""
     use_cache = hidden_state_cache is not None
-    chunk_counts = hidden_state_cache.chunk_counts if use_cache else None
+    if use_cache:
+        chunk_counts = hidden_state_cache.chunk_counts
+    elif gpu_store is not None:
+        chunk_counts = gpu_store.chunk_counts
+    else:
+        chunk_counts = None
 
     if gpu_store is not None:
         train_dataset = CachedHiddenStateDataset(

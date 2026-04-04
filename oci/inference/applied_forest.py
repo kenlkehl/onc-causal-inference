@@ -346,7 +346,9 @@ def _process_fold_forest(
     )
 
     # Create DataLoaders for Stage 2 feature extraction and prediction
-    _cc = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
+    _cc = (hidden_state_cache.chunk_counts if hidden_state_cache is not None
+           else getattr(gpu_store, 'chunk_counts', None) if gpu_store is not None
+           else None)
     if gpu_store is not None and train_indices is not None and test_indices is not None:
         # GPU cache mode: cache_index path
         train_dataset = CachedHiddenStateDataset(
@@ -554,7 +556,9 @@ def _run_fixed_split_inference_forest(
     # Stage 2: Train causal forest on full train + val
     logger.info("\n--- Stage 2: Training causal forest ---")
     combined_df = pd.concat([train_df, val_df])
-    _cc = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
+    _cc = (hidden_state_cache.chunk_counts if hidden_state_cache is not None
+           else getattr(gpu_store, 'chunk_counts', None) if gpu_store is not None
+           else None)
 
     if gpu_store is not None and train_indices is not None and val_indices is not None:
         combined_indices = np.concatenate([train_indices, val_indices])
@@ -814,7 +818,9 @@ def _train_representation(
 ) -> List[Dict[str, Any]]:
     """Train representation (Stage 1)."""
     train_config = config.training
-    _cc = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
+    _cc = (hidden_state_cache.chunk_counts if hidden_state_cache is not None
+           else getattr(gpu_store, 'chunk_counts', None) if gpu_store is not None
+           else None)
 
     # Create datasets
     if gpu_store is not None and train_indices is not None and val_indices is not None:

@@ -842,7 +842,12 @@ def _train_single_model(
         logger.info(f"Fitted explicit confounder featurizer on {len(train_confounder_values)} training samples")
 
     # Create datasets
-    _chunk_counts = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
+    if hidden_state_cache is not None:
+        _chunk_counts = hidden_state_cache.chunk_counts
+    elif gpu_store is not None:
+        _chunk_counts = getattr(gpu_store, 'chunk_counts', None)
+    else:
+        _chunk_counts = None
     if gpu_store is not None and train_indices is not None and val_indices is not None:
         # GPU cache mode: use cache_index path (no inline loading — data is on GPU)
         train_dataset = CachedHiddenStateDataset(
@@ -1012,7 +1017,12 @@ def _predict_dataset(
     gpu_store=None
 ) -> dict:
     """Generate predictions for a dataframe."""
-    _chunk_counts = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
+    if hidden_state_cache is not None:
+        _chunk_counts = hidden_state_cache.chunk_counts
+    elif gpu_store is not None:
+        _chunk_counts = getattr(gpu_store, 'chunk_counts', None)
+    else:
+        _chunk_counts = None
     if gpu_store is not None and dataset_indices is not None:
         # GPU cache mode: cache_index path (data on GPU)
         dataset = CachedHiddenStateDataset(
