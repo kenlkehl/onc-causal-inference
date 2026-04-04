@@ -858,7 +858,12 @@ def run_causal_forest_experiment(
         combined_T = combined_df['treatment_indicator'].values
         combined_Y = combined_df['outcome_indicator'].values
 
-        chunk_counts = hidden_state_cache.chunk_counts if hidden_state_cache is not None else None
+        if hidden_state_cache is not None:
+            chunk_counts = hidden_state_cache.chunk_counts
+        elif gpu_store is not None:
+            chunk_counts = gpu_store.chunk_counts
+        else:
+            chunk_counts = None
         if gpu_store is not None:
             combined_indices = np.concatenate([train_idx, test_idx])
             combined_dataset = CachedHiddenStateDataset(
