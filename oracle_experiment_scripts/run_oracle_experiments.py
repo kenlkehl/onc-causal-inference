@@ -2111,10 +2111,28 @@ def main():
         logger.warning("--workers-per-gpu > 1 requires --cache or --gpu-cache (LLM uses most VRAM); forcing 1")
         args.workers_per_gpu = "1"
 
+    # Resolve workers per GPU for each device (used in multiprocessing path)
+    # GPU cache mode: force 1 worker per GPU (each worker loads its own GPU store)
+    if use_cache and args.gpu_cache:
+        wpg_per_device = {d: 1 for d in args.devices}
+        if args.workers_per_gpu != "auto" and int(args.workers_per_gpu) > 1:
+            logger.warning("--workers-per-gpu > 1 with --gpu-cache would duplicate GPU store in VRAM; forcing 1")
+    elif use_cache:
+        wpg_per_device = {
+            d: resolve_workers_per_gpu(args.workers_per_gpu, d, use_cache)
+            for d in args.devices
+        }
+    else:
+        wpg_per_device = {d: 1 for d in args.devices}
+
+    total_workers = sum(wpg_per_device.values())
+
     logger.info(f"Running {len(gpu_configs)} GPU experiments in {len(cache_groups)} cache group(s) "
                 f"on {len(args.devices)} GPU(s) (workers-per-gpu: {args.workers_per_gpu})")
+    for d, w in wpg_per_device.items():
+        logger.info(f"  {d}: {w} worker(s)")
     if use_cache:
-        logger.info("Using multiprocessing (1 process per GPU, avoids GIL contention)")
+        logger.info(f"Using multiprocessing ({total_workers} total processes, avoids GIL contention)")
     else:
         logger.info("Using threading (non-cached mode, LLM loaded per experiment)")
 
@@ -2160,20 +2178,23 @@ def main():
             for config in group_configs:
                 job_queue.put(config)
 
-            # 4. Spawn worker processes (1 per GPU)
+            # 4. Spawn worker processes (workers_per_gpu per GPU)
             processes = []
             for device in args.devices:
-                p = ctx.Process(
-                    target=worker_process_fn,
-                    args=(device, job_queue, progress_queue, str(output_dir),
-                          cache_hash, serializable_cache_info, args.gpu_cache,
-                          cache_base_dir),
-                    name=f"worker-{device}",
-                )
-                p.start()
-                processes.append(p)
+                n_workers = wpg_per_device[device]
+                for worker_idx in range(n_workers):
+                    p = ctx.Process(
+                        target=worker_process_fn,
+                        args=(device, job_queue, progress_queue, str(output_dir),
+                              cache_hash, serializable_cache_info, args.gpu_cache,
+                              cache_base_dir),
+                        name=f"worker-{device}-{worker_idx}",
+                    )
+                    p.start()
+                    processes.append(p)
 
-            logger.info(f"Spawned {len(processes)} worker processes")
+            logger.info(f"Spawned {len(processes)} worker processes "
+                        f"across {len(args.devices)} GPU(s)")
 
             # 5. Monitor progress from main process
             completed_in_group = 0
