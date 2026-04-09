@@ -2112,16 +2112,19 @@ def main():
         args.workers_per_gpu = "1"
 
     # Resolve workers per GPU for each device (used in multiprocessing path)
-    # GPU cache mode: force 1 worker per GPU (each worker loads its own GPU store)
-    if use_cache and args.gpu_cache:
-        wpg_per_device = {d: 1 for d in args.devices}
-        if args.workers_per_gpu != "auto" and int(args.workers_per_gpu) > 1:
-            logger.warning("--workers-per-gpu > 1 with --gpu-cache would duplicate GPU store in VRAM; forcing 1")
-    elif use_cache:
+    # Non-cached mode: force 1 (each experiment loads the full LLM)
+    # Cached mode (disk or GPU): spawn multiple workers per GPU
+    # Note: with --gpu-cache, each worker process loads its own GPU store copy.
+    # The per-worker VRAM check in load_single_gpu_store() will fall back to
+    # disk cache if there isn't enough free VRAM, so this is safe.
+    if use_cache:
         wpg_per_device = {
             d: resolve_workers_per_gpu(args.workers_per_gpu, d, use_cache)
             for d in args.devices
         }
+        if args.gpu_cache and any(w > 1 for w in wpg_per_device.values()):
+            logger.info("Note: with --gpu-cache, each worker loads its own GPU store copy. "
+                        "Workers that can't fit the store will fall back to disk cache.")
     else:
         wpg_per_device = {d: 1 for d in args.devices}
 
