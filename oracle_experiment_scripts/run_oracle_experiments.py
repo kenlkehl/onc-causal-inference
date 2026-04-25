@@ -1444,7 +1444,6 @@ def generate_experiment_grid(
             chat_template_options = [None]
             if chat_template_prompt is not None:
                 chat_template_options = [None, chat_template_prompt]
-            print(filter_max_lengths)
             if filter_max_lengths:
                 max_lengths = [m for m in max_lengths if m in filter_max_lengths]
 
