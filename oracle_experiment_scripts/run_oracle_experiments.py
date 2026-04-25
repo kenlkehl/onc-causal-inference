@@ -1438,13 +1438,13 @@ def generate_experiment_grid(
     for ext_type in extractor_types:
         if ext_type == "frozen_llm_pooler":
             # frozen_llm_pooler grid: max_lengths x downprojection_dims x confounders x chat_template x model_names x lr x epochs
-            max_lengths = [5000, 10000, 25000, 50000, 75000]
+            max_lengths = [5000, 10000, 25000, 50000, 75000, 100000]
             downprojection_dims = [128, 256, 512]
 
             chat_template_options = [None]
             if chat_template_prompt is not None:
                 chat_template_options = [None, chat_template_prompt]
-
+            print(filter_max_lengths)
             if filter_max_lengths:
                 max_lengths = [m for m in max_lengths if m in filter_max_lengths]
 
