@@ -1422,8 +1422,7 @@ def generate_experiment_grid(
                        and m != "best_attainable"]
 
     # Determine which extractor types to include
-    # temporarily dropped frozen llm pooler
-    all_extractor_types = ["hierarchical_llm",
+    all_extractor_types = ["frozen_llm_pooler", "hierarchical_llm",
                            "hierarchical_cnn", "hierarchical_gru", "simple_cnn"]
 
     extractor_types = all_extractor_types
@@ -2059,10 +2058,10 @@ def main():
     print(f"Repeats:     {args.n_repeats}")
     print(f"{'='*60}")
 
-    response = input("Proceed? [y/N] ").strip()
-    if response.lower() not in ('y', 'yes'):
-        print("Aborted.")
-        return
+    # response = input("Proceed? [y/N] ").strip()
+    # if response.lower() not in ('y', 'yes'):
+    #     print("Aborted.")
+    #     return
 
     # Separate best_attainable (CPU-only) from GPU experiments
     ba_configs = [c for c in pending_configs if c.model_type == "best_attainable"]
