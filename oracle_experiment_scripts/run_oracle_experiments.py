@@ -408,7 +408,11 @@ def group_configs_by_cache_key(
     result = []
     for cache_hash, (cache_info, cfgs) in groups.items():
         result.append((cache_hash, cache_info, cfgs))
-    result.sort(key=lambda x: (x[1]['max_length'], x[1]['dataset_name'], x[1]['downprojection_dim']))
+    result.sort(key=lambda x: (
+        x[1]['max_length'],
+        x[1]['dataset_name'],
+        (x[1]['downprojection_dim'] is None, x[1]['downprojection_dim'] or 0),
+    ))
 
     # Append non-cacheable groups (trainable extractors skip cache precomputation)
     for key, cfgs in non_cacheable_configs.items():
@@ -1392,6 +1396,7 @@ def generate_experiment_grid(
     model_names: Optional[List[str]] = None,
     chat_template_prompt: Optional[str] = None,
     filter_extractor_types: Optional[List[str]] = None,
+    filter_downprojection_dims: Optional[List[Optional[int]]] = None,
 ) -> List[ExperimentConfig]:
     """Generate all experiment configurations.
 
@@ -1439,13 +1444,15 @@ def generate_experiment_grid(
         if ext_type == "frozen_llm_pooler":
             # frozen_llm_pooler grid: max_lengths x downprojection_dims x confounders x chat_template x model_names x lr x epochs
             max_lengths = [5000, 10000, 25000, 50000, 75000, 100000]
-            downprojection_dims = [128, 256, 512]
+            downprojection_dims = [None, 128, 256, 512]  # None = no downprojection (pool on full hidden_size)
 
             chat_template_options = [None]
             if chat_template_prompt is not None:
                 chat_template_options = [None, chat_template_prompt]
             if filter_max_lengths:
                 max_lengths = [m for m in max_lengths if m in filter_max_lengths]
+            if filter_downprojection_dims is not None:
+                downprojection_dims = [d for d in downprojection_dims if d in filter_downprojection_dims]
 
             for (dataset_path, dataset_name), model_type, max_len, explicit_conf, dp_dim, ctp, mn, lr, ep in itertools.product(
                 datasets, model_types, max_lengths, explicit_confounder_options, downprojection_dims, chat_template_options, model_names, learning_rates, epoch_counts
@@ -1469,7 +1476,9 @@ def generate_experiment_grid(
             chunk_size = 2048
             chunk_overlap = 256
             max_chunks_options = [4, 8, 16]  # effective: 2048*4=8K, 2048*8=16K, 2048*16=32K
-            downprojection_dims = [128, 256, 512]
+            downprojection_dims = [None, 128, 256, 512]  # None = no downprojection (pool on full hidden_size)
+            if filter_downprojection_dims is not None:
+                downprojection_dims = [d for d in downprojection_dims if d in filter_downprojection_dims]
 
             for (dataset_path, dataset_name), model_type, n_chunks, explicit_conf, dp_dim, mn, lr, ep in itertools.product(
                 datasets, model_types, max_chunks_options, explicit_confounder_options, downprojection_dims, model_names, learning_rates, epoch_counts
@@ -1941,6 +1950,26 @@ def main():
              "hierarchical_gru, simple_cnn). Default: all."
     )
 
+    def _parse_dp_dim(value: str) -> Optional[int]:
+        if value.lower() == "none":
+            return None
+        try:
+            return int(value)
+        except ValueError:
+            raise argparse.ArgumentTypeError(
+                f"--downprojection-dims values must be integers or 'none', got '{value}'"
+            )
+
+    parser.add_argument(
+        "--downprojection-dims",
+        type=_parse_dp_dim,
+        nargs="+",
+        default=None,
+        help="Filter downprojection dims for frozen_llm_pooler / hierarchical_llm grids. "
+             "Pass integers (e.g. 128 256) and/or 'none' for no downprojection "
+             "(pool on full hidden_size). Default: all of [none, 128, 256, 512]."
+    )
+
     args = parser.parse_args()
 
     # Validate --workers-per-gpu
@@ -1967,6 +1996,7 @@ def main():
         model_names=args.model_names,
         chat_template_prompt=args.chat_template_prompt,
         filter_extractor_types=args.filter_extractor_types,
+        filter_downprojection_dims=args.downprojection_dims,
     )
 
     use_cache = args.cache or args.gpu_cache
