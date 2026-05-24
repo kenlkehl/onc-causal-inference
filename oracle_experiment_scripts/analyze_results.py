@@ -741,10 +741,19 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # but poorly calibrated CIs.
     # ---------------------------------------------------------------
     if "ci_coverage" in df.columns:
+        ci_available = df["ci_coverage"].notna()
+        ci_model_counts = (
+            df.loc[ci_available, primary_group].value_counts().sort_index()
+            if primary_group and primary_group in df.columns
+            else pd.Series(dtype=int)
+        )
         lines = [
-            f"Overall CI coverage: {fmt(df['ci_coverage'].mean())} "
+            f"Overall CI coverage among runs with CI metrics: {fmt(df['ci_coverage'].mean())} "
             f"(target: 0.95)",
-            f"Overall CI width:    {fmt(df['mean_ci_width'].mean())}",
+            f"Overall CI width among runs with CI metrics:    {fmt(df['mean_ci_width'].mean())}",
+            f"Runs with CI metrics: {int(ci_available.sum())} / {len(df)}",
+            "Model types with CI metrics:",
+            ci_model_counts.to_string() if len(ci_model_counts) else "None",
             "",
         ]
         if primary_group and primary_group in df.columns:
