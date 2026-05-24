@@ -163,6 +163,25 @@ def fmt(val, decimals=4):
     return f"{val:.{decimals}f}"
 
 
+def has_present_values(df: pd.DataFrame, col: str) -> bool:
+    """Return True if a column exists and has at least one non-missing value."""
+    return col in df.columns and df[col].notna().any()
+
+
+def sorted_unique_present(series: pd.Series) -> list:
+    """Return sorted non-missing unique values, robust to mixed scalar types."""
+    values = series.dropna().unique()
+    return sorted(values, key=lambda v: (type(v).__name__, str(v)))
+
+
+def choose_primary_group(df: pd.DataFrame) -> str | None:
+    """Choose the best available model grouping column."""
+    for col in ["rlearner_mode", "model_type"]:
+        if has_present_values(df, col):
+            return col
+    return None
+
+
 def group_summary(
     df: pd.DataFrame,
     group_cols: list[str],
@@ -180,14 +199,14 @@ def group_summary(
         if i > 0:
             agg_funcs[m] = ["mean", "std", "min", "max"]
 
-    grouped = df.groupby(group_cols, dropna=False).agg(agg_funcs).round(4)
+    grouped = df.groupby(group_cols, dropna=False, sort=False).agg(agg_funcs).round(4)
     return grouped.to_string()
 
 
 def pairwise_ttest(df: pd.DataFrame, group_col: str, metric: str) -> list[str]:
     """Run pairwise t-tests between groups for a metric."""
     lines = []
-    groups = sorted(df[group_col].dropna().unique())
+    groups = sorted_unique_present(df[group_col])
     if len(groups) < 2:
         return [f"  Only {len(groups)} group(s), skipping t-tests."]
 
@@ -220,19 +239,19 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # ---------------------------------------------------------------
     lines = [
         f"Total experiments completed: {len(df)}",
-        f"Datasets represented: {sorted(df['dataset_name'].unique())}",
+        f"Datasets represented: {sorted_unique_present(df['dataset_name'])}",
     ]
-    if 'model_type' in df.columns:
-        lines.append(f"Model types: {sorted(df['model_type'].unique())}")
-    if 'feature_extractor_type' in df.columns:
-        lines.append(f"Extractor types: {sorted(df['feature_extractor_type'].unique())}")
-    if 'rlearner_mode' in df.columns:
-        lines.append(f"R-learner modes: {sorted(df['rlearner_mode'].unique())}")
-    if 'clam_enabled' in df.columns:
-        lines.append(f"CLAM enabled: {sorted(df['clam_enabled'].unique())}")
-    lines.append(f"Explicit confounders: {sorted(df['use_explicit_confounders'].unique())}")
-    if 'outcome_type' in df.columns:
-        lines.append(f"Outcome types: {sorted(df['outcome_type'].unique())}")
+    if has_present_values(df, 'model_type'):
+        lines.append(f"Model types: {sorted_unique_present(df['model_type'])}")
+    if has_present_values(df, 'feature_extractor_type'):
+        lines.append(f"Extractor types: {sorted_unique_present(df['feature_extractor_type'])}")
+    if has_present_values(df, 'rlearner_mode'):
+        lines.append(f"R-learner modes: {sorted_unique_present(df['rlearner_mode'])}")
+    if has_present_values(df, 'clam_enabled'):
+        lines.append(f"CLAM enabled: {sorted_unique_present(df['clam_enabled'])}")
+    lines.append(f"Explicit confounders: {sorted_unique_present(df['use_explicit_confounders'])}")
+    if has_present_values(df, 'outcome_type'):
+        lines.append(f"Outcome types: {sorted_unique_present(df['outcome_type'])}")
     lines += [
         "",
         "ITE correlation:    "
@@ -267,11 +286,7 @@ def analyze(df: pd.DataFrame) -> list[str]:
     # ---------------------------------------------------------------
     # 1. By model type / rlearner_mode
     # ---------------------------------------------------------------
-    primary_group = (
-        "rlearner_mode" if "rlearner_mode" in df.columns
-        else "model_type" if "model_type" in df.columns
-        else None
-    )
+    primary_group = choose_primary_group(df)
     if primary_group and df[primary_group].nunique() > 1:
         lines = [
             group_summary(df, [primary_group]),
