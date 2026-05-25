@@ -1176,6 +1176,7 @@ def run_best_attainable_experiment(
     """
     from econml.dml import CausalForestDML
     from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+    from oci.models.causal_forest_head import tune_causal_forest_model
     from oci.models.explicit_confounder_featurizer import get_raw_confounder_features
 
     confounder_specs = load_confounder_specs_from_metadata(config.dataset_path)
@@ -1245,28 +1246,33 @@ def run_best_attainable_experiment(
 
         # Train CausalForestDML with flexible nuisance models
         # (DGP has interaction terms that linear defaults can't capture)
-        cf = CausalForestDML(
-            model_t=RandomForestClassifier(
-                n_estimators=max(50, config.cf_n_estimators // 2),
+        def create_causal_forest():
+            return CausalForestDML(
+                model_t=RandomForestClassifier(
+                    n_estimators=max(50, config.cf_n_estimators // 2),
+                    min_samples_leaf=config.cf_min_samples_leaf,
+                    random_state=42 + config.repeat_index,
+                    n_jobs=n_jobs,
+                ),
+                model_y=RandomForestRegressor(
+                    n_estimators=max(50, config.cf_n_estimators // 2),
+                    min_samples_leaf=config.cf_min_samples_leaf,
+                    random_state=42 + config.repeat_index,
+                    n_jobs=n_jobs,
+                ),
+                discrete_treatment=True,
+                n_estimators=config.cf_n_estimators,
                 min_samples_leaf=config.cf_min_samples_leaf,
+                max_depth=None,
+                honest=True,
+                inference=True,
                 random_state=42 + config.repeat_index,
                 n_jobs=n_jobs,
-            ),
-            model_y=RandomForestRegressor(
-                n_estimators=max(50, config.cf_n_estimators // 2),
-                min_samples_leaf=config.cf_min_samples_leaf,
-                random_state=42 + config.repeat_index,
-                n_jobs=n_jobs,
-            ),
-            discrete_treatment=True,
-            n_estimators=config.cf_n_estimators,
-            min_samples_leaf=config.cf_min_samples_leaf,
-            max_depth=None,
-            honest=True,
-            inference=True,
-            random_state=42 + config.repeat_index,
-            n_jobs=n_jobs,
-        )
+            )
+
+        cf = create_causal_forest()
+        if not tune_causal_forest_model(cf, Y=Y_train, T=T_train, X=X_train):
+            cf = create_causal_forest()
         cf.fit(Y_train, T_train, X=X_train)
 
         # Predict on test fold

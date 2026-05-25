@@ -16,6 +16,28 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def tune_causal_forest_model(
+    model: Any,
+    Y: np.ndarray,
+    T: np.ndarray,
+    X: np.ndarray,
+    params: Any = "auto",
+) -> bool:
+    """Tune an EconML CausalForestDML model, falling back to configured parameters."""
+    try:
+        logger.info("Tuning CausalForestDML hyperparameters with params=%r", params)
+        model.tune(Y=Y, T=T, X=X, params=params)
+        logger.info("CausalForestDML hyperparameter tuning complete")
+        return True
+    except Exception as exc:
+        logger.warning(
+            "CausalForestDML hyperparameter tuning failed; fitting with configured "
+            "hyperparameters. Error: %s",
+            exc,
+        )
+        return False
+
+
 class CausalForestHead:
     """
     Causal Forest head for ITE estimation from neural features.
@@ -77,6 +99,40 @@ class CausalForestHead:
         self.model = None
         self._fitted = False
 
+    def _create_model(self):
+        """Create an unfitted CausalForestDML with configured nuisance models."""
+        model_t = RandomForestClassifier(
+            n_estimators=max(50, self.n_estimators // 2),
+            max_depth=self.max_depth,
+            min_samples_leaf=self.min_samples_leaf,
+            random_state=self.random_state,
+            n_jobs=-1
+        )
+        logger.info("Using random forest for propensity estimation (on neural features)")
+
+        model_y = RandomForestRegressor(
+            n_estimators=max(50, self.n_estimators // 2),
+            max_depth=self.max_depth,
+            min_samples_leaf=self.min_samples_leaf,
+            random_state=self.random_state,
+            n_jobs=-1
+        )
+        logger.info("Using random forest for outcome estimation (on neural features)")
+
+        return CausalForestDML(
+            model_t=model_t,
+            model_y=model_y,
+            discrete_treatment=True,  # Binary treatment indicator
+            n_estimators=self.n_estimators,
+            max_depth=self.max_depth,
+            min_samples_leaf=self.min_samples_leaf,
+            max_features=self.max_features,
+            honest=self.honest,
+            inference=self.inference,
+            random_state=self.random_state,
+            n_jobs=-1
+        )
+
     def fit(
         self,
         X: np.ndarray,
@@ -104,43 +160,10 @@ class CausalForestHead:
         T = np.asarray(T).flatten()
         Y = np.asarray(Y).flatten()
 
-        # Create nuisance models using sklearn (reliable with cross-fitting)
-        # Note: CausalForestDML uses cross-fitting internally, so we can't easily
-        # use pre-computed neural network predictions. Instead, we use sklearn
-        # models that work well with the cross-fitting procedure.
-        # The neural network's contribution is the learned feature representation X.
-        model_t = RandomForestClassifier(
-            n_estimators=max(50, self.n_estimators // 2),
-            max_depth=self.max_depth,
-            min_samples_leaf=self.min_samples_leaf,
-            random_state=self.random_state,
-            n_jobs=-1
-        )
-        logger.info("Using random forest for propensity estimation (on neural features)")
-
-        model_y = RandomForestRegressor(
-            n_estimators=max(50, self.n_estimators // 2),
-            max_depth=self.max_depth,
-            min_samples_leaf=self.min_samples_leaf,
-            random_state=self.random_state,
-            n_jobs=-1
-        )
-        logger.info("Using random forest for outcome estimation (on neural features)")
-
-        # Create CausalForestDML with discrete_treatment=True for binary treatment
-        self.model = CausalForestDML(
-            model_t=model_t,
-            model_y=model_y,
-            discrete_treatment=True,  # Binary treatment indicator
-            n_estimators=self.n_estimators,
-            max_depth=self.max_depth,
-            min_samples_leaf=self.min_samples_leaf,
-            max_features=self.max_features,
-            honest=self.honest,
-            inference=self.inference,
-            random_state=self.random_state,
-            n_jobs=-1
-        )
+        self.model = self._create_model()
+        if not tune_causal_forest_model(self.model, Y=Y, T=T, X=X):
+            logger.info("Rebuilding CausalForestDML after failed tuning attempt")
+            self.model = self._create_model()
 
         # Fit the model
         # CausalForestDML expects T as 1D and Y as 1D
