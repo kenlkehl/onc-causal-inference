@@ -9,9 +9,9 @@ import torch.nn.functional as F
 
 from .dragonnet import DragonNet
 from .rlearner import RLearnerNet
-from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer
+from .explicit_feature_featurizer import ExplicitFeatureFeaturizer
 from .extractor_factory import create_feature_extractor
-from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
+from ..config import normalize_feature_extractor_type, ExplicitFeatureSpec
 
 
 logger = logging.getLogger(__name__)
@@ -102,8 +102,13 @@ class CausalText(nn.Module):
         model_type: str = "dragonnet",  # "dragonnet" or "rlearner"
         # Auxiliary features (for hybrid text + categorical models)
         auxiliary_dim: int = 0,  # Dimension of auxiliary categorical features (0 = no auxiliary)
-        # Explicit confounder featurizer args
-        explicit_confounder_specs: Optional[List[ExplicitConfounderSpec]] = None,
+        # Explicit feature featurizer args
+        explicit_feature_specs: Optional[List[ExplicitFeatureSpec]] = None,
+        explicit_feature_output_dim: int = 64,
+        explicit_feature_hidden_dim: int = 128,
+        explicit_feature_dropout: float = 0.1,
+        # Backward-compatible aliases for old checkpoints/callers.
+        explicit_confounder_specs: Optional[List[ExplicitFeatureSpec]] = None,
         explicit_confounder_output_dim: int = 64,
         explicit_confounder_hidden_dim: int = 128,
         explicit_confounder_dropout: float = 0.1,
@@ -141,6 +146,11 @@ class CausalText(nn.Module):
         self.outcome_type = outcome_type
         # Normalize feature extractor type
         self.feature_extractor_type = normalize_feature_extractor_type(feature_extractor_type)
+        if explicit_feature_specs is None:
+            explicit_feature_specs = explicit_confounder_specs
+            explicit_feature_output_dim = explicit_confounder_output_dim
+            explicit_feature_hidden_dim = explicit_confounder_hidden_dim
+            explicit_feature_dropout = explicit_confounder_dropout
 
         # Store config for checkpointing (store original type for reproducibility)
         self.config = {
@@ -204,10 +214,10 @@ class CausalText(nn.Module):
             'causal_head_dropout': causal_head_dropout,
             'model_type': model_type,
             'auxiliary_dim': auxiliary_dim,
-            'explicit_confounder_specs': explicit_confounder_specs,
-            'explicit_confounder_output_dim': explicit_confounder_output_dim,
-            'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
-            'explicit_confounder_dropout': explicit_confounder_dropout,
+            'explicit_feature_specs': explicit_feature_specs,
+            'explicit_feature_output_dim': explicit_feature_output_dim,
+            'explicit_feature_hidden_dim': explicit_feature_hidden_dim,
+            'explicit_feature_dropout': explicit_feature_dropout,
             'rlearner_dual_extractors': rlearner_dual_extractors,
             'outcome_type': outcome_type,
         }
@@ -293,28 +303,32 @@ class CausalText(nn.Module):
         else:
             self.auxiliary_projection = None
 
-        # Explicit confounder featurizer (if specs provided)
-        self.explicit_confounder_specs = explicit_confounder_specs
-        if explicit_confounder_specs and len(explicit_confounder_specs) > 0:
-            self.explicit_confounder_featurizer = ExplicitConfounderFeaturizer(
-                specs=explicit_confounder_specs,
-                output_dim=explicit_confounder_output_dim,
-                hidden_dim=explicit_confounder_hidden_dim,
-                dropout=explicit_confounder_dropout,
+        # Explicit feature featurizer (if specs provided)
+        self.explicit_feature_specs = explicit_feature_specs
+        self.explicit_confounder_specs = explicit_feature_specs
+        if explicit_feature_specs and len(explicit_feature_specs) > 0:
+            self.explicit_feature_featurizer = ExplicitFeatureFeaturizer(
+                specs=explicit_feature_specs,
+                output_dim=explicit_feature_output_dim,
+                hidden_dim=explicit_feature_hidden_dim,
+                dropout=explicit_feature_dropout,
                 device=str(self._device)
             )
-            logger.info(f"Explicit confounder featurizer enabled: {len(explicit_confounder_specs)} confounders, "
-                       f"output_dim={explicit_confounder_output_dim}")
+            logger.info(
+                f"Explicit feature featurizer enabled: {len(explicit_feature_specs)} features, "
+                f"output_dim={explicit_feature_output_dim}"
+            )
         else:
-            self.explicit_confounder_featurizer = None
+            self.explicit_feature_featurizer = None
+        self.explicit_confounder_featurizer = self.explicit_feature_featurizer
 
         # Binary treatment Causal Inference Net
         # Input dim = text features + auxiliary features (if any) + explicit confounder features (if any)
         input_dim = self.feature_extractor.output_dim
         if auxiliary_dim > 0:
             input_dim += causal_head_representation_dim // 2
-        if self.explicit_confounder_featurizer is not None:
-            input_dim += explicit_confounder_output_dim
+        if self.explicit_feature_featurizer is not None:
+            input_dim += explicit_feature_output_dim
 
         if model_type == "rlearner":
             self.net = RLearnerNet(
@@ -456,11 +470,35 @@ class CausalText(nn.Module):
             return batch
         return texts
 
+    @staticmethod
+    def _get_explicit_feature_values(
+        batch: Dict[str, Any],
+        override: Optional[List[Dict[str, Any]]] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """Return explicit feature values from the new key, with legacy fallback."""
+        if override is not None:
+            return override
+        return batch.get('explicit_feature_values', batch.get('explicit_confounder_values', None))
+
+    def _append_explicit_features(
+        self,
+        features: torch.Tensor,
+        explicit_feature_values: Optional[List[Dict[str, Any]]],
+    ) -> torch.Tensor:
+        """Append explicit feature embeddings when configured and present."""
+        if self.explicit_feature_featurizer is None:
+            return features
+        if explicit_feature_values is None:
+            return features
+        explicit_features = self.explicit_feature_featurizer(explicit_feature_values)
+        return torch.cat([features, explicit_features], dim=1)
+
     def forward(
         self,
         texts: List[str],
         auxiliary_features: Optional[torch.Tensor] = None,
-        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through the complete model.
@@ -484,10 +522,8 @@ class CausalText(nn.Module):
             aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
             features = torch.cat([features, aux_projected], dim=1)
 
-        # Concatenate explicit confounder features if provided
-        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-            features = torch.cat([features, conf_features], dim=1)
+        explicit_feature_values = explicit_feature_values or explicit_confounder_values
+        features = self._append_explicit_features(features, explicit_feature_values)
 
         if self.model_type == "rlearner":
             # RLearnerNet returns: m_logit, tau, t_logit, final_common_layer
@@ -558,7 +594,7 @@ class CausalText(nn.Module):
         treatments = batch['treatment']  # (batch,)
         outcomes = batch['outcome']  # (batch,)
         auxiliary_features = batch.get('auxiliary_features', None)
-        explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        explicit_feature_values = self._get_explicit_feature_values(batch)
         extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing if enabled (skip outcome smoothing for continuous)
@@ -580,10 +616,7 @@ class CausalText(nn.Module):
             aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
             features = torch.cat([features, aux_projected], dim=1)
 
-        # Concatenate explicit confounder features if provided
-        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-            features = torch.cat([features, conf_features], dim=1)
+        features = self._append_explicit_features(features, explicit_feature_values)
 
         # DragonNet: handle stop_grad_propensity
         if stop_grad_propensity:
@@ -689,7 +722,7 @@ class CausalText(nn.Module):
         treatments = batch['treatment']  # (batch,)
         outcomes = batch['outcome']  # (batch,)
         auxiliary_features = batch.get('auxiliary_features', None)
-        explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        explicit_feature_values = self._get_explicit_feature_values(batch)
         extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing if enabled (skip outcome smoothing for continuous)
@@ -723,10 +756,7 @@ class CausalText(nn.Module):
                 aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
                 nuisance_features = torch.cat([nuisance_features, aux_projected], dim=1)
 
-            # Concatenate explicit confounder features if provided
-            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-                nuisance_features = torch.cat([nuisance_features, conf_features], dim=1)
+            nuisance_features = self._append_explicit_features(nuisance_features, explicit_feature_values)
 
             # Nuisance heads: propensity e(X) and marginal outcome m(X)
             # Note: We use the RLearnerNet's shared layers but only for nuisance functions
@@ -794,10 +824,7 @@ class CausalText(nn.Module):
                 aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
                 features = torch.cat([features, aux_projected], dim=1)
 
-            # Concatenate explicit confounder features if provided
-            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-                features = torch.cat([features, conf_features], dim=1)
+            features = self._append_explicit_features(features, explicit_feature_values)
 
             if stop_grad_propensity:
                 # CRITICAL: Detach features for propensity to prevent propensity
@@ -886,7 +913,8 @@ class CausalText(nn.Module):
         self,
         texts_or_batch,
         auxiliary_features: Optional[torch.Tensor] = None,
-        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, torch.Tensor]:
         """
         Make predictions for inference.
@@ -905,11 +933,14 @@ class CausalText(nn.Module):
             if isinstance(texts_or_batch, dict):
                 texts = texts_or_batch['texts']
                 extractor_input = self._get_extractor_input(texts_or_batch, texts)
-                if explicit_confounder_values is None:
-                    explicit_confounder_values = texts_or_batch.get('explicit_confounder_values', None)
+                explicit_feature_values = self._get_explicit_feature_values(
+                    texts_or_batch,
+                    override=explicit_feature_values or explicit_confounder_values,
+                )
             else:
                 texts = texts_or_batch
                 extractor_input = texts
+                explicit_feature_values = explicit_feature_values or explicit_confounder_values
 
             features = self.feature_extractor(extractor_input)
 
@@ -918,10 +949,7 @@ class CausalText(nn.Module):
                 aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
                 features = torch.cat([features, aux_projected], dim=1)
 
-            # Concatenate explicit confounder features if provided
-            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-                features = torch.cat([features, conf_features], dim=1)
+            features = self._append_explicit_features(features, explicit_feature_values)
 
             if self.model_type == "rlearner":
                 # Check for dual extractor mode
@@ -994,7 +1022,8 @@ class CausalText(nn.Module):
     def get_features(
         self,
         texts_or_batch,
-        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
     ) -> torch.Tensor:
         """
         Extract feature representations from texts.
@@ -1010,17 +1039,17 @@ class CausalText(nn.Module):
             if isinstance(texts_or_batch, dict):
                 texts = texts_or_batch['texts']
                 extractor_input = self._get_extractor_input(texts_or_batch, texts)
-                if explicit_confounder_values is None:
-                    explicit_confounder_values = texts_or_batch.get('explicit_confounder_values', None)
+                explicit_feature_values = self._get_explicit_feature_values(
+                    texts_or_batch,
+                    override=explicit_feature_values or explicit_confounder_values,
+                )
             else:
                 extractor_input = texts_or_batch
+                explicit_feature_values = explicit_feature_values or explicit_confounder_values
 
             features = self.feature_extractor(extractor_input)
 
-            # Concatenate explicit confounder features if provided
-            if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-                conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-                features = torch.cat([features, conf_features], dim=1)
+            features = self._append_explicit_features(features, explicit_feature_values)
 
             return features
 
@@ -1047,26 +1076,33 @@ class CausalText(nn.Module):
             if hasattr(self.effect_feature_extractor, 'fit_tokenizer'):
                 self.effect_feature_extractor.fit_tokenizer(texts)
 
-    def fit_explicit_confounder_featurizer(
+    def fit_explicit_feature_featurizer(
         self,
-        confounder_values_list: List[Dict[str, Any]]
+        feature_values_list: List[Dict[str, Any]]
     ) -> 'CausalText':
         """
-        Fit the explicit confounder featurizer on training data.
+        Fit the explicit feature featurizer on training data.
 
-        This computes normalization statistics (mean/std) for continuous confounders.
-        Must be called before training if explicit confounders are used.
+        This computes normalization statistics (mean/std) for continuous features.
+        Must be called before training if explicit features are used.
 
         Args:
-            confounder_values_list: List of dicts with confounder values from training data.
+            feature_values_list: List of dicts with feature values from training data.
                 Each dict should have "{name}" and "{name}_missing" keys.
 
         Returns:
             self for method chaining
         """
-        if self.explicit_confounder_featurizer is not None:
-            self.explicit_confounder_featurizer.fit(confounder_values_list)
+        if self.explicit_feature_featurizer is not None:
+            self.explicit_feature_featurizer.fit(feature_values_list)
         return self
+
+    def fit_explicit_confounder_featurizer(
+        self,
+        confounder_values_list: List[Dict[str, Any]]
+    ) -> 'CausalText':
+        """Backward-compatible alias for fit_explicit_feature_featurizer."""
+        return self.fit_explicit_feature_featurizer(confounder_values_list)
 
     def save_checkpoint(
         self,
@@ -1089,9 +1125,10 @@ class CausalText(nn.Module):
         # Save extractor state
         checkpoint['extractor_state'] = self.feature_extractor.get_state()
 
-        # Save explicit confounder featurizer state if enabled
-        if self.explicit_confounder_featurizer is not None:
-            checkpoint['explicit_confounder_featurizer_state'] = self.explicit_confounder_featurizer.get_state()
+        # Save explicit feature featurizer state if enabled
+        if self.explicit_feature_featurizer is not None:
+            checkpoint['explicit_feature_featurizer_state'] = self.explicit_feature_featurizer.get_state()
+            checkpoint['explicit_confounder_featurizer_state'] = checkpoint['explicit_feature_featurizer_state']
 
         # Save effect extractor and effect MLP state if in dual mode (R-Learner)
         if self.rlearner_dual_extractors and self.model_type == "rlearner":
@@ -1164,9 +1201,13 @@ class CausalText(nn.Module):
                     if 'effect_mlp' in checkpoint:
                         model.effect_mlp.load_state_dict(checkpoint['effect_mlp'])
 
-        # Load explicit confounder featurizer state if present
-        if 'explicit_confounder_featurizer_state' in checkpoint and model.explicit_confounder_featurizer is not None:
-            model.explicit_confounder_featurizer.load_state(checkpoint['explicit_confounder_featurizer_state'])
+        # Load explicit feature featurizer state if present
+        feature_state = checkpoint.get(
+            'explicit_feature_featurizer_state',
+            checkpoint.get('explicit_confounder_featurizer_state')
+        )
+        if feature_state is not None and model.explicit_feature_featurizer is not None:
+            model.explicit_feature_featurizer.load_state(feature_state)
 
         logger.info(f"Model loaded from {path}")
         return model

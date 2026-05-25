@@ -7,7 +7,7 @@ Tests the main applied user workflows:
 3. RLearner + Dual Extractors + CV
 4. Causal Forest (neural features from R-learner training) + CV
 5. TF-IDF Forest + CV
-6. Confounders-Only Causal Forest + CV
+6. Explicit Feature Causal Forest + CV
 """
 
 import gc
@@ -21,11 +21,11 @@ from oci.config import (
     AppliedInferenceConfig,
     ModelArchitectureConfig,
     TrainingConfig,
-    ExplicitConfounderExtractionConfig,
-    ExplicitConfounderSpec,
+    ExplicitFeatureExtractionConfig,
+    ExplicitFeatureSpec,
     CausalForestConfig,
     TfidfForestConfig,
-    ConfounderForestConfig,
+    ExplicitFeatureForestConfig,
 )
 from oci.inference.applied import run_applied_inference
 
@@ -64,40 +64,42 @@ def _create_test_dataset(n: int = 40, seed: int = 42) -> pd.DataFrame:
     })
 
 
-def _add_mock_confounders(df: pd.DataFrame) -> tuple:
-    """Add mock confounder columns to DataFrame.
+def _add_mock_features(df: pd.DataFrame) -> tuple:
+    """Add mock explicit feature columns to DataFrame.
 
     Returns:
-        (specs, confounder_columns) tuple
+        (specs, feature_columns) tuple
     """
     rng = np.random.RandomState(123)
     n = len(df)
 
     specs = [
-        ExplicitConfounderSpec(
+        ExplicitFeatureSpec(
             name="ecog_status",
             type="categorical",
             categories=["0", "1", "2"],
-            description="ECOG performance status"
+            description="ECOG performance status",
+            roles=["confounder", "effect_modifier"],
         ),
-        ExplicitConfounderSpec(
+        ExplicitFeatureSpec(
             name="age",
             type="continuous",
-            description="Patient age at diagnosis"
+            description="Patient age at diagnosis",
+            roles=["confounder"],
         ),
     ]
 
-    # Add categorical confounder
-    df['explicit_conf_ecog_status'] = rng.choice(["0", "1", "2"], size=n)
-    df['explicit_conf_ecog_status_missing'] = False
+    # Add categorical feature
+    df['explicit_feat_ecog_status'] = rng.choice(["0", "1", "2"], size=n)
+    df['explicit_feat_ecog_status_missing'] = False
 
-    # Add continuous confounder
-    df['explicit_conf_age'] = rng.uniform(40, 80, size=n)
-    df['explicit_conf_age_missing'] = False
+    # Add continuous feature
+    df['explicit_feat_age'] = rng.uniform(40, 80, size=n)
+    df['explicit_feat_age_missing'] = False
 
     columns = [
-        'explicit_conf_ecog_status', 'explicit_conf_ecog_status_missing',
-        'explicit_conf_age', 'explicit_conf_age_missing',
+        'explicit_feat_ecog_status', 'explicit_feat_ecog_status_missing',
+        'explicit_feat_age', 'explicit_feat_age_missing',
     ]
 
     return specs, columns
@@ -147,7 +149,7 @@ def _make_config(
         honest=False,
         inference=True,
     )
-    arch_kwargs['confounder_forest'] = ConfounderForestConfig(
+    arch_kwargs['explicit_feature_forest'] = ExplicitFeatureForestConfig(
         n_estimators=8,
         min_samples_leaf=2,
         honest=False,
@@ -345,29 +347,29 @@ class TestTfidfForest:
         _verify_forest_predictions(results_df, n_expected=len(df))
 
 
-class TestConfounderForest:
-    """Test Confounders-Only Causal Forest + CV."""
+class TestExplicitFeatureForest:
+    """Test Explicit Feature Causal Forest + CV."""
 
-    def test_confounder_forest_cv(self, test_dataset, tmp_path, device):
+    def test_explicit_feature_forest_cv(self, test_dataset, tmp_path, device):
         df, dataset_path = test_dataset
         df = df.copy()
-        specs, conf_columns = _add_mock_confounders(df)
+        specs, feature_columns = _add_mock_features(df)
 
         output_path = tmp_path / "applied_inference" / "predictions.parquet"
 
-        config = _make_config("confounder_forest", dataset_path)
-        config.explicit_confounders = ExplicitConfounderExtractionConfig(
+        config = _make_config("explicit_feature_forest", dataset_path)
+        config.explicit_features = ExplicitFeatureExtractionConfig(
             enabled=True,
-            confounders=specs,
+            features=specs,
         )
 
-        # Call the confounder forest pipeline directly (bypassing extraction)
-        from oci.inference.applied_confounder_forest import run_applied_inference_confounder_forest
-        run_applied_inference_confounder_forest(
+        # Call the explicit feature forest pipeline directly (bypassing extraction)
+        from oci.inference.applied_explicit_feature_forest import run_applied_inference_explicit_feature_forest
+        run_applied_inference_explicit_feature_forest(
             dataset=df,
             config=config,
             output_path=output_path,
-            explicit_confounder_columns=conf_columns,
+            explicit_feature_columns=feature_columns,
         )
 
         results_df = pd.read_parquet(output_path)

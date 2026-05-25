@@ -1,5 +1,5 @@
 # oci/extraction/cache.py
-"""Caching utilities for LLM-based confounder extraction results.
+"""Caching utilities for LLM-based explicit feature extraction results.
 
 The cache helps avoid redundant LLM calls by storing extraction results
 keyed by (dataset path hash + extraction config hash). Cache files are
@@ -20,17 +20,18 @@ logger = logging.getLogger(__name__)
 def _compute_config_hash(config: Dict[str, Any]) -> str:
     """Compute a deterministic hash of extraction configuration.
 
-    Includes: confounder specs, model name, temperature, max_tokens.
+    Includes: feature specs, roles, model name, temperature, max_tokens.
     """
     # Extract relevant fields for hashing
     hash_dict = {
-        'confounders': [
+        'features': [
             {
                 'name': c.get('name') if isinstance(c, dict) else c.name,
                 'type': c.get('type') if isinstance(c, dict) else c.type,
                 'categories': c.get('categories') if isinstance(c, dict) else c.categories,
+                'roles': c.get('roles') if isinstance(c, dict) else c.roles,
             }
-            for c in config.get('confounders', [])
+            for c in config.get('features', config.get('confounders', []))
         ],
         'vllm_model_name': config.get('vllm_model_name', ''),
         'extraction_temperature': config.get('extraction_temperature', 0.0),
@@ -47,7 +48,7 @@ def _compute_dataset_hash(dataset_path: str) -> str:
 
 
 class ExtractionCache:
-    """Cache for LLM-based confounder extraction results.
+    """Cache for LLM-based explicit feature extraction results.
 
     Cache files are stored as:
         {cache_dir}/.oci_cache/extraction_{dataset_hash}_{config_hash}.parquet
@@ -122,12 +123,12 @@ class ExtractionCache:
                 return None
 
             # Verify expected columns exist
-            confounders = config.get('confounders', [])
+            features = config.get('features', config.get('confounders', []))
             expected_cols = []
-            for c in confounders:
+            for c in features:
                 name = c.get('name') if isinstance(c, dict) else c.name
-                expected_cols.append(f"explicit_conf_{name}")
-                expected_cols.append(f"explicit_conf_{name}_missing")
+                expected_cols.append(f"explicit_feat_{name}")
+                expected_cols.append(f"explicit_feat_{name}_missing")
 
             missing_cols = set(expected_cols) - set(cached_df.columns)
             if missing_cols:

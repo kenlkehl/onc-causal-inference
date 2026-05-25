@@ -59,15 +59,12 @@ class RLearnerNet(nn.Module):
         self.representation_fc2 = nn.Linear(representation_dim, representation_dim)
         self.rep_dropout = nn.Dropout(dropout)
 
-        # Propensity head: P(T=1|X) - single linear layer
-        self.propensity_fc = nn.Linear(representation_dim, 1)
+        # Nuisance branch: hidden state W jointly supports e(X) and m(X).
+        self.nuisance_fc = nn.Linear(representation_dim, hidden_outcome_dim)
+        self.propensity_fc = nn.Linear(hidden_outcome_dim, 1)
+        self.outcome_fc = nn.Linear(hidden_outcome_dim, 1)
 
-        # Marginal outcome head: E[Y|X] - 2 hidden layers
-        self.outcome_fc1 = nn.Linear(representation_dim, hidden_outcome_dim)
-        self.outcome_fc2 = nn.Linear(hidden_outcome_dim, hidden_outcome_dim)
-        self.outcome_fc3 = nn.Linear(hidden_outcome_dim, 1)
-
-        # Treatment effect head: τ(X) = E[Y(1)-Y(0)|X] - 2 hidden layers
+        # Treatment effect branch: hidden state X supports τ(X).
         # Note: τ is unbounded (no final activation), can be positive or negative
         self.effect_fc1 = nn.Linear(representation_dim, hidden_outcome_dim)
         self.effect_fc2 = nn.Linear(hidden_outcome_dim, hidden_outcome_dim)
@@ -95,24 +92,40 @@ class RLearnerNet(nn.Module):
         phi = F.elu(self.representation_fc2(h))
         phi = self.rep_dropout(phi)
 
-        # Propensity head
-        t_logit = self.propensity_fc(phi)
-
-        # Marginal outcome head
-        m = F.relu(self.outcome_fc1(phi))
-        m = self.outcome_dropout(m)
-        m = F.elu(self.outcome_fc2(m))
-        m = self.outcome_dropout(m)
-        m_logit = self.outcome_fc3(m)
+        # Nuisance branch: W is the common hidden state for propensity/outcome.
+        w_hidden = F.relu(self.nuisance_fc(phi))
+        w_hidden = self.outcome_dropout(w_hidden)
+        t_logit = self.propensity_fc(w_hidden)
+        m_logit = self.outcome_fc(w_hidden)
 
         # Treatment effect head (no final activation - τ can be negative)
-        tau = F.relu(self.effect_fc1(phi))
-        tau = self.outcome_dropout(tau)
+        x_hidden = F.relu(self.effect_fc1(phi))
+        tau = self.outcome_dropout(x_hidden)
         tau = F.elu(self.effect_fc2(tau))
         tau = self.outcome_dropout(tau)
         tau_out = self.effect_fc3(tau)
 
         return m_logit, tau_out, t_logit, phi
+
+    def forward_with_activations(self, features: torch.Tensor):
+        """Forward pass returning role-specific W/X branch activations."""
+        h = F.relu(self.representation_fc1(features))
+        h = self.rep_dropout(h)
+        phi = F.elu(self.representation_fc2(h))
+        phi = self.rep_dropout(phi)
+
+        w_hidden = F.relu(self.nuisance_fc(phi))
+        w_hidden = self.outcome_dropout(w_hidden)
+        t_logit = self.propensity_fc(w_hidden)
+        m_logit = self.outcome_fc(w_hidden)
+
+        x_hidden = F.relu(self.effect_fc1(phi))
+        tau = self.outcome_dropout(x_hidden)
+        tau = F.elu(self.effect_fc2(tau))
+        tau = self.outcome_dropout(tau)
+        tau_out = self.effect_fc3(tau)
+
+        return m_logit, tau_out, t_logit, phi, w_hidden, x_hidden
 
     def get_representation(self, features):
         """Compute shared representation from input features."""
@@ -124,4 +137,6 @@ class RLearnerNet(nn.Module):
 
     def propensity_from_representation(self, phi):
         """Compute propensity logit from shared representation."""
-        return self.propensity_fc(phi)
+        w_hidden = F.relu(self.nuisance_fc(phi))
+        w_hidden = self.outcome_dropout(w_hidden)
+        return self.propensity_fc(w_hidden)

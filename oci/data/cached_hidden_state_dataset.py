@@ -34,7 +34,7 @@ class CachedHiddenStateDataset(Dataset):
         outcome_column: Name of outcome column.
         treatment_column: Name of treatment column.
         dataset_indices: Array mapping local position -> global cache index.
-        explicit_confounder_columns: Optional list of explicit confounder column names.
+        explicit_feature_columns: Optional list of explicit feature column names.
         cache_hidden_states: Optional numpy array of hidden states (N, seq_len, hidden_size).
             When provided, __getitem__ returns hidden states directly.
         cache_attention_masks: Optional numpy array of attention masks (N, seq_len).
@@ -48,6 +48,7 @@ class CachedHiddenStateDataset(Dataset):
         outcome_column: str,
         treatment_column: str,
         dataset_indices: np.ndarray,
+        explicit_feature_columns: Optional[List[str]] = None,
         explicit_confounder_columns: Optional[List[str]] = None,
         cache_hidden_states: Optional[np.ndarray] = None,
         cache_attention_masks: Optional[np.ndarray] = None,
@@ -72,15 +73,17 @@ class CachedHiddenStateDataset(Dataset):
             dtype=torch.float32
         )
 
-        # Extract explicit confounder values if columns provided
-        self.explicit_confounder_columns = explicit_confounder_columns or []
-        self.explicit_confounder_values = None
-        if self.explicit_confounder_columns:
-            self.explicit_confounder_values = []
+        # Extract explicit feature values if columns provided
+        self.explicit_feature_columns = explicit_feature_columns or explicit_confounder_columns or []
+        self.explicit_feature_values = None
+        if self.explicit_feature_columns:
+            self.explicit_feature_values = []
             for idx in range(len(data)):
                 row_values = {}
-                for col in self.explicit_confounder_columns:
-                    if col.startswith("explicit_conf_"):
+                for col in self.explicit_feature_columns:
+                    if col.startswith("explicit_feat_"):
+                        spec_name = col[len("explicit_feat_"):]
+                    elif col.startswith("explicit_conf_"):
                         spec_name = col[len("explicit_conf_"):]
                     else:
                         spec_name = col
@@ -90,7 +93,7 @@ class CachedHiddenStateDataset(Dataset):
                         row_values[f"{spec_name}_missing"] = data[missing_col].iloc[idx]
                     else:
                         row_values[f"{spec_name}_missing"] = pd.isna(row_values[spec_name])
-                self.explicit_confounder_values.append(row_values)
+                self.explicit_feature_values.append(row_values)
 
         mode = "inline loading" if self._cache_hs is not None else "deferred (cache_index)"
         logger.info(
@@ -124,8 +127,8 @@ class CachedHiddenStateDataset(Dataset):
             global_idx_for_chunks = self.dataset_indices[idx]
             item['chunk_count'] = self._chunk_counts[global_idx_for_chunks]
 
-        if self.explicit_confounder_values is not None:
-            item['explicit_confounder_values'] = self.explicit_confounder_values[idx]
+        if self.explicit_feature_values is not None:
+            item['explicit_feature_values'] = self.explicit_feature_values[idx]
 
         return item
 
@@ -175,9 +178,9 @@ def collate_cached_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
     if 'chunk_count' in batch[0]:
         result['sample_chunk_counts'] = [item['chunk_count'] for item in batch]
 
-    if 'explicit_confounder_values' in batch[0]:
-        result['explicit_confounder_values'] = [
-            item['explicit_confounder_values'] for item in batch
+    if 'explicit_feature_values' in batch[0]:
+        result['explicit_feature_values'] = [
+            item['explicit_feature_values'] for item in batch
         ]
 
     return result

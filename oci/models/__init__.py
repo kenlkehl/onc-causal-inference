@@ -11,7 +11,14 @@ from .simple_cnn_extractor import SimpleCNNExtractor
 from .gated_attention_pooling import GatedAttentionPooling
 from .learned_tokenizer import LearnedTokenizer
 from .text_chunking import chunk_token_ids, pad_and_batch_chunks
-from .explicit_confounder_featurizer import ExplicitConfounderFeaturizer, get_raw_confounder_features
+from .explicit_feature_featurizer import (
+    ExplicitFeatureFeaturizer,
+    filter_specs_by_role,
+    get_raw_explicit_features,
+    get_raw_explicit_feature_matrices,
+)
+ExplicitConfounderFeaturizer = ExplicitFeatureFeaturizer
+get_raw_confounder_features = get_raw_explicit_features
 from .hidden_state_cache import HiddenStateCache
 from .gpu_hidden_state_store import GPUHiddenStateStore
 from .causal_text import CausalText
@@ -37,8 +44,12 @@ __all__ = [
     'PropensityNet',
     'create_propensity_model_from_config',
     'CausalForestHead',
+    'ExplicitFeatureFeaturizer',
     'ExplicitConfounderFeaturizer',
+    'filter_specs_by_role',
+    'get_raw_explicit_features',
     'get_raw_confounder_features',
+    'get_raw_explicit_feature_matrices',
     'HiddenStateCache',
     'GPUHiddenStateStore',
     'CausalTextForest',

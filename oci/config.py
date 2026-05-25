@@ -9,34 +9,51 @@ import hashlib
 
 
 # =============================================================================
-# EXPLICIT CONFOUNDER EXTRACTION CONFIGURATION
+# EXPLICIT FEATURE EXTRACTION CONFIGURATION
 # =============================================================================
 
 @dataclass
-class ExplicitConfounderSpec:
-    """Specification for a single explicit confounder to extract from clinical text."""
+class ExplicitFeatureSpec:
+    """Specification for a single explicit feature to extract from clinical text.
+
+    Roles are causal roles, not mutually exclusive classes. A variable can be a
+    confounder, an effect modifier, or both.
+    """
     name: str  # e.g., "performance_status"
     type: str  # "categorical" or "continuous"
     categories: Optional[List[str]] = None  # For categorical only (e.g., ["0", "1", "2", "3", "4"])
     description: Optional[str] = None  # Used in LLM prompt (e.g., "ECOG performance status")
+    roles: List[str] = field(default_factory=list)  # "confounder", "effect_modifier", or both
 
     def __post_init__(self):
         if self.type not in ("categorical", "continuous"):
             raise ValueError(f"type must be 'categorical' or 'continuous', got '{self.type}'")
         if self.type == "categorical" and not self.categories:
-            raise ValueError(f"categories required for categorical confounder '{self.name}'")
+            raise ValueError(f"categories required for categorical explicit feature '{self.name}'")
+        valid_roles = {"confounder", "effect_modifier"}
+        if not self.roles:
+            raise ValueError(
+                f"roles required for explicit feature '{self.name}'; "
+                "use one or both of ['confounder', 'effect_modifier']"
+            )
+        invalid_roles = set(self.roles) - valid_roles
+        if invalid_roles:
+            raise ValueError(
+                f"invalid roles for explicit feature '{self.name}': {sorted(invalid_roles)}. "
+                f"Valid roles: {sorted(valid_roles)}"
+            )
+        # Preserve order while deduplicating roles.
+        self.roles = list(dict.fromkeys(self.roles))
 
 
 @dataclass
-class ExplicitConfounderExtractionConfig:
-    """Configuration for LLM-based confounder extraction from clinical text.
+class ExplicitFeatureExtractionConfig:
+    """Configuration for LLM-based explicit feature extraction from clinical text.
 
-    This enables extraction of explicit confounder variables (e.g., performance status,
-    disease stage) from unstructured clinical text using an LLM. The extracted values
-    are then featurized and concatenated to text embeddings before the causal head.
+    Extracted features are role-tagged as confounders, effect modifiers, or both.
     """
     enabled: bool = False
-    confounders: List[ExplicitConfounderSpec] = field(default_factory=list)
+    features: List[ExplicitFeatureSpec] = field(default_factory=list)
 
     # vLLM mode: "server", "start_server", or "python_api"
     # - "server": Connect to running vLLM OpenAI-compatible server
@@ -63,6 +80,12 @@ class ExplicitConfounderExtractionConfig:
     featurizer_output_dim: int = 64
     featurizer_hidden_dim: int = 128
     featurizer_dropout: float = 0.1
+
+
+# Backward-compatible symbol aliases for older internal imports. Config files
+# using the old explicit_confounders key are rejected in ExperimentConfig.from_dict.
+ExplicitConfounderSpec = ExplicitFeatureSpec
+ExplicitConfounderExtractionConfig = ExplicitFeatureExtractionConfig
 
 
 # =============================================================================
@@ -178,15 +201,16 @@ class TfidfForestConfig:
 
 
 # =============================================================================
-# CONFOUNDERS-ONLY CAUSAL FOREST CONFIGURATION
+# EXPLICIT-FEATURE-ONLY CAUSAL FOREST CONFIGURATION
 # =============================================================================
 
 @dataclass
-class ConfounderForestConfig:
-    """Configuration for Confounders-Only Causal Forest (model_type="confounder_forest").
+class ExplicitFeatureForestConfig:
+    """Configuration for Explicit-Feature-Only Causal Forest.
 
-    A non-neural pathway that uses only LLM-extracted confounder features with
-    CausalForestDML. No text processing, no GPU, no training epochs.
+    A non-neural pathway that uses only LLM-extracted explicit features with
+    CausalForestDML. Confounder-role features are passed as W, and
+    effect-modifier-role features are passed as X.
     """
     n_estimators: int = 200
     max_depth: Optional[int] = None
@@ -194,6 +218,9 @@ class ConfounderForestConfig:
     max_features: str = "sqrt"
     honest: bool = True
     inference: bool = True
+
+
+ConfounderForestConfig = ExplicitFeatureForestConfig
 
 
 EXTRACTOR_ALIASES = {
@@ -244,7 +271,7 @@ def normalize_feature_extractor_type(feature_type: str) -> str:
 @dataclass
 class ModelArchitectureConfig:
     """Configuration for model architecture."""
-    model_type: str = "dragonnet"  # "dragonnet", "rlearner", "causal_forest", or "tfidf_forest"
+    model_type: str = "dragonnet"  # "dragonnet", "rlearner", "causal_forest", "tfidf_forest", or "explicit_feature_forest"
 
     # Feature extractor type: "frozen_llm_pooler"
     feature_extractor_type: str = "frozen_llm_pooler"
@@ -335,8 +362,8 @@ class ModelArchitectureConfig:
     # TF-IDF + Causal Forest config (used when model_type="tfidf_forest")
     tfidf_forest: TfidfForestConfig = field(default_factory=TfidfForestConfig)
 
-    # Confounders-Only Causal Forest config (used when model_type="confounder_forest")
-    confounder_forest: ConfounderForestConfig = field(default_factory=ConfounderForestConfig)
+    # Explicit-Feature-Only Causal Forest config (used when model_type="explicit_feature_forest")
+    explicit_feature_forest: ExplicitFeatureForestConfig = field(default_factory=ExplicitFeatureForestConfig)
 
 
 @dataclass
@@ -411,8 +438,8 @@ class AppliedInferenceConfig:
     # PSM analysis configuration (uses DragonNet's propensity scores)
     matching_analysis: MatchingAnalysisConfig = field(default_factory=MatchingAnalysisConfig)
 
-    # Explicit confounder extraction configuration (LLM-based)
-    explicit_confounders: ExplicitConfounderExtractionConfig = field(default_factory=ExplicitConfounderExtractionConfig)
+    # Explicit feature extraction configuration (LLM-based)
+    explicit_features: ExplicitFeatureExtractionConfig = field(default_factory=ExplicitFeatureExtractionConfig)
 
 
 
@@ -450,29 +477,51 @@ class ExperimentConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ExperimentConfig':
         """Create config from dictionary."""
+        applied_data = data.get('applied_inference', {})
+        if 'explicit_confounders' in applied_data:
+            raise ValueError(
+                "Configuration key applied_inference.explicit_confounders has been removed. "
+                "Use applied_inference.explicit_features.features with role-tagged "
+                "ExplicitFeatureSpec entries instead."
+            )
 
         def parse_architecture_config(arch_data: Dict[str, Any]) -> ModelArchitectureConfig:
             """Parse architecture config, handling nested causal_forest and tfidf_forest."""
             arch_data = arch_data.copy()
+            if arch_data.get('model_type') == 'confounder_forest':
+                raise ValueError(
+                    "model_type='confounder_forest' has been removed. "
+                    "Use model_type='explicit_feature_forest' with role-tagged explicit_features."
+                )
             if 'causal_forest' in arch_data and isinstance(arch_data['causal_forest'], dict):
                 arch_data['causal_forest'] = CausalForestConfig(**arch_data['causal_forest'])
             if 'tfidf_forest' in arch_data and isinstance(arch_data['tfidf_forest'], dict):
                 arch_data['tfidf_forest'] = TfidfForestConfig(**arch_data['tfidf_forest'])
-            if 'confounder_forest' in arch_data and isinstance(arch_data['confounder_forest'], dict):
-                arch_data['confounder_forest'] = ConfounderForestConfig(**arch_data['confounder_forest'])
+            if 'confounder_forest' in arch_data:
+                raise ValueError(
+                    "architecture.confounder_forest has been removed. "
+                    "Use architecture.explicit_feature_forest."
+                )
+            if 'explicit_feature_forest' in arch_data and isinstance(arch_data['explicit_feature_forest'], dict):
+                arch_data['explicit_feature_forest'] = ExplicitFeatureForestConfig(**arch_data['explicit_feature_forest'])
             return ModelArchitectureConfig(**arch_data)
 
-        def parse_explicit_confounders_config(conf_data: Dict[str, Any]) -> ExplicitConfounderExtractionConfig:
-            """Parse explicit confounders config, handling nested confounder specs."""
-            if not conf_data:
-                return ExplicitConfounderExtractionConfig()
-            conf_data = conf_data.copy()
-            if 'confounders' in conf_data and isinstance(conf_data['confounders'], list):
-                conf_data['confounders'] = [
-                    ExplicitConfounderSpec(**c) if isinstance(c, dict) else c
-                    for c in conf_data['confounders']
+        def parse_explicit_features_config(feat_data: Dict[str, Any]) -> ExplicitFeatureExtractionConfig:
+            """Parse explicit features config, handling nested feature specs."""
+            if not feat_data:
+                return ExplicitFeatureExtractionConfig()
+            feat_data = feat_data.copy()
+            if 'confounders' in feat_data:
+                raise ValueError(
+                    "explicit_features.confounders is not supported. "
+                    "Use explicit_features.features and set roles on each feature."
+                )
+            if 'features' in feat_data and isinstance(feat_data['features'], list):
+                feat_data['features'] = [
+                    ExplicitFeatureSpec(**f) if isinstance(f, dict) else f
+                    for f in feat_data['features']
                 ]
-            return ExplicitConfounderExtractionConfig(**conf_data)
+            return ExplicitFeatureExtractionConfig(**feat_data)
 
         applied = AppliedInferenceConfig(
             **{k: parse_architecture_config(v) if k == 'architecture'
@@ -480,9 +529,9 @@ class ExperimentConfig:
                else PropensityTrimmingConfig(**v) if k == 'propensity_trimming'
                else OutcomeModelConfig(**v) if k == 'outcome_model'
                else MatchingAnalysisConfig(**v) if k == 'matching_analysis'
-               else parse_explicit_confounders_config(v) if k == 'explicit_confounders'
+               else parse_explicit_features_config(v) if k == 'explicit_features'
                else v
-               for k, v in data.get('applied_inference', {}).items()}
+               for k, v in applied_data.items()}
         )
 
         return cls(
@@ -514,6 +563,18 @@ class ExperimentConfig:
         if self.applied_inference.outcome_type not in valid_outcome_types:
             raise ValueError(f"applied_inference.outcome_type must be one of {valid_outcome_types}, "
                            f"got '{self.applied_inference.outcome_type}'")
+
+        if self.applied_inference.architecture.model_type == "confounder_forest":
+            raise ValueError(
+                "model_type='confounder_forest' has been removed. "
+                "Use model_type='explicit_feature_forest'."
+            )
+
+        if self.applied_inference.explicit_features.enabled and not self.applied_inference.explicit_features.features:
+            raise ValueError(
+                "applied_inference.explicit_features.enabled=True requires at least one "
+                "role-tagged explicit feature in explicit_features.features"
+            )
 
         # Validate matching config
         if self.applied_inference.matching_analysis.enabled:

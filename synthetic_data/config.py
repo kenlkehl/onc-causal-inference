@@ -68,8 +68,8 @@ class SyntheticDataConfig:
     interaction_coefficient_scale: float = 0.1  # Scale for interaction coefficients
     target_logit_std: float = 2.0  # Target std of logits; lower values compress propensities toward 0.5
     
-    # Number of confounders (None = use LLM default of 8-12)
-    num_confounders: Optional[int] = None
+    # Number of role-tagged explicit features (None = use LLM default of 8-12)
+    num_features: Optional[int] = None
     
     # Outcome type: "binary" or "continuous"
     outcome_type: str = "binary"
@@ -119,6 +119,9 @@ class SyntheticDataConfig:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SyntheticDataConfig':
         """Create config from dictionary."""
+        data = data.copy()
+        if "num_confounders" in data and "num_features" not in data:
+            data["num_features"] = data.pop("num_confounders")
         llm_data = data.pop('llm', {})
         llm_config = LLMConfig(**llm_data) if llm_data else LLMConfig()
         structured_data_data = data.pop('structured_data', {})

@@ -13,34 +13,40 @@ Always respond with valid JSON when requested."""
 
 
 # =============================================================================
-# Confounder Generation Prompt
+# Explicit Feature Generation Prompt
 # =============================================================================
 
 CONFOUNDER_GENERATION_PROMPT = """Given the following comparative effectiveness research question:
 
 "{clinical_question}"
 
-Generate a comprehensive list of realistic confounding variables that would influence both treatment assignment and outcome in a real-world clinical setting.
+Generate a comprehensive list of realistic patient-level variables for causal inference.
+Each variable must be tagged with one or both causal roles:
+- "confounder": plausibly influences treatment assignment and baseline outcome risk
+- "effect_modifier": plausibly modifies the treatment effect
 
 Requirements:
 1. Include {num_confounders_instruction} total
 2. Mix of categorical (3-5 categories each) and continuous variables
-3. Common confounders might include: age, sex (if applicable to the cancer type), performance status, comorbidities, prior treatments, biomarkers, disease stage, etc.
+3. Common variables might include: age, sex (if applicable to the cancer type), performance status, comorbidities, prior treatments, biomarkers, disease stage, etc.
 4. Be specific to the clinical context of the question
+5. Some variables may have both roles; assign roles based on clinical plausibility
 
 Respond with a JSON object in this exact format:
 {{
-  "confounders": [
+  "features": [
     {{
       "name": "age",
       "type": "continuous",
-      "description": "Patient age in years"
+      "description": "Patient age in years",
+      "roles": ["confounder"]
     }},
     {{
       "name": "ecog_performance_status",
       "type": "categorical",
       "categories": ["0", "1", "2", "3"],
-      "description": "ECOG performance status score"
+      "description": "ECOG performance status score",
+      "roles": ["confounder", "effect_modifier"]
     }},
     ...
   ]
@@ -51,27 +57,27 @@ Respond with a JSON object in this exact format:
 # Regression Equation Generation Prompt
 # =============================================================================
 
-REGRESSION_EQUATION_PROMPT = """Given the following confounding variables for a comparative effectiveness study:
+REGRESSION_EQUATION_PROMPT = """Given the following role-tagged variables for a comparative effectiveness study:
 
 Clinical Question: "{clinical_question}"
 
-Confounders:
+Variables:
 {confounder_list}
 
 Generate two plausible regression equations for a simulation.
 
-CRITICAL: You must ONLY use the confounders listed above. Do NOT invent or add any variables that are not in the confounder list. Every coefficient name must correspond to a confounder from the list above.
+CRITICAL: You must ONLY use the variables listed above. Do NOT invent or add variables that are not in the list. Every coefficient name must correspond to a listed variable.
 
-1. TREATMENT ASSIGNMENT equation: Predicts logit(P(treatment=1)) based on confounders
+1. TREATMENT ASSIGNMENT equation: Predicts logit(P(treatment=1)) based on variables with the "confounder" role
    - Should reflect realistic clinical decision-making
-   - Some confounders should have stronger effects than others
-   - Include interaction terms ONLY if there are 2+ confounders (use pairs from the list above)
+   - Some confounder-role variables should have stronger effects than others
+   - Include interaction terms ONLY if there are 2+ confounder-role variables
 
-2. OUTCOME equation: Predicts logit(P(outcome=1)) based on confounders AND treatment
+2. OUTCOME equation: Predicts logit(P(outcome=1)) based on confounder-role variables AND treatment
    - The treatment coefficient is FIXED at {treatment_coefficient} (do not include treatment in your coefficients)
    - Should reflect known prognostic factors
-   - Include interaction terms ONLY if there are 2+ confounders
-   - Some confounders may affect outcome differently than treatment assignment
+   - Include interaction terms ONLY if there are 2+ confounder-role variables
+   - Treatment-effect interactions will be generated from effect-modifier-role variables
 
 For continuous variables, coefficients represent effect per 1 SD increase.
 For categorical variables, coefficients are relative to the reference category (first listed).
@@ -111,8 +117,8 @@ Respond with JSON in this exact format (example shows structure only - use YOUR 
 IMPORTANT RULES:
 - For categorical variables with N categories, create N-1 dummy coefficients (excluding the reference/first category)
 - Dummy variable names must be: variablename_categoryvalue (e.g., "ecog_status_2" for category "2" of "ecog_status")
-- If there is only 1 confounder, the "interactions" arrays should be empty []
-- Do NOT include any variables that are not in the confounder list above"""
+- If there is only 1 eligible confounder-role variable, the "interactions" arrays should be empty []
+- Do NOT include any variables that are not in the variable list above"""
 
 
 # =============================================================================
@@ -570,14 +576,16 @@ def build_event_timeline_prompt(
 
 
 def format_confounder_list(confounders: list) -> str:
-    """Format confounders into a readable list for prompts."""
+    """Format role-tagged features into a readable list for prompts."""
     lines = []
     for c in confounders:
+        roles = ", ".join(c.get("roles", []))
+        role_text = f" Roles: [{roles}]." if roles else ""
         if c["type"] == "categorical":
             cats = ", ".join(c["categories"])
-            lines.append(f"- {c['name']} (categorical): {c['description']}. Categories: [{cats}]")
+            lines.append(f"- {c['name']} (categorical): {c['description']}.{role_text} Categories: [{cats}]")
         else:
-            lines.append(f"- {c['name']} (continuous): {c['description']}")
+            lines.append(f"- {c['name']} (continuous): {c['description']}.{role_text}")
     return "\n".join(lines)
 
 

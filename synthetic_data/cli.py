@@ -772,10 +772,12 @@ Examples:
         help="Target outcome rate in control group (treatment=0) (default: 0.5)",
     )
     parser.add_argument(
+        "--num-features",
         "--num-confounders",
+        dest="num_features",
         type=int,
         default=None,
-        help="Number of confounders to generate (default: 8-12, determined by LLM)",
+        help="Number of role-tagged features to generate (default: 8-12, determined by LLM)",
     )
 
     # Positivity enforcement
@@ -968,12 +970,14 @@ Examples:
         help="Noise standard deviation for continuous outcomes (default: 1.0)",
     )
 
-    # Confounder extraction (post-generation)
+    # Explicit feature extraction (post-generation)
     parser.add_argument(
+        "--extract-features",
         "--extract-confounders",
+        dest="extract_features",
         action="store_true",
         default=True,
-        help="After generation, extract confounders from clinical text using the same LLM and evaluate accuracy",
+        help="After generation, extract explicit features from clinical text using the same LLM and evaluate accuracy",
     )
     parser.add_argument(
         "--extraction-max-text-tokens",
@@ -1027,8 +1031,8 @@ Examples:
             config.max_treatment_rate_per_stratum = args.max_treatment_rate
         if args.target_logit_std != 2.0:
             config.target_logit_std = args.target_logit_std
-        if args.num_confounders is not None:
-            config.num_confounders = args.num_confounders
+        if args.num_features is not None:
+            config.num_features = args.num_features
         if args.outcome_type != "binary":
             config.outcome_type = args.outcome_type
         if args.outcome_noise_std != 1.0:
@@ -1082,7 +1086,7 @@ Examples:
             min_treatment_rate_per_stratum=args.min_treatment_rate,
             max_treatment_rate_per_stratum=args.max_treatment_rate,
             target_logit_std=args.target_logit_std,
-            num_confounders=args.num_confounders,
+            num_features=args.num_features,
             outcome_type=args.outcome_type,
             outcome_noise_std=args.outcome_noise_std,
             generation_mode=args.generation_mode,
@@ -1182,15 +1186,15 @@ Examples:
         logging.error(f"Generation failed: {e}", exc_info=True)
         sys.exit(1)
 
-    # Optional: Extract confounders from generated text
-    if args.extract_confounders:
-        confounders = metadata.get("confounders", [])
+    # Optional: Extract explicit features from generated text
+    if args.extract_features:
+        confounders = metadata.get("features", metadata.get("confounders", []))
         if not confounders:
-            logging.warning("No confounders in metadata -- skipping extraction")
+            logging.warning("No explicit features in metadata -- skipping extraction")
         else:
             try:
-                print(f"\n--- Confounder Extraction ---")
-                print(f"Extracting {len(confounders)} confounders from clinical text...")
+                print(f"\n--- Explicit Feature Extraction ---")
+                print(f"Extracting {len(confounders)} features from clinical text...")
 
                 df_extracted, metrics = run_confounder_extraction(
                     df=df,

@@ -18,7 +18,7 @@ class ClinicalTextDataset(Dataset):
     Returns raw text strings that are tokenized by the model during forward pass.
     This is memory-efficient and allows end-to-end training.
 
-    Optionally includes explicit confounder columns if they are present in the data.
+    Optionally includes explicit feature columns if they are present in the data.
     """
 
     def __init__(
@@ -27,7 +27,8 @@ class ClinicalTextDataset(Dataset):
         text_column: str,
         outcome_column: str,
         treatment_column: str,
-        explicit_confounder_columns: Optional[List[str]] = None
+        explicit_feature_columns: Optional[List[str]] = None,
+        explicit_confounder_columns: Optional[List[str]] = None,
     ):
         """
         Initialize dataset.
@@ -37,13 +38,13 @@ class ClinicalTextDataset(Dataset):
             text_column: Name of text column
             outcome_column: Name of outcome column
             treatment_column: Name of treatment column
-            explicit_confounder_columns: Optional list of explicit confounder column names
-                (e.g., ["explicit_conf_performance_status", "explicit_conf_age_at_diagnosis"]).
+            explicit_feature_columns: Optional list of explicit feature column names
+                (e.g., ["explicit_feat_performance_status", "explicit_feat_age_at_diagnosis"]).
                 If provided, corresponding "_missing" columns are also read.
         """
         self.data = data.reset_index(drop=True)
         self.text_column = text_column
-        self.explicit_confounder_columns = explicit_confounder_columns or []
+        self.explicit_feature_columns = explicit_feature_columns or explicit_confounder_columns or []
 
         self.texts = data[text_column].tolist()
         self.outcomes = torch.tensor(
@@ -55,18 +56,19 @@ class ClinicalTextDataset(Dataset):
             dtype=torch.float32
         )
 
-        # Extract explicit confounder values if columns provided
+        # Extract explicit feature values if columns provided.
         # The featurizer expects keys to match spec.name (e.g., "age"),
-        # not the column name (e.g., "explicit_conf_age").
-        # Strip the "explicit_conf_" prefix when building value dicts.
-        self.explicit_confounder_values = None
-        if self.explicit_confounder_columns:
-            self.explicit_confounder_values = []
+        # not the column name (e.g., "explicit_feat_age").
+        self.explicit_feature_values = None
+        if self.explicit_feature_columns:
+            self.explicit_feature_values = []
             for idx in range(len(data)):
                 row_values = {}
-                for col in self.explicit_confounder_columns:
+                for col in self.explicit_feature_columns:
                     # Extract spec name by stripping prefix
-                    if col.startswith("explicit_conf_"):
+                    if col.startswith("explicit_feat_"):
+                        spec_name = col[len("explicit_feat_"):]
+                    elif col.startswith("explicit_conf_"):
                         spec_name = col[len("explicit_conf_"):]
                     else:
                         spec_name = col
@@ -79,8 +81,8 @@ class ClinicalTextDataset(Dataset):
                     else:
                         # Infer missing from value
                         row_values[f"{spec_name}_missing"] = pd.isna(row_values[spec_name])
-                self.explicit_confounder_values.append(row_values)
-            logger.info(f"Loaded {len(self.explicit_confounder_columns)} explicit confounder columns")
+                self.explicit_feature_values.append(row_values)
+            logger.info(f"Loaded {len(self.explicit_feature_columns)} explicit feature columns")
 
         logger.info(f"ClinicalTextDataset created: {len(self)} samples")
 
@@ -95,8 +97,8 @@ class ClinicalTextDataset(Dataset):
             'text_id': idx
         }
 
-        if self.explicit_confounder_values is not None:
-            item['explicit_confounder_values'] = self.explicit_confounder_values[idx]
+        if self.explicit_feature_values is not None:
+            item['explicit_feature_values'] = self.explicit_feature_values[idx]
 
         return item
 
@@ -123,10 +125,10 @@ def collate_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
         'text_id': text_ids
     }
 
-    # Include explicit confounder values if present
-    if 'explicit_confounder_values' in batch[0]:
-        result['explicit_confounder_values'] = [
-            item['explicit_confounder_values'] for item in batch
+    # Include explicit feature values if present
+    if 'explicit_feature_values' in batch[0]:
+        result['explicit_feature_values'] = [
+            item['explicit_feature_values'] for item in batch
         ]
 
     return result

@@ -35,6 +35,38 @@ from ..utils import cuda_cleanup, get_memory_info
 logger = logging.getLogger(__name__)
 
 
+def _get_explicit_feature_specs(config: AppliedInferenceConfig):
+    if hasattr(config, 'explicit_features') and config.explicit_features.enabled:
+        return config.explicit_features.features
+    return None
+
+
+def _feature_values_from_df(
+    df: pd.DataFrame,
+    feature_columns: Optional[List[str]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Convert explicit_feat_* columns to list-of-dicts for featurizers."""
+    if not feature_columns:
+        return None
+    values = []
+    for _, row in df.iterrows():
+        item = {}
+        for col in feature_columns:
+            if col.endswith("_missing"):
+                continue
+            if col.startswith("explicit_feat_"):
+                name = col[len("explicit_feat_"):]
+            elif col.startswith("explicit_conf_"):
+                name = col[len("explicit_conf_"):]
+            else:
+                name = col
+            item[name] = row.get(col)
+            missing_col = f"{col}_missing"
+            item[f"{name}_missing"] = bool(row.get(missing_col, pd.isna(item[name])))
+        values.append(item)
+    return values
+
+
 def run_applied_inference_forest(
     dataset: pd.DataFrame,
     config: AppliedInferenceConfig,
@@ -43,7 +75,7 @@ def run_applied_inference_forest(
     num_workers: int = 1,
     verbose: bool = True,
     gpu_ids: Optional[List[int]] = None,
-    explicit_confounder_columns: Optional[List[str]] = None,
+    explicit_feature_columns: Optional[List[str]] = None,
 ) -> None:
     """
     Run applied causal inference using two-stage neural + causal forest approach.
@@ -196,13 +228,15 @@ def run_applied_inference_forest(
         _run_cv_inference_forest(
             dataset, config, output_path, device, verbose,
             hidden_state_cache=hidden_state_cache,
-            gpu_store=gpu_store
+            gpu_store=gpu_store,
+            explicit_feature_columns=explicit_feature_columns,
         )
     else:
         _run_fixed_split_inference_forest(
             dataset, config, output_path, device, verbose,
             hidden_state_cache=hidden_state_cache,
-            gpu_store=gpu_store
+            gpu_store=gpu_store,
+            explicit_feature_columns=explicit_feature_columns,
         )
 
     # Cleanup
@@ -219,7 +253,8 @@ def _run_cv_inference_forest(
     device: torch.device,
     verbose: bool = True,
     hidden_state_cache: Optional[HiddenStateCache] = None,
-    gpu_store=None
+    gpu_store=None,
+    explicit_feature_columns: Optional[List[str]] = None,
 ) -> None:
     """Run K-Fold Cross-Validation inference with causal forest."""
     k = config.cv_folds
@@ -250,7 +285,8 @@ def _run_cv_inference_forest(
             hidden_state_cache=hidden_state_cache,
             train_indices=train_idx,
             test_indices=test_idx,
-            gpu_store=gpu_store
+            gpu_store=gpu_store,
+            explicit_feature_columns=explicit_feature_columns,
         )
 
         # Add fold info
@@ -285,7 +321,8 @@ def _process_fold_forest(
     hidden_state_cache: Optional[HiddenStateCache] = None,
     train_indices: Optional[np.ndarray] = None,
     test_indices: Optional[np.ndarray] = None,
-    gpu_store=None
+    gpu_store=None,
+    explicit_feature_columns: Optional[List[str]] = None,
 ) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
     """Process a single fold with causal forest."""
     arch_config = config.architecture
@@ -306,6 +343,7 @@ def _process_fold_forest(
     outcome_type = getattr(config, 'outcome_type', 'binary')
     model = _create_causal_forest_model(
         arch_config, device, outcome_type=outcome_type,
+        explicit_features_config=getattr(config, 'explicit_features', None),
         flp_skip_llm=_using_cache and feature_extractor_type == "frozen_llm_pooler",
         flp_cached_hidden_size=(
             _cached_hidden_size if feature_extractor_type == "frozen_llm_pooler" else 0
@@ -332,8 +370,13 @@ def _process_fold_forest(
     # fit_tokenizer for trainable extractors (hierarchical_cnn, hierarchical_gru, simple_cnn)
     if feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES:
         train_texts = train_df[config.text_column].tolist()
-        logger.info(f"Fitting tokenizer for {extractor_type} on {len(train_texts)} texts...")
+        logger.info(f"Fitting tokenizer for {feature_extractor_type} on {len(train_texts)} texts...")
         model.fit_tokenizer(train_texts)
+
+    train_feature_values = _feature_values_from_df(train_df, explicit_feature_columns)
+    if train_feature_values is not None:
+        model.fit_explicit_feature_featurizer(train_feature_values)
+        model.fit_explicit_features(train_feature_values)
 
     # Stage 1: Train representation
     logger.info("\n--- Stage 1: Training representation ---")
@@ -342,7 +385,8 @@ def _process_fold_forest(
         hidden_state_cache=hidden_state_cache,
         train_indices=train_indices,
         val_indices=test_indices,
-        gpu_store=gpu_store
+        gpu_store=gpu_store,
+        explicit_feature_columns=explicit_feature_columns,
     )
 
     # Create DataLoaders for Stage 2 feature extraction and prediction
@@ -357,6 +401,7 @@ def _process_fold_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_chunk_counts=_cc,
         )
         test_dataset = CachedHiddenStateDataset(
@@ -365,6 +410,7 @@ def _process_fold_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=test_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_chunk_counts=_cc,
         )
         collate_fn = collate_cached_batch
@@ -377,6 +423,7 @@ def _process_fold_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
             cache_chunk_counts=_cc,
@@ -387,6 +434,7 @@ def _process_fold_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=test_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
             cache_chunk_counts=_cc,
@@ -397,13 +445,15 @@ def _process_fold_forest(
             data=train_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
-            treatment_column=config.treatment_column
+            treatment_column=config.treatment_column,
+            explicit_feature_columns=explicit_feature_columns,
         )
         test_dataset = ClinicalTextDataset(
             data=test_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
-            treatment_column=config.treatment_column
+            treatment_column=config.treatment_column,
+            explicit_feature_columns=explicit_feature_columns,
         )
         collate_fn = collate_batch
 
@@ -474,7 +524,8 @@ def _run_fixed_split_inference_forest(
     device: torch.device,
     verbose: bool = True,
     hidden_state_cache: Optional[HiddenStateCache] = None,
-    gpu_store=None
+    gpu_store=None,
+    explicit_feature_columns: Optional[List[str]] = None,
 ) -> None:
     """Run inference using fixed train/val/test splits with causal forest."""
     logger.info("Running Fixed Split Inference (Train/Val/Test)")
@@ -515,6 +566,7 @@ def _run_fixed_split_inference_forest(
     outcome_type = getattr(config, 'outcome_type', 'binary')
     model = _create_causal_forest_model(
         arch_config, device, outcome_type=outcome_type,
+        explicit_features_config=getattr(config, 'explicit_features', None),
         flp_skip_llm=_using_cache and feature_extractor_type == "frozen_llm_pooler",
         flp_cached_hidden_size=(
             _cached_hidden_size if feature_extractor_type == "frozen_llm_pooler" else 0
@@ -539,6 +591,11 @@ def _run_fixed_split_inference_forest(
         logger.info(f"Fitting tokenizer for {feature_extractor_type} on {len(train_texts)} texts...")
         model.fit_tokenizer(train_texts)
 
+    train_feature_values = _feature_values_from_df(train_df, explicit_feature_columns)
+    if train_feature_values is not None:
+        model.fit_explicit_feature_featurizer(train_feature_values)
+        model.fit_explicit_features(train_feature_values)
+
     # Stage 1: Train representation
     logger.info("\n--- Stage 1: Training representation ---")
     history = _train_representation(
@@ -546,7 +603,8 @@ def _run_fixed_split_inference_forest(
         hidden_state_cache=hidden_state_cache,
         train_indices=train_indices,
         val_indices=val_indices,
-        gpu_store=gpu_store
+        gpu_store=gpu_store,
+        explicit_feature_columns=explicit_feature_columns,
     )
 
     # Save training logs
@@ -568,6 +626,7 @@ def _run_fixed_split_inference_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=combined_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_chunk_counts=_cc,
         )
         combined_collate_fn = collate_cached_batch
@@ -581,6 +640,7 @@ def _run_fixed_split_inference_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=combined_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
             cache_chunk_counts=_cc,
@@ -591,7 +651,8 @@ def _run_fixed_split_inference_forest(
             data=combined_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
-            treatment_column=config.treatment_column
+            treatment_column=config.treatment_column,
+            explicit_feature_columns=explicit_feature_columns,
         )
         combined_collate_fn = collate_batch
 
@@ -623,6 +684,7 @@ def _run_fixed_split_inference_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=test_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_chunk_counts=_cc,
         )
         test_collate_fn = collate_cached_batch
@@ -635,6 +697,7 @@ def _run_fixed_split_inference_forest(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=test_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
             cache_chunk_counts=_cc,
@@ -645,7 +708,8 @@ def _run_fixed_split_inference_forest(
             data=test_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
-            treatment_column=config.treatment_column
+            treatment_column=config.treatment_column,
+            explicit_feature_columns=explicit_feature_columns,
         )
         test_collate_fn = collate_batch
 
@@ -684,6 +748,7 @@ def _create_causal_forest_model(
     arch_config,
     device: torch.device,
     outcome_type: str = "binary",
+    explicit_features_config=None,
     flp_skip_llm: bool = False,
     flp_cached_hidden_size: int = 0,
     flp_downprojection_dim: Optional[int] = None,
@@ -718,6 +783,16 @@ def _create_causal_forest_model(
     cf_use_rlearner_representation = getattr(cf_config, 'use_rlearner_representation', False) if cf_config else False
     cf_gamma_rlearner = getattr(cf_config, 'gamma_rlearner', 1.0) if cf_config else 1.0
     cf_rlearner_dual_extractors = getattr(cf_config, 'rlearner_dual_extractors', False) if cf_config else False
+
+    explicit_feature_specs = None
+    explicit_feature_output_dim = 64
+    explicit_feature_hidden_dim = 128
+    explicit_feature_dropout = 0.1
+    if explicit_features_config is not None and getattr(explicit_features_config, 'enabled', False):
+        explicit_feature_specs = getattr(explicit_features_config, 'features', None)
+        explicit_feature_output_dim = getattr(explicit_features_config, 'featurizer_output_dim', 64)
+        explicit_feature_hidden_dim = getattr(explicit_features_config, 'featurizer_hidden_dim', 128)
+        explicit_feature_dropout = getattr(explicit_features_config, 'featurizer_dropout', 0.1)
 
     model = CausalTextForest(
         feature_extractor_type=feature_extractor_type,
@@ -795,6 +870,11 @@ def _create_causal_forest_model(
         cf_use_rlearner_representation=cf_use_rlearner_representation,
         cf_gamma_rlearner=cf_gamma_rlearner,
         cf_rlearner_dual_extractors=cf_rlearner_dual_extractors,
+        # Explicit feature args
+        explicit_feature_specs=explicit_feature_specs,
+        explicit_feature_output_dim=explicit_feature_output_dim,
+        explicit_feature_hidden_dim=explicit_feature_hidden_dim,
+        explicit_feature_dropout=explicit_feature_dropout,
         # Device
         device=str(device),
         # Outcome type
@@ -814,7 +894,8 @@ def _train_representation(
     hidden_state_cache: Optional[HiddenStateCache] = None,
     train_indices: Optional[np.ndarray] = None,
     val_indices: Optional[np.ndarray] = None,
-    gpu_store=None
+    gpu_store=None,
+    explicit_feature_columns: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Train representation (Stage 1)."""
     train_config = config.training
@@ -831,6 +912,7 @@ def _train_representation(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_chunk_counts=_cc,
         )
         val_dataset = CachedHiddenStateDataset(
@@ -839,6 +921,7 @@ def _train_representation(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=val_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_chunk_counts=_cc,
         )
         collate_fn = collate_cached_batch
@@ -852,6 +935,7 @@ def _train_representation(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=train_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
             cache_chunk_counts=_cc,
@@ -862,6 +946,7 @@ def _train_representation(
             outcome_column=config.outcome_column,
             treatment_column=config.treatment_column,
             dataset_indices=val_indices,
+            explicit_feature_columns=explicit_feature_columns,
             cache_hidden_states=cache_hs,
             cache_attention_masks=cache_mask,
             cache_chunk_counts=_cc,
@@ -873,13 +958,15 @@ def _train_representation(
             data=train_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
-            treatment_column=config.treatment_column
+            treatment_column=config.treatment_column,
+            explicit_feature_columns=explicit_feature_columns,
         )
         val_dataset = ClinicalTextDataset(
             data=val_df,
             text_column=config.text_column,
             outcome_column=config.outcome_column,
-            treatment_column=config.treatment_column
+            treatment_column=config.treatment_column,
+            explicit_feature_columns=explicit_feature_columns,
         )
         collate_fn = collate_batch
 

@@ -20,13 +20,14 @@ def tune_causal_forest_model(
     model: Any,
     Y: np.ndarray,
     T: np.ndarray,
-    X: np.ndarray,
+    X: Optional[np.ndarray],
+    W: Optional[np.ndarray] = None,
     params: Any = "auto",
 ) -> bool:
     """Tune an EconML CausalForestDML model, falling back to configured parameters."""
     try:
         logger.info("Tuning CausalForestDML hyperparameters with params=%r", params)
-        model.tune(Y=Y, T=T, X=X, params=params)
+        model.tune(Y=Y, T=T, X=X, W=W, params=params)
         logger.info("CausalForestDML hyperparameter tuning complete")
         return True
     except Exception as exc:
@@ -135,9 +136,10 @@ class CausalForestHead:
 
     def fit(
         self,
-        X: np.ndarray,
+        X: Optional[np.ndarray],
         T: np.ndarray,
         Y: np.ndarray,
+        W: Optional[np.ndarray] = None,
         propensity: Optional[np.ndarray] = None,
         outcome_pred: Optional[np.ndarray] = None
     ) -> 'CausalForestHead':
@@ -145,7 +147,8 @@ class CausalForestHead:
         Fit causal forest on extracted features.
 
         Args:
-            X: Feature matrix from neural network, shape (n_samples, n_features)
+            X: Effect-modifier feature matrix, shape (n_samples, n_features), or None
+            W: Optional control/confounder feature matrix passed to EconML W
             T: Binary treatment indicator, shape (n_samples,)
             Y: Binary outcome indicator, shape (n_samples,)
             propensity: Optional propensity scores from neural network P(T=1|X)
@@ -154,20 +157,23 @@ class CausalForestHead:
         Returns:
             self
         """
-        logger.info(f"Fitting CausalForestDML on {X.shape[0]} samples with {X.shape[1]} features")
+        n_samples = X.shape[0] if X is not None else len(Y)
+        x_dim = X.shape[1] if X is not None else 0
+        w_msg = f", W={W.shape[1]} controls" if W is not None else ""
+        logger.info(f"Fitting CausalForestDML on {n_samples} samples with X={x_dim} features{w_msg}")
 
         # Ensure arrays are the right shape
         T = np.asarray(T).flatten()
         Y = np.asarray(Y).flatten()
 
         self.model = self._create_model()
-        if not tune_causal_forest_model(self.model, Y=Y, T=T, X=X):
+        if not tune_causal_forest_model(self.model, Y=Y, T=T, X=X, W=W):
             logger.info("Rebuilding CausalForestDML after failed tuning attempt")
             self.model = self._create_model()
 
         # Fit the model
         # CausalForestDML expects T as 1D and Y as 1D
-        self.model.fit(Y=Y, T=T, X=X)
+        self.model.fit(Y=Y, T=T, X=X, W=W)
         self._fitted = True
 
         logger.info("CausalForestDML fitting complete")
@@ -175,7 +181,7 @@ class CausalForestHead:
 
     def predict(
         self,
-        X: np.ndarray,
+        X: Optional[np.ndarray],
         return_ci: bool = True,
         alpha: float = 0.05
     ) -> Dict[str, np.ndarray]:
@@ -183,7 +189,7 @@ class CausalForestHead:
         Predict ITE with optional confidence intervals.
 
         Args:
-            X: Feature matrix, shape (n_samples, n_features)
+            X: Effect-modifier feature matrix, shape (n_samples, n_features), or None
             return_ci: Whether to return confidence intervals
             alpha: Significance level for confidence intervals (default 0.05 = 95% CI)
 
@@ -219,7 +225,7 @@ class CausalForestHead:
 
     def effect_summary(
         self,
-        X: np.ndarray,
+        X: Optional[np.ndarray],
         alpha: float = 0.05
     ) -> Dict[str, Any]:
         """

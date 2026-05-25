@@ -226,10 +226,11 @@ class VLLMBatchClient:
             except json.JSONDecodeError:
                 pass
         
-        # Look for JSON object with confounders or other expected keys
+        # Look for JSON object with explicit features or other expected keys
         # Use a more targeted pattern to find complete JSON objects
         json_patterns = [
-            r'\{\s*"confounders"\s*:\s*\[.*?\]\s*\}',  # Confounder response
+            r'\{\s*"features"\s*:\s*\[.*?\]\s*\}',  # Explicit feature response
+            r'\{\s*"confounders"\s*:\s*\[.*?\]\s*\}',  # Legacy response
             r'\{\s*"treatment_equation"\s*:\s*\{.*?\}\s*,\s*"outcome_equation"\s*:\s*\{.*?\}\s*\}',  # Equations
             r'\{\s*"summary_statistics"\s*:\s*\{.*?\}\s*\}',  # Summary stats
         ]

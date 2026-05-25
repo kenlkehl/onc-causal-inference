@@ -52,7 +52,7 @@ def generate_synthetic_dataset(
     Generate a synthetic clinical dataset with known causal structure.
     
     This pipeline:
-    1. Uses LLM to generate realistic confounders based on clinical question
+    1. Uses LLM to generate realistic role-tagged features based on clinical question
     2. Uses LLM to generate treatment and outcome regression equations
     3. Uses LLM to generate summary statistics for confounders
     4. For each patient: samples characteristics, computes logits, generates clinical history
@@ -87,10 +87,10 @@ def generate_synthetic_dataset(
     else:
         logger.info("Positivity enforcement disabled (realistic observational data)")
 
-    # Step 1: Generate confounders
-    logger.info("Step 1/5: Generating confounders...")
-    confounders = _generate_confounders(client, config.clinical_question, num_confounders=config.num_confounders)
-    logger.info(f"Generated {len(confounders)} confounders: {[c['name'] for c in confounders]}")
+    # Step 1: Generate role-tagged features
+    logger.info("Step 1/5: Generating role-tagged features...")
+    confounders = _generate_confounders(client, config.clinical_question, num_confounders=config.num_features)
+    logger.info(f"Generated {len(confounders)} features: {[c['name'] for c in confounders]}")
     
     # Step 2: Generate regression equations
     logger.info("Step 2/5: Generating regression equations...")
@@ -148,7 +148,9 @@ def generate_synthetic_dataset(
     # Compile metadata
     metadata = {
         "config": asdict(config),
-        "confounders": confounders,
+        "features": confounders,
+        "confounders": _filter_features_by_role(confounders, "confounder"),
+        "effect_modifiers": _filter_features_by_role(confounders, "effect_modifier"),
         "treatment_equation": treatment_eq,
         "outcome_equation": outcome_eq,
         "summary_statistics": summary_stats,
@@ -180,12 +182,12 @@ def generate_synthetic_dataset(
 
 
 def _generate_confounders(client: LLMClient, clinical_question: str, num_confounders: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Generate confounders using LLM."""
-    # Determine the instruction for number of confounders
+    """Generate role-tagged explicit features using LLM."""
+    # Determine the instruction for number of features
     if num_confounders is not None:
-        num_confounders_instruction = f"exactly {num_confounders} confounders"
+        num_confounders_instruction = f"exactly {num_confounders} features"
     else:
-        num_confounders_instruction = "8-12 confounders"
+        num_confounders_instruction = "8-12 features"
     
     prompt = CONFOUNDER_GENERATION_PROMPT.format(
         clinical_question=clinical_question,
@@ -198,19 +200,15 @@ def _generate_confounders(client: LLMClient, clinical_question: str, num_confoun
         temperature=0.7,
     )
     
-    confounders = response.get("confounders", [])
+    confounders = response.get("features", response.get("confounders", []))
 
     # Validate structure
-    for conf in confounders:
-        if "name" not in conf or "type" not in conf:
-            raise ValueError(f"Invalid confounder structure: {conf}")
-        if conf["type"] == "categorical" and "categories" not in conf:
-            raise ValueError(f"Categorical confounder missing categories: {conf}")
+    confounders = _validate_feature_roles(confounders)
 
     # Enforce count if num_confounders was specified
     if num_confounders is not None and len(confounders) != num_confounders:
         logger.warning(
-            f"LLM returned {len(confounders)} confounders but {num_confounders} requested, "
+            f"LLM returned {len(confounders)} features but {num_confounders} requested, "
             f"truncating to first {num_confounders}"
         )
         confounders = confounders[:num_confounders]
@@ -218,13 +216,44 @@ def _generate_confounders(client: LLMClient, clinical_question: str, num_confoun
     return confounders
 
 
-def _get_valid_coefficient_names(confounders: List[Dict[str, Any]]) -> set:
+def _validate_feature_roles(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Validate feature definitions and normalize causal roles."""
+    valid_roles = {"confounder", "effect_modifier"}
+    validated = []
+    for feature in features:
+        if "name" not in feature or "type" not in feature:
+            raise ValueError(f"Invalid feature structure: {feature}")
+        if feature["type"] == "categorical" and "categories" not in feature:
+            raise ValueError(f"Categorical feature missing categories: {feature}")
+        roles = feature.get("roles")
+        if not roles:
+            raise ValueError(
+                f"Feature '{feature.get('name')}' is missing roles; expected one or both of "
+                "['confounder', 'effect_modifier']"
+            )
+        invalid = set(roles) - valid_roles
+        if invalid:
+            raise ValueError(f"Feature '{feature.get('name')}' has invalid roles: {sorted(invalid)}")
+        feature = feature.copy()
+        feature["roles"] = list(dict.fromkeys(roles))
+        validated.append(feature)
+    return validated
+
+
+def _filter_features_by_role(features: List[Dict[str, Any]], role: str) -> List[Dict[str, Any]]:
+    """Return features with a given causal role."""
+    return [feature for feature in features if role in feature.get("roles", [])]
+
+
+def _get_valid_coefficient_names(confounders: List[Dict[str, Any]], role: Optional[str] = None) -> set:
     """
     Build a set of valid coefficient names from the confounder definitions.
 
     For continuous variables: the variable name itself
     For categorical variables: variablename_category for each non-reference category
     """
+    if role is not None:
+        confounders = _filter_features_by_role(confounders, role)
     valid_names = set()
     for conf in confounders:
         name = conf["name"]
@@ -315,10 +344,10 @@ def _generate_equations(
     treatment_eq = response.get("treatment_equation", {})
     outcome_eq = response.get("outcome_equation", {})
 
-    # Validate coefficients - remove any that don't match the confounder list
-    valid_names = _get_valid_coefficient_names(confounders)
-    treatment_eq = _validate_equation_coefficients(treatment_eq, valid_names, "treatment_equation")
-    outcome_eq = _validate_equation_coefficients(outcome_eq, valid_names, "outcome_equation")
+    # Validate nuisance coefficients against confounder-role variables only.
+    confounder_valid_names = _get_valid_coefficient_names(confounders, role="confounder")
+    treatment_eq = _validate_equation_coefficients(treatment_eq, confounder_valid_names, "treatment_equation")
+    outcome_eq = _validate_equation_coefficients(outcome_eq, confounder_valid_names, "outcome_equation")
 
     # Scale LLM-generated coefficients to keep logits in reasonable range
     def scale_coefficients(coefficients: Dict[str, float], scale: float) -> Dict[str, float]:
@@ -338,10 +367,11 @@ def _generate_equations(
     # Add fixed treatment coefficient to outcome equation
     outcome_eq["treatment_coefficient"] = treatment_coefficient
 
-    # Add treatment-confounder interactions to outcome equation (for heterogeneous treatment effects)
-    # Each continuous confounder and each categorical dummy gets a treatment interaction
+    # Add treatment-feature interactions to outcome equation for heterogeneous treatment effects.
+    # Only effect-modifier-role variables are eligible. Features with both roles
+    # appear in nuisance equations and in treatment-effect interactions.
     treatment_interactions = []
-    for conf in confounders:
+    for conf in _filter_features_by_role(confounders, "effect_modifier"):
         name = conf["name"]
         if conf["type"] == "continuous":
             # Interaction: treatment * z_scored_confounder
@@ -360,12 +390,12 @@ def _generate_equations(
                     "coefficient": coef
                 })
     outcome_eq["treatment_interactions"] = treatment_interactions
-    logger.info(f"Added {len(treatment_interactions)} treatment-confounder interactions to outcome equation")
+    logger.info(f"Added {len(treatment_interactions)} treatment-effect-modifier interactions to outcome equation")
 
-    # Add pairwise confounder-confounder interactions to treatment equation
+    # Add pairwise confounder-role interactions to treatment equation.
     # Get all coefficient names (continuous names + categorical dummies)
     coef_names = []
-    for conf in confounders:
+    for conf in _filter_features_by_role(confounders, "confounder"):
         name = conf["name"]
         if conf["type"] == "continuous":
             coef_names.append(name)
@@ -421,11 +451,11 @@ def _generate_summary_statistics(
 # ============================================================================
 
 def _generate_confounders_vllm(client: 'VLLMBatchClient', clinical_question: str, num_confounders: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Generate confounders using vLLM batch client."""
+    """Generate role-tagged explicit features using vLLM batch client."""
     if num_confounders is not None:
-        num_confounders_instruction = f"exactly {num_confounders} confounders"
+        num_confounders_instruction = f"exactly {num_confounders} features"
     else:
-        num_confounders_instruction = "8-12 confounders"
+        num_confounders_instruction = "8-12 features"
     
     prompt = CONFOUNDER_GENERATION_PROMPT.format(
         clinical_question=clinical_question,
@@ -438,18 +468,14 @@ def _generate_confounders_vllm(client: 'VLLMBatchClient', clinical_question: str
         temperature=0.7,
     )
     
-    confounders = response.get("confounders", [])
+    confounders = response.get("features", response.get("confounders", []))
 
-    for conf in confounders:
-        if "name" not in conf or "type" not in conf:
-            raise ValueError(f"Invalid confounder structure: {conf}")
-        if conf["type"] == "categorical" and "categories" not in conf:
-            raise ValueError(f"Categorical confounder missing categories: {conf}")
+    confounders = _validate_feature_roles(confounders)
 
     # Enforce count if num_confounders was specified
     if num_confounders is not None and len(confounders) != num_confounders:
         logger.warning(
-            f"LLM returned {len(confounders)} confounders but {num_confounders} requested, "
+            f"LLM returned {len(confounders)} features but {num_confounders} requested, "
             f"truncating to first {num_confounders}"
         )
         confounders = confounders[:num_confounders]
@@ -483,10 +509,10 @@ def _generate_equations_vllm(
     treatment_eq = response.get("treatment_equation", {})
     outcome_eq = response.get("outcome_equation", {})
 
-    # Validate coefficients - remove any that don't match the confounder list
-    valid_names = _get_valid_coefficient_names(confounders)
-    treatment_eq = _validate_equation_coefficients(treatment_eq, valid_names, "treatment_equation")
-    outcome_eq = _validate_equation_coefficients(outcome_eq, valid_names, "outcome_equation")
+    # Validate nuisance coefficients against confounder-role variables only.
+    confounder_valid_names = _get_valid_coefficient_names(confounders, role="confounder")
+    treatment_eq = _validate_equation_coefficients(treatment_eq, confounder_valid_names, "treatment_equation")
+    outcome_eq = _validate_equation_coefficients(outcome_eq, confounder_valid_names, "outcome_equation")
 
     # Scale coefficients
     if "coefficients" in treatment_eq:
@@ -508,10 +534,10 @@ def _generate_equations_vllm(
     # Add fixed treatment coefficient to outcome equation (CRITICAL for ITE)
     outcome_eq["treatment_coefficient"] = treatment_coefficient
     
-    # Add treatment-confounder interactions to outcome equation (for heterogeneous treatment effects)
-    # Each continuous confounder and each categorical dummy gets a treatment interaction
+    # Add treatment-feature interactions to outcome equation for heterogeneous treatment effects.
+    # Only effect-modifier-role variables are eligible.
     treatment_interactions = []
-    for conf in confounders:
+    for conf in _filter_features_by_role(confounders, "effect_modifier"):
         name = conf["name"]
         if conf["type"] == "continuous":
             # Interaction: treatment * z_scored_confounder
@@ -530,7 +556,7 @@ def _generate_equations_vllm(
                     "coefficient": coef
                 })
     outcome_eq["treatment_interactions"] = treatment_interactions
-    logger.info(f"Added treatment_coefficient={treatment_coefficient} and {len(treatment_interactions)} treatment-confounder interactions to outcome equation")
+    logger.info(f"Added treatment_coefficient={treatment_coefficient} and {len(treatment_interactions)} treatment-effect-modifier interactions to outcome equation")
     
     return treatment_eq, outcome_eq
 
@@ -944,6 +970,19 @@ def _compute_logit(
             if std == 0:
                 std = 1.0
             z_values[name] = (characteristics[name] - mean) / std
+
+    def term_value(term: str) -> Optional[float]:
+        """Return the numeric value for a coefficient or interaction term."""
+        if term in z_values:
+            return z_values[term]
+        for conf in confounders:
+            if conf["type"] != "categorical":
+                continue
+            name = conf["name"]
+            for cat in conf["categories"][1:]:
+                if term == f"{name}_{cat}":
+                    return 1.0 if characteristics.get(name) == cat else 0.0
+        return None
     
     # Apply coefficients
     for coef_name, coef_value in coefficients.items():
@@ -974,17 +1013,14 @@ def _compute_logit(
         terms = interaction.get("terms", [])
         coef = interaction.get("coefficient", 0.0)
         
-        # Compute product of z-scored values
+        # Compute product of continuous z-scores and categorical dummy indicators
         product = 1.0
         for term in terms:
-            if term in z_values:
-                product *= z_values[term]
-            elif term in characteristics:
-                # For categorical in interaction, use indicator
-                product *= 1.0
-            else:
+            value = term_value(term)
+            if value is None:
                 product = 0.0
                 break
+            product *= value
         
         logit += coef * product
     
@@ -998,22 +1034,9 @@ def _compute_logit(
         for interaction in treatment_interactions:
             term = interaction.get("term", "")
             coef = interaction.get("coefficient", 0.0)
-            
-            # Check if it's a continuous variable (in z_values)
-            if term in z_values:
-                logit += coef * treatment * z_values[term]
-            else:
-                # Check if it's a categorical dummy
-                for conf in confounders:
-                    if conf["type"] == "categorical":
-                        name = conf["name"]
-                        for cat in conf["categories"][1:]:  # Skip reference category
-                            dummy_name = f"{name}_{cat}"
-                            if term == dummy_name:
-                                # Add interaction if this category is selected
-                                if characteristics.get(name) == cat:
-                                    logit += coef * treatment
-                                break
+            value = term_value(term)
+            if value is not None:
+                logit += coef * treatment * value
     
     return logit
 
@@ -1234,6 +1257,9 @@ def _generate_single_patient(
     if generation_mode == "two_stage":
         result["event_timeline"] = event_timeline
         result["num_notes"] = num_notes
+
+    for name, value in characteristics.items():
+        result[f"true_{name}"] = value
 
     return result
 
@@ -1644,10 +1670,10 @@ def generate_synthetic_dataset_batch(
     else:
         vllm_client = VLLMBatchClient(vllm_config)
     
-    # Step 1: Generate confounders using vLLM
-    logger.info("Step 1/6: Generating confounders...")
-    confounders = _generate_confounders_vllm(vllm_client, config.clinical_question, num_confounders=config.num_confounders)
-    logger.info(f"Generated {len(confounders)} confounders: {[c['name'] for c in confounders]}")
+    # Step 1: Generate role-tagged features using vLLM
+    logger.info("Step 1/6: Generating role-tagged features...")
+    confounders = _generate_confounders_vllm(vllm_client, config.clinical_question, num_confounders=config.num_features)
+    logger.info(f"Generated {len(confounders)} features: {[c['name'] for c in confounders]}")
     
     # Step 2: Generate regression equations
     logger.info("Step 2/6: Generating regression equations...")
@@ -1744,7 +1770,7 @@ def generate_synthetic_dataset_batch(
         # Format patient characteristics as prompt
         patient_prompt = format_patient_characteristics(characteristics, confounders)
 
-        patient_records.append({
+        record = {
             "patient_id": patient_idx,
             "patient_prompt": patient_prompt,
             "clinical_text": None,  # Will be filled by batch generation
@@ -1755,7 +1781,10 @@ def generate_synthetic_dataset_batch(
             "true_y0_prob": outcome_prob_0,
             "true_y1_prob": outcome_prob_1,
             "true_ite_prob": true_ite_prob,
-        })
+        }
+        for name, value in characteristics.items():
+            record[f"true_{name}"] = value
+        patient_records.append(record)
 
     generation_mode = getattr(config, 'generation_mode', 'single_document')
 
@@ -1992,7 +2021,9 @@ def generate_synthetic_dataset_batch(
     # Compile metadata
     metadata = {
         "config": asdict(config),
-        "confounders": confounders,
+        "features": confounders,
+        "confounders": _filter_features_by_role(confounders, "confounder"),
+        "effect_modifiers": _filter_features_by_role(confounders, "effect_modifier"),
         "treatment_equation": treatment_eq,
         "outcome_equation": outcome_eq,
         "summary_statistics": summary_stats,

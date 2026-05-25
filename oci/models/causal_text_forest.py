@@ -9,9 +9,13 @@ import torch.nn.functional as F
 import numpy as np
 
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
-from .explicit_confounder_featurizer import get_raw_confounder_features, ExplicitConfounderFeaturizer
+from .explicit_feature_featurizer import (
+    ExplicitFeatureFeaturizer,
+    filter_specs_by_role,
+    get_raw_explicit_features,
+)
 from .extractor_factory import create_feature_extractor
-from ..config import normalize_feature_extractor_type, ExplicitConfounderSpec
+from ..config import normalize_feature_extractor_type, ExplicitFeatureSpec
 from ..data.cached_hidden_state_dataset import prepare_cached_batch
 
 
@@ -132,7 +136,12 @@ class CausalTextForest(nn.Module):
         # R-learner dual extractor mode (separate extractors for nuisance vs effect)
         cf_rlearner_dual_extractors: bool = False,
         # Explicit confounder args (raw features for causal forest, MLP for Stage 1 training)
-        explicit_confounder_specs: Optional[List[ExplicitConfounderSpec]] = None,
+        explicit_feature_specs: Optional[List[ExplicitFeatureSpec]] = None,
+        explicit_feature_output_dim: int = 64,
+        explicit_feature_hidden_dim: int = 128,
+        explicit_feature_dropout: float = 0.1,
+        # Backward-compatible aliases for older direct callers.
+        explicit_confounder_specs: Optional[List[ExplicitFeatureSpec]] = None,
         explicit_confounder_output_dim: int = 64,
         explicit_confounder_hidden_dim: int = 128,
         explicit_confounder_dropout: float = 0.1,
@@ -153,6 +162,11 @@ class CausalTextForest(nn.Module):
         self._device = torch.device(device)
         self.outcome_type = outcome_type
         self.feature_extractor_type = normalize_feature_extractor_type(feature_extractor_type)
+        if explicit_feature_specs is None:
+            explicit_feature_specs = explicit_confounder_specs
+            explicit_feature_output_dim = explicit_confounder_output_dim
+            explicit_feature_hidden_dim = explicit_confounder_hidden_dim
+            explicit_feature_dropout = explicit_confounder_dropout
 
         # Store config
         self.config = {
@@ -224,50 +238,62 @@ class CausalTextForest(nn.Module):
             'cf_use_rlearner_representation': cf_use_rlearner_representation,
             'cf_gamma_rlearner': cf_gamma_rlearner,
             'cf_rlearner_dual_extractors': cf_rlearner_dual_extractors,
-            'explicit_confounder_specs': explicit_confounder_specs,
-            'explicit_confounder_output_dim': explicit_confounder_output_dim,
-            'explicit_confounder_hidden_dim': explicit_confounder_hidden_dim,
-            'explicit_confounder_dropout': explicit_confounder_dropout,
+            'explicit_feature_specs': explicit_feature_specs,
+            'explicit_feature_output_dim': explicit_feature_output_dim,
+            'explicit_feature_hidden_dim': explicit_feature_hidden_dim,
+            'explicit_feature_dropout': explicit_feature_dropout,
             'outcome_type': outcome_type,
         }
 
         # Store explicit confounder output dim for head input calculation
-        self._explicit_confounder_output_dim = explicit_confounder_output_dim
+        self._explicit_feature_output_dim = explicit_feature_output_dim
 
         # Explicit confounder support (raw features for interpretability)
-        self.explicit_confounder_specs = explicit_confounder_specs or []
-        self._explicit_confounder_means = {}
-        self._explicit_confounder_stds = {}
-        self._explicit_confounders_fitted = False
+        self.explicit_feature_specs = explicit_feature_specs or []
+        self._explicit_feature_means = {}
+        self._explicit_feature_stds = {}
+        self._explicit_features_fitted = False
 
-        if self.explicit_confounder_specs:
+        if self.explicit_feature_specs:
             # Calculate raw feature dimension
             raw_dim = 0
-            for spec in self.explicit_confounder_specs:
+            for spec in self.explicit_feature_specs:
                 if spec.type == "categorical":
                     n_cats = len(spec.categories) if spec.categories else 2
                     raw_dim += (n_cats - 1) + 1  # k-1 dummies + missing
                 else:
                     raw_dim += 2  # value + missing
-            self._explicit_confounder_raw_dim = raw_dim
-            logger.info(f"Explicit confounders: {len(self.explicit_confounder_specs)} specs, "
+            self._explicit_feature_raw_dim = raw_dim
+            logger.info(f"Explicit confounders: {len(self.explicit_feature_specs)} specs, "
                        f"raw feature dim: {raw_dim}")
         else:
-            self._explicit_confounder_raw_dim = 0
+            self._explicit_feature_raw_dim = 0
 
-        # Initialize ExplicitConfounderFeaturizer (MLP) for Stage 1 training
-        # This allows the neural network to learn from explicit confounders during representation learning
-        if self.explicit_confounder_specs:
-            self.explicit_confounder_featurizer = ExplicitConfounderFeaturizer(
-                specs=self.explicit_confounder_specs,
-                output_dim=explicit_confounder_output_dim,
-                hidden_dim=explicit_confounder_hidden_dim,
-                dropout=explicit_confounder_dropout,
-                device=str(self._device)
+        self.explicit_nuisance_specs = filter_specs_by_role(self.explicit_feature_specs, "confounder")
+        self.explicit_effect_specs = filter_specs_by_role(self.explicit_feature_specs, "effect_modifier")
+
+        def make_role_featurizer(specs: List[ExplicitFeatureSpec], role: str):
+            if not specs:
+                return None
+            logger.info(
+                f"ExplicitFeatureFeaturizer for {role}: {len(specs)} features, "
+                f"output_dim={explicit_feature_output_dim}"
             )
-            logger.info(f"ExplicitConfounderFeaturizer for Stage 1: output_dim={explicit_confounder_output_dim}")
-        else:
-            self.explicit_confounder_featurizer = None
+            return ExplicitFeatureFeaturizer(
+                specs=specs,
+                output_dim=explicit_feature_output_dim,
+                hidden_dim=explicit_feature_hidden_dim,
+                dropout=explicit_feature_dropout,
+                device=str(self._device),
+            )
+
+        self.explicit_nuisance_featurizer = make_role_featurizer(
+            self.explicit_nuisance_specs, "confounder/W"
+        )
+        self.explicit_effect_featurizer = make_role_featurizer(
+            self.explicit_effect_specs, "effect_modifier/X"
+        )
+        self.explicit_feature_featurizer = self.explicit_nuisance_featurizer
 
         # Initialize feature extractor using factory
         self.feature_extractor = create_feature_extractor(
@@ -332,33 +358,36 @@ class CausalTextForest(nn.Module):
 
         logger.info(f"Using {self.feature_extractor_type.upper()} feature extractor")
 
-        # Simple propensity head for representation learning
-        # Input dim = text features + explicit confounder features (if any)
-        input_dim = self.feature_extractor.output_dim
-        if self.explicit_confounder_featurizer is not None:
-            input_dim += explicit_confounder_output_dim
-        self._head_input_dim = input_dim  # Store for logging
+        # Branch-specific Stage 1 heads.
+        # W hidden state jointly predicts propensity and marginal outcome.
+        # X hidden state predicts the R-learner tau head.
+        base_input_dim = self.feature_extractor.output_dim
+        nuisance_input_dim = base_input_dim
+        effect_input_dim = base_input_dim
+        if self.explicit_nuisance_featurizer is not None:
+            nuisance_input_dim += explicit_feature_output_dim
+        if self.explicit_effect_featurizer is not None:
+            effect_input_dim += explicit_feature_output_dim
+        self._head_input_dim = base_input_dim
+        self._nuisance_input_dim = nuisance_input_dim
+        self._effect_input_dim = effect_input_dim
+        self._wx_hidden_dim = hidden_dim
 
-        self.propensity_head = nn.Sequential(
-            nn.Linear(input_dim, representation_dim),
+        self.nuisance_branch = nn.Sequential(
+            nn.Linear(nuisance_input_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(representation_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1)
         )
+        self.propensity_head = nn.Linear(hidden_dim, 1)
+        self.outcome_head = nn.Linear(hidden_dim, 1)
 
-        # Simple outcome head for representation learning
-        self.outcome_head = nn.Sequential(
-            nn.Linear(input_dim, representation_dim),
+        self.effect_branch = nn.Sequential(
+            nn.Linear(effect_input_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(representation_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, 1)
         )
+        self.effect_tau_head = nn.Linear(hidden_dim, 1)
+        input_dim = nuisance_input_dim
 
         # Optional: Treatment effect head for R-learner representation training
         # When enabled, adds R-loss to encourage embeddings to capture τ heterogeneity
@@ -452,16 +481,9 @@ class CausalTextForest(nn.Module):
                 # effect_head is not used in dual mode, but set to None for clarity
                 self.effect_head = None
             else:
-                # SINGLE EXTRACTOR MODE: Use shared features with separate effect head
-                self.effect_head = nn.Sequential(
-                    nn.Linear(input_dim, representation_dim),
-                    nn.ReLU(),
-                    nn.Dropout(dropout),
-                    nn.Linear(representation_dim, hidden_dim),
-                    nn.ReLU(),
-                    nn.Dropout(dropout),
-                    nn.Linear(hidden_dim, 1)  # No activation - τ can be negative
-                )
+                # SINGLE EXTRACTOR MODE: Use effect_branch/effect_tau_head from
+                # the common text representation plus effect-modifier explicit features.
+                self.effect_head = None
                 logger.info("  R-learner representation training: ENABLED (single extractor)")
         else:
             self.effect_head = None
@@ -509,17 +531,66 @@ class CausalTextForest(nn.Module):
             return batch
         return texts
 
+    def _append_role_features(
+        self,
+        text_features: torch.Tensor,
+        explicit_feature_values: Optional[List[Dict[str, Any]]],
+        role: str,
+    ) -> torch.Tensor:
+        """Append role-specific explicit feature embeddings to text features."""
+        featurizer = (
+            self.explicit_nuisance_featurizer
+            if role == "confounder"
+            else self.explicit_effect_featurizer
+        )
+        if featurizer is None:
+            return text_features
+        if explicit_feature_values is None:
+            raise ValueError(
+                f"Explicit features with role '{role}' are configured, but no "
+                "explicit_feature_values were provided."
+            )
+        role_features = featurizer(explicit_feature_values)
+        return torch.cat([text_features, role_features], dim=1)
+
+    def _nuisance_forward(
+        self,
+        text_features: torch.Tensor,
+        explicit_feature_values: Optional[List[Dict[str, Any]]],
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return W hidden state plus propensity/outcome logits."""
+        nuisance_input = self._append_role_features(
+            text_features, explicit_feature_values, "confounder"
+        )
+        w_hidden = self.nuisance_branch(nuisance_input)
+        propensity_logit = self.propensity_head(w_hidden)
+        outcome_logit = self.outcome_head(w_hidden)
+        return w_hidden, propensity_logit, outcome_logit
+
+    def _effect_forward(
+        self,
+        text_features: torch.Tensor,
+        explicit_feature_values: Optional[List[Dict[str, Any]]],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Return X hidden state plus tau prediction."""
+        effect_input = self._append_role_features(
+            text_features, explicit_feature_values, "effect_modifier"
+        )
+        x_hidden = self.effect_branch(effect_input)
+        tau = self.effect_tau_head(x_hidden)
+        return x_hidden, tau
+
     def forward(
         self,
         texts_or_batch,
-        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass through neural components.
 
         Args:
             texts_or_batch: List of text strings or preprocessed batch dict from DataLoader
-            explicit_confounder_values: Optional list of dicts with explicit confounder values
+            explicit_feature_values: Optional list of dicts with explicit confounder values
 
         Returns:
             features: Extracted features (batch, feature_dim)
@@ -529,21 +600,16 @@ class CausalTextForest(nn.Module):
         if isinstance(texts_or_batch, dict):
             texts = texts_or_batch['texts']
             extractor_input = self._get_extractor_input(texts_or_batch, texts)
-            if explicit_confounder_values is None:
-                explicit_confounder_values = texts_or_batch.get('explicit_confounder_values', None)
+            if explicit_feature_values is None:
+                explicit_feature_values = texts_or_batch.get('explicit_feature_values', None)
         else:
             extractor_input = texts_or_batch
 
-        features = self.feature_extractor(extractor_input)
-
-        # Concatenate explicit confounder features if provided
-        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-            features = torch.cat([features, conf_features], dim=1)
-
-        propensity_logit = self.propensity_head(features)
-        outcome_logit = self.outcome_head(features)
-        return features, propensity_logit, outcome_logit
+        text_features = self.feature_extractor(extractor_input)
+        w_hidden, propensity_logit, outcome_logit = self._nuisance_forward(
+            text_features, explicit_feature_values
+        )
+        return w_hidden, propensity_logit, outcome_logit
 
     def _outcome_loss(self, logit, target):
         """BCE for binary outcomes, MSE for continuous outcomes."""
@@ -574,7 +640,7 @@ class CausalTextForest(nn.Module):
 
         Args:
             batch: Dictionary with 'texts', 'treatment', 'outcome' keys.
-                   Optional 'explicit_confounder_values' for explicit confounders.
+                   Optional 'explicit_feature_values' for explicit confounders.
             alpha_propensity: Weight for propensity loss
             gamma_rlearner: Weight for R-learner loss (only used if use_rlearner_representation=True)
             label_smoothing: Label smoothing factor
@@ -586,7 +652,7 @@ class CausalTextForest(nn.Module):
         texts = batch['texts']
         treatments = batch['treatment']
         outcomes = batch['outcome']
-        explicit_confounder_values = batch.get('explicit_confounder_values', None)
+        explicit_feature_values = batch.get('explicit_feature_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
         # Apply label smoothing (skip outcome smoothing for continuous)
@@ -600,26 +666,24 @@ class CausalTextForest(nn.Module):
             treatments_smooth = treatments
             outcomes_smooth = outcomes
 
-        # Extract features from text
-        features = self.feature_extractor(extractor_input)
+        # Extract common text representation, then branch into W and X paths.
+        text_features = self.feature_extractor(extractor_input)
+        w_hidden, propensity_logit, outcome_logit = self._nuisance_forward(
+            text_features, explicit_feature_values
+        )
 
-        # Concatenate explicit confounder features if provided
-        if self.explicit_confounder_featurizer is not None and explicit_confounder_values is not None:
-            conf_features = self.explicit_confounder_featurizer(explicit_confounder_values)
-            features = torch.cat([features, conf_features], dim=1)
-
-        # Propensity prediction
+        # Propensity prediction with optional stop-grad through the nuisance branch.
         if stop_grad_propensity:
-            propensity_logit = self.propensity_head(features.detach())
+            _, detached_propensity_logit, _ = self._nuisance_forward(
+                text_features.detach(), explicit_feature_values
+            )
+            propensity_logit_for_loss = detached_propensity_logit
         else:
-            propensity_logit = self.propensity_head(features)
-
-        # Outcome prediction (marginal E[Y|X])
-        outcome_logit = self.outcome_head(features)
+            propensity_logit_for_loss = propensity_logit
 
         # Losses
         propensity_loss = F.binary_cross_entropy_with_logits(
-            propensity_logit.squeeze(-1),
+            propensity_logit_for_loss.squeeze(-1),
             treatments_smooth
         )
 
@@ -653,9 +717,10 @@ class CausalTextForest(nn.Module):
                 T_residual = treatments - e_X.squeeze(-1)
                 r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
 
-            elif self.effect_head is not None:
-                # SINGLE EXTRACTOR MODE: Use shared features with separate effect head
-                tau = self.effect_head(features)
+            else:
+                # SINGLE EXTRACTOR MODE: branch from common text representation
+                # through the X hidden state to predict tau.
+                _, tau = self._effect_forward(text_features, explicit_feature_values)
 
                 # Detach nuisance functions - this is the key to R-learner
                 # Gradients only flow through τ, not through e or m estimates
@@ -703,10 +768,134 @@ class CausalTextForest(nn.Module):
             stop_grad_propensity=stop_grad_propensity
         )
 
+    @staticmethod
+    def _hstack_optional(left: Optional[np.ndarray], right: Optional[np.ndarray]) -> Optional[np.ndarray]:
+        """Horizontally stack optional 2D matrices, treating zero-width as absent."""
+        if right is not None and right.shape[1] == 0:
+            right = None
+        if left is not None and left.shape[1] == 0:
+            left = None
+        if left is None:
+            return right
+        if right is None:
+            return left
+        return np.hstack([left, right])
+
+    def extract_forest_features(
+        self,
+        texts_or_loader,
+        batch_size: int = 32,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        gpu_store=None,
+    ) -> Tuple[np.ndarray, Optional[np.ndarray], np.ndarray, np.ndarray]:
+        """
+        Extract EconML X/W feature matrices plus nuisance predictions.
+
+        X receives effect-modifier information: learned X activations and raw
+        explicit features with role="effect_modifier". W receives confounder
+        information: learned W activations and raw explicit features with
+        role="confounder". Both-role explicit features appear in both matrices.
+        """
+        from torch.utils.data import DataLoader
+
+        if explicit_feature_values is None:
+            explicit_feature_values = explicit_confounder_values
+
+        self.eval()
+        all_x = []
+        all_w = []
+        all_propensity = []
+        all_outcome = []
+        all_feature_values = []
+
+        use_wx_activations = self.use_rlearner_representation
+        use_effect_extractor = (
+            self.rlearner_dual_extractors and
+            self.effect_feature_extractor is not None
+        )
+
+        is_batch_iterable = isinstance(texts_or_loader, DataLoader) or (
+            hasattr(texts_or_loader, '__iter__') and not isinstance(texts_or_loader, (list, str))
+        )
+
+        def process_batch(extractor_input, batch_feature_values):
+            text_features = self.feature_extractor(extractor_input)
+            w_hidden, prop_logit, outcome_logit = self._nuisance_forward(
+                text_features, batch_feature_values
+            )
+
+            if use_wx_activations:
+                if use_effect_extractor:
+                    effect_text_features = self.effect_feature_extractor(extractor_input)
+                    # In dual-extractor mode the R-loss trains effect_feature_extractor
+                    # through effect_mlp, not the single-extractor effect_branch.
+                    x_hidden = effect_text_features
+                else:
+                    x_hidden, _ = self._effect_forward(text_features, batch_feature_values)
+                x_matrix = x_hidden
+                w_matrix = w_hidden
+            else:
+                x_matrix = text_features
+                w_matrix = None
+
+            return x_matrix, w_matrix, prop_logit, outcome_logit
+
+        with torch.no_grad():
+            if is_batch_iterable:
+                for batch in texts_or_loader:
+                    prepare_cached_batch(batch, self._device, gpu_store=gpu_store)
+                    texts = batch['texts']
+                    extractor_input = self._get_extractor_input(batch, texts)
+                    batch_feature_values = batch.get('explicit_feature_values', None)
+                    x_matrix, w_matrix, prop_logit, outcome_logit = process_batch(
+                        extractor_input, batch_feature_values
+                    )
+                    all_x.append(x_matrix.cpu().numpy())
+                    if w_matrix is not None:
+                        all_w.append(w_matrix.cpu().numpy())
+                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
+                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
+                    if batch_feature_values is not None:
+                        all_feature_values.extend(batch_feature_values)
+            else:
+                texts = texts_or_loader
+                for i in range(0, len(texts), batch_size):
+                    batch_texts = texts[i:i + batch_size]
+                    batch_feature_values = None
+                    if explicit_feature_values is not None:
+                        batch_feature_values = explicit_feature_values[i:i + batch_size]
+                    x_matrix, w_matrix, prop_logit, outcome_logit = process_batch(
+                        batch_texts, batch_feature_values
+                    )
+                    all_x.append(x_matrix.cpu().numpy())
+                    if w_matrix is not None:
+                        all_w.append(w_matrix.cpu().numpy())
+                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
+                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
+
+        x_features = np.vstack(all_x)
+        w_features = np.vstack(all_w) if all_w else None
+
+        feature_values_for_raw = all_feature_values if all_feature_values else explicit_feature_values
+        if feature_values_for_raw is not None and self.explicit_feature_specs:
+            raw_w = self._get_raw_explicit_features(feature_values_for_raw, role="confounder")
+            raw_x = self._get_raw_explicit_features(feature_values_for_raw, role="effect_modifier")
+            x_features = self._hstack_optional(x_features, raw_x)
+            w_features = self._hstack_optional(w_features, raw_w)
+
+        return (
+            x_features,
+            w_features,
+            np.vstack(all_propensity).flatten(),
+            np.vstack(all_outcome).flatten(),
+        )
+
     def extract_features(
         self,
         texts_or_loader,
         batch_size: int = 32,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
         explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
         gpu_store=None
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -720,8 +909,8 @@ class CausalTextForest(nn.Module):
         Args:
             texts_or_loader: List of all text strings, or a DataLoader yielding batch dicts
             batch_size: Batch size for processing (only used when texts_or_loader is a list)
-            explicit_confounder_values: Optional list of dicts with confounder values.
-                If provided and explicit_confounder_specs is set, raw confounder features
+            explicit_feature_values: Optional list of dicts with confounder values.
+                If provided and explicit_feature_specs is set, raw confounder features
                 are concatenated to neural features. Ignored when using DataLoader
                 (confounder values come from batch dicts).
 
@@ -730,6 +919,14 @@ class CausalTextForest(nn.Module):
             propensity: Propensity predictions (n_samples,)
             outcome_pred: Outcome predictions (n_samples,)
         """
+        x_features, _, propensity, outcome_pred = self.extract_forest_features(
+            texts_or_loader,
+            batch_size=batch_size,
+            explicit_feature_values=explicit_feature_values or explicit_confounder_values,
+            gpu_store=gpu_store,
+        )
+        return x_features, propensity, outcome_pred
+
         from torch.utils.data import DataLoader
 
         self.eval()
@@ -758,7 +955,7 @@ class CausalTextForest(nn.Module):
                     prepare_cached_batch(batch, self._device, gpu_store=gpu_store)
                     texts = batch['texts']
                     extractor_input = self._get_extractor_input(batch, texts)
-                    batch_conf_values = batch.get('explicit_confounder_values', None)
+                    batch_conf_values = batch.get('explicit_feature_values', None)
 
                     if use_effect_extractor:
                         text_features = self.effect_feature_extractor(extractor_input)
@@ -768,7 +965,7 @@ class CausalTextForest(nn.Module):
 
                     _, prop_logit, outcome_logit = self.forward(
                         batch,
-                        explicit_confounder_values=batch_conf_values
+                        explicit_feature_values=batch_conf_values
                     )
                     all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
                     all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
@@ -783,8 +980,8 @@ class CausalTextForest(nn.Module):
                     batch_texts = texts[i:i + batch_size]
 
                     batch_conf_values = None
-                    if explicit_confounder_values is not None:
-                        batch_conf_values = explicit_confounder_values[i:i + batch_size]
+                    if explicit_feature_values is not None:
+                        batch_conf_values = explicit_feature_values[i:i + batch_size]
 
                     if use_effect_extractor:
                         text_features = self.effect_feature_extractor(batch_texts)
@@ -794,7 +991,7 @@ class CausalTextForest(nn.Module):
 
                     _, prop_logit, outcome_logit = self.forward(
                         batch_texts,
-                        explicit_confounder_values=batch_conf_values
+                        explicit_feature_values=batch_conf_values
                     )
                     all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
                     all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
@@ -803,9 +1000,9 @@ class CausalTextForest(nn.Module):
 
         # Concatenate raw confounder features if provided
         # Use collected confounder values from DataLoader batches, or the provided list
-        conf_values_for_raw = all_conf_values if all_conf_values else explicit_confounder_values
-        if conf_values_for_raw is not None and self.explicit_confounder_specs:
-            raw_conf_features = self._get_raw_confounder_features(conf_values_for_raw)
+        conf_values_for_raw = all_conf_values if all_conf_values else explicit_feature_values
+        if conf_values_for_raw is not None and self.explicit_feature_specs:
+            raw_conf_features = self._get_raw_explicit_features(conf_values_for_raw)
             combined_features = np.hstack([neural_features, raw_conf_features])
         else:
             combined_features = neural_features
@@ -822,6 +1019,7 @@ class CausalTextForest(nn.Module):
         T: np.ndarray,
         Y: np.ndarray,
         batch_size: int = 32,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
         explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
         gpu_store=None
     ) -> 'CausalTextForest':
@@ -837,28 +1035,28 @@ class CausalTextForest(nn.Module):
             T: Treatment indicators
             Y: Outcome indicators
             batch_size: Batch size for feature extraction (only used with raw texts)
-            explicit_confounder_values: Optional list of dicts with confounder values.
+            explicit_feature_values: Optional list of dicts with confounder values.
                 If provided, raw confounder features are concatenated to neural features.
             gpu_store: Optional GPUHiddenStateStore for GPU-resident hidden states.
 
         Returns:
             self
         """
-        logger.info("Extracting features for causal forest training...")
-        features, _, _ = self.extract_features(
+        logger.info("Extracting X/W features for causal forest training...")
+        x_features, w_features, _, _ = self.extract_forest_features(
             texts_or_loader, batch_size,
-            explicit_confounder_values=explicit_confounder_values,
+            explicit_feature_values=explicit_feature_values or explicit_confounder_values,
             gpu_store=gpu_store
         )
 
-        if self.explicit_confounder_specs and explicit_confounder_values is not None:
-            logger.info(f"  Neural features: {features.shape[1] - self._explicit_confounder_raw_dim}, "
-                       f"Raw confounder features: {self._explicit_confounder_raw_dim}")
+        logger.info(
+            f"  Causal forest X features: {x_features.shape[1]}, "
+            f"W controls: {w_features.shape[1] if w_features is not None else 0}"
+        )
 
-        # Fit causal forest on neural network features (+ raw confounder features if provided)
-        # Nuisance functions are estimated internally using random forests
         self.causal_forest.fit(
-            X=features,
+            X=x_features,
+            W=w_features,
             T=T,
             Y=Y
         )
@@ -871,6 +1069,7 @@ class CausalTextForest(nn.Module):
         batch_size: int = 32,
         return_ci: bool = True,
         alpha: float = 0.05,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
         explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
         gpu_store=None
     ) -> Dict[str, np.ndarray]:
@@ -882,7 +1081,7 @@ class CausalTextForest(nn.Module):
             batch_size: Batch size for feature extraction (only used with raw texts)
             return_ci: Whether to return confidence intervals
             alpha: Significance level for confidence intervals
-            explicit_confounder_values: Optional list of dicts with confounder values.
+            explicit_feature_values: Optional list of dicts with confounder values.
                 Must be provided if model was trained with explicit confounders.
             gpu_store: Optional GPUHiddenStateStore for GPU-resident hidden states.
 
@@ -893,15 +1092,15 @@ class CausalTextForest(nn.Module):
                 - outcome_pred: Outcome predictions from neural network
                 - tau_lower, tau_upper: Confidence intervals (if return_ci)
         """
-        # Extract features (with raw confounder features if provided)
-        features, propensity, outcome_pred = self.extract_features(
+        # Extract X/W features (W is only needed at fit time; predictions use X).
+        x_features, _, propensity, outcome_pred = self.extract_forest_features(
             texts_or_loader, batch_size,
-            explicit_confounder_values=explicit_confounder_values,
+            explicit_feature_values=explicit_feature_values or explicit_confounder_values,
             gpu_store=gpu_store
         )
 
         # Get ITE predictions from causal forest
-        cf_preds = self.causal_forest.predict(features, return_ci=return_ci, alpha=alpha)
+        cf_preds = self.causal_forest.predict(x_features, return_ci=return_ci, alpha=alpha)
 
         result = {
             'tau_pred': cf_preds['tau_pred'],
@@ -931,9 +1130,9 @@ class CausalTextForest(nn.Module):
 
         return result
 
-    def fit_explicit_confounder_featurizer(
+    def fit_explicit_feature_featurizer(
         self,
-        confounder_values_list: List[Dict[str, Any]]
+        feature_values_list: List[Dict[str, Any]]
     ) -> 'CausalTextForest':
         """
         Fit the explicit confounder featurizer (MLP) on training data.
@@ -943,20 +1142,30 @@ class CausalTextForest(nn.Module):
         if explicit confounders are used.
 
         Args:
-            confounder_values_list: List of dicts with confounder values from training data.
+            feature_values_list: List of dicts with confounder values from training data.
                 Each dict should have "{name}" and "{name}_missing" keys.
 
         Returns:
             self for method chaining
         """
-        if self.explicit_confounder_featurizer is not None:
-            self.explicit_confounder_featurizer.fit(confounder_values_list)
-            logger.info("Fitted ExplicitConfounderFeaturizer for Stage 1 training")
+        if self.explicit_nuisance_featurizer is not None:
+            self.explicit_nuisance_featurizer.fit(feature_values_list)
+            logger.info("Fitted confounder-role ExplicitFeatureFeaturizer for Stage 1 training")
+        if self.explicit_effect_featurizer is not None and self.explicit_effect_featurizer is not self.explicit_nuisance_featurizer:
+            self.explicit_effect_featurizer.fit(feature_values_list)
+            logger.info("Fitted effect-modifier-role ExplicitFeatureFeaturizer for Stage 1 training")
         return self
 
-    def fit_explicit_confounders(
+    def fit_explicit_confounder_featurizer(
         self,
         confounder_values_list: List[Dict[str, Any]]
+    ) -> 'CausalTextForest':
+        """Backward-compatible alias for fit_explicit_feature_featurizer."""
+        return self.fit_explicit_feature_featurizer(confounder_values_list)
+
+    def fit_explicit_features(
+        self,
+        feature_values_list: List[Dict[str, Any]]
     ) -> 'CausalTextForest':
         """
         Compute normalization statistics for explicit confounders from training data.
@@ -965,22 +1174,22 @@ class CausalTextForest(nn.Module):
         This method computes mean/std for continuous confounders.
 
         Args:
-            confounder_values_list: List of dicts with confounder values.
+            feature_values_list: List of dicts with confounder values.
                 Keys should match spec.name (e.g., "age", not "explicit_conf_age").
 
         Returns:
             self for method chaining
         """
-        if not self.explicit_confounder_specs:
+        if not self.explicit_feature_specs:
             return self
 
         # Collect continuous values
         continuous_values = {
-            spec.name: [] for spec in self.explicit_confounder_specs if spec.type == "continuous"
+            spec.name: [] for spec in self.explicit_feature_specs if spec.type == "continuous"
         }
 
-        for values in confounder_values_list:
-            for spec in self.explicit_confounder_specs:
+        for values in feature_values_list:
+            for spec in self.explicit_feature_specs:
                 if spec.type == "continuous":
                     val = values.get(spec.name)
                     missing = values.get(f"{spec.name}_missing", val is None)
@@ -990,38 +1199,47 @@ class CausalTextForest(nn.Module):
         # Compute mean and std for each continuous confounder
         for name, vals in continuous_values.items():
             if vals:
-                self._explicit_confounder_means[name] = sum(vals) / len(vals)
-                variance = sum((v - self._explicit_confounder_means[name]) ** 2 for v in vals) / len(vals)
-                self._explicit_confounder_stds[name] = max(variance ** 0.5, 1e-6)
+                self._explicit_feature_means[name] = sum(vals) / len(vals)
+                variance = sum((v - self._explicit_feature_means[name]) ** 2 for v in vals) / len(vals)
+                self._explicit_feature_stds[name] = max(variance ** 0.5, 1e-6)
             else:
-                self._explicit_confounder_means[name] = 0.0
-                self._explicit_confounder_stds[name] = 1.0
+                self._explicit_feature_means[name] = 0.0
+                self._explicit_feature_stds[name] = 1.0
 
-        self._explicit_confounders_fitted = True
-        logger.info(f"Fitted explicit confounders on {len(confounder_values_list)} samples")
+        self._explicit_features_fitted = True
+        logger.info(f"Fitted explicit confounders on {len(feature_values_list)} samples")
         return self
 
-    def _get_raw_confounder_features(
+    def fit_explicit_confounders(
         self,
         confounder_values_list: List[Dict[str, Any]]
+    ) -> 'CausalTextForest':
+        """Backward-compatible alias for fit_explicit_features."""
+        return self.fit_explicit_features(confounder_values_list)
+
+    def _get_raw_explicit_features(
+        self,
+        feature_values_list: List[Dict[str, Any]],
+        role: Optional[str] = None,
     ) -> np.ndarray:
         """
         Get raw confounder features as numpy array.
 
         Args:
-            confounder_values_list: List of dicts with confounder values
+            feature_values_list: List of dicts with confounder values
 
         Returns:
             (n_samples, raw_dim) numpy array
         """
-        if not self.explicit_confounder_specs:
-            return np.zeros((len(confounder_values_list), 0))
+        if not self.explicit_feature_specs:
+            return np.zeros((len(feature_values_list), 0))
 
-        features, _ = get_raw_confounder_features(
-            confounder_values_list,
-            self.explicit_confounder_specs,
-            continuous_means=self._explicit_confounder_means,
-            continuous_stds=self._explicit_confounder_stds
+        features, _ = get_raw_explicit_features(
+            feature_values_list,
+            self.explicit_feature_specs,
+            continuous_means=self._explicit_feature_means,
+            continuous_stds=self._explicit_feature_stds,
+            role=role,
         )
         return np.array(features)
 
@@ -1075,9 +1293,11 @@ class CausalTextForest(nn.Module):
         if self.causal_forest._fitted:
             checkpoint['causal_forest_model'] = pickle.dumps(self.causal_forest.model)
 
-        # Save explicit confounder featurizer state if enabled
-        if self.explicit_confounder_featurizer is not None:
-            checkpoint['explicit_confounder_featurizer_state'] = self.explicit_confounder_featurizer.get_state()
+        # Save role-specific explicit feature featurizer state if enabled
+        if self.explicit_nuisance_featurizer is not None:
+            checkpoint['explicit_nuisance_featurizer_state'] = self.explicit_nuisance_featurizer.get_state()
+        if self.explicit_effect_featurizer is not None:
+            checkpoint['explicit_effect_featurizer_state'] = self.explicit_effect_featurizer.get_state()
 
         # Save effect extractor and effect MLP state if in dual mode
         if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
