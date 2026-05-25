@@ -64,4 +64,5 @@ tests/test_e2e_workflows.py
 tests/test_explicit_confounders_e2e.py
 tests/test_explicit_features.py
 tests/test_extractors.py
+tests/test_synthetic_feature_counts.py
 tests/test_text_chunking.py

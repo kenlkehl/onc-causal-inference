@@ -1,0 +1,33 @@
+{
+  "per_confounder": {
+    "age": {
+      "type": "continuous",
+      "correlation": 0.9928363196745446,
+      "mae": 1.827177177177177,
+      "rmse": 2.2494048818125925,
+      "coverage": 0.999,
+      "total_samples": 1000,
+      "valid_extractions": 999,
+      "missing_extractions": 1.0
+    },
+    "pdl1_expression": {
+      "type": "categorical",
+      "accuracy": 1.0,
+      "coverage": 0.999,
+      "total_samples": 1000,
+      "valid_extractions": 999,
+      "unknown_extractions": 1.0,
+      "per_category_accuracy": {
+        "<1%": 1.0,
+        "1-49%": 1.0,
+        "\u226550%": 1.0
+      }
+    }
+  },
+  "aggregate": {
+    "categorical_accuracy": 1.0,
+    "total_categorical_samples": 999,
+    "mean_continuous_correlation": 0.9928363196745446,
+    "num_continuous_confounders": 1
+  }
+}
