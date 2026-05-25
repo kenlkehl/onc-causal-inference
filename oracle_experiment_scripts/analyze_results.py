@@ -63,8 +63,9 @@ EXPERIMENTAL FACTORS:
   (2) Featurizer MLP underfits at 30 epochs
   (3) Concatenation dilutes text representation signal
   (4) Causal forest sees more features but same n_estimators/min_samples_leaf
-  IMPORTANT: The experiment randomly samples 1-to-N confounders per run, so
-  compare effect of num_sampled_confounders, not just on/off.
+  Some experiment schemas randomly sample 1-to-N confounders per run; newer
+  schemas use all metadata confounders when use_explicit_confounders=True.
+  Compare effect of num_confounders where that varies, not just on/off.
 
 - clam_enabled: CLAM instance-level loss supervises top-attended chunks with
   document labels. Should help hierarchical extractors focus attention.
@@ -93,7 +94,7 @@ WHAT TO LOOK FOR IN THE OUTPUT:
 5. "Confounders within best model type": Controls for model type to isolate
    the effect of explicit confounders.
 6. "By CLAM": Does CLAM instance-level loss help?
-7. "By num_sampled_confounders": Does adding more confounders help linearly,
+7. "By num_confounders": Does adding more confounders help linearly,
    or is there a sweet spot?
 8. "Specific confounders": Are certain confounders consistently helpful?
 9. "Hyperparameter effects": Do larger models help? Is there a sweet spot?
@@ -113,9 +114,96 @@ import pandas as pd
 from scipy import stats as scipy_stats
 
 
+def _metadata_candidates(dataset_path: str | None, results_dir: Path) -> list[Path]:
+    """Return possible metadata.json locations for a result's dataset_path."""
+    if not dataset_path:
+        return []
+
+    path = Path(dataset_path)
+    if path.is_absolute():
+        return [path / "metadata.json"]
+
+    project_root = Path(__file__).resolve().parent.parent
+    return [
+        Path.cwd() / path / "metadata.json",
+        results_dir.resolve().parent / path / "metadata.json",
+        project_root / path / "metadata.json",
+    ]
+
+
+def _metadata_confounder_names(
+    config: dict,
+    results_dir: Path,
+    metadata_cache: dict[str, list[str] | None],
+) -> list[str] | None:
+    """Load all confounder names from dataset metadata, if it can be resolved."""
+    dataset_path = config.get("dataset_path")
+    dataset_name = config.get("dataset_name")
+    cache_key = str(dataset_path or dataset_name or "")
+    if cache_key in metadata_cache:
+        return metadata_cache[cache_key]
+
+    for metadata_file in _metadata_candidates(dataset_path, results_dir):
+        if not metadata_file.exists():
+            continue
+        with open(metadata_file) as fh:
+            metadata = json.load(fh)
+        names = [
+            str(conf["name"])
+            for conf in metadata.get("confounders", [])
+            if isinstance(conf, dict) and conf.get("name")
+        ]
+        metadata_cache[cache_key] = names
+        return names
+
+    metadata_cache[cache_key] = None
+    return None
+
+
+def _normalize_confounder_names(value) -> list[str] | None:
+    """Normalize known config formats for selected confounder names."""
+    if not isinstance(value, list):
+        return None
+
+    names = []
+    for item in value:
+        if isinstance(item, str):
+            names.append(item)
+        elif isinstance(item, dict) and item.get("name"):
+            names.append(str(item["name"]))
+    return names
+
+
+def infer_confounder_names(
+    config: dict,
+    results_dir: Path,
+    metadata_cache: dict[str, list[str] | None],
+) -> tuple[list[str] | None, str]:
+    """Infer explicit confounder names across old and current result schemas."""
+    for key in (
+        "sampled_confounder_names",
+        "explicit_confounder_names",
+        "confounder_names",
+        "sampled_confounders",
+    ):
+        names = _normalize_confounder_names(config.get(key))
+        if names is not None:
+            return names, key
+
+    if not config.get("use_explicit_confounders", False):
+        return [], "not_used"
+
+    names = _metadata_confounder_names(config, results_dir, metadata_cache)
+    if names is not None:
+        return names, "metadata"
+
+    return None, "unknown"
+
+
 def load_results(results_dir: Path) -> pd.DataFrame:
     """Load all result JSONs into a DataFrame."""
     records = []
+    metadata_cache = {}
     for f in sorted(results_dir.glob("*.json")):
         with open(f) as fh:
             data = json.load(fh)
@@ -134,11 +222,12 @@ def load_results(results_dir: Path) -> pd.DataFrame:
         }
 
         # Derived columns
-        names = config.get("sampled_confounder_names", [])
-        row["num_confounders"] = len(names) if isinstance(names, list) else 0
-        row["confounder_names_str"] = (
-            ",".join(sorted(names)) if isinstance(names, list) and names else ""
+        names, names_source = infer_confounder_names(
+            config, results_dir, metadata_cache
         )
+        row["num_confounders"] = len(names) if names is not None else np.nan
+        row["confounder_names_str"] = ",".join(sorted(names)) if names else ""
+        row["confounder_names_source"] = names_source
 
         records.append(row)
 
@@ -405,7 +494,7 @@ def analyze(df: pd.DataFrame) -> list[str]:
     output.extend(section("6. BY CLAM", lines))
 
     # ---------------------------------------------------------------
-    # 7. By number of sampled confounders
+    # 7. By number of explicit confounders
     # NOTE: Only relevant for use_explicit_confounders=True experiments.
     # Look for a dose-response: does adding more confounders improve ITE
     # correlation? Or is there a sweet spot (e.g., 1-3 is good, >5 hurts)?
@@ -440,13 +529,13 @@ def analyze(df: pd.DataFrame) -> list[str]:
     else:
         lines = ["No explicit-confounder experiments yet."]
     output.extend(
-        section("7. BY NUMBER OF SAMPLED CONFOUNDERS", lines)
+        section("7. BY NUMBER OF EXPLICIT CONFOUNDERS", lines)
     )
 
     # ---------------------------------------------------------------
     # 8. Which specific confounders appear in best/worst experiments?
-    # NOTE: Since confounders are randomly sampled, we can check whether
-    # certain confounders consistently appear in high-performing runs.
+    # NOTE: When confounder sets vary, we can check whether certain
+    # confounders consistently appear in high-performing runs.
     # This is exploratory — small sample sizes mean low power.
     # ---------------------------------------------------------------
     if len(conf_df) > 0:
@@ -456,11 +545,12 @@ def analyze(df: pd.DataFrame) -> list[str]:
                 all_names.update(names_str.split(","))
 
         if all_names:
+            confounder_name_sets = conf_df["confounder_names_str"].fillna("").map(
+                lambda names_str: set(names_str.split(",")) if names_str else set()
+            )
             confounder_stats = []
             for name in sorted(all_names):
-                mask = conf_df["confounder_names_str"].str.contains(
-                    name, na=False
-                )
+                mask = confounder_name_sets.map(lambda names: name in names)
                 present = conf_df.loc[mask, "ite_corr"]
                 absent = conf_df.loc[~mask, "ite_corr"]
                 confounder_stats.append({
