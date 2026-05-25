@@ -6,7 +6,10 @@ import json
 import re
 from typing import Optional, Dict, Any, List
 
-from openai import OpenAI
+try:
+    from openai import OpenAI
+except ImportError:  # pragma: no cover - exercised only when optional dependency is absent
+    OpenAI = None
 
 from .config import LLMConfig
 
@@ -24,6 +27,11 @@ class LLMClient:
         Args:
             config: LLM configuration with API URL, key, model name, etc.
         """
+        if OpenAI is None:
+            raise ImportError(
+                "The 'openai' package is required for API-server synthetic data "
+                "generation. Install it or use --use-vllm-batch."
+            )
         self.config = config
         self.client = OpenAI(
             base_url=config.api_base_url,

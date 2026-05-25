@@ -68,8 +68,12 @@ class SyntheticDataConfig:
     interaction_coefficient_scale: float = 0.1  # Scale for interaction coefficients
     target_logit_std: float = 2.0  # Target std of logits; lower values compress propensities toward 0.5
     
-    # Number of role-tagged explicit features (None = use LLM default of 8-12)
+    # Number of role-tagged explicit features (None = use LLM default of 8-12).
+    # num_confounders / num_effect_modifiers are role counts, not necessarily
+    # mutually exclusive feature counts: a feature with both roles counts in both.
     num_features: Optional[int] = None
+    num_confounders: Optional[int] = None
+    num_effect_modifiers: Optional[int] = None
     
     # Outcome type: "binary" or "continuous"
     outcome_type: str = "binary"
@@ -120,8 +124,6 @@ class SyntheticDataConfig:
     def from_dict(cls, data: Dict[str, Any]) -> 'SyntheticDataConfig':
         """Create config from dictionary."""
         data = data.copy()
-        if "num_confounders" in data and "num_features" not in data:
-            data["num_features"] = data.pop("num_confounders")
         llm_data = data.pop('llm', {})
         llm_config = LLMConfig(**llm_data) if llm_data else LLMConfig()
         structured_data_data = data.pop('structured_data', {})
@@ -167,3 +169,26 @@ class SyntheticDataConfig:
                 raise ValueError("max_treatment_rate_per_stratum must be between 0 and 1 (exclusive)")
             if self.min_treatment_rate_per_stratum >= self.max_treatment_rate_per_stratum:
                 raise ValueError("min_treatment_rate_per_stratum must be less than max_treatment_rate_per_stratum")
+
+        for field_name in ("num_features", "num_confounders", "num_effect_modifiers"):
+            value = getattr(self, field_name)
+            if value is not None and value < 0:
+                raise ValueError(f"{field_name} must be non-negative")
+        if self.num_features is not None and self.num_features < 1:
+            raise ValueError("num_features must be at least 1")
+        if self.num_confounders is not None and self.num_features is not None:
+            if self.num_confounders > self.num_features:
+                raise ValueError("num_confounders cannot exceed num_features")
+        if self.num_effect_modifiers is not None and self.num_features is not None:
+            if self.num_effect_modifiers > self.num_features:
+                raise ValueError("num_effect_modifiers cannot exceed num_features")
+        if (
+            self.num_features is not None
+            and self.num_confounders is not None
+            and self.num_effect_modifiers is not None
+            and self.num_features > self.num_confounders + self.num_effect_modifiers
+        ):
+            raise ValueError(
+                "num_features cannot exceed num_confounders + num_effect_modifiers "
+                "when both role counts are specified"
+            )

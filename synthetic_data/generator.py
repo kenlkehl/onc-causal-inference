@@ -89,7 +89,13 @@ def generate_synthetic_dataset(
 
     # Step 1: Generate role-tagged features
     logger.info("Step 1/5: Generating role-tagged features...")
-    confounders = _generate_confounders(client, config.clinical_question, num_confounders=config.num_features)
+    confounders = _generate_confounders(
+        client,
+        config.clinical_question,
+        num_features=config.num_features,
+        num_confounders=config.num_confounders,
+        num_effect_modifiers=config.num_effect_modifiers,
+    )
     logger.info(f"Generated {len(confounders)} features: {[c['name'] for c in confounders]}")
     
     # Step 2: Generate regression equations
@@ -181,17 +187,121 @@ def generate_synthetic_dataset(
     return df, metadata
 
 
-def _generate_confounders(client: LLMClient, clinical_question: str, num_confounders: Optional[int] = None) -> List[Dict[str, Any]]:
-    """Generate role-tagged explicit features using LLM."""
-    # Determine the instruction for number of features
+def _resolve_feature_count_request(
+    num_features: Optional[int],
+    num_confounders: Optional[int],
+    num_effect_modifiers: Optional[int],
+) -> Optional[int]:
+    """Resolve total feature count from total and role-count requests."""
+    if num_features is None and (num_confounders is not None or num_effect_modifiers is not None):
+        return (num_confounders or 0) + (num_effect_modifiers or 0)
+    return num_features
+
+
+def _build_feature_count_instruction(
+    num_features: Optional[int],
+    num_confounders: Optional[int],
+    num_effect_modifiers: Optional[int],
+) -> str:
+    """Build the prompt instruction for total features and role counts."""
+    resolved_num_features = _resolve_feature_count_request(
+        num_features, num_confounders, num_effect_modifiers
+    )
+    if resolved_num_features is None:
+        return "8-12 total features"
+
+    parts = [f"exactly {resolved_num_features} total features"]
     if num_confounders is not None:
-        num_confounders_instruction = f"exactly {num_confounders} features"
-    else:
-        num_confounders_instruction = "8-12 features"
-    
+        parts.append(f"exactly {num_confounders} features with the confounder role")
+    if num_effect_modifiers is not None:
+        parts.append(f"exactly {num_effect_modifiers} features with the effect_modifier role")
+    if num_confounders is not None or num_effect_modifiers is not None:
+        parts.append("features tagged with both roles count toward both role totals")
+    return "; ".join(parts)
+
+
+def _count_features_by_role(features: List[Dict[str, Any]]) -> Dict[str, int]:
+    return {
+        "total": len(features),
+        "confounder": sum("confounder" in feature.get("roles", []) for feature in features),
+        "effect_modifier": sum("effect_modifier" in feature.get("roles", []) for feature in features),
+    }
+
+
+def _feature_counts_match_request(
+    features: List[Dict[str, Any]],
+    num_features: Optional[int],
+    num_confounders: Optional[int],
+    num_effect_modifiers: Optional[int],
+) -> bool:
+    counts = _count_features_by_role(features)
+    return (
+        (num_features is None or counts["total"] == num_features)
+        and (num_confounders is None or counts["confounder"] == num_confounders)
+        and (num_effect_modifiers is None or counts["effect_modifier"] == num_effect_modifiers)
+    )
+
+
+def _enforce_feature_count_request(
+    features: List[Dict[str, Any]],
+    num_features: Optional[int],
+    num_confounders: Optional[int],
+    num_effect_modifiers: Optional[int],
+) -> List[Dict[str, Any]]:
+    """Enforce requested total and role counts, preserving LLM order when possible."""
+    resolved_num_features = _resolve_feature_count_request(
+        num_features, num_confounders, num_effect_modifiers
+    )
+    if resolved_num_features is None and num_confounders is None and num_effect_modifiers is None:
+        return features
+
+    if _feature_counts_match_request(
+        features, resolved_num_features, num_confounders, num_effect_modifiers
+    ):
+        return features
+
+    if resolved_num_features is not None and len(features) >= resolved_num_features:
+        if num_confounders is None and num_effect_modifiers is None:
+            logger.warning(
+                "LLM returned %d features but %d requested; truncating to first %d",
+                len(features), resolved_num_features, resolved_num_features,
+            )
+            return features[:resolved_num_features]
+
+        import itertools
+        for indices in itertools.combinations(range(len(features)), resolved_num_features):
+            subset = [features[i] for i in indices]
+            if _feature_counts_match_request(
+                subset, resolved_num_features, num_confounders, num_effect_modifiers
+            ):
+                logger.warning(
+                    "LLM feature counts %s did not match request; selected ordered subset "
+                    "with requested counts",
+                    _count_features_by_role(features),
+                )
+                return subset
+
+    raise ValueError(
+        "LLM-generated feature counts do not satisfy request. "
+        f"Requested total={resolved_num_features}, confounders={num_confounders}, "
+        f"effect_modifiers={num_effect_modifiers}; got {_count_features_by_role(features)}. "
+        "Retry generation, adjust the counts, or specify --num-features to allow overlap."
+    )
+
+
+def _generate_confounders(
+    client: LLMClient,
+    clinical_question: str,
+    num_features: Optional[int] = None,
+    num_confounders: Optional[int] = None,
+    num_effect_modifiers: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Generate role-tagged explicit features using LLM."""
     prompt = CONFOUNDER_GENERATION_PROMPT.format(
         clinical_question=clinical_question,
-        num_confounders_instruction=num_confounders_instruction
+        feature_count_instruction=_build_feature_count_instruction(
+            num_features, num_confounders, num_effect_modifiers
+        ),
     )
     
     response = client.generate_json(
@@ -205,15 +315,9 @@ def _generate_confounders(client: LLMClient, clinical_question: str, num_confoun
     # Validate structure
     confounders = _validate_feature_roles(confounders)
 
-    # Enforce count if num_confounders was specified
-    if num_confounders is not None and len(confounders) != num_confounders:
-        logger.warning(
-            f"LLM returned {len(confounders)} features but {num_confounders} requested, "
-            f"truncating to first {num_confounders}"
-        )
-        confounders = confounders[:num_confounders]
-
-    return confounders
+    return _enforce_feature_count_request(
+        confounders, num_features, num_confounders, num_effect_modifiers
+    )
 
 
 def _validate_feature_roles(features: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -450,16 +554,19 @@ def _generate_summary_statistics(
 # vLLM-based helper functions for batch generation
 # ============================================================================
 
-def _generate_confounders_vllm(client: 'VLLMBatchClient', clinical_question: str, num_confounders: Optional[int] = None) -> List[Dict[str, Any]]:
+def _generate_confounders_vllm(
+    client: 'VLLMBatchClient',
+    clinical_question: str,
+    num_features: Optional[int] = None,
+    num_confounders: Optional[int] = None,
+    num_effect_modifiers: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """Generate role-tagged explicit features using vLLM batch client."""
-    if num_confounders is not None:
-        num_confounders_instruction = f"exactly {num_confounders} features"
-    else:
-        num_confounders_instruction = "8-12 features"
-    
     prompt = CONFOUNDER_GENERATION_PROMPT.format(
         clinical_question=clinical_question,
-        num_confounders_instruction=num_confounders_instruction
+        feature_count_instruction=_build_feature_count_instruction(
+            num_features, num_confounders, num_effect_modifiers
+        ),
     )
     
     response = client.generate_json(
@@ -472,15 +579,9 @@ def _generate_confounders_vllm(client: 'VLLMBatchClient', clinical_question: str
 
     confounders = _validate_feature_roles(confounders)
 
-    # Enforce count if num_confounders was specified
-    if num_confounders is not None and len(confounders) != num_confounders:
-        logger.warning(
-            f"LLM returned {len(confounders)} features but {num_confounders} requested, "
-            f"truncating to first {num_confounders}"
-        )
-        confounders = confounders[:num_confounders]
-
-    return confounders
+    return _enforce_feature_count_request(
+        confounders, num_features, num_confounders, num_effect_modifiers
+    )
 
 
 def _generate_equations_vllm(
@@ -1672,7 +1773,13 @@ def generate_synthetic_dataset_batch(
     
     # Step 1: Generate role-tagged features using vLLM
     logger.info("Step 1/6: Generating role-tagged features...")
-    confounders = _generate_confounders_vllm(vllm_client, config.clinical_question, num_confounders=config.num_features)
+    confounders = _generate_confounders_vllm(
+        vllm_client,
+        config.clinical_question,
+        num_features=config.num_features,
+        num_confounders=config.num_confounders,
+        num_effect_modifiers=config.num_effect_modifiers,
+    )
     logger.info(f"Generated {len(confounders)} features: {[c['name'] for c in confounders]}")
     
     # Step 2: Generate regression equations

@@ -26,11 +26,12 @@ Each variable must be tagged with one or both causal roles:
 - "effect_modifier": plausibly modifies the treatment effect
 
 Requirements:
-1. Include {num_confounders_instruction} total
+1. Include {feature_count_instruction}
 2. Mix of categorical (3-5 categories each) and continuous variables
 3. Common variables might include: age, sex (if applicable to the cancer type), performance status, comorbidities, prior treatments, biomarkers, disease stage, etc.
 4. Be specific to the clinical context of the question
 5. Some variables may have both roles; assign roles based on clinical plausibility
+6. A variable tagged with both roles counts toward both requested role totals
 
 Respond with a JSON object in this exact format:
 {{

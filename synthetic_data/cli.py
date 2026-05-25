@@ -773,11 +773,22 @@ Examples:
     )
     parser.add_argument(
         "--num-features",
-        "--num-confounders",
         dest="num_features",
         type=int,
         default=None,
-        help="Number of role-tagged features to generate (default: 8-12, determined by LLM)",
+        help="Total number of role-tagged features to generate (default: 8-12, determined by LLM)",
+    )
+    parser.add_argument(
+        "--num-confounders",
+        type=int,
+        default=None,
+        help="Exact number of generated features that should have the confounder role",
+    )
+    parser.add_argument(
+        "--num-effect-modifiers",
+        type=int,
+        default=None,
+        help="Exact number of generated features that should have the effect_modifier role",
     )
 
     # Positivity enforcement
@@ -1000,6 +1011,11 @@ Examples:
 
     args = parser.parse_args()
 
+    if args.num_features is None and (
+        args.num_confounders is not None or args.num_effect_modifiers is not None
+    ):
+        args.num_features = (args.num_confounders or 0) + (args.num_effect_modifiers or 0)
+
     # Setup logging
     log_level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
@@ -1033,6 +1049,10 @@ Examples:
             config.target_logit_std = args.target_logit_std
         if args.num_features is not None:
             config.num_features = args.num_features
+        if args.num_confounders is not None:
+            config.num_confounders = args.num_confounders
+        if args.num_effect_modifiers is not None:
+            config.num_effect_modifiers = args.num_effect_modifiers
         if args.outcome_type != "binary":
             config.outcome_type = args.outcome_type
         if args.outcome_noise_std != 1.0:
@@ -1087,6 +1107,8 @@ Examples:
             max_treatment_rate_per_stratum=args.max_treatment_rate,
             target_logit_std=args.target_logit_std,
             num_features=args.num_features,
+            num_confounders=args.num_confounders,
+            num_effect_modifiers=args.num_effect_modifiers,
             outcome_type=args.outcome_type,
             outcome_noise_std=args.outcome_noise_std,
             generation_mode=args.generation_mode,
