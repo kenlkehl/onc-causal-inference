@@ -96,7 +96,7 @@ class XWRLearnerForestConfig:
     repeat_index: int = 0
 
     # Frozen LLM Pooler hyperparameters.
-    flp_max_length: int = 10000
+    flp_max_length: int = 100000
     flp_freeze_llm: bool = True
     flp_projection_dim: int = 128
     flp_gated_attention_dim: int = 128
@@ -783,7 +783,7 @@ def generate_experiment_grid(
     if learning_rates is None:
         learning_rates = [1e-5, 1e-4]
     if epoch_counts is None:
-        epoch_counts = [5, 10, 25, 50]
+        epoch_counts = [50]
     if include_explicit_feature_options is None:
         include_explicit_feature_options = [False, True]
 
@@ -1310,7 +1310,7 @@ def main():
         "--epoch-counts",
         type=int,
         nargs="+",
-        default=[5, 10, 25, 50],
+        default=[50],
         help="Epoch-count grid",
     )
     parser.add_argument(
