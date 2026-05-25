@@ -1,0 +1,130 @@
+{
+  "per_confounder": {
+    "age": {
+      "type": "continuous",
+      "correlation": 0.9746792372580276,
+      "mae": 2.4431256281407037,
+      "rmse": 3.4894479988507374,
+      "coverage": 0.995,
+      "total_samples": 1000,
+      "valid_extractions": 995,
+      "missing_extractions": 5.0
+    },
+    "sex": {
+      "type": "categorical",
+      "accuracy": 1.0,
+      "coverage": 0.995,
+      "total_samples": 1000,
+      "valid_extractions": 995,
+      "unknown_extractions": 5.0,
+      "per_category_accuracy": {
+        "Male": 1.0,
+        "Female": 1.0,
+        "Other": 1.0
+      }
+    },
+    "ecog_performance_status": {
+      "type": "categorical",
+      "accuracy": 0.8462311557788945,
+      "coverage": 0.995,
+      "total_samples": 1000,
+      "valid_extractions": 995,
+      "unknown_extractions": 5.0,
+      "per_category_accuracy": {
+        "0": 1.0,
+        "1": 0.9093484419263456,
+        "2": 0.8011695906432749,
+        "3": 0.6214285714285714
+      }
+    },
+    "creatinine_clearance": {
+      "type": "continuous",
+      "correlation": 0.8426189325296358,
+      "mae": 5.583869346733668,
+      "rmse": 13.245579981458953,
+      "coverage": 0.995,
+      "total_samples": 1000,
+      "valid_extractions": 995,
+      "missing_extractions": 5.0
+    },
+    "prior_platinum_therapy": {
+      "type": "categorical",
+      "accuracy": 0.8121212121212121,
+      "coverage": 0.99,
+      "total_samples": 1000,
+      "valid_extractions": 990,
+      "unknown_extractions": 10.0,
+      "per_category_accuracy": {
+        "None": 1.0,
+        "Adjuvant": 0.7974358974358975,
+        "Multiple": 0.2246376811594203
+      }
+    },
+    "histology_type": {
+      "type": "categorical",
+      "accuracy": 0.8974874371859296,
+      "coverage": 0.995,
+      "total_samples": 1000,
+      "valid_extractions": 995,
+      "unknown_extractions": 5.0,
+      "per_category_accuracy": {
+        "Squamous": 1.0,
+        "Adenocarcinoma": 1.0,
+        "Large cell": 1.0,
+        "Other": 0.07272727272727272
+      }
+    },
+    "egfr_mutation_status": {
+      "type": "categorical",
+      "accuracy": 0.9076305220883534,
+      "coverage": 0.996,
+      "total_samples": 1000,
+      "valid_extractions": 996,
+      "unknown_extractions": 4.0,
+      "per_category_accuracy": {
+        "Positive": 0.9921875,
+        "Negative": 0.9971671388101983,
+        "Unknown": 0.4506172839506173
+      }
+    },
+    "baseline_nlr": {
+      "type": "continuous",
+      "correlation": 0.8919919672490734,
+      "mae": 0.4197828335056877,
+      "rmse": 1.1591556763910607,
+      "coverage": 0.967,
+      "total_samples": 1000,
+      "valid_extractions": 967,
+      "missing_extractions": 33.0
+    },
+    "brain_metastases_status": {
+      "type": "categorical",
+      "accuracy": 0.9136546184738956,
+      "coverage": 0.996,
+      "total_samples": 1000,
+      "valid_extractions": 996,
+      "unknown_extractions": 4.0,
+      "per_category_accuracy": {
+        "Yes": 0.7541666666666667,
+        "No": 0.9928876244665719,
+        "Unknown": 0.5849056603773585
+      }
+    },
+    "baseline_hemoglobin": {
+      "type": "continuous",
+      "correlation": 0.8787903446130415,
+      "mae": 0.3605829145728643,
+      "rmse": 0.6880085601898223,
+      "coverage": 0.995,
+      "total_samples": 1000,
+      "valid_extractions": 995,
+      "missing_extractions": 5.0
+    }
+  },
+  "aggregate": {
+    "categorical_accuracy": 0.8962627786157198,
+    "total_categorical_samples": 5967,
+    "mean_continuous_correlation": 0.8970201204124446,
+    "num_continuous_confounders": 4
+  }
+}
