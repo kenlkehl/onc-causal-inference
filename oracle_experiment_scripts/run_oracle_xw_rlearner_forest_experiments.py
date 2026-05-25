@@ -952,6 +952,26 @@ def _is_real_cache_group(cache_hash: str, cache_info: Optional[dict]) -> bool:
     return bool(cache_info) and not cache_hash.startswith("__no_cache__")
 
 
+def randomize_execution_groups(
+    cache_groups: List[Tuple[str, dict, List[XWRLearnerForestConfig]]],
+    seed: int = 42,
+) -> List[Tuple[str, dict, List[XWRLearnerForestConfig]]]:
+    """Randomize cache-group order and job order within each group.
+
+    We still run grouped by cache key so a hidden-state cache is created once,
+    but the groups returned by group_configs_by_cache_key are sorted. Shuffle
+    them here so cached runs do not execute in dataset/extractor order.
+    """
+    rng = random.Random(seed)
+    randomized_groups = []
+    for cache_hash, cache_info, group_configs in cache_groups:
+        shuffled_configs = list(group_configs)
+        rng.shuffle(shuffled_configs)
+        randomized_groups.append((cache_hash, cache_info, shuffled_configs))
+    rng.shuffle(randomized_groups)
+    return randomized_groups
+
+
 def worker_process_fn(
     device: str,
     job_queue: mp.Queue,
@@ -1403,7 +1423,10 @@ def main():
         return
 
     cache_base_dir = str(output_dir / ".oci_cache")
-    cache_groups = group_configs_by_cache_key(pending_configs, use_cache)
+    cache_groups = randomize_execution_groups(
+        group_configs_by_cache_key(pending_configs, use_cache)
+    )
+    logger.info("Randomized execution order across %d cache group(s)", len(cache_groups))
 
     if use_cache:
         wpg_per_device = {
