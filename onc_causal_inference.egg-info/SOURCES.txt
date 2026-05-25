@@ -17,9 +17,11 @@ oci/experiments/runner.py
 oci/extraction/__init__.py
 oci/extraction/cache.py
 oci/extraction/explicit_confounders.py
+oci/extraction/explicit_features.py
 oci/inference/__init__.py
 oci/inference/applied.py
 oci/inference/applied_confounder_forest.py
+oci/inference/applied_explicit_feature_forest.py
 oci/inference/applied_forest.py
 oci/inference/applied_tfidf_forest.py
 oci/matching/__init__.py
@@ -30,6 +32,7 @@ oci/models/causal_text.py
 oci/models/causal_text_forest.py
 oci/models/dragonnet.py
 oci/models/explicit_confounder_featurizer.py
+oci/models/explicit_feature_featurizer.py
 oci/models/extractor_factory.py
 oci/models/frozen_llm_pooler_extractor.py
 oci/models/gated_attention_pooling.py
@@ -56,7 +59,9 @@ onc_causal_inference.egg-info/dependency_links.txt
 onc_causal_inference.egg-info/entry_points.txt
 onc_causal_inference.egg-info/requires.txt
 onc_causal_inference.egg-info/top_level.txt
+tests/test_causal_forest_tuning.py
 tests/test_e2e_workflows.py
 tests/test_explicit_confounders_e2e.py
+tests/test_explicit_features.py
 tests/test_extractors.py
 tests/test_text_chunking.py

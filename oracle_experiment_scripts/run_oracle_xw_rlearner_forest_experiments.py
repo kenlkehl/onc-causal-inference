@@ -803,7 +803,7 @@ def generate_experiment_grid(
 
     for ext_type in extractor_types:
         if ext_type == "frozen_llm_pooler":
-            max_lengths = [5000, 10000, 25000, 50000, 75000, 100000]
+            max_lengths = [100000]
             if filter_max_lengths:
                 max_lengths = [m for m in max_lengths if m in filter_max_lengths]
             chat_template_options = [None]
