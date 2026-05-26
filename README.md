@@ -9,7 +9,7 @@ git clone https://github.com/kenlkehl/onc-causal-inference.git
 cd onc-causal-inference
 pip install -e .
 
-# For LLM-based explicit confounder extraction (optional)
+# For LLM-based explicit feature extraction (optional)
 pip install -e ".[extraction]"
 ```
 
@@ -92,6 +92,7 @@ Handles documents up to 50K+ tokens with the pretrained tokenizer. No `fit_token
 | `rlearner` | Direct tau(X) optimization with detached nuisance functions | tau directly predicts ITE |
 | `causal_forest` | Two-stage: neural features + econml CausalForestDML | tau with 95% confidence intervals |
 | `tfidf_forest` | TF-IDF features + CausalForestDML (no neural network, no GPU) | tau with 95% confidence intervals |
+| `explicit_feature_forest` | Role-tagged explicit features + CausalForestDML (no text model) | tau with 95% confidence intervals |
 
 **Recommended: Causal Forest** -- trains neural features with propensity + outcome losses (optionally with R-learner loss), then fits CausalForestDML on the learned representations for doubly-robust estimation with confidence intervals.
 
@@ -142,7 +143,7 @@ Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"cont
         "honest": true,
         "inference": true,
         "use_rlearner_representation": true,
-        "rlearner_dual_extractors": false
+        "rlearner_nuisance_folds": 5
       }
     },
 
@@ -222,21 +223,9 @@ Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"cont
 
 See `example_configs/` for complete configuration files, including configs for each feature extractor type.
 
-## Dual Extractor Mode
+## Staged R-Learner Representation
 
-For R-Learner and Causal Forest, you can use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (tau). This prevents gradient interference between confounder learning and effect modifier learning.
-
-```json
-{
-  "architecture": {
-    "model_type": "rlearner",
-    "feature_extractor_type": "frozen_llm_pooler",
-    "rlearner_dual_extractors": true
-  }
-}
-```
-
-For Causal Forest with dual extractors, Stage 2 uses the effect extractor's features (optimized for tau via R-loss):
+For Causal Forest, `use_rlearner_representation=true` trains separate nuisance and effect representations. Nuisance features support propensity/outcome prediction; effect features are trained with R-loss from out-of-fold nuisance predictions and are used as forest `X`.
 
 ```json
 {
@@ -245,13 +234,13 @@ For Causal Forest with dual extractors, Stage 2 uses the effect extractor's feat
     "feature_extractor_type": "frozen_llm_pooler",
     "causal_forest": {
       "use_rlearner_representation": true,
-      "rlearner_dual_extractors": true
+      "rlearner_nuisance_folds": 5
     }
   }
 }
 ```
 
-Note: dual mode approximately doubles feature extraction memory and compute.
+Note: staged R-learner representation training uses separate nuisance and effect extractors, so it approximately doubles feature extraction memory and compute when enabled.
 
 ## Hidden State Caching
 
@@ -270,31 +259,43 @@ Or pass `--cache` to the oracle experiment script. Cache files are stored in `{d
 
 Use `--gpu-cache` to keep hidden states in GPU VRAM for fastest access (requires sufficient VRAM).
 
-## Explicit Confounder Extraction
+## Explicit Feature Extraction
 
-Researchers can specify confounder variables to be extracted from clinical text using an LLM (via vLLM or an OpenAI-compatible API). Extracted confounders are featurized and concatenated to the text feature vector before the causal heads.
+Researchers can specify structured variables to extract from clinical text using an LLM (via vLLM or an OpenAI-compatible API). Each feature declares its causal role with `roles`: `"confounder"`, `"effect_modifier"`, or both.
+
+For neural heads, extracted features are featurized and concatenated to the text feature vector before the causal heads. For causal forests, raw role-specific features are also passed directly: confounder-role features go to `W`, and effect-modifier-role features go to `X`.
 
 ```json
 {
-  "explicit_confounders": {
-    "enabled": true,
-    "confounders": [
-      {
-        "name": "performance_status",
-        "type": "categorical",
-        "categories": ["0", "1", "2", "3", "4"],
-        "description": "ECOG performance status"
-      },
-      {
-        "name": "age_at_diagnosis",
-        "type": "continuous",
-        "description": "Patient age at diagnosis in years"
-      }
-    ],
-    "vllm_mode": "python_api",
-    "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
-    "cache_enabled": true,
-    "featurizer_output_dim": 64
+  "applied_inference": {
+    "explicit_features": {
+      "enabled": true,
+      "features": [
+        {
+          "name": "performance_status",
+          "type": "categorical",
+          "categories": ["0", "1", "2", "3", "4"],
+          "description": "ECOG performance status",
+          "roles": ["confounder", "effect_modifier"]
+        },
+        {
+          "name": "age_at_diagnosis",
+          "type": "continuous",
+          "description": "Patient age at diagnosis in years",
+          "roles": ["confounder"]
+        },
+        {
+          "name": "pdl1_expression",
+          "type": "continuous",
+          "description": "Tumor PD-L1 expression percentage",
+          "roles": ["effect_modifier"]
+        }
+      ],
+      "vllm_mode": "python_api",
+      "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
+      "cache_enabled": true,
+      "featurizer_output_dim": 64
+    }
   }
 }
 ```
@@ -302,6 +303,8 @@ Researchers can specify confounder variables to be extracted from clinical text 
 Install extraction support with `pip install -e ".[extraction]"`.
 
 Results are cached to `{dataset_dir}/.oci_cache/` and invalidated automatically if the extraction config changes.
+
+Use `model_type="explicit_feature_forest"` to fit CausalForestDML from extracted structured features only. In that mode, confounder-role features form `W`, effect-modifier-role features form `X`, and no text encoder is trained.
 
 ## Contrastive Learning
 
@@ -471,7 +474,7 @@ The `predictions.parquet` contains:
 
 **Core**: torch, transformers, pandas, numpy, scikit-learn, econml, accelerate
 
-**Optional**: openai (explicit confounder extraction via `pip install -e ".[extraction]"`)
+**Optional**: openai (explicit feature extraction via `pip install -e ".[extraction]"`)
 
 ## Citation
 

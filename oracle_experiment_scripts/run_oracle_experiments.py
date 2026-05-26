@@ -764,7 +764,6 @@ def run_causal_forest_experiment(
             cf_inference=True,
             cf_use_rlearner_representation=True,
             cf_gamma_rlearner=config.gamma_rlearner,
-            cf_rlearner_dual_extractors=False,
             explicit_confounder_specs=confounder_specs,
         ))
 
@@ -1481,7 +1480,7 @@ def generate_experiment_grid(
             # hierarchical_llm grid: effective_lengths (chunk_size*max_chunks) x downprojection_dims x confounders
             chunk_size = 2048
             chunk_overlap = 256
-            max_chunks_options = [4, 8, 16]  # effective: 2048*4=8K, 2048*8=16K, 2048*16=32K
+            max_chunks_options = [16]  # effective: 2048*16=32K
             downprojection_dims = [None, 128, 256, 512]  # None = no downprojection (pool on full hidden_size)
             if filter_downprojection_dims is not None:
                 downprojection_dims = [d for d in downprojection_dims if d in filter_downprojection_dims]

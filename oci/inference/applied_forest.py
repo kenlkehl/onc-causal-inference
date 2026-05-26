@@ -67,6 +67,74 @@ def _feature_values_from_df(
     return values
 
 
+def _make_stage_dataset_and_loader(
+    df: pd.DataFrame,
+    indices: Optional[np.ndarray],
+    config: AppliedInferenceConfig,
+    batch_size: int,
+    shuffle: bool,
+    hidden_state_cache: Optional[HiddenStateCache] = None,
+    gpu_store=None,
+    explicit_feature_columns: Optional[List[str]] = None,
+) -> Tuple[Any, DataLoader]:
+    """Create a Stage 1/feature-extraction dataset and loader."""
+    chunk_counts = (
+        hidden_state_cache.chunk_counts if hidden_state_cache is not None
+        else getattr(gpu_store, 'chunk_counts', None) if gpu_store is not None
+        else None
+    )
+
+    if gpu_store is not None and indices is not None:
+        dataset = CachedHiddenStateDataset(
+            data=df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=np.asarray(indices),
+            explicit_feature_columns=explicit_feature_columns,
+            cache_chunk_counts=chunk_counts,
+        )
+        collate_fn = collate_cached_batch
+    elif hidden_state_cache is not None and indices is not None:
+        dataset = CachedHiddenStateDataset(
+            data=df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            dataset_indices=np.asarray(indices),
+            explicit_feature_columns=explicit_feature_columns,
+            cache_hidden_states=hidden_state_cache.hidden_states_array,
+            cache_attention_masks=hidden_state_cache.attention_mask_array,
+            cache_chunk_counts=chunk_counts,
+        )
+        collate_fn = collate_cached_batch
+    else:
+        dataset = ClinicalTextDataset(
+            data=df,
+            text_column=config.text_column,
+            outcome_column=config.outcome_column,
+            treatment_column=config.treatment_column,
+            explicit_feature_columns=explicit_feature_columns,
+        )
+        collate_fn = collate_batch
+
+    if gpu_store is not None:
+        dl_kwargs = {}
+    elif hidden_state_cache is not None and indices is not None:
+        dl_kwargs = dict(num_workers=2, persistent_workers=True, pin_memory=True)
+    else:
+        dl_kwargs = {}
+
+    loader = DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        collate_fn=collate_fn,
+        **dl_kwargs,
+    )
+    return dataset, loader
+
+
 def run_applied_inference_forest(
     dataset: pd.DataFrame,
     config: AppliedInferenceConfig,
@@ -387,6 +455,7 @@ def _process_fold_forest(
         val_indices=test_indices,
         gpu_store=gpu_store,
         explicit_feature_columns=explicit_feature_columns,
+        use_val_for_early_stopping=False,
     )
 
     # Create DataLoaders for Stage 2 feature extraction and prediction
@@ -782,7 +851,6 @@ def _create_causal_forest_model(
     # R-learner representation training options
     cf_use_rlearner_representation = getattr(cf_config, 'use_rlearner_representation', False) if cf_config else False
     cf_gamma_rlearner = getattr(cf_config, 'gamma_rlearner', 1.0) if cf_config else 1.0
-    cf_rlearner_dual_extractors = getattr(cf_config, 'rlearner_dual_extractors', False) if cf_config else False
 
     explicit_feature_specs = None
     explicit_feature_output_dim = 64
@@ -869,7 +937,6 @@ def _create_causal_forest_model(
         # R-learner representation training
         cf_use_rlearner_representation=cf_use_rlearner_representation,
         cf_gamma_rlearner=cf_gamma_rlearner,
-        cf_rlearner_dual_extractors=cf_rlearner_dual_extractors,
         # Explicit feature args
         explicit_feature_specs=explicit_feature_specs,
         explicit_feature_output_dim=explicit_feature_output_dim,
@@ -896,6 +963,7 @@ def _train_representation(
     val_indices: Optional[np.ndarray] = None,
     gpu_store=None,
     explicit_feature_columns: Optional[List[str]] = None,
+    use_val_for_early_stopping: bool = True,
 ) -> List[Dict[str, Any]]:
     """Train representation (Stage 1)."""
     train_config = config.training
@@ -993,6 +1061,375 @@ def _train_representation(
         collate_fn=collate_fn,
         **dl_kwargs
     )
+
+    if model.use_rlearner_representation:
+        alpha_propensity = train_config.alpha_propensity
+        label_smoothing = getattr(train_config, 'label_smoothing', 0.0)
+        stop_grad_propensity = getattr(train_config, 'stop_grad_propensity', False)
+        gradient_clip_norm = getattr(train_config, 'gradient_clip_norm', 0.0)
+        weight_decay = getattr(train_config, 'weight_decay', 0.01)
+        gamma_rlearner = model.cf_gamma_rlearner
+        history = []
+
+        def make_scheduler(optimizer, steps_per_epoch):
+            if train_config.lr_schedule == "linear":
+                total_steps = max(steps_per_epoch * train_config.epochs, 1)
+                return torch.optim.lr_scheduler.LinearLR(
+                    optimizer,
+                    start_factor=1.0,
+                    end_factor=0.1,
+                    total_iters=total_steps,
+                )
+            return None
+
+        def fit_auxiliary_state(model_to_fit: CausalTextForest, source_df: pd.DataFrame) -> None:
+            if model_to_fit.feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES:
+                model_to_fit.fit_tokenizer(source_df[config.text_column].tolist())
+            feature_values = _feature_values_from_df(source_df, explicit_feature_columns)
+            if feature_values is not None:
+                model_to_fit.fit_explicit_feature_featurizer(feature_values)
+                model_to_fit.fit_explicit_features(feature_values)
+
+        def make_inner_model(source_df: pd.DataFrame) -> CausalTextForest:
+            inner_config = dict(model.config)
+            inner_config['device'] = str(device)
+            inner_model = CausalTextForest(**inner_config)
+            fit_auxiliary_state(inner_model, source_df)
+            return inner_model
+
+        def evaluate_nuisance(
+            model_to_eval: CausalTextForest,
+            loader: DataLoader,
+        ) -> Tuple[float, float, float, Optional[float], Optional[float]]:
+            model_to_eval.eval()
+            val_loss = 0.0
+            val_prop_loss = 0.0
+            val_outcome_loss = 0.0
+            all_prop_logits = []
+            all_outcome_logits = []
+            all_treatments = []
+            all_outcomes = []
+
+            with torch.no_grad():
+                for batch in loader:
+                    batch['outcome'] = batch['outcome'].to(device)
+                    batch['treatment'] = batch['treatment'].to(device)
+                    prepare_cached_batch(batch, device, hidden_state_cache, gpu_store=gpu_store)
+                    losses = model_to_eval.train_nuisance_step(
+                        batch,
+                        alpha_propensity=alpha_propensity,
+                        label_smoothing=label_smoothing,
+                        stop_grad_propensity=stop_grad_propensity,
+                    )
+                    val_loss += losses['loss'].item()
+                    val_prop_loss += losses['propensity_loss'].item()
+                    val_outcome_loss += losses['outcome_loss'].item()
+                    all_prop_logits.append(losses['propensity_logit'].cpu())
+                    all_outcome_logits.append(losses['outcome_logit'].cpu())
+                    all_treatments.append(batch['treatment'].cpu())
+                    all_outcomes.append(batch['outcome'].cpu())
+
+            denom = max(len(loader), 1)
+            val_loss /= denom
+            val_prop_loss /= denom
+            val_outcome_loss /= denom
+
+            val_auroc_prop = None
+            val_outcome_metric = None
+            if all_prop_logits:
+                prop_scores = torch.sigmoid(torch.cat(all_prop_logits)).numpy().flatten()
+                outcome_type = getattr(model_to_eval, 'outcome_type', 'binary')
+                if outcome_type == "continuous":
+                    outcome_scores = torch.cat(all_outcome_logits).numpy().flatten()
+                else:
+                    outcome_scores = torch.sigmoid(torch.cat(all_outcome_logits)).numpy().flatten()
+                treatments = torch.cat(all_treatments).numpy()
+                outcomes = torch.cat(all_outcomes).numpy()
+                try:
+                    val_auroc_prop = roc_auc_score(treatments, prop_scores)
+                except Exception:
+                    val_auroc_prop = None
+                if outcome_type == "continuous":
+                    from sklearn.metrics import r2_score
+                    try:
+                        val_outcome_metric = r2_score(outcomes, outcome_scores) if len(outcomes) >= 2 else None
+                    except Exception:
+                        val_outcome_metric = None
+                else:
+                    try:
+                        val_outcome_metric = roc_auc_score(outcomes, outcome_scores)
+                    except Exception:
+                        val_outcome_metric = None
+
+            return val_loss, val_prop_loss, val_outcome_loss, val_auroc_prop, val_outcome_metric
+
+        def train_nuisance_stage(
+            model_to_train: CausalTextForest,
+            stage_train_loader: DataLoader,
+            stage_val_loader: Optional[DataLoader],
+            collect_history: bool = False,
+        ) -> List[Dict[str, Any]]:
+            params = [p for p in model_to_train.nuisance_parameters() if p.requires_grad]
+            optimizer = torch.optim.AdamW(params, lr=train_config.learning_rate, weight_decay=weight_decay)
+            scheduler = make_scheduler(optimizer, len(stage_train_loader))
+            best_val_loss = float('inf')
+            best_state = None
+            local_history = []
+
+            for epoch in range(train_config.epochs):
+                model_to_train.train()
+                train_loss = 0.0
+                train_prop_loss = 0.0
+                train_outcome_loss = 0.0
+
+                for batch in tqdm(
+                    stage_train_loader,
+                    desc=f"Nuisance {epoch+1}",
+                    leave=False,
+                    disable=not verbose,
+                ):
+                    batch['outcome'] = batch['outcome'].to(device)
+                    batch['treatment'] = batch['treatment'].to(device)
+                    prepare_cached_batch(batch, device, hidden_state_cache, gpu_store=gpu_store)
+
+                    optimizer.zero_grad()
+                    losses = model_to_train.train_nuisance_step(
+                        batch,
+                        alpha_propensity=alpha_propensity,
+                        label_smoothing=label_smoothing,
+                        stop_grad_propensity=stop_grad_propensity,
+                    )
+                    losses['loss'].backward()
+                    if gradient_clip_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(params, gradient_clip_norm)
+                    optimizer.step()
+                    if scheduler is not None:
+                        scheduler.step()
+
+                    train_loss += losses['loss'].item()
+                    train_prop_loss += losses['propensity_loss'].item()
+                    train_outcome_loss += losses['outcome_loss'].item()
+
+                denom = max(len(stage_train_loader), 1)
+                train_loss /= denom
+                train_prop_loss /= denom
+                train_outcome_loss /= denom
+
+                if stage_val_loader is not None:
+                    val_loss, val_prop_loss, val_outcome_loss, val_auroc_prop, val_outcome_metric = evaluate_nuisance(
+                        model_to_train,
+                        stage_val_loader,
+                    )
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        best_state = {k: v.cpu().clone() for k, v in model_to_train.state_dict().items()}
+                else:
+                    val_loss = np.nan
+                    val_prop_loss = np.nan
+                    val_outcome_loss = np.nan
+                    val_auroc_prop = None
+                    val_outcome_metric = None
+
+                if collect_history:
+                    local_history.append({
+                        'stage': 'nuisance',
+                        'epoch': epoch + 1,
+                        'train_loss': train_loss,
+                        'train_propensity_loss': train_prop_loss,
+                        'train_outcome_loss': train_outcome_loss,
+                        'train_r_loss': 0.0,
+                        'val_loss': val_loss,
+                        'val_propensity_loss': val_prop_loss,
+                        'val_outcome_loss': val_outcome_loss,
+                        'val_r_loss': 0.0,
+                        'val_auroc_prop': val_auroc_prop,
+                        'val_auroc_outcome': val_outcome_metric,
+                    })
+
+                    if verbose:
+                        message = (
+                            f"Nuisance epoch {epoch+1}/{train_config.epochs} | "
+                            f"Train Loss: {train_loss:.4f}"
+                        )
+                        if stage_val_loader is not None:
+                            message += f" | Val Loss: {val_loss:.4f}"
+                        logger.info(message)
+
+            if best_state is not None:
+                model_to_train.load_state_dict(best_state)
+                model_to_train.to(device)
+            return local_history
+
+        def train_effect_stage(
+            model_to_train: CausalTextForest,
+            stage_train_loader: DataLoader,
+            nuisance_propensity: np.ndarray,
+            nuisance_outcome: np.ndarray,
+        ) -> List[Dict[str, Any]]:
+            params = [p for p in model_to_train.effect_parameters() if p.requires_grad]
+            optimizer = torch.optim.AdamW(params, lr=train_config.learning_rate, weight_decay=weight_decay)
+            scheduler = make_scheduler(optimizer, len(stage_train_loader))
+            local_history = []
+
+            for epoch in range(train_config.epochs):
+                model_to_train.train()
+                train_loss = 0.0
+                train_r_loss = 0.0
+
+                for batch in tqdm(
+                    stage_train_loader,
+                    desc=f"Effect {epoch+1}",
+                    leave=False,
+                    disable=not verbose,
+                ):
+                    batch['outcome'] = batch['outcome'].to(device)
+                    batch['treatment'] = batch['treatment'].to(device)
+                    prepare_cached_batch(batch, device, hidden_state_cache, gpu_store=gpu_store)
+
+                    batch_ids = np.asarray(batch['text_id'], dtype=int)
+                    e_hat = torch.as_tensor(
+                        nuisance_propensity[batch_ids],
+                        dtype=torch.float32,
+                        device=device,
+                    )
+                    m_hat = torch.as_tensor(
+                        nuisance_outcome[batch_ids],
+                        dtype=torch.float32,
+                        device=device,
+                    )
+
+                    optimizer.zero_grad()
+                    losses = model_to_train.train_effect_r_step(
+                        batch,
+                        e_hat=e_hat,
+                        m_hat=m_hat,
+                        gamma_rlearner=gamma_rlearner,
+                    )
+                    losses['loss'].backward()
+                    if gradient_clip_norm > 0:
+                        torch.nn.utils.clip_grad_norm_(params, gradient_clip_norm)
+                    optimizer.step()
+                    if scheduler is not None:
+                        scheduler.step()
+
+                    train_loss += losses['loss'].item()
+                    train_r_loss += losses['r_loss'].item()
+
+                denom = max(len(stage_train_loader), 1)
+                train_loss /= denom
+                train_r_loss /= denom
+                local_history.append({
+                    'stage': 'effect',
+                    'epoch': epoch + 1,
+                    'train_loss': train_loss,
+                    'train_propensity_loss': 0.0,
+                    'train_outcome_loss': 0.0,
+                    'train_r_loss': train_r_loss,
+                    'val_loss': np.nan,
+                    'val_propensity_loss': np.nan,
+                    'val_outcome_loss': np.nan,
+                    'val_r_loss': np.nan,
+                    'val_auroc_prop': None,
+                    'val_auroc_outcome': None,
+                })
+
+                if verbose:
+                    logger.info(
+                        f"Effect epoch {epoch+1}/{train_config.epochs} | "
+                        f"R-Loss: {train_r_loss:.4f}"
+                    )
+
+            return local_history
+
+        cf_config = getattr(config.architecture, 'causal_forest', None)
+        requested_inner_folds = getattr(cf_config, 'rlearner_nuisance_folds', 5)
+        n_inner = min(requested_inner_folds, len(train_df))
+        if n_inner < 2:
+            raise ValueError("Staged R-learner representation requires at least 2 training samples")
+
+        logger.info(
+            "Using staged R-learner representation training "
+            f"({n_inner} inner nuisance folds)"
+        )
+        inner_kf = KFold(n_splits=n_inner, shuffle=True, random_state=10_000 + 42)
+        oof_propensity = np.full(len(train_df), np.nan, dtype=np.float32)
+        oof_outcome = np.full(len(train_df), np.nan, dtype=np.float32)
+        train_indices_array = np.asarray(train_indices) if train_indices is not None else None
+
+        for inner_train_pos, inner_val_pos in inner_kf.split(train_df):
+            inner_train_df = train_df.iloc[inner_train_pos]
+            inner_val_df = train_df.iloc[inner_val_pos]
+            inner_train_indices = (
+                train_indices_array[inner_train_pos]
+                if train_indices_array is not None
+                else None
+            )
+            inner_val_indices = (
+                train_indices_array[inner_val_pos]
+                if train_indices_array is not None
+                else None
+            )
+
+            inner_model = make_inner_model(inner_train_df)
+            inner_train_dataset, inner_train_loader = _make_stage_dataset_and_loader(
+                inner_train_df,
+                inner_train_indices,
+                config,
+                train_config.batch_size,
+                shuffle=True,
+                hidden_state_cache=hidden_state_cache,
+                gpu_store=gpu_store,
+                explicit_feature_columns=explicit_feature_columns,
+            )
+            inner_val_dataset, inner_val_loader = _make_stage_dataset_and_loader(
+                inner_val_df,
+                inner_val_indices,
+                config,
+                train_config.batch_size,
+                shuffle=False,
+                hidden_state_cache=hidden_state_cache,
+                gpu_store=gpu_store,
+                explicit_feature_columns=explicit_feature_columns,
+            )
+
+            train_nuisance_stage(inner_model, inner_train_loader, inner_val_loader)
+            prop_hat, outcome_hat = inner_model.predict_nuisance(
+                inner_val_loader,
+                gpu_store=gpu_store,
+            )
+            oof_propensity[inner_val_pos] = prop_hat
+            oof_outcome[inner_val_pos] = outcome_hat
+
+            del inner_model, inner_train_loader, inner_val_loader
+            del inner_train_dataset, inner_val_dataset
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
+        if np.isnan(oof_propensity).any() or np.isnan(oof_outcome).any():
+            raise RuntimeError("Incomplete out-of-fold nuisance predictions")
+
+        nuisance_val_loader = val_loader if use_val_for_early_stopping else None
+        history.extend(
+            train_nuisance_stage(
+                model,
+                train_loader,
+                nuisance_val_loader,
+                collect_history=True,
+            )
+        )
+        history.extend(
+            train_effect_stage(
+                model,
+                train_loader,
+                oof_propensity,
+                oof_outcome,
+            )
+        )
+
+        del train_loader, val_loader, train_dataset, val_dataset
+        gc.collect()
+        return history
 
     # Optimizer
     optimizer = torch.optim.AdamW(

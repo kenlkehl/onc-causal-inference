@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 def create_collator(
     feature_extractor,
-    effect_feature_extractor=None
 ) -> Optional[Callable]:
     """Return a collator for the given feature extractor.
 
@@ -23,7 +22,6 @@ def create_collator(
 
     Args:
         feature_extractor: The model's feature extractor (already initialized)
-        effect_feature_extractor: Optional second extractor for dual mode
 
     Returns:
         None (frozen_llm_pooler handles tokenization internally)

@@ -181,8 +181,7 @@ Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"cont
         "min_samples_leaf": 5,
         "honest": true,
         "inference": true,
-        "use_rlearner_representation": true,
-        "rlearner_dual_extractors": false
+        "use_rlearner_representation": true
       }
     },
 
@@ -262,21 +261,9 @@ Set `outcome_type` in config: `"binary"` (default, BCE loss + sigmoid) or `"cont
 
 See `example_configs/` for complete configuration files, including configs for each feature extractor type.
 
-## Dual Extractor Mode
+## Staged R-Learner Representation
 
-For R-Learner and Causal Forest, you can use separate feature extractors for nuisance functions (propensity, outcome) and treatment effect (tau). This prevents gradient interference between confounder learning and effect modifier learning.
-
-```json
-{
-  "architecture": {
-    "model_type": "rlearner",
-    "feature_extractor_type": "frozen_llm_pooler",
-    "rlearner_dual_extractors": true
-  }
-}
-```
-
-For Causal Forest with dual extractors, Stage 2 uses the effect extractor's features (optimized for tau via R-loss):
+For Causal Forest, `use_rlearner_representation=true` trains separate nuisance and effect representations. Nuisance features support propensity/outcome prediction; effect features are trained with R-loss from out-of-fold nuisance predictions and are used as forest `X`.
 
 ```json
 {
@@ -285,7 +272,7 @@ For Causal Forest with dual extractors, Stage 2 uses the effect extractor's feat
     "feature_extractor_type": "frozen_llm_pooler",
     "causal_forest": {
       "use_rlearner_representation": true,
-      "rlearner_dual_extractors": true
+      "rlearner_nuisance_folds": 5
     }
   }
 }

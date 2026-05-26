@@ -112,8 +112,6 @@ class CausalText(nn.Module):
         explicit_confounder_output_dim: int = 64,
         explicit_confounder_hidden_dim: int = 128,
         explicit_confounder_dropout: float = 0.1,
-        # R-Learner dual extractor mode
-        rlearner_dual_extractors: bool = False,
         # Outcome type
         outcome_type: str = "binary",  # "binary" or "continuous"
     ):
@@ -218,7 +216,6 @@ class CausalText(nn.Module):
             'explicit_feature_output_dim': explicit_feature_output_dim,
             'explicit_feature_hidden_dim': explicit_feature_hidden_dim,
             'explicit_feature_dropout': explicit_feature_dropout,
-            'rlearner_dual_extractors': rlearner_dual_extractors,
             'outcome_type': outcome_type,
         }
 
@@ -349,102 +346,6 @@ class CausalText(nn.Module):
 
         # Alias for backward compatibility
         self.dragonnet = self.net
-
-        # R-Learner dual extractor mode
-        # When enabled, creates a second independent feature extractor for tau(X)
-        # The nuisance extractor (self.feature_extractor) handles e(X) and m(X)
-        # The effect extractor (self.effect_feature_extractor) handles tau(X)
-        self.rlearner_dual_extractors = rlearner_dual_extractors
-        self.effect_feature_extractor = None
-        self.effect_mlp = None
-
-        # Check for dual extractor mode (R-Learner only)
-        dual_mode_enabled = (rlearner_dual_extractors and model_type == "rlearner")
-
-        if dual_mode_enabled:
-            # Create second feature extractor with same architecture using factory
-            self.effect_feature_extractor = create_feature_extractor(
-                extractor_type=self.feature_extractor_type,
-                device=self._device,
-                model_type=model_type,
-                # Frozen LLM Pooler args
-                flp_model_name=flp_model_name,
-                flp_max_length=flp_max_length,
-                flp_freeze_llm=flp_freeze_llm,
-                flp_gated_attention_dim=flp_gated_attention_dim,
-                flp_projection_dim=flp_projection_dim,
-                flp_dropout=flp_dropout,
-                flp_gradient_checkpointing=flp_gradient_checkpointing,
-                flp_downprojection_dim=flp_downprojection_dim,
-                flp_skip_llm=flp_skip_llm,
-                flp_cached_hidden_size=flp_cached_hidden_size,
-                flp_chat_template_prompt=flp_chat_template_prompt,
-                # Hierarchical LLM args
-                hlm_model_name=hlm_model_name,
-                hlm_chunk_size=hlm_chunk_size,
-                hlm_chunk_overlap=hlm_chunk_overlap,
-                hlm_max_chunks=hlm_max_chunks,
-                hlm_freeze_llm=hlm_freeze_llm,
-                hlm_gated_attention_dim=hlm_gated_attention_dim,
-                hlm_projection_dim=hlm_projection_dim,
-                hlm_dropout=hlm_dropout,
-                hlm_gradient_checkpointing=hlm_gradient_checkpointing,
-                hlm_downprojection_dim=hlm_downprojection_dim,
-                hlm_skip_llm=hlm_skip_llm,
-                hlm_cached_hidden_size=hlm_cached_hidden_size,
-                hlm_chat_template_prompt=hlm_chat_template_prompt,
-                # Hierarchical CNN args
-                hcnn_embedding_dim=hcnn_embedding_dim,
-                hcnn_conv_dim=hcnn_conv_dim,
-                hcnn_kernel_size=hcnn_kernel_size,
-                hcnn_num_conv_blocks=hcnn_num_conv_blocks,
-                hcnn_chunk_size=hcnn_chunk_size,
-                hcnn_chunk_overlap=hcnn_chunk_overlap,
-                hcnn_max_chunks=hcnn_max_chunks,
-                hcnn_vocab_size=hcnn_vocab_size,
-                hcnn_gated_attention_dim=hcnn_gated_attention_dim,
-                hcnn_projection_dim=hcnn_projection_dim,
-                hcnn_dropout=hcnn_dropout,
-                # Hierarchical GRU args
-                hgru_embedding_dim=hgru_embedding_dim,
-                hgru_gru_hidden_dim=hgru_gru_hidden_dim,
-                hgru_num_gru_layers=hgru_num_gru_layers,
-                hgru_chunk_size=hgru_chunk_size,
-                hgru_chunk_overlap=hgru_chunk_overlap,
-                hgru_max_chunks=hgru_max_chunks,
-                hgru_vocab_size=hgru_vocab_size,
-                hgru_gated_attention_dim=hgru_gated_attention_dim,
-                hgru_projection_dim=hgru_projection_dim,
-                hgru_dropout=hgru_dropout,
-                # Simple CNN args
-                scnn_embedding_dim=scnn_embedding_dim,
-                scnn_conv_dim=scnn_conv_dim,
-                scnn_kernel_size=scnn_kernel_size,
-                scnn_num_conv_blocks=scnn_num_conv_blocks,
-                scnn_max_length=scnn_max_length,
-                scnn_vocab_size=scnn_vocab_size,
-                scnn_gated_attention_dim=scnn_gated_attention_dim,
-                scnn_projection_dim=scnn_projection_dim,
-                scnn_dropout=scnn_dropout,
-            )
-
-            # Simple MLP for tau(X) - takes effect extractor output, predicts treatment effect
-            # Note: tau is unbounded (can be negative) - no final activation
-            effect_input_dim = self.effect_feature_extractor.output_dim
-            self.effect_mlp = nn.Sequential(
-                nn.Linear(effect_input_dim, causal_head_hidden_outcome_dim),
-                nn.ReLU(),
-                nn.Dropout(causal_head_dropout),
-                nn.Linear(causal_head_hidden_outcome_dim, causal_head_hidden_outcome_dim),
-                nn.ELU(),
-                nn.Dropout(causal_head_dropout),
-                nn.Linear(causal_head_hidden_outcome_dim, 1)  # tau is unbounded
-            )
-
-            logger.info(f"R-Learner dual extractor mode enabled:")
-            logger.info(f"  Nuisance extractor: {self.feature_extractor_type} -> e(X), m(X)")
-            logger.info(f"  Effect extractor: {self.feature_extractor_type} -> tau(X)")
-            logger.info(f"  Effect MLP: {effect_input_dim} -> {causal_head_hidden_outcome_dim} -> 1")
 
         # Move to device
         self.to(self._device)
@@ -736,140 +637,45 @@ class CausalText(nn.Module):
             treatments_smooth = treatments
             outcomes_smooth = outcomes
 
-        # Check for dual extractor mode
-        if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
-            # DUAL EXTRACTOR MODE:
-            # - Nuisance extractor (self.feature_extractor) -> e(X), m(X)
-            # - Effect extractor (self.effect_feature_extractor) + effect_mlp -> tau(X)
+        # Extract features
+        features = self.feature_extractor(extractor_input)
 
-            # Nuisance path: extract features for e(X) and m(X)
-            nuisance_features = self.feature_extractor(extractor_input)
+        # Compute attention entropy loss if enabled and extractor supports it
+        entropy_loss = torch.tensor(0.0, device=self._device)
+        if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
+            _, attention_info = self.feature_extractor.forward_with_attention(texts)
+            entropy_loss = attention_info['attention_entropy']
 
-            # Compute attention entropy loss if enabled and extractor supports it
-            entropy_loss = torch.tensor(0.0, device=self._device)
-            if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
-                _, attention_info = self.feature_extractor.forward_with_attention(texts)
-                entropy_loss = attention_info['attention_entropy']
+        # Concatenate auxiliary features if provided
+        if self.auxiliary_projection is not None and auxiliary_features is not None:
+            aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
+            features = torch.cat([features, aux_projected], dim=1)
 
-            # Concatenate auxiliary features if provided
-            if self.auxiliary_projection is not None and auxiliary_features is not None:
-                aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
-                nuisance_features = torch.cat([nuisance_features, aux_projected], dim=1)
+        features = self._append_explicit_features(features, explicit_feature_values)
 
-            nuisance_features = self._append_explicit_features(nuisance_features, explicit_feature_values)
-
-            # Nuisance heads: propensity e(X) and marginal outcome m(X)
-            # Note: We use the RLearnerNet's shared layers but only for nuisance functions
-            m_logit, _, t_logit, phi = self.net(nuisance_features)
-
-            # Effect path: extract features for tau(X)
-            effect_features = self.effect_feature_extractor(extractor_input)
-
-            # tau(X) from separate effect MLP
-            tau = self.effect_mlp(effect_features)
-
-            # Handle stop_grad_propensity (detach nuisance features for propensity loss)
-            if stop_grad_propensity:
-                nuisance_features_detached = nuisance_features.detach()
-                phi_detached = self.net.get_representation(nuisance_features_detached)
-                t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
-
-                propensity_loss = F.binary_cross_entropy_with_logits(
-                    t_logit_for_loss.squeeze(-1),
-                    treatments_smooth
-                )
-            else:
-                propensity_loss = F.binary_cross_entropy_with_logits(
-                    t_logit.squeeze(-1),
-                    treatments_smooth
-                )
-
-            # Loss 2: Marginal outcome loss - BCE/MSE for m(X) = E[Y|X]
-            outcome_loss = self._outcome_loss(
-                m_logit.squeeze(-1),
-                outcomes_smooth
+        if stop_grad_propensity:
+            features_detached = features.detach()
+            m_logit, tau, t_logit, phi = self.net(features)
+            phi_detached = self.net.get_representation(features_detached)
+            t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
+            propensity_loss = F.binary_cross_entropy_with_logits(
+                t_logit_for_loss.squeeze(-1),
+                treatments_smooth
             )
-
-            # Loss 3: R-learner loss
-            # CRITICAL: Nuisance functions are detached - gradients flow only through tau
-            # In dual mode, tau comes from separate effect extractor + MLP
-            e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
-            m_X = self._outcome_activation(m_logit).detach()
-
-            # Compute residuals
-            Y_residual = outcomes - m_X.squeeze(-1)  # Y - m(X)
-            T_residual = treatments - e_X.squeeze(-1)  # T - e(X)
-
-            # R-loss: E[((Y - m(X)) - tau(X) * (T - e(X)))^2]
-            r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
-
-            # Set features variable for downstream use
-            features = nuisance_features
-
         else:
-            # STANDARD SINGLE EXTRACTOR MODE
-
-            # Extract features
-            features = self.feature_extractor(extractor_input)
-
-            # Compute attention entropy loss if enabled and extractor supports it
-            entropy_loss = torch.tensor(0.0, device=self._device)
-            if attention_entropy_weight > 0 and hasattr(self.feature_extractor, 'compute_attention_entropy_loss'):
-                # Use forward_with_attention to get entropy
-                _, attention_info = self.feature_extractor.forward_with_attention(texts)
-                entropy_loss = attention_info['attention_entropy']
-
-            # Concatenate auxiliary features if provided
-            if self.auxiliary_projection is not None and auxiliary_features is not None:
-                aux_projected = self.auxiliary_projection(auxiliary_features.to(self._device))
-                features = torch.cat([features, aux_projected], dim=1)
-
-            features = self._append_explicit_features(features, explicit_feature_values)
-
-            if stop_grad_propensity:
-                # CRITICAL: Detach features for propensity to prevent propensity
-                # from dominating the representation learning
-                features_detached = features.detach()
-
-                # Forward pass with regular features for outcome/tau
-                m_logit, tau, t_logit, phi = self.net(features)
-
-                # Re-compute propensity with detached features using helper methods
-                phi_detached = self.net.get_representation(features_detached)
-                t_logit_for_loss = self.net.propensity_from_representation(phi_detached)
-
-                # Loss 1: Propensity loss with DETACHED features
-                propensity_loss = F.binary_cross_entropy_with_logits(
-                    t_logit_for_loss.squeeze(-1),
-                    treatments_smooth
-                )
-            else:
-                # Standard forward pass
-                m_logit, tau, t_logit, phi = self.net(features)
-
-                # Loss 1: Propensity loss - BCE for e(X)
-                propensity_loss = F.binary_cross_entropy_with_logits(
-                    t_logit.squeeze(-1),
-                    treatments_smooth
-                )
-
-            # Loss 2: Marginal outcome loss - BCE/MSE for m(X) = E[Y|X]
-            outcome_loss = self._outcome_loss(
-                m_logit.squeeze(-1),
-                outcomes_smooth
+            m_logit, tau, t_logit, phi = self.net(features)
+            propensity_loss = F.binary_cross_entropy_with_logits(
+                t_logit.squeeze(-1),
+                treatments_smooth
             )
 
-            # Loss 3: R-learner loss
-            # CRITICAL: Detach nuisance functions so gradients flow only through tau
-            e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
-            m_X = self._outcome_activation(m_logit).detach()
+        outcome_loss = self._outcome_loss(m_logit.squeeze(-1), outcomes_smooth)
 
-            # Compute residuals
-            Y_residual = outcomes - m_X.squeeze(-1)  # Y - m(X)
-            T_residual = treatments - e_X.squeeze(-1)  # T - e(X)
-
-            # R-loss: E[((Y - m(X)) - tau(X) * (T - e(X)))^2]
-            r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
+        e_X = torch.sigmoid(t_logit).detach().clamp(0.01, 0.99)
+        m_X = self._outcome_activation(m_logit).detach()
+        Y_residual = outcomes - m_X.squeeze(-1)
+        T_residual = treatments - e_X.squeeze(-1)
+        r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
 
         # Total loss
         total_loss = (
@@ -952,29 +758,12 @@ class CausalText(nn.Module):
             features = self._append_explicit_features(features, explicit_feature_values)
 
             if self.model_type == "rlearner":
-                # Check for dual extractor mode
-                if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
-                    # DUAL EXTRACTOR MODE:
-                    # - Nuisance from main extractor + RLearnerNet
-                    # - tau from effect extractor + effect_mlp
-                    m_logit, _, t_logit, final_common_layer = self.net(features)
+                # RLearnerNet returns: m_logit, tau, t_logit, final_common_layer
+                m_logit, tau, t_logit, final_common_layer = self.net(features)
 
-                    # Get tau from effect extractor
-                    effect_features = self.effect_feature_extractor(extractor_input)
-                    tau = self.effect_mlp(effect_features)
-
-                    m_prob = self._outcome_activation(m_logit).squeeze(-1)  # E[Y|X]
-                    tau_val = tau.squeeze(-1)  # tau(X)
-                    prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
-
-                else:
-                    # STANDARD MODE:
-                    # RLearnerNet returns: m_logit, tau, t_logit, final_common_layer
-                    m_logit, tau, t_logit, final_common_layer = self.net(features)
-
-                    m_prob = self._outcome_activation(m_logit).squeeze(-1)  # E[Y|X]
-                    tau_val = tau.squeeze(-1)  # tau(X)
-                    prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
+                m_prob = self._outcome_activation(m_logit).squeeze(-1)  # E[Y|X]
+                tau_val = tau.squeeze(-1)  # tau(X)
+                prop = torch.sigmoid(t_logit).squeeze(-1)  # e(X)
 
                 # Derive Y0/Y1 from m and tau for backward compatibility:
                 # From: m = e*y1 + (1-e)*y0 and tau = y1 - y0
@@ -1072,9 +861,6 @@ class CausalText(nn.Module):
         """Fit tokenizer for trainable-from-scratch extractors. No-op for LLM-based."""
         if hasattr(self.feature_extractor, 'fit_tokenizer'):
             self.feature_extractor.fit_tokenizer(texts)
-        if hasattr(self, 'effect_feature_extractor') and self.effect_feature_extractor is not None:
-            if hasattr(self.effect_feature_extractor, 'fit_tokenizer'):
-                self.effect_feature_extractor.fit_tokenizer(texts)
 
     def fit_explicit_feature_featurizer(
         self,
@@ -1130,14 +916,6 @@ class CausalText(nn.Module):
             checkpoint['explicit_feature_featurizer_state'] = self.explicit_feature_featurizer.get_state()
             checkpoint['explicit_confounder_featurizer_state'] = checkpoint['explicit_feature_featurizer_state']
 
-        # Save effect extractor and effect MLP state if in dual mode (R-Learner)
-        if self.rlearner_dual_extractors and self.model_type == "rlearner":
-            if self.effect_feature_extractor is not None:
-                checkpoint['effect_feature_extractor'] = self.effect_feature_extractor.state_dict()
-                checkpoint['effect_mlp'] = self.effect_mlp.state_dict()
-                if hasattr(self.effect_feature_extractor, 'get_state'):
-                    checkpoint['effect_extractor_state'] = self.effect_feature_extractor.get_state()
-
         if optimizer is not None:
             checkpoint['optimizer_state_dict'] = optimizer.state_dict()
 
@@ -1168,14 +946,6 @@ class CausalText(nn.Module):
         # Create model
         model = cls(**config)
 
-        # Load effect extractor state BEFORE loading model_state_dict
-        # This ensures embedding layers have correct dimensions
-        if model.rlearner_dual_extractors and model.model_type == "rlearner":
-            if model.effect_feature_extractor is not None:
-                if 'effect_extractor_state' in checkpoint:
-                    if hasattr(model.effect_feature_extractor, 'load_state'):
-                        model.effect_feature_extractor.load_state(checkpoint['effect_extractor_state'])
-
         # Load state dict
         if 'model_state_dict' in checkpoint:
             model.load_state_dict(checkpoint['model_state_dict'], strict=False)
@@ -1190,17 +960,6 @@ class CausalText(nn.Module):
                     checkpoint['dragonnet'],
                     strict=False
                 )
-            # Load effect extractor weights separately if not using model_state_dict
-            if model.rlearner_dual_extractors and model.model_type == "rlearner":
-                if model.effect_feature_extractor is not None:
-                    if 'effect_feature_extractor' in checkpoint:
-                        model.effect_feature_extractor.load_state_dict(
-                            checkpoint['effect_feature_extractor'],
-                            strict=False
-                        )
-                    if 'effect_mlp' in checkpoint:
-                        model.effect_mlp.load_state_dict(checkpoint['effect_mlp'])
-
         # Load explicit feature featurizer state if present
         feature_state = checkpoint.get(
             'explicit_feature_featurizer_state',

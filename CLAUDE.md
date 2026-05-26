@@ -2,7 +2,7 @@
 
 ## Overview
 
-OCI estimates treatment effects from clinical text by combining text feature extraction with causal inference heads. It extracts confounders from unstructured EHR narratives to estimate individual (ITE) and average (ATE) treatment effects.
+OCI estimates treatment effects from clinical text by combining text feature extraction with causal inference heads. Optional explicit feature extraction turns selected clinical variables into role-tagged structured features for confounding control (`W`) and effect modification (`X`).
 
 ## Repository Structure
 
@@ -16,13 +16,13 @@ oci/
 │   └── collators.py                  # Collator utilities (returns None for frozen LLM)
 ├── experiments/runner.py  # Orchestrates inference
 ├── extraction/
-│   ├── explicit_confounders.py   # LLM-based confounder extraction via vLLM
+│   ├── explicit_confounders.py   # LLM-based explicit feature extraction via vLLM
 │   └── cache.py                  # Extraction result caching
 ├── inference/
 │   ├── applied.py             # Applied inference (CV or fixed split)
 │   ├── applied_forest.py      # Causal forest inference pipeline
 │   ├── applied_tfidf_forest.py  # TF-IDF forest baseline pipeline
-│   └── applied_confounder_forest.py  # Confounders-only forest pipeline
+│   └── applied_confounder_forest.py  # Legacy confounders-only forest pipeline
 ├── models/
 │   ├── causal_text.py                # Main model (extractor + causal head)
 │   ├── causal_text_forest.py         # Two-stage neural + causal forest model
@@ -40,7 +40,7 @@ oci/
 │   ├── extractor_factory.py          # Factory for creating feature extractors
 │   ├── dragonnet.py                  # DragonNet causal head
 │   ├── rlearner.py                   # R-Learner causal head
-│   ├── explicit_confounder_featurizer.py  # MLP featurization of extracted confounders
+│   ├── explicit_confounder_featurizer.py  # MLP featurization of extracted explicit features
 │   ├── propensity_model.py           # Propensity-only model for trimming
 │   └── outcome_model.py              # Outcome-only model for assessment
 ├── training/
@@ -91,33 +91,13 @@ Extractors are instantiated via `extractor_factory.py`, which centralizes all cr
 | `rlearner` | Direct tau(X) optimization, detached nuisance functions | tau directly predicts ITE |
 | `causal_forest` | Two-stage: neural features + econml CausalForestDML | tau with confidence intervals |
 | `tfidf_forest` | TF-IDF features + econml CausalForestDML (no neural network) | tau with confidence intervals |
-| `confounder_forest` | Explicit confounders only + econml CausalForestDML (no text features) | tau with confidence intervals |
+| `explicit_feature_forest` | Role-tagged explicit features + econml CausalForestDML (no text features) | tau with confidence intervals |
 
 **R-Learner advantage**: Nuisance functions (e, m) are detached in R-loss, providing stronger gradient signal for treatment effect modifiers.
 
-### R-Learner Dual Extractor Mode
+### Staged R-Learner Causal Forest
 
-When `rlearner_dual_extractors=True`, the R-Learner uses two independent feature extractors (of the same type):
-
-| Component | Purpose | Training Signal |
-|-----------|---------|-----------------|
-| Nuisance Extractor | e(X), m(X) | Propensity BCE + Outcome BCE |
-| Effect Extractor | tau(X) | R-learner loss only |
-
-This separation prevents gradient interference between confounder learning (nuisance) and effect modifier learning (tau). The effect extractor learns representations optimized specifically for treatment effect heterogeneity.
-
-**Memory Note**: Dual mode approximately doubles feature extraction memory/compute.
-
-**Config:**
-```json
-{
-  "architecture": {
-    "model_type": "rlearner",
-    "feature_extractor_type": "frozen_llm_pooler",
-    "rlearner_dual_extractors": true
-  }
-}
-```
+For `causal_forest` with `use_rlearner_representation=True`, the forest path trains separate nuisance and effect representations. Nuisance nets learn `e(W)` and `m(W)`; inner-fold out-of-fold nuisance predictions train the effect net with R-loss; the causal forest receives effect features as `X` and nuisance features as `W`.
 
 ## CLI
 
@@ -359,31 +339,35 @@ No chunking -- processes the full tokenized sequence up to `scnn_max_length`. Re
 | `scnn_projection_dim` | Final output dimension | `128` |
 | `scnn_dropout` | Dropout rate | `0.1` |
 
-## Explicit Confounder Extraction
+## Explicit Feature Extraction
 
-Researchers can specify explicit confounder variables to be extracted from clinical text using an LLM (via vLLM). The extracted confounders are featurized and concatenated to text embeddings before the causal heads.
+Researchers can specify structured variables to extract from clinical text using an LLM (via vLLM). Each feature declares one or more causal roles: `confounder`, `effect_modifier`, or both. Confounder-role features are used for nuisance adjustment (`W`); effect-modifier-role features are used for heterogeneity/effect estimation (`X`).
 
 ### How It Works
 
 ```
-1. Config specifies explicit confounders (name, type, categories)
-2. vLLM extracts confounders from clinical text (preprocessing step)
+1. Config specifies explicit features (name, type, categories, roles)
+2. vLLM extracts structured feature values from clinical text (preprocessing step)
 3. Generates structured values per patient with missingness flags
-4. ExplicitConfounderFeaturizer MLP encodes confounders
-5. Concatenated to feature extractor output
+4. ExplicitFeatureFeaturizer MLP encodes role-specific features for neural heads
+5. Role-specific embeddings are concatenated to text features before heads
 6. Combined representation -> Causal heads (DragonNet, R-Learner, etc.)
 
-For Causal Forest: Raw confounder features added directly to neural features
+For Causal Forest:
+- Raw confounder-role features are passed to W
+- Raw effect-modifier-role features are passed to X
+- Features with both roles are included in both matrices
 ```
 
-### Confounder Specification
+### Feature Specification
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `name` | string | Confounder name (e.g., "performance_status") |
+| `name` | string | Feature name (e.g., "performance_status") |
 | `type` | string | "categorical" or "continuous" |
 | `categories` | list | Valid categories for categorical (e.g., ["0", "1", "2", "3", "4"]) |
 | `description` | string | Description used in LLM prompt |
+| `roles` | list | One or both of `"confounder"`, `"effect_modifier"` |
 
 ### vLLM Modes
 
@@ -397,8 +381,8 @@ For Causal Forest: Raw confounder features added directly to neural features
 
 | Param | Description | Default |
 |-------|-------------|---------|
-| `enabled` | Enable explicit confounder extraction | `False` |
-| `confounders` | List of ExplicitConfounderSpec | `[]` |
+| `enabled` | Enable explicit feature extraction | `False` |
+| `features` | List of role-tagged ExplicitFeatureSpec | `[]` |
 | `vllm_mode` | "server", "start_server", or "python_api" | `"server"` |
 | `vllm_server_url` | URL for vLLM server | `"http://localhost:8000/v1"` |
 | `vllm_model_name` | Model name for extraction | `"Qwen/Qwen2.5-7B-Instruct"` |
@@ -413,25 +397,35 @@ For Causal Forest: Raw confounder features added directly to neural features
 
 ```json
 {
-  "explicit_confounders": {
-    "enabled": true,
-    "confounders": [
-      {
-        "name": "performance_status",
-        "type": "categorical",
-        "categories": ["0", "1", "2", "3", "4"],
-        "description": "ECOG performance status"
-      },
-      {
-        "name": "age_at_diagnosis",
-        "type": "continuous",
-        "description": "Patient age at diagnosis in years"
-      }
-    ],
-    "vllm_mode": "python_api",
-    "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
-    "cache_enabled": true,
-    "featurizer_output_dim": 64
+  "applied_inference": {
+    "explicit_features": {
+      "enabled": true,
+      "features": [
+        {
+          "name": "performance_status",
+          "type": "categorical",
+          "categories": ["0", "1", "2", "3", "4"],
+          "description": "ECOG performance status",
+          "roles": ["confounder", "effect_modifier"]
+        },
+        {
+          "name": "age_at_diagnosis",
+          "type": "continuous",
+          "description": "Patient age at diagnosis in years",
+          "roles": ["confounder"]
+        },
+        {
+          "name": "pdl1_expression",
+          "type": "continuous",
+          "description": "Tumor PD-L1 expression percentage",
+          "roles": ["effect_modifier"]
+        }
+      ],
+      "vllm_mode": "python_api",
+      "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
+      "cache_enabled": true,
+      "featurizer_output_dim": 64
+    }
   }
 }
 ```
@@ -441,11 +435,13 @@ For Causal Forest: Raw confounder features added directly to neural features
 For **neural models** (DragonNet, R-Learner):
 - Categorical: k-1 dummy variables (reference coding)
 - Continuous: Z-score normalized
-- Missingness: Binary indicator per confounder
+- Missingness: Binary indicator per feature
 - MLP projection to `featurizer_output_dim`
 
 For **Causal Forest**:
-- Raw features (no MLP) for interpretability
+- Raw role-specific features (no MLP) for interpretability
+- Confounder-role features -> forest `W`
+- Effect-modifier-role features -> forest `X`
 - One-hot categoricals + normalized continuous + missingness indicators
 
 ### Caching
@@ -462,23 +458,18 @@ When `model_type="causal_forest"`, OCI uses a two-stage approach combining neura
 ### Architecture
 
 ```
-Stage 1: Representation Learning (Neural Network)
-+-- Frozen LLM Pooler -> Features
-+-- Propensity Head: P(T=1|X) -> BCE loss
-+-- Outcome Head: E[Y|X] -> BCE loss
-+-- [Optional] Effect Head: tau(X) -> R-loss (when use_rlearner_representation=True)
+Stage 1a: Nuisance Representation
++-- Text/structured W -> W features
++-- Propensity Head -> e(W) [BCE loss]
++-- Outcome Head -> m(W) [BCE/MSE loss]
 
-Stage 1 with Dual Extractors (when rlearner_dual_extractors=True):
-+-- Nuisance Extractor (feature_extractor)
-|   +-- Text -> Features_nuisance
-|   +-- Propensity Head -> e(X) [BCE loss]
-|   +-- Outcome Head -> m(X) [BCE loss]
-+-- Effect Extractor (effect_feature_extractor)
-    +-- Text -> Features_effect -> effect_mlp -> tau(X) [R-loss]
+Stage 1b: Effect Representation
++-- Text/structured X -> X features
++-- Tau Head -> tau(X) [R-loss from OOF nuisance predictions]
 
 Stage 2: Effect Estimation (Causal Forest)
-+-- Extract learned representations from Stage 1
-|   (In dual mode: uses Effect Extractor features, optimized for tau)
++-- X: effect features plus raw effect-modifier features
++-- W: nuisance features plus raw confounder features
 +-- Fit CausalForestDML on extracted features
 +-- Estimate tau(X) = E[Y(1)-Y(0)|X] with confidence intervals
 ```
@@ -493,13 +484,13 @@ Stage 2: Effect Estimation (Causal Forest)
 | `max_features` | Feature subset strategy for splitting | `"sqrt"` |
 | `honest` | Use honest estimation (sample splitting within trees) | `True` |
 | `inference` | Enable confidence intervals | `True` |
-| `use_rlearner_representation` | Add tau head and R-loss to Stage 1 training | `False` |
+| `use_rlearner_representation` | Use staged nuisance/effect R-learner representation training | `False` |
 | `gamma_rlearner` | Weight for R-learner loss during representation training | `1.0` |
-| `rlearner_dual_extractors` | Use separate extractors for nuisance vs effect | `False` |
+| `rlearner_nuisance_folds` | Inner folds for out-of-fold nuisance predictions | `5` |
 
 ### R-Learner Representation Training
 
-When `use_rlearner_representation=True`, Stage 1 adds a treatment effect head (tau) and trains with the R-learner loss in addition to propensity and outcome losses.
+When `use_rlearner_representation=True`, the causal forest runner trains nuisance models first, then trains an effect representation with the R-learner loss using out-of-fold nuisance predictions.
 
 **R-loss formula**: `E[((Y - m(X)) - tau(X)(T - e(X)))^2]`
 
@@ -539,7 +530,6 @@ When `model_type="tfidf_forest"`, OCI uses a non-neural baseline: TF-IDF feature
 | `stop_grad_propensity=True` | Prevents propensity from dominating representation |
 | `attention_entropy_weight>0` | Encourages focused attention (low entropy) |
 | `gamma_rlearner>1.0` | Stronger treatment effect signal |
-| `rlearner_dual_extractors=True` | Uses separate extractors for nuisance (e,m) and effect (tau) |
 
 ## Propensity Trimming
 
@@ -613,7 +603,7 @@ evaluating how well text extractors capture confounding beyond explicitly specif
 | Mode | Description | Use Case |
 |------|-------------|----------|
 | `random` | LLM generates regression equations with random coefficients, calibrated to target rates | Stress-testing across diverse DGPs |
-| `fitted` | Logistic regression fit on extracted confounders to predict real T/Y | Stability analysis for specific dataset |
+| `fitted` | Logistic regression fit on extracted structured features to predict real T/Y | Stability analysis for specific dataset |
 
 ### Key Files
 
@@ -765,7 +755,7 @@ python -m synthetic_data.cli --config my_config.json
 | Learned tokenizer | `oci/models/learned_tokenizer.py` |
 | Gated attention | `oci/models/gated_attention_pooling.py` |
 | Hidden state cache | `oci/models/hidden_state_cache.py`, `oci/models/gpu_hidden_state_store.py` |
-| Explicit confounders | `oci/extraction/explicit_confounders.py`, `oci/extraction/cache.py`, `oci/models/explicit_confounder_featurizer.py` |
+| Explicit features | `oci/extraction/explicit_confounders.py`, `oci/extraction/cache.py`, `oci/models/explicit_confounder_featurizer.py` |
 | Propensity/Outcome models | `oci/models/propensity_model.py`, `oci/models/outcome_model.py` |
 | Training | `oci/inference/applied.py`, `oci/inference/applied_forest.py`, `oci/inference/applied_tfidf_forest.py`, `oci/inference/applied_confounder_forest.py` |
 | Semi-synthetic simulation | `oracle_experiment_scripts/semisynthetic_dgp.py`, `run_semisynthetic_experiments.py` |
@@ -779,7 +769,7 @@ python -m synthetic_data.cli --config my_config.json
 
 **Core**: torch, transformers, pandas, numpy, scikit-learn, tqdm, pyarrow, joblib, accelerate, econml
 
-**Optional**: openai (explicit confounder extraction via vLLM server)
+**Optional**: openai (explicit feature extraction via vLLM server)
 
 **Device support**: CUDA (NVIDIA GPUs), MPS (Apple Silicon M1/M2/M3), CPU
 

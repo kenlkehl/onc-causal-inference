@@ -4,10 +4,9 @@
 Tests the main applied user workflows:
 1. DragonNet + Frozen LLM Pooler + CV
 2. RLearner + Frozen LLM Pooler + CV
-3. RLearner + Dual Extractors + CV
-4. Causal Forest (neural features from R-learner training) + CV
-5. TF-IDF Forest + CV
-6. Explicit Feature Causal Forest + CV
+3. Causal Forest (neural features from R-learner training) + CV
+4. TF-IDF Forest + CV
+5. Explicit Feature Causal Forest + CV
 """
 
 import gc
@@ -128,7 +127,7 @@ def _make_config(
 
     # Apply architecture overrides (all extractor prefixes + special flags)
     extractor_prefixes = ('flp_', 'hlm_', 'hcnn_', 'hgru_', 'scnn_')
-    special_arch_keys = ('rlearner_dual_extractors', 'feature_extractor_type')
+    special_arch_keys = ('feature_extractor_type',)
     for k in list(overrides.keys()):
         if any(k.startswith(p) for p in extractor_prefixes) or k in special_arch_keys:
             arch_kwargs[k] = overrides.pop(k)
@@ -278,27 +277,6 @@ class TestRLearner:
         results_df = pd.read_parquet(output_path)
         _verify_neural_predictions(results_df, n_expected=len(df))
         _cleanup()
-
-    def test_rlearner_dual_extractors_cv(self, test_dataset, tmp_path, device):
-        df, dataset_path = test_dataset
-        output_path = tmp_path / "applied_inference" / "predictions.parquet"
-
-        config = _make_config(
-            "rlearner", dataset_path,
-            rlearner_dual_extractors=True
-        )
-
-        run_applied_inference(
-            dataset=df,
-            config=config,
-            output_path=output_path,
-            device=device,
-        )
-
-        results_df = pd.read_parquet(output_path)
-        _verify_neural_predictions(results_df, n_expected=len(df))
-        _cleanup()
-
 
 class TestCausalForest:
     """Test Causal Forest (neural features) + CV."""

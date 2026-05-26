@@ -813,8 +813,6 @@ def _train_single_model(
         causal_head_dropout=getattr(arch_config, 'causal_head_dropout', 0.2),
         device=str(device),
         model_type=arch_config.model_type,
-        # R-Learner dual extractor mode
-        rlearner_dual_extractors=getattr(arch_config, 'rlearner_dual_extractors', False),
         # Outcome type
         outcome_type=getattr(config, 'outcome_type', 'binary'),
     )

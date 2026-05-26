@@ -2,6 +2,7 @@
 """Two-stage causal text model combining neural feature extraction with causal forests."""
 
 import logging
+from itertools import chain
 from typing import Optional, List, Dict, Any, Tuple
 import torch
 import torch.nn as nn
@@ -133,8 +134,6 @@ class CausalTextForest(nn.Module):
         # R-learner representation training args
         cf_use_rlearner_representation: bool = False,
         cf_gamma_rlearner: float = 1.0,
-        # R-learner dual extractor mode (separate extractors for nuisance vs effect)
-        cf_rlearner_dual_extractors: bool = False,
         # Explicit confounder args (raw features for causal forest, MLP for Stage 1 training)
         explicit_feature_specs: Optional[List[ExplicitFeatureSpec]] = None,
         explicit_feature_output_dim: int = 64,
@@ -237,7 +236,6 @@ class CausalTextForest(nn.Module):
             'cf_random_state': cf_random_state,
             'cf_use_rlearner_representation': cf_use_rlearner_representation,
             'cf_gamma_rlearner': cf_gamma_rlearner,
-            'cf_rlearner_dual_extractors': cf_rlearner_dual_extractors,
             'explicit_feature_specs': explicit_feature_specs,
             'explicit_feature_output_dim': explicit_feature_output_dim,
             'explicit_feature_hidden_dim': explicit_feature_hidden_dim,
@@ -389,102 +387,78 @@ class CausalTextForest(nn.Module):
         self.effect_tau_head = nn.Linear(hidden_dim, 1)
         input_dim = nuisance_input_dim
 
-        # Optional: Treatment effect head for R-learner representation training
-        # When enabled, adds R-loss to encourage embeddings to capture τ heterogeneity
+        # Optional staged R-learner representation training.
+        # When enabled, the nuisance extractor/branch learns W for e(W), m(W),
+        # while a separate effect extractor/branch learns X for tau(X) from
+        # fixed out-of-fold nuisance predictions.
         self.use_rlearner_representation = cf_use_rlearner_representation
         self.cf_gamma_rlearner = cf_gamma_rlearner
-        self.rlearner_dual_extractors = cf_rlearner_dual_extractors
         self.effect_feature_extractor = None
-        self.effect_mlp = None
 
         if cf_use_rlearner_representation:
-            if cf_rlearner_dual_extractors:
-                # DUAL EXTRACTOR MODE: Create a second feature extractor for τ(X)
-                # This provides complete separation between nuisance and effect learning
-                self.effect_feature_extractor = create_feature_extractor(
-                    extractor_type=self.feature_extractor_type,
-                    device=self._device,
-                    model_type="dragonnet",
-                    flp_model_name=flp_model_name,
-                    flp_max_length=flp_max_length,
-                    flp_freeze_llm=flp_freeze_llm,
-                    flp_gated_attention_dim=flp_gated_attention_dim,
-                    flp_projection_dim=flp_projection_dim,
-                    flp_dropout=flp_dropout,
-                    flp_gradient_checkpointing=flp_gradient_checkpointing,
-                    flp_downprojection_dim=flp_downprojection_dim,
-                    flp_skip_llm=flp_skip_llm,
-                    flp_cached_hidden_size=flp_cached_hidden_size,
-                    flp_chat_template_prompt=flp_chat_template_prompt,
-                    hlm_model_name=hlm_model_name,
-                    hlm_chunk_size=hlm_chunk_size,
-                    hlm_chunk_overlap=hlm_chunk_overlap,
-                    hlm_max_chunks=hlm_max_chunks,
-                    hlm_freeze_llm=hlm_freeze_llm,
-                    hlm_gated_attention_dim=hlm_gated_attention_dim,
-                    hlm_projection_dim=hlm_projection_dim,
-                    hlm_dropout=hlm_dropout,
-                    hlm_gradient_checkpointing=hlm_gradient_checkpointing,
-                    hlm_downprojection_dim=hlm_downprojection_dim,
-                    hlm_skip_llm=hlm_skip_llm,
-                    hlm_cached_hidden_size=hlm_cached_hidden_size,
-                    hlm_chat_template_prompt=hlm_chat_template_prompt,
-                    hcnn_embedding_dim=hcnn_embedding_dim,
-                    hcnn_conv_dim=hcnn_conv_dim,
-                    hcnn_kernel_size=hcnn_kernel_size,
-                    hcnn_num_conv_blocks=hcnn_num_conv_blocks,
-                    hcnn_chunk_size=hcnn_chunk_size,
-                    hcnn_chunk_overlap=hcnn_chunk_overlap,
-                    hcnn_max_chunks=hcnn_max_chunks,
-                    hcnn_vocab_size=hcnn_vocab_size,
-                    hcnn_gated_attention_dim=hcnn_gated_attention_dim,
-                    hcnn_projection_dim=hcnn_projection_dim,
-                    hcnn_dropout=hcnn_dropout,
-                    hgru_embedding_dim=hgru_embedding_dim,
-                    hgru_gru_hidden_dim=hgru_gru_hidden_dim,
-                    hgru_num_gru_layers=hgru_num_gru_layers,
-                    hgru_chunk_size=hgru_chunk_size,
-                    hgru_chunk_overlap=hgru_chunk_overlap,
-                    hgru_max_chunks=hgru_max_chunks,
-                    hgru_vocab_size=hgru_vocab_size,
-                    hgru_gated_attention_dim=hgru_gated_attention_dim,
-                    hgru_projection_dim=hgru_projection_dim,
-                    hgru_dropout=hgru_dropout,
-                    scnn_embedding_dim=scnn_embedding_dim,
-                    scnn_conv_dim=scnn_conv_dim,
-                    scnn_kernel_size=scnn_kernel_size,
-                    scnn_num_conv_blocks=scnn_num_conv_blocks,
-                    scnn_max_length=scnn_max_length,
-                    scnn_vocab_size=scnn_vocab_size,
-                    scnn_gated_attention_dim=scnn_gated_attention_dim,
-                    scnn_projection_dim=scnn_projection_dim,
-                    scnn_dropout=scnn_dropout,
-                )
-
-                # Effect MLP: takes effect extractor output, predicts τ
-                effect_input_dim = self.effect_feature_extractor.output_dim
-                self.effect_mlp = nn.Sequential(
-                    nn.Linear(effect_input_dim, hidden_dim),
-                    nn.ReLU(),
-                    nn.Dropout(dropout),
-                    nn.Linear(hidden_dim, hidden_dim),
-                    nn.ELU(),
-                    nn.Dropout(dropout),
-                    nn.Linear(hidden_dim, 1)  # τ is unbounded
-                )
-
-                logger.info("  R-learner representation training: ENABLED (DUAL EXTRACTOR MODE)")
-                logger.info(f"    Nuisance extractor: {self.feature_extractor_type} -> e(X), m(X)")
-                logger.info(f"    Effect extractor: {self.feature_extractor_type} -> τ(X)")
-                logger.info(f"    Effect MLP: {effect_input_dim} -> {hidden_dim} -> 1")
-
-                # effect_head is not used in dual mode, but set to None for clarity
-                self.effect_head = None
-            else:
-                # SINGLE EXTRACTOR MODE: Use effect_branch/effect_tau_head from
-                # the common text representation plus effect-modifier explicit features.
-                self.effect_head = None
-                logger.info("  R-learner representation training: ENABLED (single extractor)")
+            self.effect_feature_extractor = create_feature_extractor(
+                extractor_type=self.feature_extractor_type,
+                device=self._device,
+                model_type="dragonnet",
+                flp_model_name=flp_model_name,
+                flp_max_length=flp_max_length,
+                flp_freeze_llm=flp_freeze_llm,
+                flp_gated_attention_dim=flp_gated_attention_dim,
+                flp_projection_dim=flp_projection_dim,
+                flp_dropout=flp_dropout,
+                flp_gradient_checkpointing=flp_gradient_checkpointing,
+                flp_downprojection_dim=flp_downprojection_dim,
+                flp_skip_llm=flp_skip_llm,
+                flp_cached_hidden_size=flp_cached_hidden_size,
+                flp_chat_template_prompt=flp_chat_template_prompt,
+                hlm_model_name=hlm_model_name,
+                hlm_chunk_size=hlm_chunk_size,
+                hlm_chunk_overlap=hlm_chunk_overlap,
+                hlm_max_chunks=hlm_max_chunks,
+                hlm_freeze_llm=hlm_freeze_llm,
+                hlm_gated_attention_dim=hlm_gated_attention_dim,
+                hlm_projection_dim=hlm_projection_dim,
+                hlm_dropout=hlm_dropout,
+                hlm_gradient_checkpointing=hlm_gradient_checkpointing,
+                hlm_downprojection_dim=hlm_downprojection_dim,
+                hlm_skip_llm=hlm_skip_llm,
+                hlm_cached_hidden_size=hlm_cached_hidden_size,
+                hlm_chat_template_prompt=hlm_chat_template_prompt,
+                hcnn_embedding_dim=hcnn_embedding_dim,
+                hcnn_conv_dim=hcnn_conv_dim,
+                hcnn_kernel_size=hcnn_kernel_size,
+                hcnn_num_conv_blocks=hcnn_num_conv_blocks,
+                hcnn_chunk_size=hcnn_chunk_size,
+                hcnn_chunk_overlap=hcnn_chunk_overlap,
+                hcnn_max_chunks=hcnn_max_chunks,
+                hcnn_vocab_size=hcnn_vocab_size,
+                hcnn_gated_attention_dim=hcnn_gated_attention_dim,
+                hcnn_projection_dim=hcnn_projection_dim,
+                hcnn_dropout=hcnn_dropout,
+                hgru_embedding_dim=hgru_embedding_dim,
+                hgru_gru_hidden_dim=hgru_gru_hidden_dim,
+                hgru_num_gru_layers=hgru_num_gru_layers,
+                hgru_chunk_size=hgru_chunk_size,
+                hgru_chunk_overlap=hgru_chunk_overlap,
+                hgru_max_chunks=hgru_max_chunks,
+                hgru_vocab_size=hgru_vocab_size,
+                hgru_gated_attention_dim=hgru_gated_attention_dim,
+                hgru_projection_dim=hgru_projection_dim,
+                hgru_dropout=hgru_dropout,
+                scnn_embedding_dim=scnn_embedding_dim,
+                scnn_conv_dim=scnn_conv_dim,
+                scnn_kernel_size=scnn_kernel_size,
+                scnn_num_conv_blocks=scnn_num_conv_blocks,
+                scnn_max_length=scnn_max_length,
+                scnn_vocab_size=scnn_vocab_size,
+                scnn_gated_attention_dim=scnn_gated_attention_dim,
+                scnn_projection_dim=scnn_projection_dim,
+                scnn_dropout=scnn_dropout,
+            )
+            self.effect_head = None
+            logger.info("  R-learner representation training: ENABLED (staged separate nets)")
+            logger.info(f"    Nuisance extractor: {self.feature_extractor_type} -> W, e(W), m(W)")
+            logger.info(f"    Effect extractor: {self.feature_extractor_type} -> X, tau(X)")
         else:
             self.effect_head = None
 
@@ -511,9 +485,32 @@ class CausalTextForest(nn.Module):
         """Fit tokenizer for trainable-from-scratch extractors. No-op for LLM-based."""
         if hasattr(self.feature_extractor, 'fit_tokenizer'):
             self.feature_extractor.fit_tokenizer(texts)
-        if hasattr(self, 'effect_feature_extractor') and self.effect_feature_extractor is not None:
+        if self.effect_feature_extractor is not None:
             if hasattr(self.effect_feature_extractor, 'fit_tokenizer'):
                 self.effect_feature_extractor.fit_tokenizer(texts)
+
+    def nuisance_parameters(self):
+        """Return trainable parameters used by the nuisance stage."""
+        modules = [
+            self.feature_extractor,
+            self.nuisance_branch,
+            self.propensity_head,
+            self.outcome_head,
+        ]
+        if self.explicit_nuisance_featurizer is not None:
+            modules.append(self.explicit_nuisance_featurizer)
+        return chain.from_iterable(module.parameters() for module in modules)
+
+    def effect_parameters(self):
+        """Return trainable parameters used by the effect/R-loss stage."""
+        modules = [self.effect_branch, self.effect_tau_head]
+        if self.effect_feature_extractor is not None:
+            modules.insert(0, self.effect_feature_extractor)
+        else:
+            modules.insert(0, self.feature_extractor)
+        if self.explicit_effect_featurizer is not None:
+            modules.append(self.explicit_effect_featurizer)
+        return chain.from_iterable(module.parameters() for module in modules)
 
     @staticmethod
     def _get_extractor_input(batch, texts):
@@ -632,11 +629,11 @@ class CausalTextForest(nn.Module):
         stop_grad_propensity: bool = False
     ) -> Dict[str, torch.Tensor]:
         """
-        Perform single representation training step.
+        Compatibility wrapper for nuisance representation training.
 
-        This stage learns to extract confounders from text by training
-        propensity and outcome prediction heads. Optionally includes R-learner
-        loss to encourage embeddings to capture treatment effect heterogeneity.
+        Staged R-learner representation training now uses train_nuisance_step()
+        followed by train_effect_r_step() with out-of-fold nuisance predictions.
+        This method intentionally trains only e(W) and m(W).
 
         Args:
             batch: Dictionary with 'texts', 'treatment', 'outcome' keys.
@@ -649,30 +646,46 @@ class CausalTextForest(nn.Module):
         Returns:
             Dictionary with loss components
         """
+        del gamma_rlearner
+        result = self.train_nuisance_step(
+            batch=batch,
+            alpha_propensity=alpha_propensity,
+            label_smoothing=label_smoothing,
+            stop_grad_propensity=stop_grad_propensity,
+        )
+        result['r_loss'] = torch.tensor(0.0, device=self._device)
+        return result
+
+    def train_nuisance_step(
+        self,
+        batch: Dict[str, Any],
+        alpha_propensity: float = 1.0,
+        label_smoothing: float = 0.0,
+        stop_grad_propensity: bool = False,
+    ) -> Dict[str, torch.Tensor]:
+        """Train e(W) and m(W) from the nuisance representation."""
         texts = batch['texts']
         treatments = batch['treatment']
         outcomes = batch['outcome']
         explicit_feature_values = batch.get('explicit_feature_values', None)
         extractor_input = self._get_extractor_input(batch, texts)
 
-        # Apply label smoothing (skip outcome smoothing for continuous)
         if label_smoothing > 0:
             treatments_smooth = treatments * (1 - label_smoothing) + 0.5 * label_smoothing
-            if self.outcome_type == "binary":
-                outcomes_smooth = outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
-            else:
-                outcomes_smooth = outcomes
+            outcomes_smooth = (
+                outcomes * (1 - label_smoothing) + 0.5 * label_smoothing
+                if self.outcome_type == "binary"
+                else outcomes
+            )
         else:
             treatments_smooth = treatments
             outcomes_smooth = outcomes
 
-        # Extract common text representation, then branch into W and X paths.
         text_features = self.feature_extractor(extractor_input)
         w_hidden, propensity_logit, outcome_logit = self._nuisance_forward(
             text_features, explicit_feature_values
         )
 
-        # Propensity prediction with optional stop-grad through the nuisance branch.
         if stop_grad_propensity:
             _, detached_propensity_logit, _ = self._nuisance_forward(
                 text_features.detach(), explicit_feature_values
@@ -681,73 +694,106 @@ class CausalTextForest(nn.Module):
         else:
             propensity_logit_for_loss = propensity_logit
 
-        # Losses
         propensity_loss = F.binary_cross_entropy_with_logits(
             propensity_logit_for_loss.squeeze(-1),
             treatments_smooth
         )
+        outcome_loss = self._outcome_loss(outcome_logit.squeeze(-1), outcomes_smooth)
+        total_loss = outcome_loss + alpha_propensity * propensity_loss
 
-        outcome_loss = self._outcome_loss(
-            outcome_logit.squeeze(-1),
-            outcomes_smooth
-        )
-
-        # R-learner loss (optional): encourages features to capture τ heterogeneity
-        # R-loss: E[((Y - m(X)) - τ(X)(T - e(X)))²]
-        # CRITICAL: Nuisance functions (e, m) are DETACHED so gradients flow only through τ
-        r_loss = torch.tensor(0.0, device=self._device)
-        if self.use_rlearner_representation:
-            if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
-                # DUAL EXTRACTOR MODE:
-                # - Nuisance extractor (self.feature_extractor) already computed features for e(X), m(X)
-                # - Effect extractor (self.effect_feature_extractor) + effect_mlp -> τ(X)
-
-                # Effect path: extract features for τ(X) using separate extractor
-                effect_features = self.effect_feature_extractor(extractor_input)
-
-                # Compute τ(X) from effect MLP
-                tau = self.effect_mlp(effect_features)
-
-                # Detach nuisance functions - gradients flow only through effect extractor + MLP
-                e_X = torch.sigmoid(propensity_logit).detach().clamp(0.01, 0.99)
-                m_X = self._outcome_activation(outcome_logit).detach()
-
-                # R-loss: pseudo-outcome regression
-                Y_residual = outcomes - m_X.squeeze(-1)
-                T_residual = treatments - e_X.squeeze(-1)
-                r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
-
-            else:
-                # SINGLE EXTRACTOR MODE: branch from common text representation
-                # through the X hidden state to predict tau.
-                _, tau = self._effect_forward(text_features, explicit_feature_values)
-
-                # Detach nuisance functions - this is the key to R-learner
-                # Gradients only flow through τ, not through e or m estimates
-                e_X = torch.sigmoid(propensity_logit).detach().clamp(0.01, 0.99)
-                m_X = self._outcome_activation(outcome_logit).detach()
-
-                # R-loss: pseudo-outcome regression
-                Y_residual = outcomes - m_X.squeeze(-1)
-                T_residual = treatments - e_X.squeeze(-1)
-                r_loss = ((Y_residual - tau.squeeze(-1) * T_residual) ** 2).mean()
-
-        total_loss = (
-            outcome_loss +
-            alpha_propensity * propensity_loss +
-            gamma_rlearner * r_loss
-        )
-
-        result = {
+        return {
             'loss': total_loss,
             'outcome_loss': outcome_loss.detach(),
             'propensity_loss': propensity_loss.detach(),
-            'r_loss': r_loss.detach() if isinstance(r_loss, torch.Tensor) else torch.tensor(r_loss),
             'propensity_logit': propensity_logit.detach(),
-            'outcome_logit': outcome_logit.detach()
+            'outcome_logit': outcome_logit.detach(),
+            'w_hidden': w_hidden.detach(),
         }
 
-        return result
+    def train_effect_r_step(
+        self,
+        batch: Dict[str, Any],
+        e_hat: torch.Tensor,
+        m_hat: torch.Tensor,
+        gamma_rlearner: float = 1.0,
+    ) -> Dict[str, torch.Tensor]:
+        """Train tau(X) from fixed nuisance predictions using the R-loss."""
+        texts = batch['texts']
+        treatments = batch['treatment']
+        outcomes = batch['outcome']
+        explicit_feature_values = batch.get('explicit_feature_values', None)
+        extractor_input = self._get_extractor_input(batch, texts)
+
+        extractor = self.effect_feature_extractor or self.feature_extractor
+        effect_text_features = extractor(extractor_input)
+        x_hidden, tau = self._effect_forward(effect_text_features, explicit_feature_values)
+
+        e_hat = e_hat.to(self._device).float().clamp(0.01, 0.99)
+        m_hat = m_hat.to(self._device).float()
+        y_residual = outcomes - m_hat
+        t_residual = treatments - e_hat
+        r_loss = ((y_residual - tau.squeeze(-1) * t_residual) ** 2).mean()
+        total_loss = gamma_rlearner * r_loss
+
+        return {
+            'loss': total_loss,
+            'r_loss': r_loss.detach(),
+            'tau': tau.detach(),
+            'x_hidden': x_hidden.detach(),
+        }
+
+    def predict_nuisance(
+        self,
+        texts_or_loader,
+        batch_size: int = 32,
+        explicit_feature_values: Optional[List[Dict[str, Any]]] = None,
+        explicit_confounder_values: Optional[List[Dict[str, Any]]] = None,
+        gpu_store=None,
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """Return ordered propensity and marginal-outcome predictions."""
+        from torch.utils.data import DataLoader
+
+        if explicit_feature_values is None:
+            explicit_feature_values = explicit_confounder_values
+
+        self.eval()
+        all_propensity = []
+        all_outcome = []
+        is_batch_iterable = isinstance(texts_or_loader, DataLoader) or (
+            hasattr(texts_or_loader, '__iter__') and not isinstance(texts_or_loader, (list, str))
+        )
+
+        with torch.no_grad():
+            if is_batch_iterable:
+                for batch in texts_or_loader:
+                    prepare_cached_batch(batch, self._device, gpu_store=gpu_store)
+                    texts = batch['texts']
+                    extractor_input = self._get_extractor_input(batch, texts)
+                    batch_feature_values = batch.get('explicit_feature_values', None)
+                    text_features = self.feature_extractor(extractor_input)
+                    _, prop_logit, outcome_logit = self._nuisance_forward(
+                        text_features, batch_feature_values
+                    )
+                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
+                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
+            else:
+                texts = texts_or_loader
+                for i in range(0, len(texts), batch_size):
+                    batch_texts = texts[i:i + batch_size]
+                    batch_feature_values = None
+                    if explicit_feature_values is not None:
+                        batch_feature_values = explicit_feature_values[i:i + batch_size]
+                    text_features = self.feature_extractor(batch_texts)
+                    _, prop_logit, outcome_logit = self._nuisance_forward(
+                        text_features, batch_feature_values
+                    )
+                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
+                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
+
+        return (
+            np.vstack(all_propensity).flatten(),
+            np.vstack(all_outcome).flatten(),
+        )
 
     # Alias for API consistency with CausalText
     def train_step(
@@ -810,10 +856,6 @@ class CausalTextForest(nn.Module):
         all_feature_values = []
 
         use_wx_activations = self.use_rlearner_representation
-        use_effect_extractor = (
-            self.rlearner_dual_extractors and
-            self.effect_feature_extractor is not None
-        )
 
         is_batch_iterable = isinstance(texts_or_loader, DataLoader) or (
             hasattr(texts_or_loader, '__iter__') and not isinstance(texts_or_loader, (list, str))
@@ -826,13 +868,13 @@ class CausalTextForest(nn.Module):
             )
 
             if use_wx_activations:
-                if use_effect_extractor:
-                    effect_text_features = self.effect_feature_extractor(extractor_input)
-                    # In dual-extractor mode the R-loss trains effect_feature_extractor
-                    # through effect_mlp, not the single-extractor effect_branch.
-                    x_hidden = effect_text_features
-                else:
-                    x_hidden, _ = self._effect_forward(text_features, batch_feature_values)
+                effect_extractor = self.effect_feature_extractor or self.feature_extractor
+                effect_text_features = (
+                    effect_extractor(extractor_input)
+                    if effect_extractor is not self.feature_extractor
+                    else text_features
+                )
+                x_hidden, _ = self._effect_forward(effect_text_features, batch_feature_values)
                 x_matrix = x_hidden
                 w_matrix = w_hidden
             else:
@@ -902,9 +944,9 @@ class CausalTextForest(nn.Module):
         """
         Extract features and nuisance predictions for all texts.
 
-        In dual extractor mode, features are extracted from the effect extractor
-        (optimized for treatment effect heterogeneity via R-loss). Propensity
-        and outcome predictions still come from the nuisance extractor.
+        In staged R-learner representation mode, features are extracted from
+        the effect branch (X). Propensity and outcome predictions still come
+        from the nuisance branch.
 
         Args:
             texts_or_loader: List of all text strings, or a DataLoader yielding batch dicts
@@ -927,91 +969,6 @@ class CausalTextForest(nn.Module):
         )
         return x_features, propensity, outcome_pred
 
-        from torch.utils.data import DataLoader
-
-        self.eval()
-        all_text_features = []
-        all_propensity = []
-        all_outcome = []
-        all_conf_values = []
-
-        # Determine which extractor to use for features
-        # In dual mode, use effect extractor (optimized for τ)
-        # Otherwise, use nuisance extractor (feature_extractor)
-        use_effect_extractor = (
-            self.rlearner_dual_extractors and
-            self.effect_feature_extractor is not None
-        )
-
-        # Accept DataLoader or any iterable yielding batch dicts (e.g. generator)
-        is_batch_iterable = isinstance(texts_or_loader, DataLoader) or (
-            hasattr(texts_or_loader, '__iter__') and not isinstance(texts_or_loader, (list, str))
-        )
-        if is_batch_iterable:
-            # DataLoader / batch iterable path: iterate over preprocessed batches
-            with torch.no_grad():
-                for batch in texts_or_loader:
-                    # Move cached hidden states to device if present (from DataLoader)
-                    prepare_cached_batch(batch, self._device, gpu_store=gpu_store)
-                    texts = batch['texts']
-                    extractor_input = self._get_extractor_input(batch, texts)
-                    batch_conf_values = batch.get('explicit_feature_values', None)
-
-                    if use_effect_extractor:
-                        text_features = self.effect_feature_extractor(extractor_input)
-                    else:
-                        text_features = self.feature_extractor(extractor_input)
-                    all_text_features.append(text_features.cpu().numpy())
-
-                    _, prop_logit, outcome_logit = self.forward(
-                        batch,
-                        explicit_feature_values=batch_conf_values
-                    )
-                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
-                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
-
-                    if batch_conf_values is not None:
-                        all_conf_values.extend(batch_conf_values)
-        else:
-            # Raw texts path (backward compatible)
-            texts = texts_or_loader
-            with torch.no_grad():
-                for i in range(0, len(texts), batch_size):
-                    batch_texts = texts[i:i + batch_size]
-
-                    batch_conf_values = None
-                    if explicit_feature_values is not None:
-                        batch_conf_values = explicit_feature_values[i:i + batch_size]
-
-                    if use_effect_extractor:
-                        text_features = self.effect_feature_extractor(batch_texts)
-                    else:
-                        text_features = self.feature_extractor(batch_texts)
-                    all_text_features.append(text_features.cpu().numpy())
-
-                    _, prop_logit, outcome_logit = self.forward(
-                        batch_texts,
-                        explicit_feature_values=batch_conf_values
-                    )
-                    all_propensity.append(torch.sigmoid(prop_logit).cpu().numpy())
-                    all_outcome.append(self._outcome_activation(outcome_logit).cpu().numpy())
-
-        neural_features = np.vstack(all_text_features)
-
-        # Concatenate raw confounder features if provided
-        # Use collected confounder values from DataLoader batches, or the provided list
-        conf_values_for_raw = all_conf_values if all_conf_values else explicit_feature_values
-        if conf_values_for_raw is not None and self.explicit_feature_specs:
-            raw_conf_features = self._get_raw_explicit_features(conf_values_for_raw)
-            combined_features = np.hstack([neural_features, raw_conf_features])
-        else:
-            combined_features = neural_features
-
-        return (
-            combined_features,
-            np.vstack(all_propensity).flatten(),
-            np.vstack(all_outcome).flatten()
-        )
 
     def train_causal_forest(
         self,
@@ -1299,10 +1256,9 @@ class CausalTextForest(nn.Module):
         if self.explicit_effect_featurizer is not None:
             checkpoint['explicit_effect_featurizer_state'] = self.explicit_effect_featurizer.get_state()
 
-        # Save effect extractor and effect MLP state if in dual mode
-        if self.rlearner_dual_extractors and self.effect_feature_extractor is not None:
+        # Save staged effect extractor state when enabled.
+        if self.effect_feature_extractor is not None:
             checkpoint['effect_feature_extractor'] = self.effect_feature_extractor.state_dict()
-            checkpoint['effect_mlp'] = self.effect_mlp.state_dict()
             if hasattr(self.effect_feature_extractor, 'get_state'):
                 checkpoint['effect_extractor_state'] = self.effect_feature_extractor.get_state()
             elif hasattr(self.effect_feature_extractor, 'get_tokenizer_state'):

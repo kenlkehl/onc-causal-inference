@@ -154,21 +154,15 @@ class CausalForestConfig:
     # Enable inference for confidence intervals
     inference: bool = True
 
-    # R-learner representation training: adds a τ head and R-loss to Stage 1
-    # When True, Stage 1 trains with propensity + outcome + R-learner losses
-    # to encourage embeddings to capture treatment effect heterogeneity
+    # R-learner representation training for causal forest. When True, staged
+    # training learns nuisance W features and effect-modifier X features.
     use_rlearner_representation: bool = False
 
     # Weight for R-learner loss during representation training
     gamma_rlearner: float = 1.0
 
-    # Dual extractor mode for R-learner representation training
-    # When enabled with use_rlearner_representation=True, uses two independent feature extractors:
-    # - Nuisance extractor: for propensity e(X) and marginal outcome m(X)
-    # - Effect extractor: for treatment effect τ(X)
-    # In dual mode, Stage 2 uses the effect extractor's features (optimized for τ)
-    # Memory note: approximately doubles feature extraction compute
-    rlearner_dual_extractors: bool = False
+    # Inner folds used for out-of-fold nuisance predictions in staged R-learning.
+    rlearner_nuisance_folds: int = 5
 
 
 # =============================================================================
@@ -275,14 +269,6 @@ class ModelArchitectureConfig:
 
     # Feature extractor type: "frozen_llm_pooler"
     feature_extractor_type: str = "frozen_llm_pooler"
-
-    # R-Learner dual extractor mode
-    # When enabled with model_type="rlearner", uses two independent feature extractors:
-    # - Nuisance extractor: shared for propensity e(X) and marginal outcome m(X)
-    # - Effect extractor: dedicated to treatment effect τ(X)
-    # This prevents gradient interference between confounder learning (nuisance) and
-    # effect modifier learning (τ). Memory note: approximately doubles feature extraction compute.
-    rlearner_dual_extractors: bool = False
 
     # Frozen LLM Pooler extractor (pretrained LLM + gated attention pooling)
     # Uses all token hidden states + GatedAttentionPooling instead of last-token embedding

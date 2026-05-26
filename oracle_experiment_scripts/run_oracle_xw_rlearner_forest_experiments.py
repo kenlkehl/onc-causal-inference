@@ -86,7 +86,7 @@ class XWRLearnerForestConfig:
 
     # Fixed by this runner. Kept in the serialized config for analyzer parity.
     model_type: str = "causal_forest"
-    rlearner_mode: str = "xw_branch"
+    rlearner_mode: str = "staged_separate_nets"
     xw_feature_split: bool = True
     use_explicit_features: bool = False
     # Compatibility alias for older analysis scripts.
@@ -112,6 +112,7 @@ class XWRLearnerForestConfig:
     batch_size: int = 2
     learning_rate: float = 1e-4
     n_folds: int = 5
+    rlearner_nuisance_folds: int = 5
     gamma_rlearner: float = 1.0
 
     # Causal forest parameters.
@@ -172,7 +173,7 @@ class XWRLearnerForestConfig:
 
     def __post_init__(self):
         self.model_type = "causal_forest"
-        self.rlearner_mode = "xw_branch"
+        self.rlearner_mode = "staged_separate_nets"
         self.xw_feature_split = True
         self.use_explicit_confounders = self.use_explicit_features
         self.flp_downprojection_dim = None
@@ -476,6 +477,165 @@ def _make_combined_loader(
     )
 
 
+def _make_xw_model(
+    config: XWRLearnerForestConfig,
+    device: torch.device,
+    explicit_feature_specs: List[ExplicitFeatureSpec],
+    gpu_store,
+    hidden_state_cache,
+    tokenizer_texts: Optional[List[str]] = None,
+) -> CausalTextForest:
+    """Create the staged X/W model with consistent oracle-runner settings."""
+    model_kwargs = _common_model_kwargs(
+        config,
+        gpu_store,
+        hidden_state_cache,
+        explicit_feature_specs,
+        device,
+    )
+    model_kwargs.update(
+        dict(
+            representation_dim=128,
+            hidden_dim=64,
+            dropout=0.2,
+            cf_n_estimators=config.cf_n_estimators,
+            cf_min_samples_leaf=config.cf_min_samples_leaf,
+            cf_honest=True,
+            cf_inference=True,
+            cf_use_rlearner_representation=True,
+            cf_gamma_rlearner=config.gamma_rlearner,
+            explicit_feature_specs=explicit_feature_specs,
+        )
+    )
+
+    model = CausalTextForest(**model_kwargs)
+    if config.feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES and tokenizer_texts is not None:
+        model.fit_tokenizer(tokenizer_texts)
+
+    for name, param in model.named_parameters():
+        if param.dtype != torch.float32:
+            logger.warning(
+                "Parameter %s has dtype %s; casting to float32",
+                name,
+                param.dtype,
+            )
+            param.data = param.data.float()
+    return model
+
+
+def _fit_explicit_feature_state(model: CausalTextForest, dataset) -> None:
+    """Fit MLP and raw explicit-feature normalization from a training dataset."""
+    if getattr(dataset, "explicit_feature_values", None):
+        model.fit_explicit_features(dataset.explicit_feature_values)
+        model.fit_explicit_feature_featurizer(dataset.explicit_feature_values)
+
+
+def _train_nuisance_stage(
+    model: CausalTextForest,
+    train_loader: DataLoader,
+    val_loader: Optional[DataLoader],
+    config: XWRLearnerForestConfig,
+    device: torch.device,
+    use_cached: bool,
+    gpu_store,
+) -> None:
+    """Train e(W), m(W); if val_loader is provided, restore the best val state."""
+    params = [p for p in model.nuisance_parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(params, lr=config.learning_rate, weight_decay=0.01)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
+
+    best_val_loss = float("inf")
+    best_state = None
+
+    for _epoch in range(config.epochs):
+        model.train()
+        for batch in train_loader:
+            batch["treatment"] = batch["treatment"].to(device)
+            batch["outcome"] = batch["outcome"].to(device)
+            if use_cached:
+                prepare_cached_batch(batch, device, gpu_store=gpu_store)
+
+            optimizer.zero_grad()
+            losses = model.train_nuisance_step(batch, alpha_propensity=1.0)
+            losses["loss"].backward()
+            torch.nn.utils.clip_grad_norm_(params, 1.0)
+            optimizer.step()
+
+        scheduler.step()
+
+        if val_loader is None:
+            continue
+
+        model.eval()
+        val_loss = 0.0
+        with torch.no_grad():
+            for batch in val_loader:
+                batch["treatment"] = batch["treatment"].to(device)
+                batch["outcome"] = batch["outcome"].to(device)
+                if use_cached:
+                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
+                losses = model.train_nuisance_step(batch, alpha_propensity=1.0)
+                val_loss += losses["loss"].item()
+
+        val_loss /= max(len(val_loader), 1)
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+    if best_state is not None:
+        model.load_state_dict(best_state)
+        model.to(device)
+
+
+def _train_effect_stage(
+    model: CausalTextForest,
+    train_loader: DataLoader,
+    nuisance_propensity: np.ndarray,
+    nuisance_outcome: np.ndarray,
+    config: XWRLearnerForestConfig,
+    device: torch.device,
+    use_cached: bool,
+    gpu_store,
+) -> None:
+    """Train tau(X) from fixed outer-train OOF nuisance predictions."""
+    params = [p for p in model.effect_parameters() if p.requires_grad]
+    optimizer = torch.optim.AdamW(params, lr=config.learning_rate, weight_decay=0.01)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
+
+    for _epoch in range(config.epochs):
+        model.train()
+        for batch in train_loader:
+            batch["treatment"] = batch["treatment"].to(device)
+            batch["outcome"] = batch["outcome"].to(device)
+            if use_cached:
+                prepare_cached_batch(batch, device, gpu_store=gpu_store)
+
+            batch_ids = np.asarray(batch["text_id"], dtype=int)
+            e_hat = torch.as_tensor(
+                nuisance_propensity[batch_ids],
+                dtype=torch.float32,
+                device=device,
+            )
+            m_hat = torch.as_tensor(
+                nuisance_outcome[batch_ids],
+                dtype=torch.float32,
+                device=device,
+            )
+
+            optimizer.zero_grad()
+            losses = model.train_effect_r_step(
+                batch,
+                e_hat=e_hat,
+                m_hat=m_hat,
+                gamma_rlearner=config.gamma_rlearner,
+            )
+            losses["loss"].backward()
+            torch.nn.utils.clip_grad_norm_(params, 1.0)
+            optimizer.step()
+
+        scheduler.step()
+
+
 def run_xw_rlearner_forest_experiment(
     config: XWRLearnerForestConfig,
     device: torch.device,
@@ -498,43 +658,83 @@ def run_xw_rlearner_forest_experiment(
         train_df = df.iloc[train_idx]
         test_df = df.iloc[test_idx]
 
-        model_kwargs = _common_model_kwargs(
+        n_inner = min(config.rlearner_nuisance_folds, len(train_df))
+        if n_inner < 2:
+            raise ValueError("rlearner_nuisance_folds requires at least 2 outer-train samples")
+        inner_kf = KFold(
+            n_splits=n_inner,
+            shuffle=True,
+            random_state=10_000 + 42 + config.repeat_index + fold,
+        )
+        oof_propensity = np.full(len(train_df), np.nan, dtype=np.float32)
+        oof_outcome = np.full(len(train_df), np.nan, dtype=np.float32)
+
+        for inner_train_pos, inner_val_pos in inner_kf.split(train_df):
+            inner_train_df = train_df.iloc[inner_train_pos]
+            inner_val_df = train_df.iloc[inner_val_pos]
+            inner_train_idx = np.asarray(train_idx)[inner_train_pos]
+            inner_val_idx = np.asarray(train_idx)[inner_val_pos]
+
+            inner_model = _make_xw_model(
+                config,
+                device,
+                explicit_feature_specs,
+                gpu_store,
+                hidden_state_cache,
+                tokenizer_texts=inner_train_df[text_column].tolist(),
+            )
+            (
+                inner_train_dataset,
+                _inner_val_dataset,
+                inner_train_loader,
+                inner_val_loader,
+                _inner_collate_fn,
+                _inner_dl_kwargs,
+            ) = _create_datasets_and_loaders(
+                inner_train_df,
+                inner_val_df,
+                inner_train_idx,
+                inner_val_idx,
+                text_column,
+                explicit_feature_cols,
+                batch_size,
+                hidden_state_cache,
+                gpu_store,
+            )
+            _fit_explicit_feature_state(inner_model, inner_train_dataset)
+            _train_nuisance_stage(
+                inner_model,
+                inner_train_loader,
+                inner_val_loader,
+                config,
+                device,
+                use_cached,
+                gpu_store,
+            )
+            cf_kwargs = dict(gpu_store=gpu_store) if use_cached else {}
+            prop_hat, outcome_hat = inner_model.predict_nuisance(
+                inner_val_loader,
+                **cf_kwargs,
+            )
+            oof_propensity[inner_val_pos] = prop_hat
+            oof_outcome[inner_val_pos] = outcome_hat
+
+            del inner_model
+            gc.collect()
+            if device.type == "cuda":
+                torch.cuda.empty_cache()
+
+        if np.isnan(oof_propensity).any() or np.isnan(oof_outcome).any():
+            raise RuntimeError("Incomplete out-of-fold nuisance predictions")
+
+        model = _make_xw_model(
             config,
+            device,
+            explicit_feature_specs,
             gpu_store,
             hidden_state_cache,
-            explicit_feature_specs,
-            device,
+            tokenizer_texts=train_df[text_column].tolist(),
         )
-        model_kwargs.update(
-            dict(
-                representation_dim=128,
-                hidden_dim=64,
-                dropout=0.2,
-                cf_n_estimators=config.cf_n_estimators,
-                cf_min_samples_leaf=config.cf_min_samples_leaf,
-                cf_honest=True,
-                cf_inference=True,
-                cf_use_rlearner_representation=True,
-                cf_gamma_rlearner=config.gamma_rlearner,
-                cf_rlearner_dual_extractors=False,
-                explicit_feature_specs=explicit_feature_specs,
-            )
-        )
-
-        model = CausalTextForest(**model_kwargs)
-
-        if config.feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES:
-            model.fit_tokenizer(train_df[text_column].tolist())
-
-        for name, param in model.named_parameters():
-            if param.dtype != torch.float32:
-                logger.warning(
-                    "Parameter %s has dtype %s; casting to float32",
-                    name,
-                    param.dtype,
-                )
-                param.data = param.data.float()
-
         (
             train_dataset,
             _test_dataset,
@@ -554,75 +754,30 @@ def run_xw_rlearner_forest_experiment(
             gpu_store,
         )
 
-        if explicit_feature_specs and train_dataset.explicit_feature_values:
-            model.fit_explicit_features(train_dataset.explicit_feature_values)
-            model.fit_explicit_feature_featurizer(train_dataset.explicit_feature_values)
-
-        optimizer = torch.optim.AdamW(
-            filter(lambda p: p.requires_grad, model.parameters()),
-            lr=config.learning_rate,
-            weight_decay=0.01,
+        _fit_explicit_feature_state(model, train_dataset)
+        _train_nuisance_stage(
+            model,
+            train_loader,
+            None,
+            config,
+            device,
+            use_cached,
+            gpu_store,
         )
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer,
-            T_max=config.epochs,
+        _train_effect_stage(
+            model,
+            train_loader,
+            oof_propensity,
+            oof_outcome,
+            config,
+            device,
+            use_cached,
+            gpu_store,
         )
 
-        best_val_loss = float("inf")
-        best_state = None
-
-        for _epoch in range(config.epochs):
-            model.train()
-            for batch in train_loader:
-                batch["treatment"] = batch["treatment"].to(device)
-                batch["outcome"] = batch["outcome"].to(device)
-                if use_cached:
-                    prepare_cached_batch(batch, device, gpu_store=gpu_store)
-
-                optimizer.zero_grad()
-                losses = model.train_representation_step(
-                    batch,
-                    alpha_propensity=1.0,
-                    gamma_rlearner=config.gamma_rlearner,
-                )
-                losses["loss"].backward()
-                torch.nn.utils.clip_grad_norm_(
-                    filter(lambda p: p.requires_grad, model.parameters()),
-                    1.0,
-                )
-                optimizer.step()
-
-            scheduler.step()
-
-            model.eval()
-            val_loss = 0.0
-            with torch.no_grad():
-                for batch in test_loader:
-                    batch["treatment"] = batch["treatment"].to(device)
-                    batch["outcome"] = batch["outcome"].to(device)
-                    if use_cached:
-                        prepare_cached_batch(batch, device, gpu_store=gpu_store)
-                    losses = model.train_representation_step(
-                        batch,
-                        alpha_propensity=1.0,
-                        gamma_rlearner=config.gamma_rlearner,
-                    )
-                    val_loss += losses["loss"].item()
-
-            val_loss /= len(test_loader)
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
-
-        if best_state:
-            model.load_state_dict(best_state)
-            model.to(device)
-
-        combined_df = pd.concat([train_df, test_df])
-        combined_indices = np.concatenate([train_idx, test_idx])
-        combined_loader = _make_combined_loader(
-            combined_df,
-            combined_indices,
+        train_eval_loader = _make_combined_loader(
+            train_df,
+            np.asarray(train_idx),
             text_column,
             explicit_feature_cols,
             batch_size,
@@ -630,11 +785,11 @@ def run_xw_rlearner_forest_experiment(
             gpu_store,
             dl_kwargs,
         )
-        combined_T = combined_df["treatment_indicator"].values
-        combined_Y = combined_df["outcome_indicator"].values
 
+        train_T = train_df["treatment_indicator"].values
+        train_Y = train_df["outcome_indicator"].values
         cf_kwargs = dict(gpu_store=gpu_store) if use_cached else {}
-        model.train_causal_forest(combined_loader, combined_T, combined_Y, **cf_kwargs)
+        model.train_causal_forest(train_eval_loader, train_T, train_Y, **cf_kwargs)
         preds = model.predict(test_loader, return_ci=True, **cf_kwargs)
 
         fold_preds = test_df.copy()
@@ -840,7 +995,7 @@ def generate_experiment_grid(
         elif ext_type == "hierarchical_llm":
             chunk_size = 2048
             chunk_overlap = 256
-            max_chunks_options = [4, 8, 16]
+            max_chunks_options = [16]
 
             for (
                 dataset_path,
