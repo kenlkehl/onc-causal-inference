@@ -96,7 +96,7 @@ class XWRLearnerForestConfig:
     repeat_index: int = 0
 
     # Frozen LLM Pooler hyperparameters.
-    flp_max_length: int = 100000
+    flp_max_length: int = 50000
     flp_freeze_llm: bool = True
     flp_projection_dim: int = 128
     flp_gated_attention_dim: int = 128
@@ -958,7 +958,7 @@ def generate_experiment_grid(
 
     for ext_type in extractor_types:
         if ext_type == "frozen_llm_pooler":
-            max_lengths = [100000]
+            max_lengths = [50000]
             if filter_max_lengths:
                 max_lengths = [m for m in max_lengths if m in filter_max_lengths]
             chat_template_options = [None]
