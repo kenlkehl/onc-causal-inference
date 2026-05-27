@@ -2,4 +2,9 @@
 
 """Training modules for OCI."""
 
-__all__ = []
+from .contrastive_effect import make_propensity_bins, PropensityBinBalancedBatchSampler
+
+__all__ = [
+    'make_propensity_bins',
+    'PropensityBinBalancedBatchSampler',
+]

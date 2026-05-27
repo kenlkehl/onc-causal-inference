@@ -45,7 +45,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent))
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from oci.config import ExplicitFeatureSpec, TRAINABLE_EXTRACTOR_TYPES
+from oci.config import ContrastiveEffectConfig, ExplicitFeatureSpec, TRAINABLE_EXTRACTOR_TYPES
 from oci.data import (
     CachedHiddenStateDataset,
     ClinicalTextDataset,
@@ -54,8 +54,13 @@ from oci.data import (
     prepare_cached_batch,
 )
 from oci.models.causal_text_forest import CausalTextForest
+from oci.models.contrastive_causal_text_forest import ContrastiveCausalTextForest
 from oci.models.gpu_hidden_state_store import GPUHiddenStateStore
 from oci.models.hidden_state_cache import HiddenStateCache
+from oci.training.contrastive_effect import (
+    PropensityBinBalancedBatchSampler,
+    make_propensity_bins,
+)
 
 from run_oracle_experiments import (
     _common_model_kwargs,
@@ -115,6 +120,22 @@ class XWRLearnerForestConfig:
     rlearner_nuisance_folds: int = 5
     gamma_rlearner: float = 1.0
 
+    # Optional matched-contrastive X-stage replacement for per-patient R-loss.
+    contrastive_effect_enabled: bool = False
+    contrastive_bottleneck_dim: int = 8
+    contrastive_hidden_dim: int = 64
+    contrastive_batch_size: int = 16
+    contrastive_n_propensity_bins: int = 10
+    contrastive_overlap_min: float = 0.05
+    contrastive_overlap_max: float = 0.95
+    contrastive_min_arm_per_bin: int = 2
+    contrastive_lambda_factual: float = 1.0
+    contrastive_lambda_contrast: float = 2.0
+    contrastive_lambda_adversary: float = 0.05
+    contrastive_lambda_z_l2: float = 1e-4
+    contrastive_target_clip: float = 1.0
+    contrastive_forest_x_mode: str = "bottleneck_plus_tau"
+
     # Causal forest parameters.
     cf_n_estimators: int = 200
     cf_min_samples_leaf: int = 5
@@ -173,7 +194,11 @@ class XWRLearnerForestConfig:
 
     def __post_init__(self):
         self.model_type = "causal_forest"
-        self.rlearner_mode = "staged_separate_nets"
+        self.rlearner_mode = (
+            "matched_contrastive_effect"
+            if self.contrastive_effect_enabled
+            else "staged_separate_nets"
+        )
         self.xw_feature_split = True
         self.use_explicit_confounders = self.use_explicit_features
         self.flp_downprojection_dim = None
@@ -477,6 +502,26 @@ def _make_combined_loader(
     )
 
 
+def _oracle_contrastive_config(config: XWRLearnerForestConfig) -> ContrastiveEffectConfig:
+    """Map oracle-runner flat fields to the library contrastive config."""
+    return ContrastiveEffectConfig(
+        enabled=config.contrastive_effect_enabled,
+        bottleneck_dim=config.contrastive_bottleneck_dim,
+        hidden_dim=config.contrastive_hidden_dim,
+        batch_size=config.contrastive_batch_size,
+        n_propensity_bins=config.contrastive_n_propensity_bins,
+        overlap_min=config.contrastive_overlap_min,
+        overlap_max=config.contrastive_overlap_max,
+        min_arm_per_bin=config.contrastive_min_arm_per_bin,
+        lambda_factual=config.contrastive_lambda_factual,
+        lambda_contrast=config.contrastive_lambda_contrast,
+        lambda_adversary=config.contrastive_lambda_adversary,
+        lambda_z_l2=config.contrastive_lambda_z_l2,
+        target_clip=config.contrastive_target_clip,
+        forest_x_mode=config.contrastive_forest_x_mode,
+    )
+
+
 def _make_xw_model(
     config: XWRLearnerForestConfig,
     device: torch.device,
@@ -508,7 +553,11 @@ def _make_xw_model(
         )
     )
 
-    model = CausalTextForest(**model_kwargs)
+    model_class = ContrastiveCausalTextForest if config.contrastive_effect_enabled else CausalTextForest
+    if config.contrastive_effect_enabled:
+        model_kwargs["contrastive_effect_config"] = _oracle_contrastive_config(config)
+
+    model = model_class(**model_kwargs)
     if config.feature_extractor_type in TRAINABLE_EXTRACTOR_TYPES and tokenizer_texts is not None:
         model.fit_tokenizer(tokenizer_texts)
 
@@ -598,13 +647,58 @@ def _train_effect_stage(
     gpu_store,
 ) -> None:
     """Train tau(X) from fixed outer-train OOF nuisance predictions."""
+    use_contrastive = (
+        config.contrastive_effect_enabled
+        and hasattr(model, "train_effect_contrastive_step")
+    )
+    effect_loader = train_loader
+    propensity_bin_ids = None
+    if use_contrastive:
+        dataset_treatment = train_loader.dataset.treatments
+        if hasattr(dataset_treatment, "detach"):
+            dataset_treatment = dataset_treatment.detach().cpu().numpy()
+        else:
+            dataset_treatment = np.asarray(dataset_treatment)
+        propensity_bin_ids = make_propensity_bins(
+            propensity=nuisance_propensity,
+            treatment=dataset_treatment,
+            n_bins=config.contrastive_n_propensity_bins,
+            overlap_min=config.contrastive_overlap_min,
+            overlap_max=config.contrastive_overlap_max,
+            min_arm_per_bin=config.contrastive_min_arm_per_bin,
+        )
+        sampler = PropensityBinBalancedBatchSampler(
+            treatment=dataset_treatment,
+            bin_ids=propensity_bin_ids,
+            batch_size=config.contrastive_batch_size,
+            min_arm_per_bin=config.contrastive_min_arm_per_bin,
+            seed=42 + config.repeat_index,
+        )
+        loader_kwargs = {}
+        if getattr(train_loader, "num_workers", 0) > 0:
+            loader_kwargs["num_workers"] = train_loader.num_workers
+            loader_kwargs["persistent_workers"] = getattr(train_loader, "persistent_workers", False)
+            loader_kwargs["pin_memory"] = getattr(train_loader, "pin_memory", False)
+        effect_loader = DataLoader(
+            train_loader.dataset,
+            batch_sampler=sampler,
+            collate_fn=train_loader.collate_fn,
+            **loader_kwargs,
+        )
+        logger.info(
+            "Contrastive effect bins: %d bins, %d/%d samples in overlap",
+            len(np.unique(propensity_bin_ids[propensity_bin_ids >= 0])),
+            int(np.sum(propensity_bin_ids >= 0)),
+            len(propensity_bin_ids),
+        )
+
     params = [p for p in model.effect_parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(params, lr=config.learning_rate, weight_decay=0.01)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.epochs)
 
     for _epoch in range(config.epochs):
         model.train()
-        for batch in train_loader:
+        for batch in effect_loader:
             batch["treatment"] = batch["treatment"].to(device)
             batch["outcome"] = batch["outcome"].to(device)
             if use_cached:
@@ -623,12 +717,25 @@ def _train_effect_stage(
             )
 
             optimizer.zero_grad()
-            losses = model.train_effect_r_step(
-                batch,
-                e_hat=e_hat,
-                m_hat=m_hat,
-                gamma_rlearner=config.gamma_rlearner,
-            )
+            if use_contrastive:
+                bin_ids = torch.as_tensor(
+                    propensity_bin_ids[batch_ids],
+                    dtype=torch.long,
+                    device=device,
+                )
+                losses = model.train_effect_contrastive_step(
+                    batch,
+                    e_hat=e_hat,
+                    m_hat=m_hat,
+                    bin_ids=bin_ids,
+                )
+            else:
+                losses = model.train_effect_r_step(
+                    batch,
+                    e_hat=e_hat,
+                    m_hat=m_hat,
+                    gamma_rlearner=config.gamma_rlearner,
+                )
             losses["loss"].backward()
             torch.nn.utils.clip_grad_norm_(params, 1.0)
             optimizer.step()
@@ -927,6 +1034,20 @@ def generate_experiment_grid(
     learning_rates: Optional[List[float]] = None,
     epoch_counts: Optional[List[int]] = None,
     include_explicit_feature_options: Optional[List[bool]] = None,
+    contrastive_effect_enabled: bool = False,
+    contrastive_bottleneck_dim: int = 8,
+    contrastive_hidden_dim: int = 64,
+    contrastive_batch_size: int = 16,
+    contrastive_n_propensity_bins: int = 10,
+    contrastive_overlap_min: float = 0.05,
+    contrastive_overlap_max: float = 0.95,
+    contrastive_min_arm_per_bin: int = 2,
+    contrastive_lambda_factual: float = 1.0,
+    contrastive_lambda_contrast: float = 2.0,
+    contrastive_lambda_adversary: float = 0.05,
+    contrastive_lambda_z_l2: float = 1e-4,
+    contrastive_target_clip: float = 1.0,
+    contrastive_forest_x_mode: str = "bottleneck_plus_tau",
 ) -> List[XWRLearnerForestConfig]:
     """Generate the narrowed experiment grid."""
     if model_names is None:
@@ -1098,6 +1219,23 @@ def generate_experiment_grid(
                         epochs=ep,
                     )
                 )
+
+    for cfg in configs:
+        cfg.contrastive_effect_enabled = contrastive_effect_enabled
+        cfg.contrastive_bottleneck_dim = contrastive_bottleneck_dim
+        cfg.contrastive_hidden_dim = contrastive_hidden_dim
+        cfg.contrastive_batch_size = contrastive_batch_size
+        cfg.contrastive_n_propensity_bins = contrastive_n_propensity_bins
+        cfg.contrastive_overlap_min = contrastive_overlap_min
+        cfg.contrastive_overlap_max = contrastive_overlap_max
+        cfg.contrastive_min_arm_per_bin = contrastive_min_arm_per_bin
+        cfg.contrastive_lambda_factual = contrastive_lambda_factual
+        cfg.contrastive_lambda_contrast = contrastive_lambda_contrast
+        cfg.contrastive_lambda_adversary = contrastive_lambda_adversary
+        cfg.contrastive_lambda_z_l2 = contrastive_lambda_z_l2
+        cfg.contrastive_target_clip = contrastive_target_clip
+        cfg.contrastive_forest_x_mode = contrastive_forest_x_mode
+        cfg.__post_init__()
 
     random.Random(42).shuffle(configs)
     return configs
@@ -1301,6 +1439,7 @@ def print_grid_summary(
     lr_values = sorted(set(config.learning_rate for config in pending_configs))
     epoch_values = sorted(set(config.epochs for config in pending_configs))
     explicit_values = sorted(set(config.use_explicit_features for config in pending_configs))
+    contrastive_values = sorted(set(config.contrastive_effect_enabled for config in pending_configs))
 
     print(f"\n{'=' * 60}")
     print("X/W R-Learner -> Causal Forest Grid Summary")
@@ -1312,6 +1451,7 @@ def print_grid_summary(
         print(f"Already completed (skipped): {completed_count}")
     print("Model path: causal_forest with cf_use_rlearner_representation=True")
     print("X/W split: enabled")
+    print(f"Contrastive X stage: {', '.join(str(v) for v in contrastive_values)}")
     print("LLM hidden-state downprojection: disabled")
     print(f"Model types: {', '.join(f'{k}({v})' for k, v in sorted(model_type_summary.items()))}")
     print(f"Extractors:  {', '.join(f'{k}({v})' for k, v in sorted(extractor_summary.items()))}")
@@ -1341,6 +1481,8 @@ def aggregate_results(output_dir: Path, results_dict: Dict[str, Any]):
             "feature_extractor_type",
             "model_type",
             "rlearner_mode",
+            "contrastive_effect_enabled",
+            "contrastive_forest_x_mode",
             "flp_model_name",
             "hlm_model_name",
             "flp_max_length",
@@ -1495,6 +1637,29 @@ def main():
         default=None,
         help="Boolean grid for using role-tagged explicit features; default false true",
     )
+    parser.add_argument(
+        "--contrastive-effect",
+        action="store_true",
+        help="Use matched contrastive X-stage training instead of per-patient R-loss",
+    )
+    parser.add_argument("--contrastive-bottleneck-dim", type=int, default=8)
+    parser.add_argument("--contrastive-hidden-dim", type=int, default=64)
+    parser.add_argument("--contrastive-batch-size", type=int, default=16)
+    parser.add_argument("--contrastive-n-propensity-bins", type=int, default=10)
+    parser.add_argument("--contrastive-overlap-min", type=float, default=0.05)
+    parser.add_argument("--contrastive-overlap-max", type=float, default=0.95)
+    parser.add_argument("--contrastive-min-arm-per-bin", type=int, default=2)
+    parser.add_argument("--contrastive-lambda-factual", type=float, default=1.0)
+    parser.add_argument("--contrastive-lambda-contrast", type=float, default=2.0)
+    parser.add_argument("--contrastive-lambda-adversary", type=float, default=0.05)
+    parser.add_argument("--contrastive-lambda-z-l2", type=float, default=1e-4)
+    parser.add_argument("--contrastive-target-clip", type=float, default=1.0)
+    parser.add_argument(
+        "--contrastive-forest-x-mode",
+        type=str,
+        default="bottleneck_plus_tau",
+        choices=["bottleneck", "tau", "bottleneck_plus_tau"],
+    )
 
     args = parser.parse_args()
 
@@ -1522,6 +1687,20 @@ def main():
         learning_rates=args.learning_rates,
         epoch_counts=args.epoch_counts,
         include_explicit_feature_options=explicit_feature_options,
+        contrastive_effect_enabled=args.contrastive_effect,
+        contrastive_bottleneck_dim=args.contrastive_bottleneck_dim,
+        contrastive_hidden_dim=args.contrastive_hidden_dim,
+        contrastive_batch_size=args.contrastive_batch_size,
+        contrastive_n_propensity_bins=args.contrastive_n_propensity_bins,
+        contrastive_overlap_min=args.contrastive_overlap_min,
+        contrastive_overlap_max=args.contrastive_overlap_max,
+        contrastive_min_arm_per_bin=args.contrastive_min_arm_per_bin,
+        contrastive_lambda_factual=args.contrastive_lambda_factual,
+        contrastive_lambda_contrast=args.contrastive_lambda_contrast,
+        contrastive_lambda_adversary=args.contrastive_lambda_adversary,
+        contrastive_lambda_z_l2=args.contrastive_lambda_z_l2,
+        contrastive_target_clip=args.contrastive_target_clip,
+        contrastive_forest_x_mode=args.contrastive_forest_x_mode,
     )
 
     use_cache = args.cache or args.gpu_cache

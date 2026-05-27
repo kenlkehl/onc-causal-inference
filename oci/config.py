@@ -128,6 +128,59 @@ class MatchingAnalysisConfig:
 # =============================================================================
 
 @dataclass
+class ContrastiveEffectConfig:
+    """Configuration for matched contrastive effect-modifier representation learning.
+
+    This stage uses cross-fitted nuisance predictions from W to create
+    propensity-neighborhood treatment/control contrasts, then trains the X
+    representation to explain within-neighborhood outcome differences.
+    """
+    enabled: bool = False
+
+    # X representation bottleneck
+    bottleneck_dim: int = 8
+    hidden_dim: int = 64
+
+    # Propensity-neighborhood batching
+    batch_size: int = 16
+    n_propensity_bins: int = 10
+    overlap_min: float = 0.05
+    overlap_max: float = 0.95
+    min_arm_per_bin: int = 2
+
+    # Loss weights
+    lambda_factual: float = 1.0
+    lambda_contrast: float = 2.0
+    lambda_adversary: float = 0.05
+    lambda_z_l2: float = 1e-4
+
+    # Residual contrast target stabilization
+    target_clip: float = 1.0
+
+    # Causal forest X feature export mode:
+    # "bottleneck", "tau", or "bottleneck_plus_tau"
+    forest_x_mode: str = "bottleneck_plus_tau"
+
+    def __post_init__(self):
+        valid_modes = {"bottleneck", "tau", "bottleneck_plus_tau"}
+        if self.forest_x_mode not in valid_modes:
+            raise ValueError(
+                f"forest_x_mode must be one of {sorted(valid_modes)}, "
+                f"got '{self.forest_x_mode}'"
+            )
+        if self.bottleneck_dim < 1:
+            raise ValueError("bottleneck_dim must be >= 1")
+        if self.batch_size < 2:
+            raise ValueError("batch_size must be >= 2")
+        if self.n_propensity_bins < 1:
+            raise ValueError("n_propensity_bins must be >= 1")
+        if not (0.0 <= self.overlap_min < self.overlap_max <= 1.0):
+            raise ValueError("overlap_min/overlap_max must satisfy 0 <= min < max <= 1")
+        if self.min_arm_per_bin < 1:
+            raise ValueError("min_arm_per_bin must be >= 1")
+
+
+@dataclass
 class CausalForestConfig:
     """Configuration for causal forest head (used with model_type="causal_forest").
 
@@ -163,6 +216,13 @@ class CausalForestConfig:
 
     # Inner folds used for out-of-fold nuisance predictions in staged R-learning.
     rlearner_nuisance_folds: int = 5
+
+    # Matched contrastive X-stage alternative to per-patient R-loss training.
+    contrastive_effect: ContrastiveEffectConfig = field(default_factory=ContrastiveEffectConfig)
+
+    def __post_init__(self):
+        if isinstance(self.contrastive_effect, dict):
+            self.contrastive_effect = ContrastiveEffectConfig(**self.contrastive_effect)
 
 
 # =============================================================================
@@ -480,7 +540,10 @@ class ExperimentConfig:
                     "Use model_type='explicit_feature_forest' with role-tagged explicit_features."
                 )
             if 'causal_forest' in arch_data and isinstance(arch_data['causal_forest'], dict):
-                arch_data['causal_forest'] = CausalForestConfig(**arch_data['causal_forest'])
+                cf_data = arch_data['causal_forest'].copy()
+                if 'contrastive_effect' in cf_data and isinstance(cf_data['contrastive_effect'], dict):
+                    cf_data['contrastive_effect'] = ContrastiveEffectConfig(**cf_data['contrastive_effect'])
+                arch_data['causal_forest'] = CausalForestConfig(**cf_data)
             if 'tfidf_forest' in arch_data and isinstance(arch_data['tfidf_forest'], dict):
                 arch_data['tfidf_forest'] = TfidfForestConfig(**arch_data['tfidf_forest'])
             if 'confounder_forest' in arch_data:

@@ -23,6 +23,7 @@ from oci.config import (
     ExplicitFeatureExtractionConfig,
     ExplicitFeatureSpec,
     CausalForestConfig,
+    ContrastiveEffectConfig,
     TfidfForestConfig,
     ExplicitFeatureForestConfig,
 )
@@ -298,6 +299,49 @@ class TestCausalForest:
             config=config,
             output_path=output_path,
             device=device,
+        )
+
+        results_df = pd.read_parquet(output_path)
+        _verify_forest_predictions(results_df, n_expected=len(df))
+        _cleanup()
+
+    def test_causal_forest_contrastive_effect_cv(self, test_dataset, tmp_path, device):
+        df, dataset_path = test_dataset
+        output_path = tmp_path / "applied_inference" / "predictions.parquet"
+
+        config = _make_config(
+            "causal_forest", dataset_path,
+            feature_extractor_type="simple_cnn",
+            scnn_embedding_dim=32,
+            scnn_conv_dim=32,
+            scnn_kernel_size=3,
+            scnn_num_conv_blocks=2,
+            scnn_max_length=100,
+            scnn_vocab_size=1000,
+            scnn_gated_attention_dim=16,
+            scnn_projection_dim=32,
+            scnn_dropout=0.0,
+            causal_forest_overrides={
+                'use_rlearner_representation': True,
+                'rlearner_nuisance_folds': 2,
+                'contrastive_effect': ContrastiveEffectConfig(
+                    enabled=True,
+                    bottleneck_dim=4,
+                    hidden_dim=8,
+                    batch_size=8,
+                    n_propensity_bins=2,
+                    min_arm_per_bin=1,
+                    lambda_adversary=0.01,
+                ),
+            },
+        )
+
+        run_applied_inference(
+            dataset=df,
+            config=config,
+            output_path=output_path,
+            device=device,
+            num_workers=0,
         )
 
         results_df = pd.read_parquet(output_path)

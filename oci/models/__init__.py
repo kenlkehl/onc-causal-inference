@@ -26,6 +26,11 @@ from .propensity_model import PropensityOnlyModel, PropensityNet, create_propens
 from .extractor_factory import create_feature_extractor, create_feature_extractor_from_config
 from .causal_forest_head import CausalForestHead, ECONML_AVAILABLE
 from .causal_text_forest import CausalTextForest
+from .contrastive_causal_text_forest import (
+    ContrastiveCausalTextForest,
+    MatchedContrastiveEffectHead,
+    grad_reverse,
+)
 
 __all__ = [
     'DragonNet',
@@ -53,6 +58,9 @@ __all__ = [
     'HiddenStateCache',
     'GPUHiddenStateStore',
     'CausalTextForest',
+    'ContrastiveCausalTextForest',
+    'MatchedContrastiveEffectHead',
+    'grad_reverse',
     'ECONML_AVAILABLE',
     'create_feature_extractor',
     'create_feature_extractor_from_config',

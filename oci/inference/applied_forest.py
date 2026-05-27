@@ -21,6 +21,11 @@ from ..config import (
     CACHEABLE_EXTRACTOR_TYPES,
 )
 from ..models.causal_text_forest import CausalTextForest
+from ..models.contrastive_causal_text_forest import ContrastiveCausalTextForest
+from ..training.contrastive_effect import (
+    PropensityBinBalancedBatchSampler,
+    make_propensity_bins,
+)
 from ..data import (
     ClinicalTextDataset,
     collate_batch,
@@ -851,6 +856,14 @@ def _create_causal_forest_model(
     # R-learner representation training options
     cf_use_rlearner_representation = getattr(cf_config, 'use_rlearner_representation', False) if cf_config else False
     cf_gamma_rlearner = getattr(cf_config, 'gamma_rlearner', 1.0) if cf_config else 1.0
+    contrastive_effect_config = getattr(cf_config, 'contrastive_effect', None) if cf_config else None
+    contrastive_effect_enabled = (
+        getattr(contrastive_effect_config, 'enabled', False)
+        if contrastive_effect_config is not None
+        else False
+    )
+    if contrastive_effect_enabled:
+        cf_use_rlearner_representation = True
 
     explicit_feature_specs = None
     explicit_feature_output_dim = 64
@@ -862,7 +875,8 @@ def _create_causal_forest_model(
         explicit_feature_hidden_dim = getattr(explicit_features_config, 'featurizer_hidden_dim', 128)
         explicit_feature_dropout = getattr(explicit_features_config, 'featurizer_dropout', 0.1)
 
-    model = CausalTextForest(
+    model_class = ContrastiveCausalTextForest if contrastive_effect_enabled else CausalTextForest
+    model_kwargs = dict(
         feature_extractor_type=feature_extractor_type,
         # Frozen LLM Pooler args
         flp_model_name=getattr(arch_config, 'flp_model_name', 'Qwen/Qwen3-0.6B-Base'),
@@ -947,6 +961,10 @@ def _create_causal_forest_model(
         # Outcome type
         outcome_type=outcome_type
     )
+    if contrastive_effect_enabled:
+        model_kwargs['contrastive_effect_config'] = contrastive_effect_config
+
+    model = model_class(**model_kwargs)
 
     return model
 
@@ -1093,7 +1111,7 @@ def _train_representation(
         def make_inner_model(source_df: pd.DataFrame) -> CausalTextForest:
             inner_config = dict(model.config)
             inner_config['device'] = str(device)
-            inner_model = CausalTextForest(**inner_config)
+            inner_model = type(model)(**inner_config)
             fit_auxiliary_state(inner_model, source_df)
             return inner_model
 
@@ -1265,19 +1283,44 @@ def _train_representation(
             stage_train_loader: DataLoader,
             nuisance_propensity: np.ndarray,
             nuisance_outcome: np.ndarray,
+            propensity_bin_ids: Optional[np.ndarray] = None,
         ) -> List[Dict[str, Any]]:
+            use_contrastive = (
+                propensity_bin_ids is not None
+                and hasattr(model_to_train, 'train_effect_contrastive_step')
+            )
+            effect_loader = stage_train_loader
+            if use_contrastive:
+                contrastive_cfg = model_to_train.contrastive_effect_config
+                sampler = PropensityBinBalancedBatchSampler(
+                    treatment=train_df[config.treatment_column].values,
+                    bin_ids=propensity_bin_ids,
+                    batch_size=contrastive_cfg.batch_size,
+                    min_arm_per_bin=contrastive_cfg.min_arm_per_bin,
+                    seed=42,
+                )
+                effect_loader = DataLoader(
+                    train_dataset,
+                    batch_sampler=sampler,
+                    collate_fn=collate_fn,
+                    **dl_kwargs,
+                )
+
             params = [p for p in model_to_train.effect_parameters() if p.requires_grad]
             optimizer = torch.optim.AdamW(params, lr=train_config.learning_rate, weight_decay=weight_decay)
-            scheduler = make_scheduler(optimizer, len(stage_train_loader))
+            scheduler = make_scheduler(optimizer, len(effect_loader))
             local_history = []
 
             for epoch in range(train_config.epochs):
                 model_to_train.train()
                 train_loss = 0.0
                 train_r_loss = 0.0
+                train_factual_loss = 0.0
+                train_adversary_loss = 0.0
+                train_z_l2_loss = 0.0
 
                 for batch in tqdm(
-                    stage_train_loader,
+                    effect_loader,
                     desc=f"Effect {epoch+1}",
                     leave=False,
                     disable=not verbose,
@@ -1299,12 +1342,25 @@ def _train_representation(
                     )
 
                     optimizer.zero_grad()
-                    losses = model_to_train.train_effect_r_step(
-                        batch,
-                        e_hat=e_hat,
-                        m_hat=m_hat,
-                        gamma_rlearner=gamma_rlearner,
-                    )
+                    if use_contrastive:
+                        bin_ids = torch.as_tensor(
+                            propensity_bin_ids[batch_ids],
+                            dtype=torch.long,
+                            device=device,
+                        )
+                        losses = model_to_train.train_effect_contrastive_step(
+                            batch,
+                            e_hat=e_hat,
+                            m_hat=m_hat,
+                            bin_ids=bin_ids,
+                        )
+                    else:
+                        losses = model_to_train.train_effect_r_step(
+                            batch,
+                            e_hat=e_hat,
+                            m_hat=m_hat,
+                            gamma_rlearner=gamma_rlearner,
+                        )
                     losses['loss'].backward()
                     if gradient_clip_norm > 0:
                         torch.nn.utils.clip_grad_norm_(params, gradient_clip_norm)
@@ -1314,17 +1370,26 @@ def _train_representation(
 
                     train_loss += losses['loss'].item()
                     train_r_loss += losses['r_loss'].item()
+                    train_factual_loss += losses.get('factual_loss', torch.tensor(0.0)).item()
+                    train_adversary_loss += losses.get('adversary_loss', torch.tensor(0.0)).item()
+                    train_z_l2_loss += losses.get('z_l2_loss', torch.tensor(0.0)).item()
 
-                denom = max(len(stage_train_loader), 1)
+                denom = max(len(effect_loader), 1)
                 train_loss /= denom
                 train_r_loss /= denom
+                train_factual_loss /= denom
+                train_adversary_loss /= denom
+                train_z_l2_loss /= denom
                 local_history.append({
-                    'stage': 'effect',
+                    'stage': 'effect_contrastive' if use_contrastive else 'effect',
                     'epoch': epoch + 1,
                     'train_loss': train_loss,
                     'train_propensity_loss': 0.0,
                     'train_outcome_loss': 0.0,
                     'train_r_loss': train_r_loss,
+                    'train_factual_loss': train_factual_loss,
+                    'train_adversary_loss': train_adversary_loss,
+                    'train_z_l2_loss': train_z_l2_loss,
                     'val_loss': np.nan,
                     'val_propensity_loss': np.nan,
                     'val_outcome_loss': np.nan,
@@ -1334,10 +1399,18 @@ def _train_representation(
                 })
 
                 if verbose:
-                    logger.info(
-                        f"Effect epoch {epoch+1}/{train_config.epochs} | "
-                        f"R-Loss: {train_r_loss:.4f}"
-                    )
+                    if use_contrastive:
+                        logger.info(
+                            f"Contrastive effect epoch {epoch+1}/{train_config.epochs} | "
+                            f"Contrast: {train_r_loss:.4f} | "
+                            f"Factual: {train_factual_loss:.4f} | "
+                            f"Adv: {train_adversary_loss:.4f}"
+                        )
+                    else:
+                        logger.info(
+                            f"Effect epoch {epoch+1}/{train_config.epochs} | "
+                            f"R-Loss: {train_r_loss:.4f}"
+                        )
 
             return local_history
 
@@ -1409,6 +1482,23 @@ def _train_representation(
         if np.isnan(oof_propensity).any() or np.isnan(oof_outcome).any():
             raise RuntimeError("Incomplete out-of-fold nuisance predictions")
 
+        propensity_bin_ids = None
+        if hasattr(model, 'train_effect_contrastive_step'):
+            contrastive_cfg = model.contrastive_effect_config
+            propensity_bin_ids = make_propensity_bins(
+                propensity=oof_propensity,
+                treatment=train_df[config.treatment_column].values,
+                n_bins=contrastive_cfg.n_propensity_bins,
+                overlap_min=contrastive_cfg.overlap_min,
+                overlap_max=contrastive_cfg.overlap_max,
+                min_arm_per_bin=contrastive_cfg.min_arm_per_bin,
+            )
+            logger.info(
+                "Contrastive effect bins: "
+                f"{len(np.unique(propensity_bin_ids[propensity_bin_ids >= 0]))} bins, "
+                f"{int(np.sum(propensity_bin_ids >= 0))}/{len(propensity_bin_ids)} samples in overlap"
+            )
+
         nuisance_val_loader = val_loader if use_val_for_early_stopping else None
         history.extend(
             train_nuisance_stage(
@@ -1424,6 +1514,7 @@ def _train_representation(
                 train_loader,
                 oof_propensity,
                 oof_outcome,
+                propensity_bin_ids=propensity_bin_ids,
             )
         )
 
