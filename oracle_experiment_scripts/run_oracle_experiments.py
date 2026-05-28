@@ -186,6 +186,7 @@ class ExperimentConfig:
     agentic_vllm_server_url: Optional[str] = None
     agentic_vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
     agentic_vllm_mode: str = "server"
+    agentic_vllm_download_dir: Optional[str] = None
     agentic_vllm_max_model_len: Optional[int] = None
     agentic_extraction_max_retries: int = 3
     agentic_extraction_max_tokens: int = 1024
@@ -1550,11 +1551,31 @@ def _selected_feature_count(value: Any) -> int:
     return len([part for part in text.split(",") if part.strip()])
 
 
+def _runtime_agentic_server_url(
+    configured_url: Optional[str],
+    device: Optional[str],
+    env_var: str,
+) -> Optional[str]:
+    """Resolve per-device agentic server URLs supplied by wrapper scripts."""
+    if device:
+        mapping_json = os.environ.get(env_var)
+        if mapping_json:
+            try:
+                mapping = json.loads(mapping_json)
+                runtime_url = mapping.get(str(device))
+                if runtime_url:
+                    return runtime_url
+            except json.JSONDecodeError:
+                logger.warning("Ignoring invalid %s JSON", env_var)
+    return configured_url
+
+
 def run_agentic_experiment(
     config: ExperimentConfig,
     df: pd.DataFrame,
     parquet_file: Path,
     output_dir: Path,
+    device: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Run the nested-CV agentic explicit-feature causal forest path."""
     initial_specs = select_agentic_initial_feature_specs(
@@ -1568,15 +1589,31 @@ def run_agentic_experiment(
         _dedupe_feature_specs(all_metadata_specs + initial_specs),
     )
 
-    agent_server_url = (
+    configured_agent_server_url = (
         config.agentic_agent_server_url
         or config.agentic_vllm_server_url
         or "http://localhost:8000/v1"
     )
-    extraction_server_url = (
+    configured_extraction_server_url = (
         config.agentic_vllm_server_url
         or config.agentic_agent_server_url
         or "http://localhost:8000/v1"
+    )
+    agent_server_url = _runtime_agentic_server_url(
+        configured_agent_server_url,
+        device,
+        "OCI_AGENTIC_AGENT_SERVER_URLS_BY_DEVICE",
+    )
+    extraction_server_url = _runtime_agentic_server_url(
+        configured_extraction_server_url,
+        device,
+        "OCI_AGENTIC_VLLM_SERVER_URLS_BY_DEVICE",
+    )
+    logger.info(
+        "Agentic LLM endpoints for %s: agent=%s extraction=%s",
+        device or "default",
+        agent_server_url,
+        extraction_server_url,
     )
     cache_dir = (
         config.agentic_cache_dir
@@ -1630,6 +1667,7 @@ def run_agentic_experiment(
             vllm_mode=config.agentic_vllm_mode,
             vllm_server_url=extraction_server_url,
             vllm_model_name=config.agentic_vllm_model_name,
+            vllm_download_dir=config.agentic_vllm_download_dir,
             vllm_max_model_len=config.agentic_vllm_max_model_len,
             extraction_batch_size=config.agentic_extraction_batch_size,
             extraction_max_retries=config.agentic_extraction_max_retries,
@@ -1752,7 +1790,7 @@ def run_single_experiment(
     if config.model_type == "best_attainable":
         result = run_best_attainable_experiment(config, df)
     elif config.model_type == "agentic_explicit_feature_forest":
-        result = run_agentic_experiment(config, df, parquet_file, output_dir)
+        result = run_agentic_experiment(config, df, parquet_file, output_dir, device=str(device))
     elif config.model_type == "causal_forest":
         result = run_causal_forest_experiment(
             config, device, df, confounder_specs, confounder_cols,
@@ -1811,6 +1849,7 @@ def generate_experiment_grid(
     agentic_vllm_server_url: Optional[str] = None,
     agentic_vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct",
     agentic_vllm_mode: str = "server",
+    agentic_vllm_download_dir: Optional[str] = None,
     agentic_vllm_max_model_len: Optional[int] = None,
     agentic_extraction_max_retries: int = 3,
     agentic_extraction_max_tokens: int = 1024,
@@ -2062,6 +2101,7 @@ def generate_experiment_grid(
                     agentic_vllm_server_url=agentic_vllm_server_url,
                     agentic_vllm_model_name=agentic_vllm_model_name,
                     agentic_vllm_mode=agentic_vllm_mode,
+                    agentic_vllm_download_dir=agentic_vllm_download_dir,
                     agentic_vllm_max_model_len=agentic_vllm_max_model_len,
                     agentic_extraction_max_retries=agentic_extraction_max_retries,
                     agentic_extraction_max_tokens=agentic_extraction_max_tokens,
@@ -2610,6 +2650,17 @@ def main():
         help="vLLM mode for explicit feature extraction."
     )
     parser.add_argument(
+        "--agentic-vllm-download-dir",
+        "--download-dir",
+        type=str,
+        dest="agentic_vllm_download_dir",
+        default=None,
+        help=(
+            "Optional vLLM/Hugging Face model download directory for agentic "
+            "extraction. --download-dir is an alias for agentic-only runs."
+        )
+    )
+    parser.add_argument(
         "--agentic-vllm-max-model-len",
         type=int,
         default=None,
@@ -2712,6 +2763,7 @@ def main():
         agentic_vllm_server_url=args.agentic_vllm_server_url,
         agentic_vllm_model_name=args.agentic_vllm_model_name,
         agentic_vllm_mode=args.agentic_vllm_mode,
+        agentic_vllm_download_dir=args.agentic_vllm_download_dir,
         agentic_vllm_max_model_len=args.agentic_vllm_max_model_len,
         agentic_extraction_max_retries=args.agentic_extraction_max_retries,
         agentic_extraction_max_tokens=args.agentic_extraction_max_tokens,
@@ -3075,6 +3127,7 @@ def main():
                       'agentic_agent_context_chars',
                       'agentic_vllm_model_name',
                       'agentic_vllm_mode',
+                      'agentic_vllm_download_dir',
                       'agentic_vllm_max_model_len',
                       'agentic_extraction_max_tokens',
                       'agentic_extraction_max_text_length']

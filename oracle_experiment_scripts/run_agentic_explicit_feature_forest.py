@@ -65,6 +65,7 @@ def main():
     parser.add_argument("--vllm-mode", default="python_api", choices=["server", "start_server", "python_api"])
     parser.add_argument("--vllm-server-url", default="http://localhost:8000/v1")
     parser.add_argument("--vllm-model-name", default="nvidia/Gemma-4-31B-IT-NVFP4")
+    parser.add_argument("--vllm-download-dir", "--download-dir", dest="vllm_download_dir", default=None)
     parser.add_argument("--vllm-max-model-len", type=int, default=None)
     parser.add_argument("--extraction-batch-size", type=int, default=64)
     parser.add_argument("--extraction-max-retries", type=int, default=5)
@@ -137,6 +138,7 @@ def main():
             vllm_mode=args.vllm_mode,
             vllm_server_url=args.vllm_server_url,
             vllm_model_name=args.vllm_model_name,
+            vllm_download_dir=args.vllm_download_dir,
             vllm_max_model_len=args.vllm_max_model_len,
             extraction_batch_size=args.extraction_batch_size,
             extraction_max_retries=args.extraction_max_retries,
