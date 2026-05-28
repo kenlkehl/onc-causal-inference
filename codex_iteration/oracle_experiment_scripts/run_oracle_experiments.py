@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 """Oracle experiment runner for CDT.
 
-Compares causal_forest, rlearner, dragonnet, best_attainable, and
-agentic_explicit_feature_forest model types across multiple datasets and
-max sequence lengths. Each experiment configuration is repeated N times
+Compares causal_forest, rlearner, dragonnet, and best_attainable model types
+using the frozen_llm_pooler feature extractor across multiple datasets and
+max sequence lengths.  Each experiment configuration is repeated N times
 (--n-repeats, default 10) with different random seeds so that summary
 statistics report mean +/- std across repeats.
 
@@ -97,21 +97,13 @@ from tqdm import tqdm
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from oci.config import (
-    AgenticFeatureSearchConfig,
-    AppliedInferenceConfig,
-    ExplicitFeatureExtractionConfig,
-    ExplicitFeatureForestConfig,
-    ExplicitFeatureSpec,
-    ModelArchitectureConfig,
-)
+from oci.config import ExplicitConfounderSpec
 from oci.data import ClinicalTextDataset, collate_batch
 from oci.data import CachedHiddenStateDataset, collate_cached_batch, prepare_cached_batch
 from oci.models.causal_text import CausalText
 from oci.models.causal_text_forest import CausalTextForest
 from oci.models.hidden_state_cache import HiddenStateCache
 from oci.models.gpu_hidden_state_store import GPUHiddenStateStore
-from oci.inference.agentic_explicit_feature_forest import run_agentic_explicit_feature_forest
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,8 +119,7 @@ class ExperimentConfig:
     dataset_path: str
     dataset_name: str
 
-    # Model type: "causal_forest", "rlearner", "dragonnet",
-    # "best_attainable", or "agentic_explicit_feature_forest"
+    # Model type: "causal_forest", "rlearner", "dragonnet", "best_attainable"
     model_type: str
 
     # Explicit confounders (use all when True)
@@ -154,6 +145,8 @@ class ExperimentConfig:
     flp_model_name: str = "Qwen/Qwen3.5-0.8B-Base"
     flp_dropout: float = 0.1
     flp_gradient_checkpointing: bool = True
+    flp_attention_slots: int = 1
+    flp_document_window: str = "tail"
     epochs: int = 30
     batch_size: int = 2
     learning_rate: float = 1e-4
@@ -164,28 +157,6 @@ class ExperimentConfig:
     # Causal forest specific
     cf_n_estimators: int = 200
     cf_min_samples_leaf: int = 5
-
-    # Agentic explicit-feature forest hyperparameters
-    agentic_initial_feature_count: int = 0
-    agentic_initial_feature_strategy: str = "none"
-    agentic_initial_feature_names: List[str] = field(default_factory=list)
-    agentic_max_iterations: int = 1
-    agentic_inner_folds: int = 2
-    agentic_max_additions_per_iter: int = 2
-    agentic_max_removals_per_iter: int = 0
-    agentic_min_feature_coverage: float = 0.70
-    agentic_min_r_loss_improvement: float = 0.01
-    agentic_min_improvement_fold_fraction: float = 2.0 / 3.0
-    agentic_agent_server_url: Optional[str] = None
-    agentic_agent_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
-    agentic_agent_api_key: str = "EMPTY"
-    agentic_vllm_server_url: Optional[str] = None
-    agentic_vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
-    agentic_extraction_max_retries: int = 3
-    agentic_extraction_max_tokens: int = 1024
-    agentic_extraction_max_text_length: int = 8000
-    agentic_extraction_batch_size: int = 32
-    agentic_cache_dir: Optional[str] = None
 
     # Hierarchical LLM hyperparameters
     hlm_model_name: str = "Qwen/Qwen3.5-0.8B-Base"
@@ -229,18 +200,32 @@ class ExperimentConfig:
     scnn_projection_dim: int = 128
     scnn_dropout: float = 0.1
 
+    # Byte CNN hyperparameters
+    byte_embedding_dim: int = 32
+    byte_conv_dim: int = 64
+    byte_kernel_size: int = 7
+    byte_num_conv_blocks: int = 4
+    byte_chunk_size: int = 512
+    byte_chunk_overlap: int = 64
+    byte_max_chunks: int = 128
+    byte_projection_dim: int = 128
+    byte_dropout: float = 0.1
+
     # Extractor-specific field prefixes -- used by config_hash() to exclude
     # parameters that belong to *other* extractors so adding a new extractor
     # type never invalidates existing result hashes.
     _EXTRACTOR_PREFIXES = {
         "frozen_llm_pooler": {"flp_"},
+        "frozen_llm_token_cnn": {"flp_"},
+        "frozen_llm_stat_pooler": {"flp_"},
+        "token_hash_embedding": {"flp_"},
         "hierarchical_llm": {"hlm_"},
         "hierarchical_cnn": {"hcnn_"},
         "hierarchical_gru": {"hgru_"},
         "simple_cnn": {"scnn_"},
+        "byte_cnn": {"byte_"},
     }
     _ALL_EXTRACTOR_PREFIXES = set().union(*_EXTRACTOR_PREFIXES.values())
-    _AGENTIC_PREFIX = "agentic_"
 
     def config_hash(self) -> str:
         """Generate unique hash for this config.
@@ -254,9 +239,6 @@ class ExperimentConfig:
         if self.model_type == "best_attainable":
             # No neural extractor -- exclude all extractor-specific fields
             keep_prefixes = set()
-        elif self.model_type == "agentic_explicit_feature_forest":
-            # No neural extractor; agentic settings are handled below.
-            keep_prefixes = set()
         else:
             keep_prefixes = self._EXTRACTOR_PREFIXES.get(
                 self.feature_extractor_type, set()
@@ -268,62 +250,13 @@ class ExperimentConfig:
             k: v for k, v in d.items()
             if not any(k.startswith(p) for p in remove_prefixes)
         }
-        if self.model_type == "agentic_explicit_feature_forest":
-            d = {
-                k: v for k, v in d.items()
-                if k.startswith(self._AGENTIC_PREFIX)
-                or not any(k.startswith(p) for p in self._ALL_EXTRACTOR_PREFIXES)
-            }
-        else:
-            d = {
-                k: v for k, v in d.items()
-                if not k.startswith(self._AGENTIC_PREFIX)
-            }
 
         config_str = json.dumps(d, sort_keys=True)
         return hashlib.md5(config_str.encode()).hexdigest()[:12]
 
 
-def _feature_spec_from_metadata_item(
-    item: Dict[str, Any],
-    default_roles: Optional[List[str]] = None,
-) -> ExplicitFeatureSpec:
-    roles = item.get("roles") or default_roles or ["confounder", "effect_modifier"]
-    return ExplicitFeatureSpec(
-        name=item["name"],
-        type=item["type"],
-        categories=item.get("categories"),
-        description=item.get("description"),
-        roles=list(roles),
-    )
-
-
-def _dedupe_feature_specs(specs: List[ExplicitFeatureSpec]) -> List[ExplicitFeatureSpec]:
-    """Deduplicate feature specs by name while merging role tags."""
-    by_name: Dict[str, ExplicitFeatureSpec] = {}
-    ordered_names = []
-    for spec in specs:
-        existing = by_name.get(spec.name)
-        if existing is None:
-            by_name[spec.name] = spec
-            ordered_names.append(spec.name)
-            continue
-        merged_roles = list(dict.fromkeys([*existing.roles, *spec.roles]))
-        by_name[spec.name] = ExplicitFeatureSpec(
-            name=existing.name,
-            type=existing.type,
-            categories=existing.categories,
-            description=existing.description,
-            roles=merged_roles,
-        )
-    return [by_name[name] for name in ordered_names]
-
-
-def load_feature_specs_from_metadata(
-    dataset_path: str,
-    section: str = "features",
-) -> List[ExplicitFeatureSpec]:
-    """Load role-tagged explicit feature specs from a dataset's metadata.json."""
+def load_confounder_specs_from_metadata(dataset_path: str) -> List[ExplicitConfounderSpec]:
+    """Load confounder specifications from a dataset's metadata.json."""
     metadata_file = Path(dataset_path) / "metadata.json"
     if not metadata_file.exists():
         logger.warning(f"metadata.json not found at {metadata_file}")
@@ -332,122 +265,19 @@ def load_feature_specs_from_metadata(
     with open(metadata_file) as f:
         metadata = json.load(f)
 
-    if section == "confounders":
-        raw_specs = metadata.get("confounders", [])
-        default_roles = ["confounder"]
-    elif section == "effect_modifiers":
-        raw_specs = metadata.get("effect_modifiers", [])
-        default_roles = ["effect_modifier"]
-    elif section == "features":
-        raw_specs = metadata.get("features")
-        if raw_specs is None:
-            raw_specs = metadata.get("confounders", []) + metadata.get("effect_modifiers", [])
-        default_roles = None
-    else:
-        raise ValueError(f"Unknown metadata feature section: {section}")
-
-    specs = [
-        _feature_spec_from_metadata_item(item, default_roles=default_roles)
-        for item in raw_specs
-    ]
-    return _dedupe_feature_specs(specs)
-
-
-
-def load_confounder_specs_from_metadata(dataset_path: str) -> List[ExplicitFeatureSpec]:
-    """Load confounder specifications from a dataset's metadata.json."""
-    return load_feature_specs_from_metadata(dataset_path, section="confounders")
-
-
-AGENTIC_INITIAL_FEATURE_STRATEGIES = {
-    "none",
-    "true_first",
-    "modifiers_first",
-    "mixed",
-    "distractors",
-}
-
-
-AGENTIC_DISTRACTOR_SPECS = [
-    ExplicitFeatureSpec(
-        name="tumor_max_diameter_cm",
-        type="continuous",
-        description="Largest baseline tumor diameter in centimeters before treatment",
-        roles=["confounder", "effect_modifier"],
-    ),
-    ExplicitFeatureSpec(
-        name="smoking_pack_years",
-        type="continuous",
-        description="Baseline cumulative smoking exposure in pack-years",
-        roles=["confounder"],
-    ),
-    ExplicitFeatureSpec(
-        name="baseline_albumin",
-        type="continuous",
-        description="Baseline serum albumin level before treatment",
-        roles=["confounder"],
-    ),
-    ExplicitFeatureSpec(
-        name="baseline_ldh",
-        type="continuous",
-        description="Baseline lactate dehydrogenase level before treatment",
-        roles=["confounder", "effect_modifier"],
-    ),
-    ExplicitFeatureSpec(
-        name="metastatic_site_count",
-        type="continuous",
-        description="Number of metastatic organ sites present at baseline",
-        roles=["confounder", "effect_modifier"],
-    ),
-]
-
-
-def _interleave_specs(
-    left: List[ExplicitFeatureSpec],
-    right: List[ExplicitFeatureSpec],
-) -> List[ExplicitFeatureSpec]:
     specs = []
-    for i in range(max(len(left), len(right))):
-        if i < len(left):
-            specs.append(left[i])
-        if i < len(right):
-            specs.append(right[i])
+    for conf in metadata.get("confounders", []):
+        specs.append(ExplicitConfounderSpec(
+            name=conf["name"],
+            type=conf["type"],
+            categories=conf.get("categories"),
+            description=conf.get("description"),
+        ))
+
     return specs
 
 
-def select_agentic_initial_feature_specs(
-    dataset_path: str,
-    count: int,
-    strategy: str,
-) -> List[ExplicitFeatureSpec]:
-    """Build a simulated user-provided starting feature set for agentic runs."""
-    if count <= 0 or strategy == "none":
-        return []
-    if strategy not in AGENTIC_INITIAL_FEATURE_STRATEGIES:
-        raise ValueError(
-            f"Unknown agentic initial feature strategy '{strategy}'. "
-            f"Valid strategies: {sorted(AGENTIC_INITIAL_FEATURE_STRATEGIES)}"
-        )
-
-    confounders = load_feature_specs_from_metadata(dataset_path, section="confounders")
-    modifiers = load_feature_specs_from_metadata(dataset_path, section="effect_modifiers")
-    distractors = list(AGENTIC_DISTRACTOR_SPECS)
-
-    if strategy == "true_first":
-        ordered = confounders + modifiers + distractors
-    elif strategy == "modifiers_first":
-        ordered = modifiers + distractors + confounders
-    elif strategy == "mixed":
-        ordered = _interleave_specs(confounders, modifiers) + distractors
-    elif strategy == "distractors":
-        ordered = distractors + modifiers + confounders
-    else:
-        ordered = []
-
-    return _dedupe_feature_specs(ordered)[:count]
-
-
-def _rename_confounder_columns(df: pd.DataFrame, confounder_specs: List[ExplicitFeatureSpec]) -> pd.DataFrame:
+def _rename_confounder_columns(df: pd.DataFrame, confounder_specs: List[ExplicitConfounderSpec]) -> pd.DataFrame:
     """Rename llm_extracted_* columns to explicit_conf_* for ClinicalTextDataset."""
     rename_map = {}
     for s in confounder_specs:
@@ -559,11 +389,13 @@ def group_configs_by_cache_key(
             _max_length = config.hlm_chunk_size * config.hlm_max_chunks
             _dp_dim = config.hlm_downprojection_dim
             _ctp = config.hlm_chat_template_prompt
+            _dw = "tail"
         else:  # frozen_llm_pooler
             _model_name = config.flp_model_name
             _max_length = config.flp_max_length
             _dp_dim = config.flp_downprojection_dim
             _ctp = config.flp_chat_template_prompt
+            _dw = getattr(config, "flp_document_window", "tail")
 
         _cs = config.hlm_chunk_size if config.feature_extractor_type == "hierarchical_llm" else None
         _co = config.hlm_chunk_overlap if config.feature_extractor_type == "hierarchical_llm" else None
@@ -573,6 +405,7 @@ def group_configs_by_cache_key(
             _model_name, _max_length, str(parquet_file), None,
             downprojection_dim=_dp_dim,
             chat_template_prompt=_ctp,
+            document_window=_dw,
             chunk_size=_cs, chunk_overlap=_co, max_chunks=_mc,
         )
         if cache_hash not in groups:
@@ -584,6 +417,7 @@ def group_configs_by_cache_key(
                 downprojection_dim=_dp_dim,
                 dataset_name=config.dataset_name,
                 chat_template_prompt=_ctp,
+                document_window=_dw,
                 chunk_size=_cs,
                 chunk_overlap=_co,
                 max_chunks=_mc,
@@ -627,6 +461,7 @@ def precompute_single_cache(
     dp_dim = cache_info['downprojection_dim']
 
     ctp = cache_info.get('chat_template_prompt', None)
+    dw = cache_info.get('document_window', 'tail')
     cs = cache_info.get('chunk_size', None)
     co = cache_info.get('chunk_overlap', None)
     mc = cache_info.get('max_chunks', None)
@@ -640,6 +475,7 @@ def precompute_single_cache(
         random_projection_dim=None,
         downprojection_dim=dp_dim,
         chat_template_prompt=ctp,
+        document_window=dw,
         chunk_size=cs,
         chunk_overlap=co,
         max_chunks=mc,
@@ -799,11 +635,16 @@ def _get_cache_info(config, parquet_file, cache_registry, gpu_store_registry):
     if ext_type not in CACHEABLE_EXTRACTOR_TYPES:
         return gpu_store, hidden_state_cache
 
-    if ext_type == "frozen_llm_pooler" and config.flp_freeze_llm and config.flp_cache_hidden_states:
+    if (
+        ext_type in {"frozen_llm_pooler", "frozen_llm_token_cnn", "frozen_llm_stat_pooler"}
+        and config.flp_freeze_llm
+        and config.flp_cache_hidden_states
+    ):
         cache_hash = HiddenStateCache.compute_cache_hash(
             config.flp_model_name, config.flp_max_length, str(parquet_file),
             None, downprojection_dim=config.flp_downprojection_dim,
             chat_template_prompt=config.flp_chat_template_prompt,
+            document_window=getattr(config, 'flp_document_window', 'tail'),
         )
         if gpu_store_registry is not None:
             gpu_store = gpu_store_registry.get(cache_hash)
@@ -837,7 +678,7 @@ def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs
         device=str(device),
     )
 
-    if ext_type == "frozen_llm_pooler":
+    if ext_type in {"frozen_llm_pooler", "frozen_llm_token_cnn", "frozen_llm_stat_pooler", "token_hash_embedding"}:
         kwargs.update(
             flp_model_name=config.flp_model_name,
             flp_max_length=config.flp_max_length,
@@ -848,6 +689,8 @@ def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs
             flp_gradient_checkpointing=config.flp_gradient_checkpointing,
             flp_downprojection_dim=None if use_cache else config.flp_downprojection_dim,
             flp_chat_template_prompt=config.flp_chat_template_prompt,
+            flp_attention_slots=getattr(config, 'flp_attention_slots', 1),
+            flp_document_window=getattr(config, 'flp_document_window', 'tail'),
         )
         if gpu_store is not None:
             kwargs['flp_skip_llm'] = True
@@ -910,6 +753,18 @@ def _common_model_kwargs(config, gpu_store, hidden_state_cache, confounder_specs
             scnn_vocab_size=config.scnn_vocab_size,
             scnn_projection_dim=config.scnn_projection_dim,
             scnn_dropout=config.scnn_dropout,
+        )
+    elif ext_type == "byte_cnn":
+        kwargs.update(
+            byte_embedding_dim=config.byte_embedding_dim,
+            byte_conv_dim=config.byte_conv_dim,
+            byte_kernel_size=config.byte_kernel_size,
+            byte_num_conv_blocks=config.byte_num_conv_blocks,
+            byte_chunk_size=config.byte_chunk_size,
+            byte_chunk_overlap=config.byte_chunk_overlap,
+            byte_max_chunks=config.byte_max_chunks,
+            byte_projection_dim=config.byte_projection_dim,
+            byte_dropout=config.byte_dropout,
         )
 
     return kwargs
@@ -1511,178 +1366,6 @@ def run_best_attainable_experiment(
     return {'metrics': metrics, 'n_samples': len(results_df)}
 
 
-def _copy_llm_extractions_to_explicit_features(
-    df: pd.DataFrame,
-    specs: List[ExplicitFeatureSpec],
-) -> pd.DataFrame:
-    """Reuse pre-existing llm_extracted_* columns for agentic explicit features."""
-    if not specs:
-        return df
-    df = df.copy()
-    for spec in specs:
-        src = f"llm_extracted_{spec.name}"
-        dst = f"explicit_feat_{spec.name}"
-        if dst not in df.columns and src in df.columns:
-            df[dst] = df[src]
-
-        src_missing = f"{src}_missing"
-        dst_missing = f"{dst}_missing"
-        if dst in df.columns and dst_missing not in df.columns:
-            if src_missing in df.columns:
-                df[dst_missing] = df[src_missing]
-            else:
-                df[dst_missing] = df[dst].isna()
-    return df
-
-
-def _selected_feature_count(value: Any) -> int:
-    if value is None or (isinstance(value, float) and np.isnan(value)):
-        return 0
-    text = str(value).strip()
-    if not text:
-        return 0
-    return len([part for part in text.split(",") if part.strip()])
-
-
-def run_agentic_experiment(
-    config: ExperimentConfig,
-    df: pd.DataFrame,
-    parquet_file: Path,
-    output_dir: Path,
-) -> Dict[str, Any]:
-    """Run the nested-CV agentic explicit-feature causal forest path."""
-    initial_specs = select_agentic_initial_feature_specs(
-        config.dataset_path,
-        count=config.agentic_initial_feature_count,
-        strategy=config.agentic_initial_feature_strategy,
-    )
-    all_metadata_specs = load_feature_specs_from_metadata(config.dataset_path, section="features")
-    df = _copy_llm_extractions_to_explicit_features(
-        df,
-        _dedupe_feature_specs(all_metadata_specs + initial_specs),
-    )
-
-    agent_server_url = (
-        config.agentic_agent_server_url
-        or config.agentic_vllm_server_url
-        or "http://localhost:8000/v1"
-    )
-    extraction_server_url = (
-        config.agentic_vllm_server_url
-        or config.agentic_agent_server_url
-        or "http://localhost:8000/v1"
-    )
-    cache_dir = (
-        config.agentic_cache_dir
-        or str(output_dir / "agentic_extraction_cache")
-    )
-
-    applied_config = AppliedInferenceConfig(
-        outcome_type="binary",
-        dataset_path=str(parquet_file),
-        text_column="clinical_text",
-        outcome_column="outcome_indicator",
-        treatment_column="treatment_indicator",
-        cv_folds=config.n_folds,
-        architecture=ModelArchitectureConfig(
-            model_type="agentic_explicit_feature_forest",
-            explicit_feature_forest=ExplicitFeatureForestConfig(
-                n_estimators=config.cf_n_estimators,
-                min_samples_leaf=config.cf_min_samples_leaf,
-                inference=True,
-            ),
-            agentic_feature_search=AgenticFeatureSearchConfig(
-                outer_folds=config.n_folds,
-                inner_folds=config.agentic_inner_folds,
-                max_iterations=config.agentic_max_iterations,
-                max_additions_per_iter=config.agentic_max_additions_per_iter,
-                max_removals_per_iter=config.agentic_max_removals_per_iter,
-                min_feature_coverage=config.agentic_min_feature_coverage,
-                min_r_loss_improvement=config.agentic_min_r_loss_improvement,
-                min_improvement_fold_fraction=config.agentic_min_improvement_fold_fraction,
-                agent_server_url=agent_server_url,
-                agent_model_name=config.agentic_agent_model_name,
-                agent_api_key=config.agentic_agent_api_key,
-                random_state=42 + config.repeat_index,
-                stop_after_rejected_iteration=True,
-            ),
-        ),
-        explicit_features=ExplicitFeatureExtractionConfig(
-            enabled=True,
-            features=initial_specs,
-            vllm_mode="server",
-            vllm_server_url=extraction_server_url,
-            vllm_model_name=config.agentic_vllm_model_name,
-            extraction_batch_size=config.agentic_extraction_batch_size,
-            extraction_max_retries=config.agentic_extraction_max_retries,
-            extraction_max_tokens=config.agentic_extraction_max_tokens,
-            extraction_max_text_length=config.agentic_extraction_max_text_length,
-            cache_enabled=True,
-            cache_dir=cache_dir,
-        ),
-    )
-
-    prediction_path = (
-        output_dir
-        / "agentic_predictions"
-        / config.config_hash()
-        / "predictions.parquet"
-    )
-    run_agentic_explicit_feature_forest(df, applied_config, prediction_path)
-    results_df = pd.read_parquet(prediction_path)
-
-    propensity_col = (
-        "pred_propensity_prob"
-        if "pred_propensity_prob" in results_df.columns
-        else "pred_propensity"
-    )
-    lower_col = (
-        "pred_ite_lower"
-        if "pred_ite_lower" in results_df.columns
-        else "pred_tau_lower"
-    )
-    upper_col = (
-        "pred_ite_upper"
-        if "pred_ite_upper" in results_df.columns
-        else "pred_tau_upper"
-    )
-
-    metrics = compute_metrics(
-        pred_ite=results_df["pred_ite_prob"].values,
-        true_ite=results_df["true_ite_prob"].values,
-        pred_propensity=results_df[propensity_col].values,
-        true_treatment=results_df["treatment_indicator"].values,
-        pred_y0=results_df["pred_y0_prob"].values,
-        pred_y1=results_df["pred_y1_prob"].values,
-        true_y0=results_df["true_y0_prob"].values,
-        true_y1=results_df["true_y1_prob"].values,
-        true_outcome=results_df["outcome_indicator"].values,
-        tau_lower=results_df[lower_col].values if lower_col in results_df.columns else None,
-        tau_upper=results_df[upper_col].values if upper_col in results_df.columns else None,
-    )
-
-    selected_counts = []
-    selected_sets = set()
-    if "selected_feature_names" in results_df.columns:
-        for value in results_df["selected_feature_names"].fillna("").tolist():
-            selected_counts.append(_selected_feature_count(value))
-            selected_sets.add(str(value))
-
-    metrics["agentic_n_initial_features"] = float(len(initial_specs))
-    if selected_counts:
-        metrics["agentic_n_selected_features_mean"] = float(np.mean(selected_counts))
-        metrics["agentic_n_selected_feature_sets"] = float(len(selected_sets))
-
-    return {
-        "metrics": metrics,
-        "n_samples": len(results_df),
-        "artifacts": {
-            "predictions_path": str(prediction_path),
-            "feature_search_dir": str(prediction_path.parent / "agentic_feature_search"),
-        },
-    }
-
-
 def run_single_experiment(
     config: ExperimentConfig,
     device: str,
@@ -1733,8 +1416,6 @@ def run_single_experiment(
     # Dispatch to model-specific runner
     if config.model_type == "best_attainable":
         result = run_best_attainable_experiment(config, df)
-    elif config.model_type == "agentic_explicit_feature_forest":
-        result = run_agentic_experiment(config, df, parquet_file, output_dir)
     elif config.model_type == "causal_forest":
         result = run_causal_forest_experiment(
             config, device, df, confounder_specs, confounder_cols,
@@ -1746,23 +1427,12 @@ def run_single_experiment(
             gpu_store, hidden_state_cache,
         )
 
-    if result.get('skipped') or result.get('error'):
-        return {
-            'config': asdict(config),
-            'metrics': result.get('metrics', {}),
-            'n_samples': result.get('n_samples', 0),
-            'skipped': True,
-            'error': result.get('error', 'unknown error'),
-            'artifacts': result.get('artifacts', {}),
-        }
-
     return {
         'config': asdict(config),
         'metrics': result['metrics'],
         'n_samples': result['n_samples'],
         'skipped': False,
-        'error': None,
-        'artifacts': result.get('artifacts', {}),
+        'error': None
     }
 
 
@@ -1774,25 +1444,6 @@ def generate_experiment_grid(
     chat_template_prompt: Optional[str] = None,
     filter_extractor_types: Optional[List[str]] = None,
     filter_downprojection_dims: Optional[List[Optional[int]]] = None,
-    agentic_iteration_options: Optional[List[int]] = None,
-    agentic_initial_feature_counts: Optional[List[int]] = None,
-    agentic_initial_feature_strategies: Optional[List[str]] = None,
-    agentic_inner_folds: int = 2,
-    agentic_max_additions_per_iter: int = 2,
-    agentic_max_removals_per_iter: int = 0,
-    agentic_min_feature_coverage: float = 0.70,
-    agentic_min_r_loss_improvement: float = 0.01,
-    agentic_min_improvement_fold_fraction: float = 2.0 / 3.0,
-    agentic_agent_server_url: Optional[str] = None,
-    agentic_agent_model_name: str = "Qwen/Qwen2.5-7B-Instruct",
-    agentic_agent_api_key: str = "EMPTY",
-    agentic_vllm_server_url: Optional[str] = None,
-    agentic_vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct",
-    agentic_extraction_max_retries: int = 3,
-    agentic_extraction_max_tokens: int = 1024,
-    agentic_extraction_max_text_length: int = 8000,
-    agentic_extraction_batch_size: int = 32,
-    agentic_cache_dir: Optional[str] = None,
 ) -> List[ExperimentConfig]:
     """Generate all experiment configurations.
 
@@ -1815,35 +1466,29 @@ def generate_experiment_grid(
     datasets = [(p, Path(p).name) for p in dataset_paths]
 
     # best_attainable is CPU-only and doesn't use LLM params -- added separately below
-    # agentic_explicit_feature_forest is also added separately because its grid
-    # dimensions are variable-search settings rather than neural extractor params.
     model_types = ["causal_forest", "rlearner", "dragonnet"]
     explicit_confounder_options = [False, True]
-    explicitly_requested_agentic = (
-        filter_model_types is not None
-        and "agentic_explicit_feature_forest" in filter_model_types
-    )
-    agentic_requested = (
-        filter_model_types is None
-        or explicitly_requested_agentic
-    )
 
     if filter_model_types:
         model_types = [m for m in model_types if m in filter_model_types
-                       and m not in ("best_attainable", "agentic_explicit_feature_forest")]
+                       and m != "best_attainable"]
 
     # Determine which extractor types to include
-    all_extractor_types = ["frozen_llm_pooler", "hierarchical_llm",
-                           "hierarchical_cnn", "hierarchical_gru", "simple_cnn"]
+    all_extractor_types = [
+        "frozen_llm_pooler",
+        "frozen_llm_token_cnn",
+        "frozen_llm_stat_pooler",
+        "token_hash_embedding",
+        "hierarchical_llm",
+        "hierarchical_cnn",
+        "hierarchical_gru",
+        "simple_cnn",
+        "byte_cnn",
+    ]
 
     extractor_types = all_extractor_types
     if filter_extractor_types:
         extractor_types = [e for e in all_extractor_types if e in filter_extractor_types]
-        if (
-            "agentic_explicit_features" not in filter_extractor_types
-            and not explicitly_requested_agentic
-        ):
-            agentic_requested = False
 
     # Training hyperparameters shared across all neural extractors
     learning_rates = [1e-5, 1e-4]
@@ -1852,7 +1497,7 @@ def generate_experiment_grid(
     configs = []
 
     for ext_type in extractor_types:
-        if ext_type == "frozen_llm_pooler":
+        if ext_type in {"frozen_llm_pooler", "frozen_llm_token_cnn", "frozen_llm_stat_pooler", "token_hash_embedding"}:
             # frozen_llm_pooler grid: max_lengths x downprojection_dims x confounders x chat_template x model_names x lr x epochs
             max_lengths = [5000, 10000, 25000, 50000, 75000, 100000]
             downprojection_dims = [None, 128, 256, 512]  # None = no downprojection (pool on full hidden_size)
@@ -1873,7 +1518,7 @@ def generate_experiment_grid(
                     dataset_name=dataset_name,
                     model_type=model_type,
                     use_explicit_confounders=explicit_conf,
-                    feature_extractor_type="frozen_llm_pooler",
+                    feature_extractor_type=ext_type,
                     flp_max_length=max_len,
                     flp_downprojection_dim=dp_dim,
                     flp_model_name=mn,
@@ -1966,6 +1611,22 @@ def generate_experiment_grid(
                     epochs=ep,
                 ))
 
+        elif ext_type == "byte_cnn":
+            max_chunks_options = [128]
+            for (dataset_path, dataset_name), model_type, explicit_conf, max_chunks, lr, ep in itertools.product(
+                datasets, model_types, explicit_confounder_options, max_chunks_options, learning_rates, epoch_counts
+            ):
+                configs.append(ExperimentConfig(
+                    dataset_path=dataset_path,
+                    dataset_name=dataset_name,
+                    model_type=model_type,
+                    use_explicit_confounders=explicit_conf,
+                    feature_extractor_type="byte_cnn",
+                    byte_max_chunks=max_chunks,
+                    learning_rate=lr,
+                    epochs=ep,
+                ))
+
     # Add best_attainable experiments (one per dataset, no GPU needed)
     if not filter_model_types or "best_attainable" in filter_model_types:
         for dataset_path, dataset_name in datasets:
@@ -1975,70 +1636,6 @@ def generate_experiment_grid(
                 model_type="best_attainable",
                 use_explicit_confounders=False,
             ))
-
-    # Add agentic explicit-feature forest experiments.
-    if agentic_requested:
-        if agentic_iteration_options is None:
-            agentic_iteration_options = [1]
-        if agentic_initial_feature_counts is None:
-            agentic_initial_feature_counts = [0]
-        if agentic_initial_feature_strategies is None:
-            agentic_initial_feature_strategies = [
-                "true_first",
-                "modifiers_first",
-                "distractors",
-            ]
-
-        invalid_strategies = (
-            set(agentic_initial_feature_strategies)
-            - AGENTIC_INITIAL_FEATURE_STRATEGIES
-        )
-        if invalid_strategies:
-            raise ValueError(
-                "Invalid agentic initial feature strategies: "
-                f"{sorted(invalid_strategies)}. "
-                f"Valid strategies: {sorted(AGENTIC_INITIAL_FEATURE_STRATEGIES)}"
-            )
-
-        for (dataset_path, dataset_name), n_iter, n_initial in itertools.product(
-            datasets,
-            agentic_iteration_options,
-            agentic_initial_feature_counts,
-        ):
-            strategies = ["none"] if n_initial <= 0 else agentic_initial_feature_strategies
-            for strategy in strategies:
-                initial_specs = select_agentic_initial_feature_specs(
-                    dataset_path,
-                    count=n_initial,
-                    strategy=strategy,
-                )
-                configs.append(ExperimentConfig(
-                    dataset_path=dataset_path,
-                    dataset_name=dataset_name,
-                    model_type="agentic_explicit_feature_forest",
-                    use_explicit_confounders=False,
-                    feature_extractor_type="agentic_explicit_features",
-                    agentic_initial_feature_count=n_initial,
-                    agentic_initial_feature_strategy=strategy,
-                    agentic_initial_feature_names=[s.name for s in initial_specs],
-                    agentic_max_iterations=n_iter,
-                    agentic_inner_folds=agentic_inner_folds,
-                    agentic_max_additions_per_iter=agentic_max_additions_per_iter,
-                    agentic_max_removals_per_iter=agentic_max_removals_per_iter,
-                    agentic_min_feature_coverage=agentic_min_feature_coverage,
-                    agentic_min_r_loss_improvement=agentic_min_r_loss_improvement,
-                    agentic_min_improvement_fold_fraction=agentic_min_improvement_fold_fraction,
-                    agentic_agent_server_url=agentic_agent_server_url,
-                    agentic_agent_model_name=agentic_agent_model_name,
-                    agentic_agent_api_key=agentic_agent_api_key,
-                    agentic_vllm_server_url=agentic_vllm_server_url,
-                    agentic_vllm_model_name=agentic_vllm_model_name,
-                    agentic_extraction_max_retries=agentic_extraction_max_retries,
-                    agentic_extraction_max_tokens=agentic_extraction_max_tokens,
-                    agentic_extraction_max_text_length=agentic_extraction_max_text_length,
-                    agentic_extraction_batch_size=agentic_extraction_batch_size,
-                    agentic_cache_dir=agentic_cache_dir,
-                ))
 
     # Shuffle so patterns emerge early
     random.Random(42).shuffle(configs)
@@ -2111,6 +1708,7 @@ def _open_cache_for_worker(cache_hash: str, cache_info: dict, cache_base_dir: Op
         random_projection_dim=None,
         downprojection_dim=cache_info['downprojection_dim'],
         chat_template_prompt=cache_info.get('chat_template_prompt', None),
+        document_window=cache_info.get('document_window', 'tail'),
         chunk_size=cache_info.get('chunk_size', None),
         chunk_overlap=cache_info.get('chunk_overlap', None),
         max_chunks=cache_info.get('max_chunks', None),
@@ -2322,10 +1920,7 @@ def _run_best_attainable_worker(args_tuple):
 
 def main():
     parser = argparse.ArgumentParser(
-        description=(
-            "Oracle experiment runner for CDT (causal_forest, rlearner, "
-            "dragonnet, best_attainable, agentic_explicit_feature_forest)"
-        )
+        description="Oracle experiment runner for CDT (causal_forest, rlearner, dragonnet, best_attainable)"
     )
     parser.add_argument(
         "--output-dir", "-o",
@@ -2363,10 +1958,7 @@ def main():
         type=str,
         nargs="+",
         default=None,
-        help=(
-            "Filter model types (causal_forest, rlearner, dragonnet, "
-            "best_attainable, agentic_explicit_feature_forest)"
-        )
+        help="Filter model types (causal_forest, rlearner, dragonnet, best_attainable)"
     )
     parser.add_argument(
         "--max-lengths",
@@ -2427,9 +2019,8 @@ def main():
         nargs="+",
         default=None,
         help="Filter feature extractor types to include in the grid "
-             "(frozen_llm_pooler, hierarchical_llm, hierarchical_cnn, "
-             "hierarchical_gru, simple_cnn, agentic_explicit_features). "
-             "Default: all."
+             "(frozen_llm_pooler, frozen_llm_token_cnn, frozen_llm_stat_pooler, token_hash_embedding, hierarchical_llm, "
+             "hierarchical_cnn, hierarchical_gru, simple_cnn, byte_cnn). Default: all."
     )
 
     def _parse_dp_dim(value: str) -> Optional[int]:
@@ -2451,131 +2042,6 @@ def main():
              "Pass integers (e.g. 128 256) and/or 'none' for no downprojection "
              "(pool on full hidden_size). Default: all of [none, 128, 256, 512]."
     )
-    parser.add_argument(
-        "--agentic-iterations",
-        type=int,
-        nargs="+",
-        default=[1],
-        help="Agentic feature-search iteration counts to grid over (default: 1)."
-    )
-    parser.add_argument(
-        "--agentic-initial-feature-counts",
-        type=int,
-        nargs="+",
-        default=[0],
-        help=(
-            "Number of simulated user-provided structured variables to start with "
-            "for agentic runs (default: 0)."
-        )
-    )
-    parser.add_argument(
-        "--agentic-initial-feature-strategies",
-        type=str,
-        nargs="+",
-        default=["true_first", "modifiers_first", "distractors"],
-        choices=sorted(AGENTIC_INITIAL_FEATURE_STRATEGIES - {"none"}),
-        help=(
-            "Ordering strategy used before slicing to the requested initial feature "
-            "count. true_first includes true confounders early; modifiers_first and "
-            "distractors simulate starts that may omit them."
-        )
-    )
-    parser.add_argument(
-        "--agentic-inner-folds",
-        type=int,
-        default=2,
-        help="Inner CV folds for accepting/rejecting agentic feature proposals (default: 2)."
-    )
-    parser.add_argument(
-        "--agentic-max-additions-per-iter",
-        type=int,
-        default=2,
-        help="Maximum add proposals accepted for evaluation per agentic iteration."
-    )
-    parser.add_argument(
-        "--agentic-max-removals-per-iter",
-        type=int,
-        default=0,
-        help="Maximum removal proposals accepted for evaluation per agentic iteration."
-    )
-    parser.add_argument(
-        "--agentic-min-feature-coverage",
-        type=float,
-        default=0.70,
-        help="Minimum extraction coverage required for an agentic candidate feature."
-    )
-    parser.add_argument(
-        "--agentic-min-r-loss-improvement",
-        type=float,
-        default=0.01,
-        help="Minimum relative inner-CV R-loss improvement to accept a feature change."
-    )
-    parser.add_argument(
-        "--agentic-min-improvement-fold-fraction",
-        type=float,
-        default=2.0 / 3.0,
-        help="Minimum fraction of inner folds that must improve R-loss."
-    )
-    parser.add_argument(
-        "--agentic-agent-server-url",
-        type=str,
-        default=None,
-        help="OpenAI-compatible endpoint for the feature proposal agent."
-    )
-    parser.add_argument(
-        "--agentic-agent-model-name",
-        type=str,
-        default="Qwen/Qwen2.5-7B-Instruct",
-        help="Model name for the feature proposal agent."
-    )
-    parser.add_argument(
-        "--agentic-agent-api-key",
-        type=str,
-        default="EMPTY",
-        help="API key for the feature proposal agent endpoint."
-    )
-    parser.add_argument(
-        "--agentic-vllm-server-url",
-        type=str,
-        default=None,
-        help="OpenAI-compatible endpoint for explicit feature extraction."
-    )
-    parser.add_argument(
-        "--agentic-vllm-model-name",
-        type=str,
-        default="Qwen/Qwen2.5-7B-Instruct",
-        help="Model name for explicit feature extraction."
-    )
-    parser.add_argument(
-        "--agentic-extraction-max-retries",
-        type=int,
-        default=3,
-        help="Retries per patient for agentic explicit feature extraction."
-    )
-    parser.add_argument(
-        "--agentic-extraction-max-tokens",
-        type=int,
-        default=1024,
-        help="Maximum extraction response tokens per feature."
-    )
-    parser.add_argument(
-        "--agentic-extraction-max-text-length",
-        type=int,
-        default=8000,
-        help="Maximum clinical text characters included in extraction prompts."
-    )
-    parser.add_argument(
-        "--agentic-extraction-batch-size",
-        type=int,
-        default=32,
-        help="Batch size for agentic explicit feature extraction."
-    )
-    parser.add_argument(
-        "--agentic-cache-dir",
-        type=str,
-        default=None,
-        help="Optional cache directory for agentic explicit feature extractions."
-    )
 
     args = parser.parse_args()
 
@@ -2587,12 +2053,6 @@ def main():
                 parser.error("--workers-per-gpu must be >= 1")
         except ValueError:
             parser.error(f"--workers-per-gpu must be 'auto' or an integer, got '{args.workers_per_gpu}'")
-    if any(v < 0 for v in args.agentic_initial_feature_counts):
-        parser.error("--agentic-initial-feature-counts must be >= 0")
-    if any(v < 1 for v in args.agentic_iterations):
-        parser.error("--agentic-iterations must be >= 1")
-    if args.agentic_inner_folds < 2:
-        parser.error("--agentic-inner-folds must be >= 2")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2610,25 +2070,6 @@ def main():
         chat_template_prompt=args.chat_template_prompt,
         filter_extractor_types=args.filter_extractor_types,
         filter_downprojection_dims=args.downprojection_dims,
-        agentic_iteration_options=args.agentic_iterations,
-        agentic_initial_feature_counts=args.agentic_initial_feature_counts,
-        agentic_initial_feature_strategies=args.agentic_initial_feature_strategies,
-        agentic_inner_folds=args.agentic_inner_folds,
-        agentic_max_additions_per_iter=args.agentic_max_additions_per_iter,
-        agentic_max_removals_per_iter=args.agentic_max_removals_per_iter,
-        agentic_min_feature_coverage=args.agentic_min_feature_coverage,
-        agentic_min_r_loss_improvement=args.agentic_min_r_loss_improvement,
-        agentic_min_improvement_fold_fraction=args.agentic_min_improvement_fold_fraction,
-        agentic_agent_server_url=args.agentic_agent_server_url,
-        agentic_agent_model_name=args.agentic_agent_model_name,
-        agentic_agent_api_key=args.agentic_agent_api_key,
-        agentic_vllm_server_url=args.agentic_vllm_server_url,
-        agentic_vllm_model_name=args.agentic_vllm_model_name,
-        agentic_extraction_max_retries=args.agentic_extraction_max_retries,
-        agentic_extraction_max_tokens=args.agentic_extraction_max_tokens,
-        agentic_extraction_max_text_length=args.agentic_extraction_max_text_length,
-        agentic_extraction_batch_size=args.agentic_extraction_batch_size,
-        agentic_cache_dir=args.agentic_cache_dir,
     )
 
     use_cache = args.cache or args.gpu_cache
@@ -2691,25 +2132,13 @@ def main():
         extractor_summary[c.feature_extractor_type] = extractor_summary.get(c.feature_extractor_type, 0) + 1
 
     llm_model_summary = {}
-    agentic_model_summary = {}
     for c in pending_configs:
-        if c.feature_extractor_type in ('frozen_llm_pooler',):
+        if c.feature_extractor_type in ('frozen_llm_pooler', 'frozen_llm_token_cnn', 'frozen_llm_stat_pooler', 'token_hash_embedding'):
             llm_model_summary[c.flp_model_name] = llm_model_summary.get(c.flp_model_name, 0) + 1
         elif c.feature_extractor_type in ('hierarchical_llm',):
             llm_model_summary[c.hlm_model_name] = llm_model_summary.get(c.hlm_model_name, 0) + 1
-        elif c.model_type == "agentic_explicit_feature_forest":
-            key = f"agent={c.agentic_agent_model_name}, extract={c.agentic_vllm_model_name}"
-            agentic_model_summary[key] = agentic_model_summary.get(key, 0) + 1
 
     dataset_names = sorted(set(c.dataset_name for c in pending_configs))
-    training_pending = [
-        c for c in pending_configs
-        if c.model_type not in ("best_attainable", "agentic_explicit_feature_forest")
-    ]
-    agentic_pending = [
-        c for c in pending_configs
-        if c.model_type == "agentic_explicit_feature_forest"
-    ]
 
     print(f"\n{'='*60}")
     print(f"Experiment Grid Summary")
@@ -2723,21 +2152,11 @@ def main():
     print(f"Extractors:  {', '.join(f'{k}({v})' for k, v in sorted(extractor_summary.items()))}")
     if llm_model_summary:
         print(f"Frozen LLMs: {', '.join(f'{k}({v})' for k, v in sorted(llm_model_summary.items()))}")
-    if agentic_model_summary:
-        print(f"Agentic LLMs:{', '.join(f'{k}({v})' for k, v in sorted(agentic_model_summary.items()))}")
-    lr_values = sorted(set(c.learning_rate for c in training_pending))
-    epoch_values = sorted(set(c.epochs for c in training_pending))
+    lr_values = sorted(set(c.learning_rate for c in pending_configs))
+    epoch_values = sorted(set(c.epochs for c in pending_configs))
     print(f"Datasets:    {', '.join(dataset_names)}")
-    if training_pending:
-        print(f"LR values:   {', '.join(str(v) for v in lr_values)}")
-        print(f"Epoch counts:{', '.join(str(v) for v in epoch_values)}")
-    if agentic_pending:
-        agentic_iters = sorted(set(c.agentic_max_iterations for c in agentic_pending))
-        initial_counts = sorted(set(c.agentic_initial_feature_count for c in agentic_pending))
-        initial_strategies = sorted(set(c.agentic_initial_feature_strategy for c in agentic_pending))
-        print(f"Agentic iterations: {', '.join(str(v) for v in agentic_iters)}")
-        print(f"Agentic initial counts: {', '.join(str(v) for v in initial_counts)}")
-        print(f"Agentic initial strategies: {', '.join(initial_strategies)}")
+    print(f"LR values:   {', '.join(str(v) for v in lr_values)}")
+    print(f"Epoch counts:{', '.join(str(v) for v in epoch_values)}")
     print(f"Repeats:     {args.n_repeats}")
     print(f"{'='*60}")
 
@@ -2953,12 +2372,7 @@ def main():
     all_results = []
     for config_hash, result in results_dict.items():
         if not result.get('skipped'):
-            config_row = dict(result.get('config', {}))
-            if isinstance(config_row.get('agentic_initial_feature_names'), list):
-                config_row['agentic_initial_feature_names'] = ",".join(
-                    config_row['agentic_initial_feature_names']
-                )
-            row = {**config_row, **result.get('metrics', {})}
+            row = {**result.get('config', {}), **result.get('metrics', {})}
             all_results.append(row)
 
     if all_results:
@@ -2970,21 +2384,13 @@ def main():
         group_cols = ['dataset_name', 'feature_extractor_type', 'model_type',
                       'flp_model_name', 'hlm_model_name',
                       'flp_max_length', 'flp_downprojection_dim',
-                      'use_explicit_confounders', 'learning_rate', 'epochs',
-                      'agentic_max_iterations',
-                      'agentic_initial_feature_count',
-                      'agentic_initial_feature_strategy',
-                      'agentic_initial_feature_names',
-                      'agentic_agent_model_name',
-                      'agentic_vllm_model_name']
+                      'use_explicit_confounders', 'learning_rate', 'epochs']
         # Only group by columns that exist in the results
         group_cols = [c for c in group_cols if c in results_df.columns]
 
         metric_agg = {}
         for metric in ['ite_corr', 'ite_spearman_corr', 'ate_bias', 'propensity_auroc',
-                        'ite_mse', 'ite_mae', 'ci_coverage', 'mean_ci_width',
-                        'agentic_n_selected_features_mean',
-                        'agentic_n_selected_feature_sets']:
+                        'ite_mse', 'ite_mae', 'ci_coverage', 'mean_ci_width']:
             if metric in results_df.columns:
                 metric_agg[metric] = ['mean', 'std']
 

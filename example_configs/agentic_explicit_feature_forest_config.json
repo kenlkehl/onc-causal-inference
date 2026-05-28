@@ -1,0 +1,70 @@
+{
+  "output_dir": "./oci_results_agentic_explicit_feature_forest",
+  "seed": 42,
+  "device": "cpu",
+  "num_workers": 1,
+
+  "applied_inference": {
+    "dataset_path": "./dataset.parquet",
+    "text_column": "clinical_text",
+    "outcome_column": "outcome_indicator",
+    "treatment_column": "treatment_indicator",
+    "outcome_type": "binary",
+    "cv_folds": 5,
+
+    "architecture": {
+      "model_type": "agentic_explicit_feature_forest",
+
+      "explicit_feature_forest": {
+        "n_estimators": 200,
+        "max_depth": null,
+        "min_samples_leaf": 10,
+        "max_features": "sqrt",
+        "honest": true,
+        "inference": true
+      },
+
+      "agentic_feature_search": {
+        "outer_folds": 5,
+        "inner_folds": 3,
+        "max_iterations": 3,
+        "max_additions_per_iter": 4,
+        "max_removals_per_iter": 2,
+        "min_feature_coverage": 0.7,
+        "min_r_loss_improvement": 0.01,
+        "max_outcome_auroc_drop": 0.002,
+        "max_treatment_auroc_drop": 0.002,
+        "min_improvement_fold_fraction": 0.6666666667,
+        "agent_server_url": "http://localhost:8000/v1",
+        "agent_model_name": "Qwen/Qwen2.5-7B-Instruct",
+        "agent_api_key": "EMPTY",
+        "agent_temperature": 0.0,
+        "agent_max_tokens": 2048,
+        "clinical_text_examples_per_prompt": 3,
+        "clinical_text_example_chars": 1600,
+        "save_agent_context": false,
+        "random_state": 42,
+        "stop_after_rejected_iteration": true
+      }
+    },
+
+    "explicit_features": {
+      "enabled": true,
+      "features": [],
+      "vllm_mode": "server",
+      "vllm_server_url": "http://localhost:8000/v1",
+      "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
+      "extraction_batch_size": 32,
+      "extraction_max_retries": 3,
+      "extraction_temperature": 0.0,
+      "extraction_max_tokens": 1024,
+      "extraction_max_text_length": 8000,
+      "cache_enabled": true,
+      "cache_dir": null
+    },
+
+    "matching_analysis": {
+      "enabled": false
+    }
+  }
+}

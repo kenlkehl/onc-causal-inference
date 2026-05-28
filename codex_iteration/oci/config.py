@@ -148,11 +148,14 @@ class ContrastiveEffectConfig:
     overlap_min: float = 0.05
     overlap_max: float = 0.95
     min_arm_per_bin: int = 2
+    pairwise_matching: bool = False
+    pair_caliper: float = 0.05
 
     # Loss weights
     lambda_factual: float = 1.0
     lambda_contrast: float = 2.0
     lambda_adversary: float = 0.05
+    lambda_pair_pull: float = 0.0
     lambda_z_l2: float = 1e-4
 
     # Residual contrast target stabilization
@@ -179,6 +182,8 @@ class ContrastiveEffectConfig:
             raise ValueError("overlap_min/overlap_max must satisfy 0 <= min < max <= 1")
         if self.min_arm_per_bin < 1:
             raise ValueError("min_arm_per_bin must be >= 1")
+        if self.pair_caliper < 0:
+            raise ValueError("pair_caliper must be >= 0")
 
 
 @dataclass
@@ -350,10 +355,26 @@ class AgenticFeatureSearchConfig:
 
 EXTRACTOR_ALIASES = {
     "frozen_llm_pooler": {"frozen_llm_pooler", "frozen_llm", "llm_pooler", "llm_pool", "flp"},
+    "frozen_llm_token_cnn": {"frozen_llm_token_cnn", "llm_token_cnn", "flp_token_cnn", "token_cnn_llm"},
+    "frozen_llm_stat_pooler": {"frozen_llm_stat_pooler", "llm_stat_pooler", "flp_stat_pooler", "stat_pooler_llm"},
+    "token_hash_embedding": {"token_hash_embedding", "token_hash", "token_hash_embed", "neural_token_hash"},
+    "causal_purity_hash": {"causal_purity_hash", "pure_hash", "causal_hash"},
+    "causal_purity_hash_student": {
+        "causal_purity_hash_student",
+        "pure_hash_student",
+        "causal_hash_student",
+    },
+    "neural_causal_hash_selector": {
+        "neural_causal_hash_selector",
+        "neural_hash_selector",
+        "softmax_hash_selector",
+    },
     "hierarchical_llm": {"hierarchical_llm", "hier_llm", "hlm"},
     "hierarchical_cnn": {"hierarchical_cnn", "hier_cnn", "hcnn"},
     "hierarchical_gru": {"hierarchical_gru", "hier_gru", "hgru"},
     "simple_cnn": {"simple_cnn", "scnn"},
+    "byte_cnn": {"byte_cnn", "bytecnn", "char_cnn", "charcnn"},
+    "text_marker": {"text_marker", "text_markers", "clinical_text_marker", "clinical_text_markers"},
 }
 
 VALID_EXTRACTOR_TYPES = set(EXTRACTOR_ALIASES.keys())
@@ -362,7 +383,7 @@ VALID_EXTRACTOR_TYPES = set(EXTRACTOR_ALIASES.keys())
 TRAINABLE_EXTRACTOR_TYPES = {"hierarchical_cnn", "hierarchical_gru", "simple_cnn"}
 
 # Extractors that support hidden state caching
-CACHEABLE_EXTRACTOR_TYPES = {"frozen_llm_pooler", "hierarchical_llm"}
+CACHEABLE_EXTRACTOR_TYPES = {"frozen_llm_pooler", "frozen_llm_token_cnn", "frozen_llm_stat_pooler", "hierarchical_llm"}
 
 
 def normalize_feature_extractor_type(feature_type: str) -> str:
