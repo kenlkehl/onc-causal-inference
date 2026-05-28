@@ -133,6 +133,7 @@ Handles documents up to 50K+ tokens with the pretrained tokenizer. No `fit_token
 | `causal_forest` | Two-stage: neural features + econml CausalForestDML | tau with 95% confidence intervals |
 | `tfidf_forest` | TF-IDF features + CausalForestDML (no neural network, no GPU) | tau with 95% confidence intervals |
 | `explicit_feature_forest` | Role-tagged explicit features + CausalForestDML (no text model) | tau with 95% confidence intervals |
+| `agentic_explicit_feature_forest` | Nested-CV LLM variable search + explicit-feature CausalForestDML | outer-CV tau, nuisance AUROC, R-loss |
 
 **Recommended: Causal Forest** -- trains neural features with propensity + outcome losses (optionally with R-learner loss), then fits CausalForestDML on the learned representations for doubly-robust estimation with confidence intervals.
 
@@ -345,6 +346,18 @@ Install extraction support with `pip install -e ".[extraction]"`.
 Results are cached to `{dataset_dir}/.oci_cache/` and invalidated automatically if the extraction config changes.
 
 Use `model_type="explicit_feature_forest"` to fit CausalForestDML from extracted structured features only. In that mode, confounder-role features form `W`, effect-modifier-role features form `X`, and no text encoder is trained.
+
+Use `model_type="agentic_explicit_feature_forest"` to let an LLM propose additional pre-treatment explicit variables after an initial explicit-feature forest fit. The agentic path uses nested CV: inner folds decide add/remove/re-role actions, and outer folds report the performance of the whole adaptive search process.
+
+For an empty-start agentic search, use the normal repo runner:
+
+```bash
+oci run --config example_configs/agentic_explicit_feature_forest_config.json
+```
+
+Set `explicit_features.features` to a role-tagged starting list if a researcher wants to seed known confounders or effect modifiers; leave it empty to let the proposal LLM choose the first variables. The agent and extractor both use OpenAI-compatible endpoints, so the same running vLLM server can serve `agent_server_url` and `vllm_server_url`.
+
+The agent receives a few train-fold text snippets to ground its proposals, but raw snippets are omitted from `agentic_feature_search/agent_decisions.jsonl` by default. Set `architecture.agentic_feature_search.save_agent_context=true` only for non-sensitive debugging runs.
 
 ## Contrastive Learning
 

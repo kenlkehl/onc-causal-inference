@@ -19,6 +19,7 @@ oci/extraction/cache.py
 oci/extraction/explicit_confounders.py
 oci/extraction/explicit_features.py
 oci/inference/__init__.py
+oci/inference/agentic_explicit_feature_forest.py
 oci/inference/applied.py
 oci/inference/applied_confounder_forest.py
 oci/inference/applied_explicit_feature_forest.py
@@ -30,6 +31,7 @@ oci/models/__init__.py
 oci/models/causal_forest_head.py
 oci/models/causal_text.py
 oci/models/causal_text_forest.py
+oci/models/contrastive_causal_text_forest.py
 oci/models/dragonnet.py
 oci/models/explicit_confounder_featurizer.py
 oci/models/explicit_feature_featurizer.py
@@ -48,6 +50,7 @@ oci/models/rlearner.py
 oci/models/simple_cnn_extractor.py
 oci/models/text_chunking.py
 oci/training/__init__.py
+oci/training/contrastive_effect.py
 oci/training/outcome_training.py
 oci/training/propensity_trimming.py
 oci/utils/__init__.py
@@ -59,7 +62,9 @@ onc_causal_inference.egg-info/dependency_links.txt
 onc_causal_inference.egg-info/entry_points.txt
 onc_causal_inference.egg-info/requires.txt
 onc_causal_inference.egg-info/top_level.txt
+tests/test_agentic_feature_search.py
 tests/test_causal_forest_tuning.py
+tests/test_contrastive_effect.py
 tests/test_e2e_workflows.py
 tests/test_explicit_confounders_e2e.py
 tests/test_explicit_features.py

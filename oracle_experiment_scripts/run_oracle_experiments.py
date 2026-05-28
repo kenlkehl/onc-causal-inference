@@ -141,7 +141,7 @@ class ExperimentConfig:
     repeat_index: int = 0
 
     # Frozen LLM Pooler hyperparameters
-    flp_max_length: int = 10000
+    flp_max_length: int = 25000
     flp_freeze_llm: bool = True
     flp_projection_dim: int = 128
     flp_gated_attention_dim: int = 128
@@ -179,8 +179,14 @@ class ExperimentConfig:
     agentic_agent_server_url: Optional[str] = None
     agentic_agent_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
     agentic_agent_api_key: str = "EMPTY"
+    agentic_agent_max_tokens: int = 2048
+    agentic_agent_context_chars: int = 4800
+    agentic_agent_context_examples: int = 3
+    agentic_save_agent_context: bool = False
     agentic_vllm_server_url: Optional[str] = None
     agentic_vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+    agentic_vllm_mode: str = "server"
+    agentic_vllm_max_model_len: Optional[int] = None
     agentic_extraction_max_retries: int = 3
     agentic_extraction_max_tokens: int = 1024
     agentic_extraction_max_text_length: int = 8000
@@ -1576,6 +1582,13 @@ def run_agentic_experiment(
         config.agentic_cache_dir
         or str(output_dir / "agentic_extraction_cache")
     )
+    agent_context_examples = max(0, config.agentic_agent_context_examples)
+    agent_context_chars = max(0, config.agentic_agent_context_chars)
+    agent_example_chars = (
+        0
+        if agent_context_examples == 0
+        else max(1, -(-agent_context_chars // agent_context_examples))
+    )
 
     applied_config = AppliedInferenceConfig(
         outcome_type="binary",
@@ -1603,6 +1616,10 @@ def run_agentic_experiment(
                 agent_server_url=agent_server_url,
                 agent_model_name=config.agentic_agent_model_name,
                 agent_api_key=config.agentic_agent_api_key,
+                agent_max_tokens=config.agentic_agent_max_tokens,
+                clinical_text_examples_per_prompt=agent_context_examples,
+                clinical_text_example_chars=agent_example_chars,
+                save_agent_context=config.agentic_save_agent_context,
                 random_state=42 + config.repeat_index,
                 stop_after_rejected_iteration=True,
             ),
@@ -1610,9 +1627,10 @@ def run_agentic_experiment(
         explicit_features=ExplicitFeatureExtractionConfig(
             enabled=True,
             features=initial_specs,
-            vllm_mode="server",
+            vllm_mode=config.agentic_vllm_mode,
             vllm_server_url=extraction_server_url,
             vllm_model_name=config.agentic_vllm_model_name,
+            vllm_max_model_len=config.agentic_vllm_max_model_len,
             extraction_batch_size=config.agentic_extraction_batch_size,
             extraction_max_retries=config.agentic_extraction_max_retries,
             extraction_max_tokens=config.agentic_extraction_max_tokens,
@@ -1784,10 +1802,16 @@ def generate_experiment_grid(
     agentic_min_r_loss_improvement: float = 0.01,
     agentic_min_improvement_fold_fraction: float = 2.0 / 3.0,
     agentic_agent_server_url: Optional[str] = None,
-    agentic_agent_model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+    agentic_agent_model_name: str = "nvidia/Gemma-4-31B-IT-NVFP4",
     agentic_agent_api_key: str = "EMPTY",
+    agentic_agent_max_tokens: int = 2048,
+    agentic_agent_context_chars: int = 4800,
+    agentic_agent_context_examples: int = 3,
+    agentic_save_agent_context: bool = False,
     agentic_vllm_server_url: Optional[str] = None,
     agentic_vllm_model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+    agentic_vllm_mode: str = "server",
+    agentic_vllm_max_model_len: Optional[int] = None,
     agentic_extraction_max_retries: int = 3,
     agentic_extraction_max_tokens: int = 1024,
     agentic_extraction_max_text_length: int = 8000,
@@ -1911,7 +1935,7 @@ def generate_experiment_grid(
 
         elif ext_type == "hierarchical_cnn":
             # hierarchical_cnn grid: chunk_sizes x confounders
-            chunk_sizes = [256, 512]
+            chunk_sizes = [512]
 
             for (dataset_path, dataset_name), model_type, explicit_conf, cs, lr, ep in itertools.product(
                 datasets, model_types, explicit_confounder_options, chunk_sizes, learning_rates, epoch_counts
@@ -1947,7 +1971,7 @@ def generate_experiment_grid(
 
         elif ext_type == "simple_cnn":
             # simple_cnn grid: max_lengths x confounders
-            scnn_max_lengths = [5000, 10000, 25000]
+            scnn_max_lengths = [50000]
 
             if filter_max_lengths:
                 scnn_max_lengths = [m for m in scnn_max_lengths if m in filter_max_lengths]
@@ -2031,8 +2055,14 @@ def generate_experiment_grid(
                     agentic_agent_server_url=agentic_agent_server_url,
                     agentic_agent_model_name=agentic_agent_model_name,
                     agentic_agent_api_key=agentic_agent_api_key,
+                    agentic_agent_max_tokens=agentic_agent_max_tokens,
+                    agentic_agent_context_chars=agentic_agent_context_chars,
+                    agentic_agent_context_examples=agentic_agent_context_examples,
+                    agentic_save_agent_context=agentic_save_agent_context,
                     agentic_vllm_server_url=agentic_vllm_server_url,
                     agentic_vllm_model_name=agentic_vllm_model_name,
+                    agentic_vllm_mode=agentic_vllm_mode,
+                    agentic_vllm_max_model_len=agentic_vllm_max_model_len,
                     agentic_extraction_max_retries=agentic_extraction_max_retries,
                     agentic_extraction_max_tokens=agentic_extraction_max_tokens,
                     agentic_extraction_max_text_length=agentic_extraction_max_text_length,
@@ -2535,6 +2565,32 @@ def main():
         help="API key for the feature proposal agent endpoint."
     )
     parser.add_argument(
+        "--agentic-agent-max-tokens",
+        type=int,
+        default=2048,
+        help="Maximum generation tokens for the feature proposal agent."
+    )
+    parser.add_argument(
+        "--agentic-agent-context-chars",
+        type=int,
+        default=4800,
+        help=(
+            "Approximate total clinical-text character budget included in each "
+            "feature proposal agent prompt."
+        )
+    )
+    parser.add_argument(
+        "--agentic-agent-context-examples",
+        type=int,
+        default=3,
+        help="Number of clinical text examples included in each feature proposal agent prompt."
+    )
+    parser.add_argument(
+        "--agentic-save-agent-context",
+        action="store_true",
+        help="Persist full agent prompt context in artifacts. May include clinical text."
+    )
+    parser.add_argument(
         "--agentic-vllm-server-url",
         type=str,
         default=None,
@@ -2545,6 +2601,22 @@ def main():
         type=str,
         default="Qwen/Qwen2.5-7B-Instruct",
         help="Model name for explicit feature extraction."
+    )
+    parser.add_argument(
+        "--agentic-vllm-mode",
+        type=str,
+        default="server",
+        choices=["server", "start_server", "python_api"],
+        help="vLLM mode for explicit feature extraction."
+    )
+    parser.add_argument(
+        "--agentic-vllm-max-model-len",
+        type=int,
+        default=None,
+        help=(
+            "vLLM max_model_len for explicit feature extraction when using "
+            "start_server/python_api backends. Server mode must be configured separately."
+        )
     )
     parser.add_argument(
         "--agentic-extraction-max-retries",
@@ -2593,6 +2665,17 @@ def main():
         parser.error("--agentic-iterations must be >= 1")
     if args.agentic_inner_folds < 2:
         parser.error("--agentic-inner-folds must be >= 2")
+    if args.agentic_agent_max_tokens < 1:
+        parser.error("--agentic-agent-max-tokens must be >= 1")
+    if args.agentic_agent_context_chars < 0:
+        parser.error("--agentic-agent-context-chars must be >= 0")
+    if args.agentic_agent_context_examples < 0:
+        parser.error("--agentic-agent-context-examples must be >= 0")
+    if (
+        args.agentic_vllm_max_model_len is not None
+        and args.agentic_vllm_max_model_len < 1
+    ):
+        parser.error("--agentic-vllm-max-model-len must be >= 1")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -2622,8 +2705,14 @@ def main():
         agentic_agent_server_url=args.agentic_agent_server_url,
         agentic_agent_model_name=args.agentic_agent_model_name,
         agentic_agent_api_key=args.agentic_agent_api_key,
+        agentic_agent_max_tokens=args.agentic_agent_max_tokens,
+        agentic_agent_context_chars=args.agentic_agent_context_chars,
+        agentic_agent_context_examples=args.agentic_agent_context_examples,
+        agentic_save_agent_context=args.agentic_save_agent_context,
         agentic_vllm_server_url=args.agentic_vllm_server_url,
         agentic_vllm_model_name=args.agentic_vllm_model_name,
+        agentic_vllm_mode=args.agentic_vllm_mode,
+        agentic_vllm_max_model_len=args.agentic_vllm_max_model_len,
         agentic_extraction_max_retries=args.agentic_extraction_max_retries,
         agentic_extraction_max_tokens=args.agentic_extraction_max_tokens,
         agentic_extraction_max_text_length=args.agentic_extraction_max_text_length,
@@ -2735,9 +2824,15 @@ def main():
         agentic_iters = sorted(set(c.agentic_max_iterations for c in agentic_pending))
         initial_counts = sorted(set(c.agentic_initial_feature_count for c in agentic_pending))
         initial_strategies = sorted(set(c.agentic_initial_feature_strategy for c in agentic_pending))
+        agent_max_tokens = sorted(set(c.agentic_agent_max_tokens for c in agentic_pending))
+        agent_context_chars = sorted(set(c.agentic_agent_context_chars for c in agentic_pending))
+        vllm_modes = sorted(set(c.agentic_vllm_mode for c in agentic_pending))
         print(f"Agentic iterations: {', '.join(str(v) for v in agentic_iters)}")
         print(f"Agentic initial counts: {', '.join(str(v) for v in initial_counts)}")
         print(f"Agentic initial strategies: {', '.join(initial_strategies)}")
+        print(f"Agentic agent max tokens: {', '.join(str(v) for v in agent_max_tokens)}")
+        print(f"Agentic agent context chars: {', '.join(str(v) for v in agent_context_chars)}")
+        print(f"Agentic vLLM modes: {', '.join(vllm_modes)}")
     print(f"Repeats:     {args.n_repeats}")
     print(f"{'='*60}")
 
@@ -2976,7 +3071,13 @@ def main():
                       'agentic_initial_feature_strategy',
                       'agentic_initial_feature_names',
                       'agentic_agent_model_name',
-                      'agentic_vllm_model_name']
+                      'agentic_agent_max_tokens',
+                      'agentic_agent_context_chars',
+                      'agentic_vllm_model_name',
+                      'agentic_vllm_mode',
+                      'agentic_vllm_max_model_len',
+                      'agentic_extraction_max_tokens',
+                      'agentic_extraction_max_text_length']
         # Only group by columns that exist in the results
         group_cols = [c for c in group_cols if c in results_df.columns]
 

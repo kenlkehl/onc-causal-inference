@@ -62,19 +62,24 @@ def main():
     parser.add_argument("--cf-min-samples-leaf", type=int, default=10)
     parser.add_argument("--cf-no-inference", action="store_true")
 
-    parser.add_argument("--vllm-mode", default="server", choices=["server", "start_server", "python_api"])
+    parser.add_argument("--vllm-mode", default="python_api", choices=["server", "start_server", "python_api"])
     parser.add_argument("--vllm-server-url", default="http://localhost:8000/v1")
-    parser.add_argument("--vllm-model-name", default="Qwen/Qwen2.5-7B-Instruct")
-    parser.add_argument("--extraction-batch-size", type=int, default=32)
-    parser.add_argument("--extraction-max-retries", type=int, default=3)
-    parser.add_argument("--extraction-max-tokens", type=int, default=1024)
-    parser.add_argument("--extraction-max-text-length", type=int, default=8000)
+    parser.add_argument("--vllm-model-name", default="nvidia/Gemma-4-31B-IT-NVFP4")
+    parser.add_argument("--vllm-max-model-len", type=int, default=None)
+    parser.add_argument("--extraction-batch-size", type=int, default=64)
+    parser.add_argument("--extraction-max-retries", type=int, default=5)
+    parser.add_argument("--extraction-max-tokens", type=int, default=10000)
+    parser.add_argument("--extraction-max-text-length", type=int, default=80000)
     parser.add_argument("--cache-dir", default=None)
     parser.add_argument("--no-cache", action="store_true")
 
     parser.add_argument("--agent-server-url", default="http://localhost:8000/v1")
     parser.add_argument("--agent-model-name", default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--agent-api-key", default="EMPTY")
+    parser.add_argument("--agent-max-tokens", type=int, default=2048)
+    parser.add_argument("--agent-context-chars", type=int, default=4800)
+    parser.add_argument("--agent-context-examples", type=int, default=3)
+    parser.add_argument("--save-agent-context", action="store_true")
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -89,6 +94,13 @@ def main():
     specs = _load_specs(args.features_json)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    agent_context_examples = max(0, args.agent_context_examples)
+    agent_context_chars = max(0, args.agent_context_chars)
+    agent_example_chars = (
+        0
+        if agent_context_examples == 0
+        else max(1, -(-agent_context_chars // agent_context_examples))
+    )
 
     config = AppliedInferenceConfig(
         outcome_type=args.outcome_type,
@@ -113,6 +125,10 @@ def main():
                 agent_server_url=args.agent_server_url,
                 agent_model_name=args.agent_model_name,
                 agent_api_key=args.agent_api_key,
+                agent_max_tokens=args.agent_max_tokens,
+                clinical_text_examples_per_prompt=agent_context_examples,
+                clinical_text_example_chars=agent_example_chars,
+                save_agent_context=args.save_agent_context,
             ),
         ),
         explicit_features=ExplicitFeatureExtractionConfig(
@@ -121,6 +137,7 @@ def main():
             vllm_mode=args.vllm_mode,
             vllm_server_url=args.vllm_server_url,
             vllm_model_name=args.vllm_model_name,
+            vllm_max_model_len=args.vllm_max_model_len,
             extraction_batch_size=args.extraction_batch_size,
             extraction_max_retries=args.extraction_max_retries,
             extraction_max_tokens=args.extraction_max_tokens,
