@@ -28,6 +28,7 @@ Requires-Dist: accelerate>=0.20.0
 Requires-Dist: econml>=0.14.0
 Requires-Dist: llvmlite>=0.46.0
 Requires-Dist: numba>=0.60.0
+Requires-Dist: vllm>=0.20.1
 Provides-Extra: dev
 Requires-Dist: pytest>=7.0.0; extra == "dev"
 Requires-Dist: black>=23.0.0; extra == "dev"
