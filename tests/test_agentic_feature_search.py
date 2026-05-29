@@ -269,6 +269,58 @@ class FakeEvaluator:
         return SplitEvaluation(predictions=predictions, metrics=metrics)
 
 
+class FeedbackAgent:
+    def __init__(self):
+        self.contexts = []
+
+    def propose(self, context):
+        self.contexts.append(context)
+        name = "weak_modifier" if context["iteration"] == 1 else "strong_modifier"
+        return [
+            {
+                "action": "add",
+                "name": name,
+                "type": "continuous",
+                "roles": ["effect_modifier"],
+                "description": f"Baseline {name} measured before treatment",
+                "rationale": "Could explain treatment effect heterogeneity",
+                "expected_signal": "tau signal",
+                "leakage_risk": "low",
+            }
+        ]
+
+
+class RejectThenAcceptEvaluator:
+    def evaluate_split(self, train_df, test_df, specs, fold_id):
+        names = {spec.name for spec in specs}
+        if "strong_modifier" in names:
+            r_loss = 0.50
+        elif "weak_modifier" in names:
+            r_loss = 0.995
+        else:
+            r_loss = 1.00
+
+        predictions = test_df.copy()
+        predictions["pred_ite_prob"] = 0.0
+        predictions["pred_y0_prob"] = 0.40
+        predictions["pred_y1_prob"] = 0.50
+        predictions["pred_propensity_prob"] = 0.50
+        predictions["cv_fold"] = fold_id
+        metrics = {
+            "fold": fold_id,
+            "n_train": len(train_df),
+            "n_test": len(test_df),
+            "n_explicit_features": len(specs),
+            "n_x_features": int(bool(names - {"age"})),
+            "n_w_features": 1,
+            "ate_estimate": 0.0,
+            "r_loss": r_loss,
+            "outcome_auroc": 0.70,
+            "treatment_auroc": 0.75,
+        }
+        return SplitEvaluation(predictions=predictions, metrics=metrics)
+
+
 def test_agentic_runner_accepts_inner_cv_improvement_without_true_ite_leakage(tmp_path):
     df = pd.DataFrame(
         {
@@ -339,6 +391,71 @@ def test_agentic_runner_accepts_inner_cv_improvement_without_true_ite_leakage(tm
         if json.loads(line)["event"] == "agent_proposals"
     ]
     assert all(context.get("clinical_text_examples") == [] for context in persisted_contexts)
+
+
+def test_agentic_runner_feeds_rejection_reasons_to_next_iteration(tmp_path):
+    df = pd.DataFrame(
+        {
+            "patient_id": np.arange(12),
+            "clinical_text": [f"Patient {i}" for i in range(12)],
+            "treatment_indicator": [0, 1] * 6,
+            "outcome_indicator": [0, 0, 1, 1] * 3,
+        }
+    )
+    agent = FeedbackAgent()
+    output_path = tmp_path / "predictions.parquet"
+    config = AppliedInferenceConfig(
+        dataset_path=str(tmp_path / "dataset.parquet"),
+        cv_folds=2,
+        architecture=ModelArchitectureConfig(
+            model_type="agentic_explicit_feature_forest",
+            explicit_feature_forest=ExplicitFeatureForestConfig(
+                n_estimators=8,
+                min_samples_leaf=2,
+                honest=False,
+                inference=False,
+            ),
+            agentic_feature_search=AgenticFeatureSearchConfig(
+                outer_folds=2,
+                inner_folds=2,
+                max_iterations=2,
+                min_r_loss_improvement=0.01,
+                min_improvement_fold_fraction=1.0,
+                stop_after_rejected_iteration=False,
+            ),
+        ),
+        explicit_features=ExplicitFeatureExtractionConfig(
+            enabled=True,
+            features=_base_specs(),
+            cache_enabled=False,
+        ),
+    )
+
+    run_agentic_explicit_feature_forest(
+        dataset=df,
+        config=config,
+        output_path=output_path,
+        proposal_agent=agent,
+        extraction_provider=FakeExtractionProvider(),
+        evaluator=RejectThenAcceptEvaluator(),
+    )
+
+    second_iteration_contexts = [
+        context for context in agent.contexts if context["iteration"] == 2
+    ]
+    assert second_iteration_contexts
+    for context in second_iteration_contexts:
+        weak_feedback = [
+            item
+            for item in context["iteration_feedback"]
+            if item.get("candidate_id") == "weak_modifier"
+        ]
+        assert weak_feedback
+        assert weak_feedback[-1]["status"] == "rejected"
+        assert any(
+            check.startswith("r_loss_improvement")
+            for check in weak_feedback[-1]["failed_checks"]
+        )
 
 
 def test_experiment_config_parses_agentic_search_config(tmp_path):

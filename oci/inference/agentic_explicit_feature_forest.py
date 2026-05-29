@@ -514,6 +514,10 @@ class AgenticFeatureSearchRunner:
                 n_examples=self.search_config.clinical_text_examples_per_prompt,
                 max_chars=self.search_config.clinical_text_example_chars,
             ),
+            "iteration_feedback": build_iteration_feedback(
+                recent_decisions,
+                self.search_config,
+            ),
             "recent_decisions": recent_decisions,
         }
 
@@ -799,7 +803,11 @@ def build_agent_prompt(
     feature_status = (
         "No variables are currently included; propose an initial variable to extract."
         if current_feature_count == 0
-        else "The current variables are already included; propose only additions that may improve them."
+        else (
+            "The current variables are already included; propose additions, "
+            "removals, or role updates only when the nested-CV context and "
+            "prior feedback justify them."
+        )
     )
     return f"""You are helping design a causal inference feature set for a causal forest.
 
@@ -832,6 +840,9 @@ Limits:
 - At most {search_config.max_removals_per_iter} remove proposals.
 - Use "none" if no defensible pre-treatment variable is available.
 - For categorical variables, provide 2-8 mutually exclusive categories.
+- Review iteration_feedback and recent_decisions before proposing. Do not repeat
+  a rejected feature unchanged; if revisiting a rejected concept, change the
+  extraction target, type/categories, or role to directly address failed_checks.
 
 Current nested-CV context:
 {context_json}
@@ -963,6 +974,191 @@ def compare_candidate_to_baseline(
         "baseline": _non_oracle_metrics(base),
         "candidate": _non_oracle_metrics(cand),
     }
+
+
+def build_iteration_feedback(
+    recent_decisions: List[Dict[str, Any]],
+    search_config: AgenticFeatureSearchConfig,
+) -> List[Dict[str, Any]]:
+    """Distill prior decisions into compact feedback for the next agent prompt."""
+    feedback: List[Dict[str, Any]] = []
+    for event in recent_decisions:
+        event_name = event.get("event")
+        payload = event.get("payload")
+        if event_name == "agent_proposals" and isinstance(payload, dict):
+            for rejected in payload.get("rejected", []):
+                if not isinstance(rejected, dict):
+                    continue
+                raw_proposal = rejected.get("proposal", {})
+                feedback.append(
+                    {
+                        "iteration": event.get("iteration"),
+                        "candidate_id": _proposal_feedback_id(raw_proposal),
+                        "status": "validation_rejected",
+                        "failed_checks": [str(rejected.get("reason", "validation_failed"))],
+                        "proposals": [_proposal_feedback_summary(raw_proposal)],
+                        "instruction": (
+                            "Do not repeat this proposal unchanged; fix the validation "
+                            "failure or propose a different pre-treatment variable."
+                        ),
+                    }
+                )
+        elif event_name == "candidate_evaluations" and isinstance(payload, list):
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                comparison = item.get("comparison", {})
+                accepted = bool(item.get("accepted", False))
+                passed = bool(comparison.get("passes_acceptance", False))
+                if accepted:
+                    status = "accepted"
+                elif passed:
+                    status = "not_selected"
+                else:
+                    status = "rejected"
+                entry = {
+                    "iteration": event.get("iteration"),
+                    "candidate_id": item.get("candidate_id"),
+                    "status": status,
+                    "proposals": [
+                        _proposal_feedback_summary(proposal)
+                        for proposal in item.get("proposals", [])
+                    ],
+                    "metrics": _candidate_feedback_metrics(comparison),
+                }
+                if accepted:
+                    entry["instruction"] = (
+                        "This candidate became the current baseline; build on it "
+                        "unless later feedback indicates a problem."
+                    )
+                elif passed:
+                    entry["failed_checks"] = ["passed_thresholds_but_lower_ranked"]
+                    entry["instruction"] = (
+                        "This candidate passed acceptance thresholds but was not "
+                        "selected because another candidate had stronger R-loss "
+                        "improvement."
+                    )
+                else:
+                    entry["failed_checks"] = _candidate_failed_checks(
+                        comparison,
+                        search_config,
+                    )
+                    entry["instruction"] = (
+                        "Do not repeat this candidate unchanged; propose a different "
+                        "baseline variable, extraction target, or role that addresses "
+                        "the failed_checks."
+                    )
+                feedback.append(entry)
+
+    return feedback[-20:]
+
+
+def _proposal_feedback_id(proposal: Any) -> str:
+    if isinstance(proposal, dict):
+        name = proposal.get("name")
+        if name:
+            return _normalize_feature_name(name)
+        action = proposal.get("action")
+        if action:
+            return str(action)
+    return str(proposal)
+
+
+def _proposal_feedback_summary(proposal: Any) -> Dict[str, Any]:
+    if not isinstance(proposal, dict):
+        return {"raw": str(proposal)}
+    return {
+        key: proposal.get(key)
+        for key in ["action", "name", "type", "roles", "description"]
+        if proposal.get(key) is not None
+    }
+
+
+def _candidate_feedback_metrics(comparison: Any) -> Dict[str, Any]:
+    if not isinstance(comparison, dict):
+        return {}
+    keys = [
+        "r_loss_improvement",
+        "outcome_auroc_delta",
+        "treatment_auroc_delta",
+        "improved_fold_fraction",
+        "passes_acceptance",
+        "rejection_reason",
+        "coverage_failures",
+    ]
+    return {
+        key: comparison[key]
+        for key in keys
+        if key in comparison
+    }
+
+
+def _candidate_failed_checks(
+    comparison: Any,
+    search_config: AgenticFeatureSearchConfig,
+) -> List[str]:
+    if not isinstance(comparison, dict):
+        return ["candidate_evaluation_missing"]
+
+    failed = []
+    rejection_reason = comparison.get("rejection_reason")
+    if rejection_reason:
+        failed.append(f"rejection_reason: {rejection_reason}")
+
+    for item in comparison.get("coverage_failures", []) or []:
+        if not isinstance(item, dict):
+            continue
+        coverage = item.get("coverage")
+        name = item.get("name", "feature")
+        if _is_number(coverage):
+            failed.append(
+                f"coverage {name} {float(coverage):.4g} "
+                f"< required {search_config.min_feature_coverage:.4g}"
+            )
+
+    r_loss_improvement = comparison.get("r_loss_improvement")
+    if (
+        _is_number(r_loss_improvement)
+        and float(r_loss_improvement) < search_config.min_r_loss_improvement
+    ):
+        failed.append(
+            f"r_loss_improvement {float(r_loss_improvement):.4g} "
+            f"< required {search_config.min_r_loss_improvement:.4g}"
+        )
+
+    outcome_delta = comparison.get("outcome_auroc_delta")
+    outcome_floor = -search_config.max_outcome_auroc_drop
+    if _is_number(outcome_delta) and float(outcome_delta) < outcome_floor:
+        failed.append(
+            f"outcome_auroc_delta {float(outcome_delta):.4g} "
+            f"< allowed {outcome_floor:.4g}"
+        )
+
+    treatment_delta = comparison.get("treatment_auroc_delta")
+    treatment_floor = -search_config.max_treatment_auroc_drop
+    if _is_number(treatment_delta) and float(treatment_delta) < treatment_floor:
+        failed.append(
+            f"treatment_auroc_delta {float(treatment_delta):.4g} "
+            f"< allowed {treatment_floor:.4g}"
+        )
+
+    improved_fold_fraction = comparison.get("improved_fold_fraction")
+    if (
+        _is_number(improved_fold_fraction)
+        and float(improved_fold_fraction) < search_config.min_improvement_fold_fraction
+    ):
+        failed.append(
+            f"improved_fold_fraction {float(improved_fold_fraction):.4g} "
+            f"< required {search_config.min_improvement_fold_fraction:.4g}"
+        )
+
+    if not failed:
+        failed.append("did_not_pass_acceptance_thresholds")
+    return failed
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float, np.integer, np.floating)) and np.isfinite(value)
 
 
 def aggregate_metric_rows(rows: List[Dict[str, Any]]) -> Dict[str, Any]:

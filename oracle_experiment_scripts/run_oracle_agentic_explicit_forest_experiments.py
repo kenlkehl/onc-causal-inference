@@ -9,9 +9,10 @@ grid and more repeats:
       agentic_iterations: 1, 2, 3
       initial_feature_counts: 0, 2, 5
       initial_feature_strategies: true_first, modifiers_first, mixed, distractors
+      stop_after_rejected_iteration: true, false
 
 The count=0 condition uses the "none" strategy internally, so this produces
-27 base conditions per dataset. With the default 30 repeats, that is 810
+54 base conditions per dataset. With the default 30 repeats, that is 1620
 experiments per dataset before --max-experiments or --resume filtering.
 
 The default LLM budgets are intentionally large:
@@ -61,6 +62,7 @@ DEFAULT_ARGS: Dict[str, List[str]] = {
     "--agentic-inner-folds": ["3"],
     "--agentic-max-additions-per-iter": ["6"],
     "--agentic-max-removals-per-iter": ["2"],
+    "--agentic-stop-after-rejected-iteration": ["true", "false"],
     "--agentic-agent-model-name": ["nvidia/Gemma-4-31B-IT-NVFP4"],
     "--agentic-agent-server-url": ["http://localhost:8000/v1"],
     "--agentic-vllm-model-name": ["nvidia/Gemma-4-31B-IT-NVFP4"],

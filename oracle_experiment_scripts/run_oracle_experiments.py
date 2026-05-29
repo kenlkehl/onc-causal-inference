@@ -173,6 +173,7 @@ class ExperimentConfig:
     agentic_inner_folds: int = 2
     agentic_max_additions_per_iter: int = 2
     agentic_max_removals_per_iter: int = 0
+    agentic_stop_after_rejected_iteration: bool = True
     agentic_min_feature_coverage: float = 0.70
     agentic_min_r_loss_improvement: float = 0.01
     agentic_min_improvement_fold_fraction: float = 2.0 / 3.0
@@ -1551,6 +1552,101 @@ def _selected_feature_count(value: Any) -> int:
     return len([part for part in text.split(",") if part.strip()])
 
 
+def _summarize_agentic_proposal(proposal: Any) -> Dict[str, Any]:
+    """Keep only variable-identifying proposal fields for experiment JSON."""
+    if not isinstance(proposal, dict):
+        return {"raw": str(proposal)}
+    return {
+        key: proposal.get(key)
+        for key in ["action", "name", "type", "roles", "description"]
+        if proposal.get(key) is not None
+    }
+
+
+def _load_agentic_iteration_variables_tried(
+    feature_search_dir: Path,
+) -> List[Dict[str, Any]]:
+    """Load compact per-iteration variable attempts from agent decision artifacts."""
+    decisions_path = feature_search_dir / "agent_decisions.jsonl"
+    if not decisions_path.exists():
+        return []
+
+    by_iteration: Dict[tuple[int, int], Dict[str, Any]] = {}
+
+    def row_for(event: Dict[str, Any]) -> Dict[str, Any]:
+        outer_fold = int(event.get("outer_fold", 0))
+        iteration = int(event.get("iteration", 0))
+        key = (outer_fold, iteration)
+        if key not in by_iteration:
+            by_iteration[key] = {
+                "outer_fold": outer_fold,
+                "iteration": iteration,
+                "validation_rejected_variables": [],
+                "candidates": [],
+            }
+        return by_iteration[key]
+
+    with open(decisions_path) as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                logger.warning("Skipping malformed agent decision line in %s", decisions_path)
+                continue
+
+            payload = event.get("payload")
+            if event.get("event") == "agent_proposals" and isinstance(payload, dict):
+                row = row_for(event)
+                for rejected in payload.get("rejected", []) or []:
+                    if not isinstance(rejected, dict):
+                        continue
+                    row["validation_rejected_variables"].append(
+                        {
+                            "proposal": _summarize_agentic_proposal(
+                                rejected.get("proposal", {})
+                            ),
+                            "reason": rejected.get("reason"),
+                        }
+                    )
+            elif event.get("event") == "candidate_evaluations" and isinstance(payload, list):
+                row = row_for(event)
+                for item in payload:
+                    if not isinstance(item, dict):
+                        continue
+                    comparison = item.get("comparison", {})
+                    variables = [
+                        _summarize_agentic_proposal(proposal)
+                        for proposal in item.get("proposals", []) or []
+                    ]
+                    row["candidates"].append(
+                        {
+                            "candidate_id": item.get("candidate_id"),
+                            "variables": variables,
+                            "accepted": bool(item.get("accepted", False)),
+                            "passes_acceptance": bool(
+                                isinstance(comparison, dict)
+                                and comparison.get("passes_acceptance", False)
+                            ),
+                            "rejection_reason": (
+                                comparison.get("rejection_reason")
+                                if isinstance(comparison, dict)
+                                else None
+                            ),
+                        }
+                    )
+
+    return [
+        by_iteration[key]
+        for key in sorted(by_iteration)
+        if (
+            by_iteration[key]["validation_rejected_variables"]
+            or by_iteration[key]["candidates"]
+        )
+    ]
+
+
 def _runtime_agentic_server_url(
     configured_url: Optional[str],
     device: Optional[str],
@@ -1658,7 +1754,7 @@ def run_agentic_experiment(
                 clinical_text_example_chars=agent_example_chars,
                 save_agent_context=config.agentic_save_agent_context,
                 random_state=42 + config.repeat_index,
-                stop_after_rejected_iteration=True,
+                stop_after_rejected_iteration=config.agentic_stop_after_rejected_iteration,
             ),
         ),
         explicit_features=ExplicitFeatureExtractionConfig(
@@ -1686,6 +1782,7 @@ def run_agentic_experiment(
     )
     run_agentic_explicit_feature_forest(df, applied_config, prediction_path)
     results_df = pd.read_parquet(prediction_path)
+    feature_search_dir = prediction_path.parent / "agentic_feature_search"
 
     propensity_col = (
         "pred_propensity_prob"
@@ -1732,9 +1829,12 @@ def run_agentic_experiment(
     return {
         "metrics": metrics,
         "n_samples": len(results_df),
+        "agentic_iteration_variables_tried": _load_agentic_iteration_variables_tried(
+            feature_search_dir
+        ),
         "artifacts": {
             "predictions_path": str(prediction_path),
-            "feature_search_dir": str(prediction_path.parent / "agentic_feature_search"),
+            "feature_search_dir": str(feature_search_dir),
         },
     }
 
@@ -1810,6 +1910,9 @@ def run_single_experiment(
             'skipped': True,
             'error': result.get('error', 'unknown error'),
             'artifacts': result.get('artifacts', {}),
+            'agentic_iteration_variables_tried': result.get(
+                'agentic_iteration_variables_tried', []
+            ),
         }
 
     return {
@@ -1819,6 +1922,9 @@ def run_single_experiment(
         'skipped': False,
         'error': None,
         'artifacts': result.get('artifacts', {}),
+        'agentic_iteration_variables_tried': result.get(
+            'agentic_iteration_variables_tried', []
+        ),
     }
 
 
@@ -1836,6 +1942,7 @@ def generate_experiment_grid(
     agentic_inner_folds: int = 2,
     agentic_max_additions_per_iter: int = 2,
     agentic_max_removals_per_iter: int = 0,
+    agentic_stop_after_rejected_iteration_options: Optional[List[bool]] = None,
     agentic_min_feature_coverage: float = 0.70,
     agentic_min_r_loss_improvement: float = 0.01,
     agentic_min_improvement_fold_fraction: float = 2.0 / 3.0,
@@ -2051,6 +2158,8 @@ def generate_experiment_grid(
                 "modifiers_first",
                 "distractors",
             ]
+        if agentic_stop_after_rejected_iteration_options is None:
+            agentic_stop_after_rejected_iteration_options = [True]
 
         invalid_strategies = (
             set(agentic_initial_feature_strategies)
@@ -2063,10 +2172,16 @@ def generate_experiment_grid(
                 f"Valid strategies: {sorted(AGENTIC_INITIAL_FEATURE_STRATEGIES)}"
             )
 
-        for (dataset_path, dataset_name), n_iter, n_initial in itertools.product(
+        for (
+            (dataset_path, dataset_name),
+            n_iter,
+            n_initial,
+            stop_after_rejected_iteration,
+        ) in itertools.product(
             datasets,
             agentic_iteration_options,
             agentic_initial_feature_counts,
+            agentic_stop_after_rejected_iteration_options,
         ):
             strategies = ["none"] if n_initial <= 0 else agentic_initial_feature_strategies
             for strategy in strategies:
@@ -2088,6 +2203,7 @@ def generate_experiment_grid(
                     agentic_inner_folds=agentic_inner_folds,
                     agentic_max_additions_per_iter=agentic_max_additions_per_iter,
                     agentic_max_removals_per_iter=agentic_max_removals_per_iter,
+                    agentic_stop_after_rejected_iteration=stop_after_rejected_iteration,
                     agentic_min_feature_coverage=agentic_min_feature_coverage,
                     agentic_min_r_loss_improvement=agentic_min_r_loss_improvement,
                     agentic_min_improvement_fold_fraction=agentic_min_improvement_fold_fraction,
@@ -2390,6 +2506,17 @@ def _run_best_attainable_worker(args_tuple):
     return config_hash, result
 
 
+def _parse_bool(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y"}:
+        return True
+    if normalized in {"0", "false", "no", "n"}:
+        return False
+    raise argparse.ArgumentTypeError(
+        f"Boolean values must be true/false, got '{value}'"
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description=(
@@ -2567,6 +2694,17 @@ def main():
         type=int,
         default=0,
         help="Maximum removal proposals accepted for evaluation per agentic iteration."
+    )
+    parser.add_argument(
+        "--agentic-stop-after-rejected-iteration",
+        type=_parse_bool,
+        nargs="+",
+        default=[True],
+        metavar="{true,false}",
+        help=(
+            "Whether agentic search stops after an iteration with no accepted "
+            "candidate. Pass multiple values to grid over them (default: true)."
+        )
     )
     parser.add_argument(
         "--agentic-min-feature-coverage",
@@ -2750,6 +2888,9 @@ def main():
         agentic_inner_folds=args.agentic_inner_folds,
         agentic_max_additions_per_iter=args.agentic_max_additions_per_iter,
         agentic_max_removals_per_iter=args.agentic_max_removals_per_iter,
+        agentic_stop_after_rejected_iteration_options=(
+            args.agentic_stop_after_rejected_iteration
+        ),
         agentic_min_feature_coverage=args.agentic_min_feature_coverage,
         agentic_min_r_loss_improvement=args.agentic_min_r_loss_improvement,
         agentic_min_improvement_fold_fraction=args.agentic_min_improvement_fold_fraction,
@@ -2876,12 +3017,19 @@ def main():
         agentic_iters = sorted(set(c.agentic_max_iterations for c in agentic_pending))
         initial_counts = sorted(set(c.agentic_initial_feature_count for c in agentic_pending))
         initial_strategies = sorted(set(c.agentic_initial_feature_strategy for c in agentic_pending))
+        stop_after_rejected = sorted(
+            set(c.agentic_stop_after_rejected_iteration for c in agentic_pending)
+        )
         agent_max_tokens = sorted(set(c.agentic_agent_max_tokens for c in agentic_pending))
         agent_context_chars = sorted(set(c.agentic_agent_context_chars for c in agentic_pending))
         vllm_modes = sorted(set(c.agentic_vllm_mode for c in agentic_pending))
         print(f"Agentic iterations: {', '.join(str(v) for v in agentic_iters)}")
         print(f"Agentic initial counts: {', '.join(str(v) for v in initial_counts)}")
         print(f"Agentic initial strategies: {', '.join(initial_strategies)}")
+        print(
+            "Agentic stop after rejected: "
+            f"{', '.join(str(v) for v in stop_after_rejected)}"
+        )
         print(f"Agentic agent max tokens: {', '.join(str(v) for v in agent_max_tokens)}")
         print(f"Agentic agent context chars: {', '.join(str(v) for v in agent_context_chars)}")
         print(f"Agentic vLLM modes: {', '.join(vllm_modes)}")
@@ -3122,6 +3270,7 @@ def main():
                       'agentic_initial_feature_count',
                       'agentic_initial_feature_strategy',
                       'agentic_initial_feature_names',
+                      'agentic_stop_after_rejected_iteration',
                       'agentic_agent_model_name',
                       'agentic_agent_max_tokens',
                       'agentic_agent_context_chars',
