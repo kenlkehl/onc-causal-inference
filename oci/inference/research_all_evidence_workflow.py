@@ -1096,12 +1096,16 @@ def _neural_queries_component(
         devices=context.config.devices,
         workers=context.config.workers,
     )
+    lane_cpu_workers = _lane_cpu_worker_budgets(len(lanes), context.config.workers)
     if pending:
         LOGGER.info(
             "run neural_queries contexts=%s parallelism=%s lanes=%s",
             len(pending),
             len(lanes),
-            [(device, len(specs)) for device, specs in lanes],
+            [
+                {"device": device, "contexts": len(specs), "cpu_workers": cpu_workers}
+                for (device, specs), cpu_workers in zip(lanes, lane_cpu_workers)
+            ],
         )
         fitted_lanes = Parallel(
             n_jobs=len(lanes),
@@ -1117,8 +1121,9 @@ def _neural_queries_component(
                 specs=specs,
                 component_dir=component_dir,
                 device=device,
+                cpu_workers=cpu_workers,
             )
-            for device, specs in lanes
+            for (device, specs), cpu_workers in zip(lanes, lane_cpu_workers)
         )
         completed.extend(row for lane in fitted_lanes for row in lane)
 
@@ -1142,6 +1147,7 @@ def _run_neural_query_context_lane(
     specs: Sequence[Mapping[str, Any]],
     component_dir: Path,
     device: str,
+    cpu_workers: int = 1,
 ) -> list[dict[str, Any]]:
     """Open the shared embedding cache once and run one fixed-device lane."""
 
@@ -1167,6 +1173,7 @@ def _run_neural_query_context_lane(
             spec=spec,
             fold_dir=component_dir / str(spec["scope_id"]),
             device=device,
+            cpu_workers=cpu_workers,
         )
         for spec in specs
     ]
@@ -1182,6 +1189,7 @@ def _run_one_neural_query_context(
     spec: Mapping[str, Any],
     fold_dir: Path,
     device: str,
+    cpu_workers: int = 1,
 ) -> dict[str, Any]:
     """Fit and immediately publish one independently resumable context."""
 
@@ -1225,6 +1233,7 @@ def _run_one_neural_query_context(
         nuisance_folds=int(mm_config.nuisance_folds),
         devices=(device,),
         seed=config.seed + 10_000 * int(spec["fold_key"]),
+        cpu_workers=cpu_workers,
     )
 
     evidence_rows: list[dict[str, Any]] = []

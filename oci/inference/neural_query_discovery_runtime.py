@@ -46,6 +46,13 @@ NEURAL_QUERY_DISCOVERY_SUBFOLD_SCHEMA = "neural_query_in_memory_subfold_v2"
 BANKS = ("treatment", "outcome", "effect")
 
 
+def _validate_cpu_workers(cpu_workers: int) -> None:
+    if isinstance(cpu_workers, bool) or not isinstance(cpu_workers, int):
+        raise TypeError("cpu_workers must be a positive integer")
+    if cpu_workers < 1:
+        raise ValueError("cpu_workers must be a positive integer")
+
+
 def _json_default(value: Any) -> Any:
     if isinstance(value, np.ndarray):
         return value.tolist()
@@ -163,6 +170,7 @@ def _fit_subfold(
     seed: int,
     device: str,
     parent_input_binding_sha256: str,
+    cpu_workers: int = 1,
 ) -> dict[str, Any]:
     """Fit one nested subfold entirely in memory.
 
@@ -197,11 +205,14 @@ def _fit_subfold(
     identity = _stable_hash(identity_payload)
 
     LOGGER.info(
-        "fold=%s device=%s fitting strict nuisances on %s rows; audit=%s rows",
+        "fold=%s device=%s fitting strict nuisances on %s rows; audit=%s rows; "
+        "cpu_budget=%s nuisance_workers=%s",
         fold,
         device,
         len(train_indices),
         len(validation_indices),
+        cpu_workers,
+        min(cpu_workers, nuisance_folds),
     )
     train_texts = [texts[index] for index in train_indices]
     validation_texts = [texts[index] for index in validation_indices]
@@ -220,9 +231,9 @@ def _fit_subfold(
         folds=int(nuisance_folds),
         random_state=int(seed + 10_000),
         nuisance_stack_config=nuisance_stack_config,
-        tfidf_workers=1,
+        tfidf_workers=cpu_workers,
         tfidf_parallel_backend="threads",
-        owner_cpu_budget=1,
+        owner_cpu_budget=cpu_workers,
     )
     validation_e, _ = nuisance["treatment"]["fitted"].predict(validation_texts)
     validation_m, _ = nuisance["outcome"]["fitted"].predict(validation_texts)
@@ -540,9 +551,11 @@ def fit_in_memory_query_discovery(
     nuisance_folds: int,
     devices: Sequence[str],
     seed: int,
+    cpu_workers: int = 1,
 ) -> dict[str, Any]:
     """Fit all three nested query banks without executable checkpoint I/O."""
 
+    _validate_cpu_workers(cpu_workers)
     device_names = tuple(str(device) for device in devices)
     if not device_names:
         raise ValueError("neural-query discovery requires at least one device")
@@ -643,18 +656,25 @@ def fit_in_memory_query_discovery(
             }
         )
 
+    # Each GPU lane runs one subfold at a time. Split the CPU budget across
+    # active lanes so their nested TF-IDF fits cannot each claim the total.
+    lane_count = min(len(device_names), len(canonical_tasks), cpu_workers)
+    active_devices = device_names[:lane_count]
+    per_lane, remainder = divmod(cpu_workers, lane_count)
+    lane_budgets = {
+        device: per_lane + (index < remainder)
+        for index, device in enumerate(active_devices)
+    }
     tasks_by_device: dict[str, list[dict[str, Any]]] = {
-        device: [] for device in device_names
+        device: [] for device in active_devices
     }
     for index, task in enumerate(canonical_tasks):
-        device = device_names[index % len(device_names)]
+        device = active_devices[index % lane_count]
+        task["cpu_workers"] = lane_budgets[device]
         tasks_by_device[device].append(task)
     unordered_subfolds: list[dict[str, Any]] = []
     with concurrent.futures.ThreadPoolExecutor(
-        max_workers=min(
-            len(device_names),
-            int(config.query_inner_folds),
-        )
+        max_workers=lane_count
     ) as executor:
         futures = [
             executor.submit(_run_device_tasks, device, tasks)
@@ -787,9 +807,18 @@ def fit_context_query_discovery(
     nuisance_folds: int,
     devices: tuple[str, ...],
     seed: int,
+    cpu_workers: int = 1,
 ) -> Mapping[str, Any]:
     """Fit nuisance models and all neural-query banks for one context."""
 
+    _validate_cpu_workers(cpu_workers)
+    LOGGER.info(
+        "Fitting full-context neural-query nuisances on %s rows; "
+        "cpu_budget=%s nuisance_workers=%s",
+        len(row_ids),
+        cpu_workers,
+        min(cpu_workers, nuisance_folds),
+    )
     nuisance = fit_joint_cross_fitted_nuisance_stacks(
         texts=list(texts),
         treatment=np.asarray(treatment, dtype=float),
@@ -800,6 +829,9 @@ def fit_context_query_discovery(
         folds=int(nuisance_folds),
         random_state=int(seed + 10_000),
         nuisance_stack_config=nuisance_stack_config,
+        tfidf_workers=cpu_workers,
+        tfidf_parallel_backend="threads",
+        owner_cpu_budget=cpu_workers,
     )
     fit_e = np.asarray(nuisance["treatment"]["stacked_oof"], dtype=float)
     fit_m = np.asarray(nuisance["outcome"]["stacked_oof"], dtype=float)
@@ -819,6 +851,7 @@ def fit_context_query_discovery(
         nuisance_folds=int(nuisance_folds),
         devices=devices,
         seed=int(seed),
+        cpu_workers=cpu_workers,
     )
 
 
