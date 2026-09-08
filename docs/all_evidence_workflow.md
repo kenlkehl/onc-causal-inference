@@ -700,10 +700,23 @@ full-context feature-importance fits are also concurrent. Native linear-algebra
 and estimator thread pools remain limited to one thread per fit. If `W < L`, one
 controller worker per active lane is the unavoidable minimum.
 
-The context directories remain the unit of recovery. Each lane writes the
-context's `complete.json` immediately after its artifacts are durable and
-before proceeding to its next context. Rerunning the command redistributes only
-the unfinished contexts among the available lanes.
+The context directories remain the scheduling unit, while text-model work is
+recoverable within a context. BoW nuisance/effect/matched-pair folds, HTR
+nuisance/effect/pair folds, full-view feature-importance fits, embedding contrasts,
+the assembled feature bundle, and the final handoff row publish atomic
+checkpoints as they finish. Neural checkpoints contain fold predictions and
+evidence, not epoch, optimizer, or model state. Each lane writes the context's
+`complete.json` only after its final artifacts are durable. Rerunning the same
+command restores compatible substeps and redistributes only unfinished contexts.
+
+Resume validation is intentionally lightweight. Checkpoint markers cover the
+schema and implementation version, relevant scientific configuration, seed,
+ordered fit/held-out row IDs, dataset path/size/mtime, and upstream marker IDs.
+They validate referenced files by presence and recorded size; they do not hash
+checkpoint bytes or rescan the dataset. A per-context advisory lock prevents two
+restarts from fitting the same context concurrently, and
+`checkpoint_progress.json` shows running, completed, reused, failed, or invalid
+substeps.
 
 ## Output and resume
 
@@ -730,6 +743,10 @@ my_stage1_run/
     text_models/
       outer_001_full/
         evidence.json
+        checkpoints/v1/
+          checkpoint_progress.json
+          context.lock
+          units/...
         worker_artifacts/...
         complete.json
       outer_001_inner_001/...

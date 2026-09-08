@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, TypeVar
 
 import numpy as np
 import pandas as pd
@@ -95,11 +95,15 @@ from .sparse_text_modeling import (
     _top_feature_rows,
 )
 from .multi_model_pair_uplift import (
+    PairUpliftFitResult,
     fit_bow_pair_uplift_train_test,
     fit_htr_pair_uplift_train_test,
 )
+from .stage1_checkpointing import Stage1CheckpointStore, row_id_identity
 
 logger = logging.getLogger(__name__)
+
+_CheckpointValue = TypeVar("_CheckpointValue")
 
 
 @dataclass
@@ -116,6 +120,172 @@ class _FeatureBundle:
     metrics: Dict[str, Any]
     handoff_evidence: Optional[Dict[str, Any]]
     inner_model_rows: List[Dict[str, Any]]
+
+
+def _feature_bundle_checkpoint_payload(bundle: _FeatureBundle) -> Dict[str, Any]:
+    return {
+        "x_train": bundle.x_train,
+        "x_test": bundle.x_test,
+        "w_train": bundle.w_train,
+        "w_test": bundle.w_test,
+        "x_names": bundle.x_names,
+        "w_names": bundle.w_names,
+        "feature_rows": bundle.feature_rows,
+        "prediction_frames": bundle.prediction_frames,
+        "embedding_rows": bundle.embedding_rows,
+        "metrics": bundle.metrics,
+        "handoff_evidence": bundle.handoff_evidence,
+        "inner_model_rows": bundle.inner_model_rows,
+    }
+
+
+def _feature_bundle_from_checkpoint(payload: Mapping[str, Any]) -> _FeatureBundle:
+    return _FeatureBundle(
+        x_train=np.asarray(payload["x_train"]),
+        x_test=np.asarray(payload["x_test"]),
+        w_train=np.asarray(payload["w_train"]),
+        w_test=np.asarray(payload["w_test"]),
+        x_names=[str(value) for value in payload["x_names"]],
+        w_names=[str(value) for value in payload["w_names"]],
+        feature_rows=[dict(value) for value in payload["feature_rows"]],
+        prediction_frames=list(payload["prediction_frames"]),
+        embedding_rows=[dict(value) for value in payload["embedding_rows"]],
+        metrics=dict(payload["metrics"]),
+        handoff_evidence=(
+            None
+            if payload.get("handoff_evidence") is None
+            else dict(payload["handoff_evidence"])
+        ),
+        inner_model_rows=[dict(value) for value in payload["inner_model_rows"]],
+    )
+
+
+def _pair_result_checkpoint_payload(result: PairUpliftFitResult) -> Dict[str, Any]:
+    return {
+        "train_delta_logit": result.train_delta_logit,
+        "test_delta_logit": result.test_delta_logit,
+        "train_pred_prob": result.train_pred_prob,
+        "test_pred_prob": result.test_pred_prob,
+        "train_n_controls": result.train_n_controls,
+        "test_n_controls": result.test_n_controls,
+        "feature_importance": result.feature_importance,
+        "evidence_rows": result.evidence_rows,
+        "attention_rows": result.attention_rows,
+        "prediction_frame": result.prediction_frame,
+        "metrics": result.metrics,
+    }
+
+
+def _pair_result_from_checkpoint(payload: Mapping[str, Any]) -> PairUpliftFitResult:
+    return PairUpliftFitResult(
+        train_delta_logit=np.asarray(payload["train_delta_logit"], dtype=float),
+        test_delta_logit=np.asarray(payload["test_delta_logit"], dtype=float),
+        train_pred_prob=np.asarray(payload["train_pred_prob"], dtype=float),
+        test_pred_prob=np.asarray(payload["test_pred_prob"], dtype=float),
+        train_n_controls=np.asarray(payload["train_n_controls"], dtype=float),
+        test_n_controls=np.asarray(payload["test_n_controls"], dtype=float),
+        feature_importance=dict(payload["feature_importance"]),
+        evidence_rows=[dict(value) for value in payload["evidence_rows"]],
+        attention_rows=[dict(value) for value in payload["attention_rows"]],
+        prediction_frame=payload["prediction_frame"],
+        metrics=dict(payload["metrics"]),
+    )
+
+
+def _validate_train_test_prediction_tuple(
+    result: Any,
+    train_rows: int,
+    test_rows: int,
+    label: str,
+) -> None:
+    if not isinstance(result, (list, tuple)) or len(result) != 3:
+        raise ValueError(f"{label} checkpoint must contain train, test, and evidence rows")
+    if len(np.asarray(result[0])) != int(train_rows):
+        raise ValueError(f"{label} checkpoint fit row count changed")
+    if len(np.asarray(result[1])) != int(test_rows):
+        raise ValueError(f"{label} checkpoint held-out row count changed")
+    if not isinstance(result[2], list):
+        raise ValueError(f"{label} checkpoint evidence must be a list")
+
+
+def _validate_pair_result_payload(
+    payload: Mapping[str, Any],
+    train_rows: int,
+    test_rows: int,
+    label: str,
+) -> None:
+    for name in ("train_delta_logit", "train_pred_prob", "train_n_controls"):
+        if len(np.asarray(payload[name])) != int(train_rows):
+            raise ValueError(f"{label} checkpoint {name} fit row count changed")
+    for name in ("test_delta_logit", "test_pred_prob", "test_n_controls"):
+        if len(np.asarray(payload[name])) != int(test_rows):
+            raise ValueError(f"{label} checkpoint {name} held-out row count changed")
+    if not isinstance(payload.get("prediction_frame"), pd.DataFrame):
+        raise ValueError(f"{label} checkpoint prediction_frame is not a DataFrame")
+
+
+def _validate_nuisance_ensemble_payload(
+    payload: Mapping[str, Any],
+    train_rows: int,
+    test_rows: int,
+) -> None:
+    for name in (
+        "e_train",
+        "m_train",
+        "e_train_clip",
+        "t_resid",
+        "y_resid",
+        "pseudo_target",
+        "r_weight",
+    ):
+        if len(np.asarray(payload[name])) != int(train_rows):
+            raise ValueError(f"nuisance ensemble checkpoint {name} fit row count changed")
+    for name in ("e_test", "m_test"):
+        if len(np.asarray(payload[name])) != int(test_rows):
+            raise ValueError(f"nuisance ensemble checkpoint {name} held-out row count changed")
+    train_predictions = payload.get("train_predictions")
+    test_predictions = payload.get("test_predictions")
+    if not isinstance(train_predictions, pd.DataFrame) or len(train_predictions) != train_rows:
+        raise ValueError("nuisance ensemble checkpoint train prediction rows changed")
+    if not isinstance(test_predictions, pd.DataFrame) or len(test_predictions) != test_rows:
+        raise ValueError("nuisance ensemble checkpoint held-out prediction rows changed")
+
+
+def _validate_mapping_checkpoint(value: Any, label: str) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} checkpoint is not a mapping")
+
+
+def _validate_embedding_checkpoint_payload(
+    payload: Mapping[str, Any],
+    train_rows: int,
+    test_rows: int,
+) -> None:
+    for family in ("w_features", "x_features"):
+        features = payload.get(family)
+        if not isinstance(features, list):
+            raise ValueError(f"embedding checkpoint {family} is not a list")
+        for feature in features:
+            if len(np.asarray(feature["train"])) != int(train_rows):
+                raise ValueError("embedding checkpoint fit feature row count changed")
+            if len(np.asarray(feature["test"])) != int(test_rows):
+                raise ValueError("embedding checkpoint held-out feature row count changed")
+    if not isinstance(payload.get("metadata"), list):
+        raise ValueError("embedding checkpoint metadata is not a list")
+
+
+def _validate_prediction_fold_payload(
+    payload: Mapping[str, Any],
+    heldout_rows: int,
+    test_rows: int,
+    label: str,
+) -> None:
+    if len(np.asarray(payload["heldout_pos"])) != int(heldout_rows):
+        raise ValueError(f"{label} checkpoint held-out positions changed")
+    if len(np.asarray(payload["heldout_pred"])) != int(heldout_rows):
+        raise ValueError(f"{label} checkpoint held-out predictions changed")
+    if len(np.asarray(payload["test_pred"])) != int(test_rows):
+        raise ValueError(f"{label} checkpoint outer-test predictions changed")
 
 
 @dataclass(frozen=True)
@@ -234,11 +404,14 @@ def run_multi_model_forest_handoff_contexts(
     handoff_dir: Path,
     plan: MultiModelForestStage1ParallelPlan,
     base_device: torch.device,
+    checkpoint_store: Optional[Stage1CheckpointStore] = None,
 ) -> List[Dict[str, Any]]:
     """Fit all enabled Stage 1 architectures in each exact discovery context."""
 
     if not contexts:
         return []
+    if checkpoint_store is not None and len(contexts) != 1:
+        raise ValueError("one Stage 1 checkpoint store may only serve one exact context")
     n_workers = max(1, min(int(plan.context_workers), len(contexts)))
     slots = _handoff_worker_slots(plan, n_workers, base_device)
     cpu_workers = _handoff_cpu_worker_budgets(plan.cpus_total, n_workers)
@@ -263,6 +436,7 @@ def run_multi_model_forest_handoff_contexts(
             device=str(slots[0][0]),
             gpu_ids=slots[0][1],
             num_workers=cpu_workers[0],
+            checkpoint_store=checkpoint_store,
         )
     shard_rows = Parallel(
         n_jobs=n_workers,
@@ -279,6 +453,7 @@ def run_multi_model_forest_handoff_contexts(
             device=str(slots[shard_index][0]),
             gpu_ids=slots[shard_index][1],
             num_workers=cpu_workers[shard_index],
+            checkpoint_store=None,
         )
         for shard_index, shard in enumerate(shards)
         if shard
@@ -324,25 +499,29 @@ def _run_handoff_context_shard(
     device: str,
     gpu_ids: Optional[List[int]],
     num_workers: int,
+    checkpoint_store: Optional[Stage1CheckpointStore] = None,
 ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     with _serial_torch_worker_environment():
         for context in shard:
             train_idx = np.asarray(context["train_idx"], dtype=int)
-            runner = MultiModelForestStage1Runner(
-                dataset=dataset,
-                config=config_for_multi_model_forest_handoff(config),
-                output_path=(
+            runner_kwargs: Dict[str, Any] = {
+                "dataset": dataset,
+                "config": config_for_multi_model_forest_handoff(config),
+                "output_path": (
                     Path(handoff_dir)
                     / "worker_artifacts"
                     / f"shard_{int(shard_index):03d}"
                     / f"fold_{int(context['fold_key']):06d}"
                     / "predictions.parquet"
                 ),
-                device=torch.device(device),
-                gpu_ids=gpu_ids,
-                num_workers=max(1, int(num_workers)),
-            )
+                "device": torch.device(device),
+                "gpu_ids": gpu_ids,
+                "num_workers": max(1, int(num_workers)),
+            }
+            if checkpoint_store is not None:
+                runner_kwargs["checkpoint_store"] = checkpoint_store
+            runner = MultiModelForestStage1Runner(**runner_kwargs)
             heldout_idx = np.asarray(context["heldout_idx"], dtype=int)
             logger.info(
                 "Precomputing handoff context fold_key=%s scope=%s rows=%s device=%s",
@@ -481,6 +660,13 @@ def run_multi_model_forest_stage1(
 class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
     """HTR adapter with full outer-train -> outer-test prediction helpers."""
 
+    def _active_checkpoint_store(self) -> Optional[Stage1CheckpointStore]:
+        if getattr(self, "native_capture_sink", None) is not None:
+            return None
+        if getattr(self, "native_pair_capture_sink", None) is not None:
+            return None
+        return getattr(self, "checkpoint_store", None)
+
     @contextmanager
     def _temporary_effect_objective(self, objective: str):
         runner = self._runner
@@ -546,6 +732,8 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
             nearest_fallback_controls=nearest_fallback_controls,
             max_attention_pairs=max_attention_pairs,
             native_capture_sink=getattr(self, "native_pair_capture_sink", None),
+            checkpoint_store=self._active_checkpoint_store(),
+            checkpoint_dependencies=("assembly/nuisance_ensemble",),
         )
 
     def fit_nuisance_inner_ensemble_predict(
@@ -580,7 +768,7 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
             )
         )
 
-        def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+        def compute_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
             model = None
             fit_pos = np.asarray(fit_pos, dtype=int)
             heldout_pos = np.asarray(heldout_pos, dtype=int)
@@ -701,7 +889,49 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
                 if model is not None:
                     runner._cleanup_model(model)
 
-        n_jobs = runner._fold_n_jobs(folds)
+        def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+            store = self._active_checkpoint_store()
+            if store is None:
+                return compute_fold(fold, fit_pos, heldout_pos)
+            fit_pos = np.asarray(fit_pos, dtype=int)
+            heldout_pos = np.asarray(heldout_pos, dtype=int)
+
+            def validate(result: Mapping[str, Any]) -> None:
+                if len(np.asarray(result["heldout_pos"])) != len(heldout_pos):
+                    raise ValueError("HTR nuisance checkpoint held-out row count changed")
+                for name in ("e_hat", "e_hat_raw", "m_hat", "m_hat_raw"):
+                    if len(np.asarray(result[name])) != len(heldout_pos):
+                        raise ValueError(f"HTR nuisance checkpoint {name} row count changed")
+                for name in ("test_e_hat", "test_m_hat"):
+                    if len(np.asarray(result[name])) != len(test_df):
+                        raise ValueError(f"HTR nuisance checkpoint {name} row count changed")
+
+            return store.run(
+                f"htr/nuisance/fold_{int(fold):03d}",
+                lambda: compute_fold(fold, fit_pos, heldout_pos),
+                parameters={
+                    "outer_fold": int(outer_fold),
+                    "inner_fold": int(fold),
+                    "total_folds": int(folds),
+                    "objective": "treatment_outcome_nuisance",
+                },
+                rows={
+                    "fit": row_id_identity(
+                        train_df.iloc[fit_pos]["_oci_row_id"].to_numpy()
+                    ),
+                    "validation": row_id_identity(
+                        train_df.iloc[heldout_pos]["_oci_row_id"].to_numpy()
+                    ),
+                    "heldout": row_id_identity(test_df["_oci_row_id"].to_numpy()),
+                },
+                validator=validate,
+                deterministic_seed=True,
+            ).value
+
+        store = self._active_checkpoint_store()
+        # Torch RNG is process-global.  Serial checkpointed leaves make the
+        # per-leaf seed deterministic without retaining epoch/model state.
+        n_jobs = 1 if store is not None else runner._fold_n_jobs(folds)
         fold_results = _run_crossfit_fold_tasks(
             run_fold,
             split_items,
@@ -809,7 +1039,7 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
                 )
             )
 
-            def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+            def compute_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
                 model = None
                 fit_pos = np.asarray(fit_pos, dtype=int)
                 heldout_pos = np.asarray(heldout_pos, dtype=int)
@@ -953,7 +1183,52 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
                     if model is not None:
                         runner._cleanup_model(model)
 
-            n_jobs = runner._fold_n_jobs(folds)
+            def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+                store = self._active_checkpoint_store()
+                if store is None:
+                    return compute_fold(fold, fit_pos, heldout_pos)
+                fit_pos = np.asarray(fit_pos, dtype=int)
+                heldout_pos = np.asarray(heldout_pos, dtype=int)
+
+                def validate(result: Mapping[str, Any]) -> None:
+                    if len(np.asarray(result["heldout_pos"])) != len(heldout_pos):
+                        raise ValueError("HTR effect checkpoint held-out row count changed")
+                    for name in (
+                        "tau_hat",
+                        "tau_logit_modifier",
+                        "r_loss",
+                        "effect_loss",
+                    ):
+                        if len(np.asarray(result[name])) != len(heldout_pos):
+                            raise ValueError(f"HTR effect checkpoint {name} row count changed")
+                    if len(np.asarray(result["test_tau"])) != len(test_df):
+                        raise ValueError("HTR effect checkpoint outer-test row count changed")
+
+                return store.run(
+                    f"htr/effect/{effect_objective}/fold_{int(fold):03d}",
+                    lambda: compute_fold(fold, fit_pos, heldout_pos),
+                    parameters={
+                        "outer_fold": int(outer_fold),
+                        "inner_fold": int(fold),
+                        "total_folds": int(folds),
+                        "effect_objective": effect_objective,
+                    },
+                    dependencies=("assembly/nuisance_ensemble",),
+                    rows={
+                        "fit": row_id_identity(
+                            train_df.iloc[fit_pos]["_oci_row_id"].to_numpy()
+                        ),
+                        "validation": row_id_identity(
+                            train_df.iloc[heldout_pos]["_oci_row_id"].to_numpy()
+                        ),
+                        "heldout": row_id_identity(test_df["_oci_row_id"].to_numpy()),
+                    },
+                    validator=validate,
+                    deterministic_seed=True,
+                ).value
+
+            store = self._active_checkpoint_store()
+            n_jobs = 1 if store is not None else runner._fold_n_jobs(folds)
             fold_results = _run_crossfit_fold_tasks(
                 run_fold,
                 split_items,
@@ -1116,6 +1391,7 @@ class MultiModelForestStage1Runner:
         bow_native_capture_sink: Optional[Any] = None,
         htr_native_capture_sink: Optional[Any] = None,
         matched_pair_native_capture_sink: Optional[Any] = None,
+        checkpoint_store: Optional[Stage1CheckpointStore] = None,
     ) -> None:
         oracle_columns = [
             column
@@ -1138,6 +1414,7 @@ class MultiModelForestStage1Runner:
         self.bow_native_capture_sink = bow_native_capture_sink
         self.htr_native_capture_sink = htr_native_capture_sink
         self.matched_pair_native_capture_sink = matched_pair_native_capture_sink
+        self.checkpoint_store = checkpoint_store
         self.nn_config: MultiModelForestConfig = getattr(
             config.architecture,
             "multi_model_forest",
@@ -1165,6 +1442,62 @@ class MultiModelForestStage1Runner:
         self.embedding_feature_rows: List[Dict[str, Any]] = []
         self.agentic_handoff_rows: List[Dict[str, Any]] = []
         self.inner_model_evidence_rows: List[Dict[str, Any]] = []
+
+    def _active_checkpoint_store(self) -> Optional[Stage1CheckpointStore]:
+        """Return the store only when replay cannot bypass native proof capture."""
+
+        if self.checkpoint_store is None:
+            return None
+        if any(
+            sink is not None
+            for sink in (
+                self.bow_native_capture_sink,
+                self.htr_native_capture_sink,
+                self.matched_pair_native_capture_sink,
+            )
+        ):
+            return None
+        if self.embedding_provider is not None or self.htr_evidence_provider is not None:
+            return None
+        return self.checkpoint_store
+
+    @staticmethod
+    def _checkpoint_rows(
+        train_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+    ) -> Dict[str, Any]:
+        return {
+            "fit": row_id_identity(train_df["_oci_row_id"].to_numpy()),
+            "heldout": row_id_identity(test_df["_oci_row_id"].to_numpy()),
+        }
+
+    def _checkpointed_value(
+        self,
+        unit: str,
+        compute: Callable[[], _CheckpointValue],
+        *,
+        train_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+        parameters: Optional[Mapping[str, Any]] = None,
+        dependencies: Sequence[str] = (),
+        validator: Optional[Callable[[_CheckpointValue], None]] = None,
+        deterministic_seed: bool = False,
+    ) -> _CheckpointValue:
+        store = self._active_checkpoint_store()
+        if store is None:
+            value = compute()
+            if validator is not None:
+                validator(value)
+            return value
+        return store.run(
+            unit,
+            compute,
+            parameters=parameters,
+            dependencies=dependencies,
+            rows=self._checkpoint_rows(train_df, test_df),
+            validator=validator,
+            deterministic_seed=deterministic_seed,
+        ).value
 
     def run(self) -> None:
         logger.info("=" * 80)
@@ -1643,6 +1976,63 @@ class MultiModelForestStage1Runner:
         test_df: pd.DataFrame,
         outer_fold: int,
     ) -> _FeatureBundle:
+        def compute() -> Dict[str, Any]:
+            return _feature_bundle_checkpoint_payload(
+                self._build_feature_bundle_uncached(
+                    train_df=train_df,
+                    test_df=test_df,
+                    outer_fold=outer_fold,
+                )
+            )
+
+        def validate(payload: Mapping[str, Any]) -> None:
+            required = {
+                "x_train",
+                "x_test",
+                "w_train",
+                "w_test",
+                "x_names",
+                "w_names",
+                "feature_rows",
+                "prediction_frames",
+                "embedding_rows",
+                "metrics",
+                "handoff_evidence",
+                "inner_model_rows",
+            }
+            missing = sorted(required - set(payload))
+            if missing:
+                raise ValueError(f"feature-bundle checkpoint is missing fields: {missing}")
+            for name, expected_rows in (
+                ("x_train", len(train_df)),
+                ("w_train", len(train_df)),
+                ("x_test", len(test_df)),
+                ("w_test", len(test_df)),
+            ):
+                matrix = np.asarray(payload[name])
+                if matrix.ndim != 2 or matrix.shape[0] != expected_rows:
+                    raise ValueError(
+                        f"feature-bundle checkpoint {name} has shape {matrix.shape}; "
+                        f"expected ({expected_rows}, n_features)"
+                    )
+
+        payload = self._checkpointed_value(
+            "assembly/feature_bundle",
+            compute,
+            train_df=train_df,
+            test_df=test_df,
+            parameters={"outer_fold": int(outer_fold), "format_version": 1},
+            validator=validate,
+        )
+        return _feature_bundle_from_checkpoint(payload)
+
+    def _build_feature_bundle_uncached(
+        self,
+        *,
+        train_df: pd.DataFrame,
+        test_df: pd.DataFrame,
+        outer_fold: int,
+    ) -> _FeatureBundle:
         texts_train = _normalize_texts(train_df[self.config.text_column].fillna(""))
         texts_test = _normalize_texts(test_df[self.config.text_column].fillna(""))
         y = train_df[self.config.outcome_column].to_numpy(dtype=float)
@@ -1664,40 +2054,116 @@ class MultiModelForestStage1Runner:
         ensemble_view_results: List[Dict[str, Any]] = []
         htr_evidence: Dict[str, Any] = {}
         inner_model_rows: List[Dict[str, Any]] = []
+        nuisance_checkpoint_units: List[str] = []
 
         if self._bow_enabled():
             for view_index, view in enumerate(self.nn_config.bow_views):
-                e_train, e_test, fold_rows = self._fit_bow_binary_train_test(
-                    texts_train,
-                    texts_test,
-                    t,
-                    outer_fold=outer_fold,
-                    view=view,
-                    view_index=view_index,
-                    label_name="treatment",
+                e_train, e_test, fold_rows = self._checkpointed_value(
+                    f"bow/nuisance/view_{int(view_index):03d}_treatment",
+                    lambda: self._fit_bow_binary_train_test(
+                        texts_train,
+                        texts_test,
+                        t,
+                        outer_fold=outer_fold,
+                        view=view,
+                        view_index=view_index,
+                        label_name="treatment",
+                        train_row_ids=train_df["_oci_row_id"].to_numpy(),
+                        test_row_ids=test_df["_oci_row_id"].to_numpy(),
+                        checkpoint_namespace=(
+                            f"bow/nuisance/view_{int(view_index):03d}_treatment"
+                        ),
+                    ),
+                    train_df=train_df,
+                    test_df=test_df,
+                    parameters={
+                        "outer_fold": int(outer_fold),
+                        "view_index": int(view_index),
+                        "view": _bow_view_to_dict(view),
+                        "target": "treatment",
+                    },
+                    validator=lambda result: _validate_train_test_prediction_tuple(
+                        result,
+                        len(train_df),
+                        len(test_df),
+                        "BoW treatment nuisance",
+                    ),
+                )
+                nuisance_checkpoint_units.append(
+                    f"bow/nuisance/view_{int(view_index):03d}_treatment"
                 )
                 inner_model_rows.extend(fold_rows)
                 if str(self.config.outcome_type).lower() == "continuous":
-                    m_train, m_test, fold_rows = self._fit_bow_regression_train_test(
-                        texts_train,
-                        texts_test,
-                        y,
-                        None,
-                        outer_fold=outer_fold,
-                        view=view,
-                        view_index=view_index,
-                        target_name="outcome",
+                    m_train, m_test, fold_rows = self._checkpointed_value(
+                        f"bow/nuisance/view_{int(view_index):03d}_outcome",
+                        lambda: self._fit_bow_regression_train_test(
+                            texts_train,
+                            texts_test,
+                            y,
+                            None,
+                            outer_fold=outer_fold,
+                            view=view,
+                            view_index=view_index,
+                            target_name="outcome",
+                            train_row_ids=train_df["_oci_row_id"].to_numpy(),
+                            test_row_ids=test_df["_oci_row_id"].to_numpy(),
+                            checkpoint_namespace=(
+                                f"bow/nuisance/view_{int(view_index):03d}_outcome"
+                            ),
+                        ),
+                        train_df=train_df,
+                        test_df=test_df,
+                        parameters={
+                            "outer_fold": int(outer_fold),
+                            "view_index": int(view_index),
+                            "view": _bow_view_to_dict(view),
+                            "target": "continuous_outcome",
+                        },
+                        validator=lambda result: _validate_train_test_prediction_tuple(
+                            result,
+                            len(train_df),
+                            len(test_df),
+                            "BoW outcome nuisance",
+                        ),
+                    )
+                    nuisance_checkpoint_units.append(
+                        f"bow/nuisance/view_{int(view_index):03d}_outcome"
                     )
                     inner_model_rows.extend(fold_rows)
                 else:
-                    m_train, m_test, fold_rows = self._fit_bow_binary_train_test(
-                        texts_train,
-                        texts_test,
-                        y,
-                        outer_fold=outer_fold,
-                        view=view,
-                        view_index=view_index,
-                        label_name="outcome",
+                    m_train, m_test, fold_rows = self._checkpointed_value(
+                        f"bow/nuisance/view_{int(view_index):03d}_outcome",
+                        lambda: self._fit_bow_binary_train_test(
+                            texts_train,
+                            texts_test,
+                            y,
+                            outer_fold=outer_fold,
+                            view=view,
+                            view_index=view_index,
+                            label_name="outcome",
+                            train_row_ids=train_df["_oci_row_id"].to_numpy(),
+                            test_row_ids=test_df["_oci_row_id"].to_numpy(),
+                            checkpoint_namespace=(
+                                f"bow/nuisance/view_{int(view_index):03d}_outcome"
+                            ),
+                        ),
+                        train_df=train_df,
+                        test_df=test_df,
+                        parameters={
+                            "outer_fold": int(outer_fold),
+                            "view_index": int(view_index),
+                            "view": _bow_view_to_dict(view),
+                            "target": "binary_outcome",
+                        },
+                        validator=lambda result: _validate_train_test_prediction_tuple(
+                            result,
+                            len(train_df),
+                            len(test_df),
+                            "BoW outcome nuisance",
+                        ),
+                    )
+                    nuisance_checkpoint_units.append(
+                        f"bow/nuisance/view_{int(view_index):03d}_outcome"
                     )
                     inner_model_rows.extend(fold_rows)
                 nuisance_train.append((view.name, e_train, m_train))
@@ -1768,6 +2234,14 @@ class MultiModelForestStage1Runner:
                 htr_train_result = htr_bundle["train"]
                 htr_test_predictions = htr_bundle["test_predictions"]
                 inner_model_rows.extend(htr_bundle.get("inner_model_rows", []))
+                htr_nuisance_folds = _bounded_fold_count(
+                    self.config.architecture.agentic_attention_variable_forest.nuisance_folds,
+                    len(train_df),
+                )
+                nuisance_checkpoint_units.extend(
+                    f"htr/nuisance/fold_{fold:03d}"
+                    for fold in range(1, htr_nuisance_folds + 1)
+                )
             else:
                 htr_train_result = htr_provider.fit_nuisance(train_df, outer_fold)
                 htr_test_predictions = htr_provider.fit_nuisance_full_predict(
@@ -1912,6 +2386,46 @@ class MultiModelForestStage1Runner:
                 "target_source": "ensemble_mean_nuisance_inner_ensemble",
             }
         )
+        ensemble_payload = self._checkpointed_value(
+            "assembly/nuisance_ensemble",
+            lambda: {
+                "e_train": e_train,
+                "m_train": m_train,
+                "e_test": e_test,
+                "m_test": m_test,
+                "e_train_clip": e_train_clip,
+                "t_resid": t_resid,
+                "y_resid": y_resid,
+                "pseudo_target": pseudo_target,
+                "r_weight": r_weight,
+                "train_predictions": ensemble_nuisance_train,
+                "test_predictions": ensemble_nuisance_test,
+            },
+            train_df=train_df,
+            test_df=test_df,
+            parameters={
+                "outer_fold": int(outer_fold),
+                "sources": [item[0] for item in nuisance_train],
+                "aggregation": "unweighted_nanmean_v1",
+            },
+            dependencies=tuple(nuisance_checkpoint_units),
+            validator=lambda payload: _validate_nuisance_ensemble_payload(
+                payload,
+                len(train_df),
+                len(test_df),
+            ),
+        )
+        e_train = np.asarray(ensemble_payload["e_train"], dtype=float)
+        m_train = np.asarray(ensemble_payload["m_train"], dtype=float)
+        e_test = np.asarray(ensemble_payload["e_test"], dtype=float)
+        m_test = np.asarray(ensemble_payload["m_test"], dtype=float)
+        e_train_clip = np.asarray(ensemble_payload["e_train_clip"], dtype=float)
+        t_resid = np.asarray(ensemble_payload["t_resid"], dtype=float)
+        y_resid = np.asarray(ensemble_payload["y_resid"], dtype=float)
+        pseudo_target = np.asarray(ensemble_payload["pseudo_target"], dtype=float)
+        r_weight = np.asarray(ensemble_payload["r_weight"], dtype=float)
+        ensemble_nuisance_train = ensemble_payload["train_predictions"]
+        ensemble_nuisance_test = ensemble_payload["test_predictions"]
         if self.bow_native_capture_sink is not None:
             self.bow_native_capture_sink.record_scope_output(
                 "treatment",
@@ -2002,36 +2516,68 @@ class MultiModelForestStage1Runner:
         if self._matched_pair_bow_enabled():
             for view_index, view in enumerate(self.nn_config.bow_views):
                 try:
-                    pair_result = fit_bow_pair_uplift_train_test(
+                    pair_payload = self._checkpointed_value(
+                        f"bow/pair_uplift/view_{int(view_index):03d}",
+                        lambda: _pair_result_checkpoint_payload(
+                            fit_bow_pair_uplift_train_test(
+                                train_df=train_df,
+                                test_df=test_df,
+                                texts_train=texts_train,
+                                texts_test=texts_test,
+                                y_train=y,
+                                t_train=t,
+                                e_train=e_train,
+                                m_train=m_train,
+                                e_test=e_test,
+                                m_test=m_test,
+                                vectorizer_params=_vectorizer_params(view),
+                                model_params=_model_params(view),
+                                outer_fold=outer_fold,
+                                view_name=view.name,
+                                view_index=view_index,
+                                effect_folds=int(self.nn_config.effect_folds),
+                                propensity_caliper=float(
+                                    self.nn_config.matched_pair_propensity_caliper
+                                ),
+                                outcome_caliper=float(
+                                    self.nn_config.matched_pair_outcome_caliper
+                                ),
+                                max_controls_per_candidate=int(
+                                    self.nn_config.matched_pair_max_controls_per_candidate
+                                ),
+                                nearest_fallback_controls=int(
+                                    self.nn_config.matched_pair_nearest_fallback_controls
+                                ),
+                                l2_alpha=float(self.nn_config.matched_pair_bow_l2_alpha),
+                                max_iter=int(self.nn_config.matched_pair_bow_max_iter),
+                                top_n=int(self.nn_config.top_n_features),
+                                native_capture_sink=self.matched_pair_native_capture_sink,
+                                checkpoint_store=self._active_checkpoint_store(),
+                                checkpoint_dependencies=(
+                                    "assembly/nuisance_ensemble",
+                                ),
+                                checkpoint_namespace=(
+                                    f"bow/pair_uplift/view_{int(view_index):03d}"
+                                ),
+                            )
+                        ),
                         train_df=train_df,
                         test_df=test_df,
-                        texts_train=texts_train,
-                        texts_test=texts_test,
-                        y_train=y,
-                        t_train=t,
-                        e_train=e_train,
-                        m_train=m_train,
-                        e_test=e_test,
-                        m_test=m_test,
-                        vectorizer_params=_vectorizer_params(view),
-                        model_params=_model_params(view),
-                        outer_fold=outer_fold,
-                        view_name=view.name,
-                        view_index=view_index,
-                        effect_folds=int(self.nn_config.effect_folds),
-                        propensity_caliper=float(self.nn_config.matched_pair_propensity_caliper),
-                        outcome_caliper=float(self.nn_config.matched_pair_outcome_caliper),
-                        max_controls_per_candidate=int(
-                            self.nn_config.matched_pair_max_controls_per_candidate
+                        parameters={
+                            "outer_fold": int(outer_fold),
+                            "view_index": int(view_index),
+                            "view": _bow_view_to_dict(view),
+                            "objective": "matched_pair_uplift_delta_logit",
+                        },
+                        dependencies=("assembly/nuisance_ensemble",),
+                        validator=lambda payload: _validate_pair_result_payload(
+                            payload,
+                            len(train_df),
+                            len(test_df),
+                            "BoW matched-pair uplift",
                         ),
-                        nearest_fallback_controls=int(
-                            self.nn_config.matched_pair_nearest_fallback_controls
-                        ),
-                        l2_alpha=float(self.nn_config.matched_pair_bow_l2_alpha),
-                        max_iter=int(self.nn_config.matched_pair_bow_max_iter),
-                        top_n=int(self.nn_config.top_n_features),
-                        native_capture_sink=self.matched_pair_native_capture_sink,
                     )
+                    pair_result = _pair_result_from_checkpoint(pair_payload)
                 except Exception as exc:
                     if self.matched_pair_native_capture_sink is not None:
                         raise RuntimeError(
@@ -2320,28 +2866,74 @@ class MultiModelForestStage1Runner:
 
         if self._bow_enabled():
             for view_index, view in enumerate(self.nn_config.bow_views):
-                pseudo_train, pseudo_test, fold_rows = self._fit_bow_regression_train_test(
-                    texts_train,
-                    texts_test,
-                    pseudo_target,
-                    None,
-                    outer_fold=outer_fold,
-                    view=view,
-                    view_index=view_index,
-                    target_name="effect_pseudo_target",
-                    seed_offset=50_000,
+                pseudo_unit = f"bow/effect/view_{int(view_index):03d}_pseudo_outcome"
+                pseudo_train, pseudo_test, fold_rows = self._checkpointed_value(
+                    pseudo_unit,
+                    lambda: self._fit_bow_regression_train_test(
+                        texts_train,
+                        texts_test,
+                        pseudo_target,
+                        None,
+                        outer_fold=outer_fold,
+                        view=view,
+                        view_index=view_index,
+                        target_name="effect_pseudo_target",
+                        seed_offset=50_000,
+                        train_row_ids=train_df["_oci_row_id"].to_numpy(),
+                        test_row_ids=test_df["_oci_row_id"].to_numpy(),
+                        checkpoint_namespace=pseudo_unit,
+                        checkpoint_dependencies=("assembly/nuisance_ensemble",),
+                    ),
+                    train_df=train_df,
+                    test_df=test_df,
+                    parameters={
+                        "outer_fold": int(outer_fold),
+                        "view_index": int(view_index),
+                        "view": _bow_view_to_dict(view),
+                        "objective": "effect_pseudo_target",
+                    },
+                    dependencies=("assembly/nuisance_ensemble",),
+                    validator=lambda result: _validate_train_test_prediction_tuple(
+                        result,
+                        len(train_df),
+                        len(test_df),
+                        "BoW pseudo-outcome effect",
+                    ),
                 )
                 inner_model_rows.extend(fold_rows)
-                r_train, r_test, fold_rows = self._fit_bow_regression_train_test(
-                    texts_train,
-                    texts_test,
-                    pseudo_target,
-                    r_weight,
-                    outer_fold=outer_fold,
-                    view=view,
-                    view_index=view_index,
-                    target_name="effect_weighted_r",
-                    seed_offset=70_000,
+                weighted_unit = f"bow/effect/view_{int(view_index):03d}_weighted_r"
+                r_train, r_test, fold_rows = self._checkpointed_value(
+                    weighted_unit,
+                    lambda: self._fit_bow_regression_train_test(
+                        texts_train,
+                        texts_test,
+                        pseudo_target,
+                        r_weight,
+                        outer_fold=outer_fold,
+                        view=view,
+                        view_index=view_index,
+                        target_name="effect_weighted_r",
+                        seed_offset=70_000,
+                        train_row_ids=train_df["_oci_row_id"].to_numpy(),
+                        test_row_ids=test_df["_oci_row_id"].to_numpy(),
+                        checkpoint_namespace=weighted_unit,
+                        checkpoint_dependencies=("assembly/nuisance_ensemble",),
+                    ),
+                    train_df=train_df,
+                    test_df=test_df,
+                    parameters={
+                        "outer_fold": int(outer_fold),
+                        "view_index": int(view_index),
+                        "view": _bow_view_to_dict(view),
+                        "objective": "effect_weighted_r",
+                    },
+                    dependencies=("assembly/nuisance_ensemble",),
+                    validator=lambda result: _validate_train_test_prediction_tuple(
+                        result,
+                        len(train_df),
+                        len(test_df),
+                        "BoW weighted-R effect",
+                    ),
                 )
                 inner_model_rows.extend(fold_rows)
                 if self.bow_native_capture_sink is not None:
@@ -2423,13 +3015,35 @@ class MultiModelForestStage1Runner:
                     None,
                 )
                 if nuisance_view is not None:
-                    importance = self._fit_primary_feature_importance_models(
-                        texts=texts_train,
-                        y=y,
-                        t=t,
-                        pseudo_target=pseudo_target,
-                        pseudo_target_sample_weight=r_weight,
-                        view=view,
+                    importance = self._checkpointed_value(
+                        f"bow/importance/view_{int(view_index):03d}",
+                        lambda: self._fit_primary_feature_importance_models(
+                            texts=texts_train,
+                            y=y,
+                            t=t,
+                            pseudo_target=pseudo_target,
+                            pseudo_target_sample_weight=r_weight,
+                            view=view,
+                        ),
+                        train_df=train_df,
+                        test_df=test_df,
+                        parameters={
+                            "outer_fold": int(outer_fold),
+                            "view_index": int(view_index),
+                            "view": _bow_view_to_dict(view),
+                            "top_n": int(self.nn_config.top_n_features),
+                        },
+                        dependencies=(
+                            "assembly/nuisance_ensemble",
+                            f"bow/nuisance/view_{int(view_index):03d}_treatment",
+                            f"bow/nuisance/view_{int(view_index):03d}_outcome",
+                            pseudo_unit,
+                            weighted_unit,
+                        ),
+                        validator=lambda value: _validate_mapping_checkpoint(
+                            value,
+                            "BoW importance",
+                        ),
                     )
                     view_metrics = self._primary_bow_metrics(
                         discovery_df=train_df,
@@ -2610,14 +3224,29 @@ class MultiModelForestStage1Runner:
 
         embedding_evidence: Dict[str, Any] = {}
         if self._embedding_contrast_enabled():
-            emb = self._embedding_feature_bundle(
+            emb = self._checkpointed_value(
+                "embedding/contrast_bundle",
+                lambda: self._embedding_feature_bundle(
+                    train_df=train_df,
+                    test_df=test_df,
+                    y=y,
+                    t=t,
+                    pseudo_target=pseudo_target,
+                    t_resid=t_resid,
+                    outer_fold=outer_fold,
+                ),
                 train_df=train_df,
                 test_df=test_df,
-                y=y,
-                t=t,
-                pseudo_target=pseudo_target,
-                t_resid=t_resid,
-                outer_fold=outer_fold,
+                parameters={
+                    "outer_fold": int(outer_fold),
+                    "objective": "embedding_contrast_feature_bundle",
+                },
+                dependencies=("assembly/nuisance_ensemble",),
+                validator=lambda payload: _validate_embedding_checkpoint_payload(
+                    payload,
+                    len(train_df),
+                    len(test_df),
+                ),
             )
             for item in emb["w_features"]:
                 _append_feature(
@@ -3065,6 +3694,10 @@ class MultiModelForestStage1Runner:
         view: BoWViewConfig,
         view_index: int,
         label_name: str,
+        train_row_ids: Optional[Sequence[Any]] = None,
+        test_row_ids: Optional[Sequence[Any]] = None,
+        checkpoint_namespace: Optional[str] = None,
+        checkpoint_dependencies: Sequence[str] = (),
     ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
         labels = np.asarray(labels, dtype=int)
         oof = np.full(len(labels), np.nan, dtype=float)
@@ -3097,7 +3730,7 @@ class MultiModelForestStage1Runner:
             self._parallel_backend_name(),
         )
 
-        def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+        def compute_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
             fit_pos = np.asarray(fit_pos, dtype=int)
             heldout_pos = np.asarray(heldout_pos, dtype=int)
             vectorizer = None
@@ -3174,6 +3807,45 @@ class MultiModelForestStage1Runner:
                 },
             }
 
+        def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+            store = self._active_checkpoint_store()
+            if store is None or checkpoint_namespace is None:
+                return compute_fold(fold, fit_pos, heldout_pos)
+            fit_pos = np.asarray(fit_pos, dtype=int)
+            heldout_pos = np.asarray(heldout_pos, dtype=int)
+            fit_ids = np.asarray(
+                np.arange(len(labels)) if train_row_ids is None else train_row_ids
+            )
+            heldout_ids = np.asarray(
+                np.arange(len(texts_test)) if test_row_ids is None else test_row_ids
+            )
+            if len(fit_ids) != len(labels) or len(heldout_ids) != len(texts_test):
+                raise ValueError("BoW binary checkpoint row ID counts do not match inputs")
+            return store.run(
+                f"{checkpoint_namespace}/fold_{int(fold):03d}",
+                lambda: compute_fold(fold, fit_pos, heldout_pos),
+                parameters={
+                    "outer_fold": int(outer_fold),
+                    "inner_fold": int(fold),
+                    "total_folds": int(len(split_items)),
+                    "view_index": int(view_index),
+                    "view": _bow_view_to_dict(view),
+                    "label_name": label_name,
+                },
+                dependencies=tuple(checkpoint_dependencies),
+                rows={
+                    "fit": row_id_identity(fit_ids[fit_pos]),
+                    "validation": row_id_identity(fit_ids[heldout_pos]),
+                    "heldout": row_id_identity(heldout_ids),
+                },
+                validator=lambda payload: _validate_prediction_fold_payload(
+                    payload,
+                    len(heldout_pos),
+                    len(texts_test),
+                    "BoW binary fold",
+                ),
+            ).value
+
         fold_results = self._run_fold_tasks(run_fold, split_items)
         test_predictions = []
         evidence_rows = []
@@ -3201,6 +3873,10 @@ class MultiModelForestStage1Runner:
         view_index: int,
         target_name: str,
         seed_offset: int = 0,
+        train_row_ids: Optional[Sequence[Any]] = None,
+        test_row_ids: Optional[Sequence[Any]] = None,
+        checkpoint_namespace: Optional[str] = None,
+        checkpoint_dependencies: Sequence[str] = (),
     ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
         values = np.asarray(values, dtype=float)
         oof = np.full(len(values), np.nan, dtype=float)
@@ -3236,7 +3912,7 @@ class MultiModelForestStage1Runner:
             self._parallel_backend_name(),
         )
 
-        def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+        def compute_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
             fit_pos = np.asarray(fit_pos, dtype=int)
             heldout_pos = np.asarray(heldout_pos, dtype=int)
             vectorizer = _make_bow_vectorizer(vectorizer_params)
@@ -3307,6 +3983,47 @@ class MultiModelForestStage1Runner:
                     "prediction_provenance": "inner_fold_model_heldout_and_outer_test",
                 },
             }
+
+        def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
+            store = self._active_checkpoint_store()
+            if store is None or checkpoint_namespace is None:
+                return compute_fold(fold, fit_pos, heldout_pos)
+            fit_pos = np.asarray(fit_pos, dtype=int)
+            heldout_pos = np.asarray(heldout_pos, dtype=int)
+            fit_ids = np.asarray(
+                np.arange(len(values)) if train_row_ids is None else train_row_ids
+            )
+            heldout_ids = np.asarray(
+                np.arange(len(texts_test)) if test_row_ids is None else test_row_ids
+            )
+            if len(fit_ids) != len(values) or len(heldout_ids) != len(texts_test):
+                raise ValueError("BoW regression checkpoint row ID counts do not match inputs")
+            return store.run(
+                f"{checkpoint_namespace}/fold_{int(fold):03d}",
+                lambda: compute_fold(fold, fit_pos, heldout_pos),
+                parameters={
+                    "outer_fold": int(outer_fold),
+                    "inner_fold": int(fold),
+                    "total_folds": int(len(split_items)),
+                    "view_index": int(view_index),
+                    "view": _bow_view_to_dict(view),
+                    "target_name": target_name,
+                    "seed_offset": int(seed_offset),
+                    "sample_weighted": sample_weight is not None,
+                },
+                dependencies=tuple(checkpoint_dependencies),
+                rows={
+                    "fit": row_id_identity(fit_ids[fit_pos]),
+                    "validation": row_id_identity(fit_ids[heldout_pos]),
+                    "heldout": row_id_identity(heldout_ids),
+                },
+                validator=lambda payload: _validate_prediction_fold_payload(
+                    payload,
+                    len(heldout_pos),
+                    len(texts_test),
+                    "BoW regression fold",
+                ),
+            ).value
 
         fold_results = self._run_fold_tasks(run_fold, split_items)
         test_predictions = []
@@ -4079,6 +4796,7 @@ class MultiModelForestStage1Runner:
             self._default_htr_provider.native_pair_capture_sink = (
                 self.matched_pair_native_capture_sink
             )
+            self._default_htr_provider.checkpoint_store = self._active_checkpoint_store()
         return self._default_htr_provider
 
     def _sync_htr_fold_parallelism(self) -> None:

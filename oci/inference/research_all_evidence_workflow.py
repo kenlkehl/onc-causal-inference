@@ -890,8 +890,81 @@ def _run_one_text_model_context(
         resolve_multi_model_forest_stage1_parallel_plan,
         run_multi_model_forest_handoff_contexts,
     )
+    from .stage1_checkpointing import (
+        Stage1CheckpointStore,
+        dataset_file_identity,
+        lightweight_fingerprint,
+        row_id_identity,
+    )
 
     context_dir.mkdir(parents=True, exist_ok=True)
+    dataset_path = Path(str(getattr(applied_config, "dataset_path", "") or ""))
+    if dataset_path.is_file():
+        source_identity: Mapping[str, Any] = dataset_file_identity(dataset_path)
+    else:
+        source_identity = {
+            "path": str(dataset_path),
+            "size": None,
+            "mtime_ns": None,
+            "loaded_rows": int(len(dataset)),
+            "loaded_columns": [str(column) for column in dataset.columns],
+        }
+    # Exact production specs always carry both arrays.  The empty fallback
+    # keeps this low-level helper usable with lightweight mocked runners.
+    train_idx = np.asarray(spec.get("train_idx", []), dtype=int)
+    heldout_idx = np.asarray(spec.get("heldout_idx", []), dtype=int)
+    context_rows = {
+        "fit": row_id_identity(train_idx),
+        "heldout": row_id_identity(heldout_idx),
+    }
+    scientific_config = asdict(applied_config)
+    scientific_config.pop("dataset_path", None)
+    architecture_identity = scientific_config.get("architecture")
+    if isinstance(architecture_identity, MutableMapping):
+        for model_key in ("multi_model_forest", "multi_model_agentic_forest"):
+            model_identity = architecture_identity.get(model_key)
+            if isinstance(model_identity, MutableMapping):
+                for runtime_key in (
+                    "cpus_total",
+                    "htr_jobs_per_gpu",
+                    "outer_parallelism",
+                    "candidate_consistency_parallelism",
+                    "fold_parallelism",
+                    "bow_fold_parallelism",
+                    "htr_fold_parallelism",
+                    "bow_parallel_backend",
+                    "outer_parallel_backend",
+                ):
+                    model_identity.pop(runtime_key, None)
+                embedding_identity = model_identity.get("embedding_contrast")
+                if isinstance(embedding_identity, MutableMapping):
+                    embedding_identity.pop("device", None)
+        attention_identity = architecture_identity.get(
+            "agentic_attention_variable_forest"
+        )
+        if isinstance(attention_identity, MutableMapping):
+            for runtime_key in (
+                "outer_parallelism",
+                "fold_parallelism",
+                "candidate_proposal_parallelism",
+            ):
+                attention_identity.pop(runtime_key, None)
+    checkpoint_store = Stage1CheckpointStore(
+        context_dir / "checkpoints" / "v1",
+        context_identity={
+            "scope_id": str(spec["scope_id"]),
+            "scope": str(spec["scope"]),
+            "fold_key": int(spec["fold_key"]),
+            "outer_fold": int(spec["outer_fold"]),
+            "inner_fold": spec.get("inner_fold"),
+            "rows": context_rows,
+            "dataset": source_identity,
+            # The full applied configuration is small, but only its digest is
+            # persisted so checkpoint metadata cannot copy configured secrets.
+            "applied_config_fingerprint": lightweight_fingerprint(scientific_config),
+        },
+        base_seed=int(getattr(applied_config, "seed", 0) or 0),
+    )
     mm_config = applied_config.architecture.multi_model_forest
     gpu_ids = _cuda_ids((device,))
     plan = resolve_multi_model_forest_stage1_parallel_plan(
@@ -902,42 +975,65 @@ def _run_one_text_model_context(
         htr_enabled=bool(mm_config.htr_evidence_enabled),
         embedding_enabled=bool(mm_config.embedding_contrast.enabled),
     )
-    rows = run_multi_model_forest_handoff_contexts(
-        dataset=dataset,
-        config=applied_config,
-        contexts=[dict(spec)],
-        handoff_dir=context_dir,
-        plan=plan,
-        base_device=torch.device(device),
-    )
-    if len(rows) != 1:
-        raise RuntimeError(f"text model context {spec['scope_id']} returned {len(rows)} rows")
-    nonfinite_paths: list[str] = []
-    row = _normalize_evidence_json(
-        dict(rows[0]),
-        nonfinite_paths=nonfinite_paths,
-    )
-    if nonfinite_paths:
-        preview = ", ".join(nonfinite_paths[:8])
-        if len(nonfinite_paths) > 8:
-            preview += f", ... ({len(nonfinite_paths) - 8} more)"
-        LOGGER.warning(
-            "text_models context=%s converted %s non-finite evidence value(s) "
-            "to JSON null at %s",
-            spec["scope_id"],
-            len(nonfinite_paths),
-            preview,
+    with checkpoint_store.context_lock():
+        def compute_handoff_rows() -> list[dict[str, Any]]:
+            return run_multi_model_forest_handoff_contexts(
+                dataset=dataset,
+                config=applied_config,
+                contexts=[dict(spec)],
+                handoff_dir=context_dir,
+                plan=plan,
+                base_device=torch.device(device),
+                checkpoint_store=checkpoint_store,
+            )
+
+        def validate_handoff_rows(value: Any) -> None:
+            if not isinstance(value, list) or len(value) != 1:
+                count = len(value) if isinstance(value, list) else type(value).__name__
+                raise ValueError(
+                    f"text model context {spec['scope_id']} returned {count} rows"
+                )
+
+        rows = checkpoint_store.run(
+            "assembly/handoff_context",
+            compute_handoff_rows,
+            parameters={
+                "scope": str(spec["scope"]),
+                "fold_key": int(spec["fold_key"]),
+                "outer_fold": int(spec["outer_fold"]),
+                "inner_fold": spec.get("inner_fold"),
+            },
+            rows=context_rows,
+            validator=validate_handoff_rows,
+        ).value
+        nonfinite_paths: list[str] = []
+        row = _normalize_evidence_json(
+            dict(rows[0]),
+            nonfinite_paths=nonfinite_paths,
         )
-    _write_json(context_dir / "evidence.json", row)
-    _write_json(
-        context_dir / "complete.json",
-        {
-            "status": "complete",
-            "completed_at": _now(),
-            "artifacts": ["evidence.json", "worker_artifacts/"],
-        },
-    )
-    return row
+        if nonfinite_paths:
+            preview = ", ".join(nonfinite_paths[:8])
+            if len(nonfinite_paths) > 8:
+                preview += f", ... ({len(nonfinite_paths) - 8} more)"
+            LOGGER.warning(
+                "text_models context=%s converted %s non-finite evidence value(s) "
+                "to JSON null at %s",
+                spec["scope_id"],
+                len(nonfinite_paths),
+                preview,
+            )
+        _write_json(context_dir / "evidence.json", row)
+        _write_json(
+            context_dir / "complete.json",
+            {
+                "status": "complete",
+                "completed_at": _now(),
+                "artifacts": ["evidence.json", "worker_artifacts/", "checkpoints/v1/"],
+                "checkpoint_schema": "stage1_context_checkpoint_v1",
+            },
+        )
+        checkpoint_store.mark_context_complete()
+        return row
 
 
 def _tfidf_component(

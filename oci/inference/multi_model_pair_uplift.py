@@ -25,6 +25,7 @@ from .sparse_text_modeling import (
     _model_feature_scores,
     _top_feature_rows,
 )
+from .stage1_checkpointing import Stage1CheckpointStore, row_id_identity
 
 logger = logging.getLogger(__name__)
 
@@ -550,7 +551,7 @@ class RidgeDeltaBoWPairModel:
         }
 
 
-def fit_bow_pair_uplift_train_test(
+def _fit_bow_pair_uplift_fold(
     *,
     train_df: pd.DataFrame,
     test_df: pd.DataFrame,
@@ -563,11 +564,162 @@ def fit_bow_pair_uplift_train_test(
     e_test: np.ndarray,
     m_test: np.ndarray,
     vectorizer_params: Dict[str, Any],
+    outer_fold: int,
+    view_name: str,
+    view_index: int,
+    inner_fold: int,
+    fit_pos: np.ndarray,
+    heldout_pos: np.ndarray,
+    propensity_caliper: float,
+    outcome_caliper: float,
+    max_controls_per_candidate: int,
+    nearest_fallback_controls: int,
+    l2_alpha: float,
+    max_iter: int,
+    native_capture_sink: Optional[Any],
+) -> Dict[str, Any]:
+    """Fit and score one independently checkpointable BoW pair fold."""
+
+    fit_pos = np.asarray(fit_pos, dtype=int)
+    heldout_pos = np.asarray(heldout_pos, dtype=int)
+    fit_df = train_df.iloc[fit_pos].reset_index(drop=True)
+    heldout_df = train_df.iloc[heldout_pos].reset_index(drop=True)
+    fit_pairs = build_training_pairs(
+        fit_df,
+        texts=[texts_train[int(pos)] for pos in fit_pos],
+        treatment=t_train[fit_pos],
+        outcome=y_train[fit_pos],
+        propensity=e_train[fit_pos],
+        outcome_prob=m_train[fit_pos],
+        propensity_caliper=propensity_caliper,
+        outcome_caliper=outcome_caliper,
+    )
+    model = OffsetLogitBoWPairModel(
+        vectorizer_params=vectorizer_params,
+        l2_alpha=l2_alpha,
+        max_iter=max_iter,
+        random_state=31_000 + int(inner_fold),
+    ).fit(fit_pairs)
+    control_pos = fit_pos[t_train[fit_pos].astype(int) == 0]
+    control_df = train_df.iloc[control_pos].reset_index(drop=True)
+    heldout_pairs = build_candidate_pairs(
+        heldout_df,
+        control_df,
+        candidate_texts=[texts_train[int(pos)] for pos in heldout_pos],
+        control_texts=[texts_train[int(pos)] for pos in control_pos],
+        candidate_propensity=e_train[heldout_pos],
+        candidate_outcome_prob=m_train[heldout_pos],
+        control_propensity=e_train[control_pos],
+        control_outcome_prob=m_train[control_pos],
+        propensity_caliper=propensity_caliper,
+        outcome_caliper=outcome_caliper,
+        max_controls_per_candidate=max_controls_per_candidate,
+        nearest_fallback_controls=nearest_fallback_controls,
+    )
+    heldout_pair_delta = model.predict_delta_logit(heldout_pairs)
+    fold_delta, fold_prob, fold_n = aggregate_pair_predictions(
+        heldout_pairs,
+        heldout_pair_delta,
+        len(heldout_df),
+    )
+    test_pairs = build_candidate_pairs(
+        test_df,
+        control_df,
+        candidate_texts=texts_test,
+        control_texts=[texts_train[int(pos)] for pos in control_pos],
+        candidate_propensity=e_test,
+        candidate_outcome_prob=m_test,
+        control_propensity=e_train[control_pos],
+        control_outcome_prob=m_train[control_pos],
+        propensity_caliper=propensity_caliper,
+        outcome_caliper=outcome_caliper,
+        max_controls_per_candidate=max_controls_per_candidate,
+        nearest_fallback_controls=nearest_fallback_controls,
+    )
+    test_pair_delta = model.predict_delta_logit(test_pairs)
+    fold_test_delta, fold_test_prob, fold_test_n = aggregate_pair_predictions(
+        test_pairs,
+        test_pair_delta,
+        len(test_df),
+    )
+    if native_capture_sink is not None:
+        native_capture_sink.record_bow_pair_fold(
+            view_name=view_name,
+            view_index=view_index,
+            fold=inner_fold,
+            fit_pos=fit_pos,
+            validation_pos=heldout_pos,
+            fit_pairs=fit_pairs,
+            validation_pairs=heldout_pairs,
+            heldout_pairs=test_pairs,
+            model=model,
+            validation_pair_delta=heldout_pair_delta,
+            validation_delta=fold_delta,
+            validation_probability=fold_prob,
+            validation_n_controls=fold_n,
+            heldout_pair_delta=test_pair_delta,
+            heldout_delta=fold_test_delta,
+            heldout_probability=fold_test_prob,
+            heldout_n_controls=fold_test_n,
+        )
+    treated_eval = (t_train[heldout_pos].astype(int) == 1) & np.isfinite(fold_prob)
+    evidence = {
+        "outer_fold": int(outer_fold),
+        "inner_fold": int(inner_fold),
+        "source_family": "bow_pair_uplift",
+        "view_name": str(view_name),
+        "objective": "matched_pair_uplift_delta_logit",
+        "target_name": "treated_observed_outcome",
+        "train_rows": int(len(fit_pos)),
+        "heldout_rows": int(len(heldout_pos)),
+        "outer_test_rows": int(len(test_df)),
+        "matched_pair_train_rows": int(len(fit_pairs)),
+        "heldout_candidate_pair_rows": int(len(heldout_pairs)),
+        "outer_test_candidate_pair_rows": int(len(test_pairs)),
+        "heldout_treated_auroc": _safe_roc(
+            y_train[heldout_pos][treated_eval],
+            fold_prob[treated_eval],
+        ),
+        "prediction_provenance": "inner_fold_pair_model_heldout_and_outer_test",
+    }
+    prediction_frame = pd.DataFrame()
+    if not heldout_pairs.empty:
+        prediction_frame = heldout_pairs[["candidate_row_id", "control_row_id"]].copy()
+        prediction_frame["outer_fold"] = int(outer_fold)
+        prediction_frame["inner_fold"] = int(inner_fold)
+        prediction_frame["split_role"] = "train_inner_oof_pairs"
+        prediction_frame["source_name"] = f"bow__{view_name}__pair_uplift"
+        prediction_frame["pair_delta_logit"] = heldout_pair_delta
+        prediction_frame["pair_pred_prob"] = expit(
+            heldout_pairs["base_logit"].to_numpy(dtype=float) + heldout_pair_delta
+        )
+    return {
+        "heldout_pos": heldout_pos,
+        "fold_delta": fold_delta,
+        "fold_prob": fold_prob,
+        "fold_n": fold_n,
+        "test_delta": fold_test_delta,
+        "test_prob": fold_test_prob,
+        "test_n": fold_test_n,
+        "attention_rows": [],
+        "evidence": evidence,
+        "prediction_frame": prediction_frame,
+    }
+
+
+def _fit_bow_pair_full_importance(
+    *,
+    train_df: pd.DataFrame,
+    texts_train: Sequence[str],
+    y_train: np.ndarray,
+    t_train: np.ndarray,
+    e_train: np.ndarray,
+    m_train: np.ndarray,
+    vectorizer_params: Dict[str, Any],
     model_params: Dict[str, Any],
     outer_fold: int,
     view_name: str,
     view_index: int,
-    effect_folds: int,
     propensity_caliper: float,
     outcome_caliper: float,
     max_controls_per_candidate: int,
@@ -575,156 +727,8 @@ def fit_bow_pair_uplift_train_test(
     l2_alpha: float,
     max_iter: int,
     top_n: int,
-    native_capture_sink: Optional[Any] = None,
-) -> PairUpliftFitResult:
-    y_train = np.asarray(y_train, dtype=float)
-    t_train = np.asarray(t_train, dtype=float)
-    e_train = np.asarray(e_train, dtype=float)
-    m_train = np.asarray(m_train, dtype=float)
-    e_test = np.asarray(e_test, dtype=float)
-    m_test = np.asarray(m_test, dtype=float)
-    folds = _bounded_folds(effect_folds, len(train_df))
-    splitter = KFold(
-        n_splits=folds,
-        shuffle=True,
-        random_state=91_000 + 100 * int(outer_fold) + 1_000 * int(view_index),
-    )
-
-    train_delta = np.full(len(train_df), np.nan, dtype=float)
-    train_prob = np.full(len(train_df), np.nan, dtype=float)
-    train_n_controls = np.zeros(len(train_df), dtype=float)
-    test_deltas = []
-    test_probs = []
-    test_n_controls = []
-    evidence_rows: List[Dict[str, Any]] = []
-    prediction_frames = []
-
-    for inner_fold, (fit_pos, heldout_pos) in enumerate(splitter.split(train_df), start=1):
-        fit_pos = np.asarray(fit_pos, dtype=int)
-        heldout_pos = np.asarray(heldout_pos, dtype=int)
-        fit_df = train_df.iloc[fit_pos].reset_index(drop=True)
-        heldout_df = train_df.iloc[heldout_pos].reset_index(drop=True)
-        fit_pairs = build_training_pairs(
-            fit_df,
-            texts=[texts_train[int(pos)] for pos in fit_pos],
-            treatment=t_train[fit_pos],
-            outcome=y_train[fit_pos],
-            propensity=e_train[fit_pos],
-            outcome_prob=m_train[fit_pos],
-            propensity_caliper=propensity_caliper,
-            outcome_caliper=outcome_caliper,
-        )
-        model = OffsetLogitBoWPairModel(
-            vectorizer_params=vectorizer_params,
-            l2_alpha=l2_alpha,
-            max_iter=max_iter,
-            random_state=31_000 + int(inner_fold),
-        ).fit(fit_pairs)
-        control_mask = t_train[fit_pos].astype(int) == 0
-        control_pos = fit_pos[control_mask]
-        control_df = train_df.iloc[control_pos].reset_index(drop=True)
-        heldout_pairs = build_candidate_pairs(
-            heldout_df,
-            control_df,
-            candidate_texts=[texts_train[int(pos)] for pos in heldout_pos],
-            control_texts=[texts_train[int(pos)] for pos in control_pos],
-            candidate_propensity=e_train[heldout_pos],
-            candidate_outcome_prob=m_train[heldout_pos],
-            control_propensity=e_train[control_pos],
-            control_outcome_prob=m_train[control_pos],
-            propensity_caliper=propensity_caliper,
-            outcome_caliper=outcome_caliper,
-            max_controls_per_candidate=max_controls_per_candidate,
-            nearest_fallback_controls=nearest_fallback_controls,
-        )
-        heldout_pair_delta = model.predict_delta_logit(heldout_pairs)
-        fold_delta, fold_prob, fold_n = aggregate_pair_predictions(
-            heldout_pairs,
-            heldout_pair_delta,
-            len(heldout_df),
-        )
-        train_delta[heldout_pos] = fold_delta
-        train_prob[heldout_pos] = fold_prob
-        train_n_controls[heldout_pos] = fold_n
-
-        test_pairs = build_candidate_pairs(
-            test_df,
-            control_df,
-            candidate_texts=texts_test,
-            control_texts=[texts_train[int(pos)] for pos in control_pos],
-            candidate_propensity=e_test,
-            candidate_outcome_prob=m_test,
-            control_propensity=e_train[control_pos],
-            control_outcome_prob=m_train[control_pos],
-            propensity_caliper=propensity_caliper,
-            outcome_caliper=outcome_caliper,
-            max_controls_per_candidate=max_controls_per_candidate,
-            nearest_fallback_controls=nearest_fallback_controls,
-        )
-        test_pair_delta = model.predict_delta_logit(test_pairs)
-        fold_test_delta, fold_test_prob, fold_test_n = aggregate_pair_predictions(
-            test_pairs,
-            test_pair_delta,
-            len(test_df),
-        )
-        test_deltas.append(fold_test_delta)
-        test_probs.append(fold_test_prob)
-        test_n_controls.append(fold_test_n)
-        if native_capture_sink is not None:
-            native_capture_sink.record_bow_pair_fold(
-                view_name=view_name,
-                view_index=view_index,
-                fold=inner_fold,
-                fit_pos=fit_pos,
-                validation_pos=heldout_pos,
-                fit_pairs=fit_pairs,
-                validation_pairs=heldout_pairs,
-                heldout_pairs=test_pairs,
-                model=model,
-                validation_pair_delta=heldout_pair_delta,
-                validation_delta=fold_delta,
-                validation_probability=fold_prob,
-                validation_n_controls=fold_n,
-                heldout_pair_delta=test_pair_delta,
-                heldout_delta=fold_test_delta,
-                heldout_probability=fold_test_prob,
-                heldout_n_controls=fold_test_n,
-            )
-        treated_eval = (t_train[heldout_pos].astype(int) == 1) & np.isfinite(fold_prob)
-        evidence_rows.append(
-            {
-                "outer_fold": int(outer_fold),
-                "inner_fold": int(inner_fold),
-                "source_family": "bow_pair_uplift",
-                "view_name": str(view_name),
-                "objective": "matched_pair_uplift_delta_logit",
-                "target_name": "treated_observed_outcome",
-                "train_rows": int(len(fit_pos)),
-                "heldout_rows": int(len(heldout_pos)),
-                "outer_test_rows": int(len(test_df)),
-                "matched_pair_train_rows": int(len(fit_pairs)),
-                "heldout_candidate_pair_rows": int(len(heldout_pairs)),
-                "outer_test_candidate_pair_rows": int(len(test_pairs)),
-                "heldout_treated_auroc": _safe_roc(y_train[heldout_pos][treated_eval], fold_prob[treated_eval]),
-                "prediction_provenance": "inner_fold_pair_model_heldout_and_outer_test",
-            }
-        )
-        if not heldout_pairs.empty:
-            frame = heldout_pairs[["candidate_row_id", "control_row_id"]].copy()
-            frame["outer_fold"] = int(outer_fold)
-            frame["inner_fold"] = int(inner_fold)
-            frame["split_role"] = "train_inner_oof_pairs"
-            frame["source_name"] = f"bow__{view_name}__pair_uplift"
-            frame["pair_delta_logit"] = heldout_pair_delta
-            frame["pair_pred_prob"] = expit(
-                heldout_pairs["base_logit"].to_numpy(dtype=float) + heldout_pair_delta
-            )
-            prediction_frames.append(frame)
-
-    test_delta = np.nanmean(np.vstack(test_deltas), axis=0) if test_deltas else np.nan
-    test_prob = np.nanmean(np.vstack(test_probs), axis=0) if test_probs else np.nan
-    test_n = np.nanmean(np.vstack(test_n_controls), axis=0) if test_n_controls else np.nan
-
+    native_capture_sink: Optional[Any],
+) -> Dict[str, Any]:
     full_pairs = build_training_pairs(
         train_df,
         texts=texts_train,
@@ -778,9 +782,207 @@ def fit_bow_pair_uplift_train_test(
             },
         }
     )
+    return {
+        "importance": importance,
+        "n_matched_training_pairs": int(len(full_pairs)),
+    }
+
+
+def _validate_bow_pair_importance_checkpoint(payload: Dict[str, Any]) -> None:
+    if not isinstance(payload.get("importance"), dict):
+        raise ValueError("BoW pair importance checkpoint is invalid")
+    if int(payload.get("n_matched_training_pairs", -1)) < 0:
+        raise ValueError("BoW pair importance checkpoint has an invalid pair count")
+
+
+def fit_bow_pair_uplift_train_test(
+    *,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    texts_train: Sequence[str],
+    texts_test: Sequence[str],
+    y_train: np.ndarray,
+    t_train: np.ndarray,
+    e_train: np.ndarray,
+    m_train: np.ndarray,
+    e_test: np.ndarray,
+    m_test: np.ndarray,
+    vectorizer_params: Dict[str, Any],
+    model_params: Dict[str, Any],
+    outer_fold: int,
+    view_name: str,
+    view_index: int,
+    effect_folds: int,
+    propensity_caliper: float,
+    outcome_caliper: float,
+    max_controls_per_candidate: int,
+    nearest_fallback_controls: int,
+    l2_alpha: float,
+    max_iter: int,
+    top_n: int,
+    native_capture_sink: Optional[Any] = None,
+    checkpoint_store: Optional[Stage1CheckpointStore] = None,
+    checkpoint_dependencies: Sequence[str] = (),
+    checkpoint_namespace: Optional[str] = None,
+) -> PairUpliftFitResult:
+    y_train = np.asarray(y_train, dtype=float)
+    t_train = np.asarray(t_train, dtype=float)
+    e_train = np.asarray(e_train, dtype=float)
+    m_train = np.asarray(m_train, dtype=float)
+    e_test = np.asarray(e_test, dtype=float)
+    m_test = np.asarray(m_test, dtype=float)
+    folds = _bounded_folds(effect_folds, len(train_df))
+    splitter = KFold(
+        n_splits=folds,
+        shuffle=True,
+        random_state=91_000 + 100 * int(outer_fold) + 1_000 * int(view_index),
+    )
+
+    train_delta = np.full(len(train_df), np.nan, dtype=float)
+    train_prob = np.full(len(train_df), np.nan, dtype=float)
+    train_n_controls = np.zeros(len(train_df), dtype=float)
+    test_deltas = []
+    test_probs = []
+    test_n_controls = []
+    evidence_rows: List[Dict[str, Any]] = []
+    prediction_frames = []
+
+    for inner_fold, (fit_pos, heldout_pos) in enumerate(splitter.split(train_df), start=1):
+        fit_pos = np.asarray(fit_pos, dtype=int)
+        heldout_pos = np.asarray(heldout_pos, dtype=int)
+
+        def compute_fold() -> Dict[str, Any]:
+            return _fit_bow_pair_uplift_fold(
+                train_df=train_df,
+                test_df=test_df,
+                texts_train=texts_train,
+                texts_test=texts_test,
+                y_train=y_train,
+                t_train=t_train,
+                e_train=e_train,
+                m_train=m_train,
+                e_test=e_test,
+                m_test=m_test,
+                vectorizer_params=vectorizer_params,
+                outer_fold=outer_fold,
+                view_name=view_name,
+                view_index=view_index,
+                inner_fold=inner_fold,
+                fit_pos=fit_pos,
+                heldout_pos=heldout_pos,
+                propensity_caliper=propensity_caliper,
+                outcome_caliper=outcome_caliper,
+                max_controls_per_candidate=max_controls_per_candidate,
+                nearest_fallback_controls=nearest_fallback_controls,
+                l2_alpha=l2_alpha,
+                max_iter=max_iter,
+                native_capture_sink=native_capture_sink,
+            )
+
+        if (
+            checkpoint_store is None
+            or checkpoint_namespace is None
+            or native_capture_sink is not None
+        ):
+            fold_result = compute_fold()
+        else:
+            fold_result = checkpoint_store.run(
+                f"{checkpoint_namespace}/fold_{int(inner_fold):03d}",
+                compute_fold,
+                parameters={
+                    "outer_fold": int(outer_fold),
+                    "inner_fold": int(inner_fold),
+                    "total_folds": int(folds),
+                    "view_name": str(view_name),
+                    "view_index": int(view_index),
+                    "propensity_caliper": float(propensity_caliper),
+                    "outcome_caliper": float(outcome_caliper),
+                    "max_controls_per_candidate": int(max_controls_per_candidate),
+                    "nearest_fallback_controls": int(nearest_fallback_controls),
+                    "l2_alpha": float(l2_alpha),
+                    "max_iter": int(max_iter),
+                },
+                dependencies=tuple(checkpoint_dependencies),
+                rows={
+                    "fit": row_id_identity(train_df.iloc[fit_pos]["_oci_row_id"].to_numpy()),
+                    "validation": row_id_identity(
+                        train_df.iloc[heldout_pos]["_oci_row_id"].to_numpy()
+                    ),
+                    "heldout": row_id_identity(test_df["_oci_row_id"].to_numpy()),
+                },
+                validator=lambda payload: _validate_pair_fold_checkpoint(
+                    payload,
+                    heldout_rows=len(heldout_pos),
+                    test_rows=len(test_df),
+                ),
+            ).value
+        result_heldout_pos = np.asarray(fold_result["heldout_pos"], dtype=int)
+        train_delta[result_heldout_pos] = fold_result["fold_delta"]
+        train_prob[result_heldout_pos] = fold_result["fold_prob"]
+        train_n_controls[result_heldout_pos] = fold_result["fold_n"]
+        test_deltas.append(np.asarray(fold_result["test_delta"], dtype=float))
+        test_probs.append(np.asarray(fold_result["test_prob"], dtype=float))
+        test_n_controls.append(np.asarray(fold_result["test_n"], dtype=float))
+        evidence_rows.append(fold_result["evidence"])
+        if not fold_result["prediction_frame"].empty:
+            prediction_frames.append(fold_result["prediction_frame"])
+
+    test_delta = np.nanmean(np.vstack(test_deltas), axis=0) if test_deltas else np.nan
+    test_prob = np.nanmean(np.vstack(test_probs), axis=0) if test_probs else np.nan
+    test_n = np.nanmean(np.vstack(test_n_controls), axis=0) if test_n_controls else np.nan
+
+    def compute_full_importance() -> Dict[str, Any]:
+        return _fit_bow_pair_full_importance(
+            train_df=train_df,
+            texts_train=texts_train,
+            y_train=y_train,
+            t_train=t_train,
+            e_train=e_train,
+            m_train=m_train,
+            vectorizer_params=vectorizer_params,
+            model_params=model_params,
+            outer_fold=outer_fold,
+            view_name=view_name,
+            view_index=view_index,
+            propensity_caliper=propensity_caliper,
+            outcome_caliper=outcome_caliper,
+            max_controls_per_candidate=max_controls_per_candidate,
+            nearest_fallback_controls=nearest_fallback_controls,
+            l2_alpha=l2_alpha,
+            max_iter=max_iter,
+            top_n=top_n,
+            native_capture_sink=native_capture_sink,
+        )
+
+    if (
+        checkpoint_store is None
+        or checkpoint_namespace is None
+        or native_capture_sink is not None
+    ):
+        importance_payload = compute_full_importance()
+    else:
+        fold_dependencies = tuple(
+            f"{checkpoint_namespace}/fold_{inner_fold:03d}"
+            for inner_fold in range(1, folds + 1)
+        )
+        importance_payload = checkpoint_store.run(
+            f"{checkpoint_namespace}/full_importance",
+            compute_full_importance,
+            parameters={
+                "outer_fold": int(outer_fold),
+                "view_name": str(view_name),
+                "view_index": int(view_index),
+                "top_n": int(top_n),
+            },
+            dependencies=fold_dependencies,
+            rows={"fit": row_id_identity(train_df["_oci_row_id"].to_numpy())},
+            validator=_validate_bow_pair_importance_checkpoint,
+        ).value
+    importance = dict(importance_payload["importance"])
+    n_matched_training_pairs = int(importance_payload["n_matched_training_pairs"])
     treated_eval = (t_train.astype(int) == 1) & np.isfinite(train_prob)
     metrics = {
-        "n_train_matched_pairs": int(len(full_pairs)),
+        "n_train_matched_pairs": n_matched_training_pairs,
         "train_candidate_control_mean": _finite_or_none(np.nanmean(train_n_controls)),
         "test_candidate_control_mean": _finite_or_none(np.nanmean(test_n)),
         "treated_oof": _binary_metrics(y_train[treated_eval], train_prob[treated_eval]),
@@ -1019,6 +1221,199 @@ def _htr_pair_attention_rows(
     return rows
 
 
+def _fit_htr_pair_uplift_fold(
+    *,
+    runner: Any,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    texts_train: Sequence[str],
+    texts_test: Sequence[str],
+    y_train: np.ndarray,
+    t_train: np.ndarray,
+    e_train: np.ndarray,
+    m_train: np.ndarray,
+    e_test: np.ndarray,
+    m_test: np.ndarray,
+    outer_fold: int,
+    inner_fold: int,
+    folds: int,
+    fit_pos: np.ndarray,
+    heldout_pos: np.ndarray,
+    propensity_caliper: float,
+    outcome_caliper: float,
+    max_controls_per_candidate: int,
+    nearest_fallback_controls: int,
+    max_attention_pairs: int,
+    native_capture_sink: Optional[Any],
+) -> Dict[str, Any]:
+    """Fit and score one independently checkpointable HTR pair fold."""
+
+    fit_pos = np.asarray(fit_pos, dtype=int)
+    heldout_pos = np.asarray(heldout_pos, dtype=int)
+    fit_df = train_df.iloc[fit_pos].reset_index(drop=True)
+    heldout_df = train_df.iloc[heldout_pos].reset_index(drop=True)
+    fit_pairs = build_training_pairs(
+        fit_df,
+        texts=[texts_train[int(pos)] for pos in fit_pos],
+        treatment=t_train[fit_pos],
+        outcome=y_train[fit_pos],
+        propensity=e_train[fit_pos],
+        outcome_prob=m_train[fit_pos],
+        propensity_caliper=propensity_caliper,
+        outcome_caliper=outcome_caliper,
+    )
+    model: Optional[HTRPairUpliftNet] = None
+    try:
+        model = _train_htr_pair_model(
+            runner=runner,
+            pairs=fit_pairs,
+            outer_fold=outer_fold,
+            inner_fold=inner_fold,
+            total_folds=folds,
+        )
+        control_pos = fit_pos[t_train[fit_pos].astype(int) == 0]
+        control_df = train_df.iloc[control_pos].reset_index(drop=True)
+        heldout_pairs = build_candidate_pairs(
+            heldout_df,
+            control_df,
+            candidate_texts=[texts_train[int(pos)] for pos in heldout_pos],
+            control_texts=[texts_train[int(pos)] for pos in control_pos],
+            candidate_propensity=e_train[heldout_pos],
+            candidate_outcome_prob=m_train[heldout_pos],
+            control_propensity=e_train[control_pos],
+            control_outcome_prob=m_train[control_pos],
+            propensity_caliper=propensity_caliper,
+            outcome_caliper=outcome_caliper,
+            max_controls_per_candidate=max_controls_per_candidate,
+            nearest_fallback_controls=nearest_fallback_controls,
+        )
+        heldout_pair_delta = _predict_htr_pair_delta(
+            runner=runner,
+            model=model,
+            pairs=heldout_pairs,
+        )
+        fold_delta, fold_prob, fold_n = aggregate_pair_predictions(
+            heldout_pairs,
+            heldout_pair_delta,
+            len(heldout_df),
+        )
+        attention_rows = _htr_pair_attention_rows(
+            runner=runner,
+            model=model,
+            pairs=heldout_pairs,
+            pair_delta=heldout_pair_delta,
+            outer_fold=outer_fold,
+            inner_fold=inner_fold,
+            max_pairs=max_attention_pairs,
+        )
+
+        test_pairs = build_candidate_pairs(
+            test_df,
+            control_df,
+            candidate_texts=texts_test,
+            control_texts=[texts_train[int(pos)] for pos in control_pos],
+            candidate_propensity=e_test,
+            candidate_outcome_prob=m_test,
+            control_propensity=e_train[control_pos],
+            control_outcome_prob=m_train[control_pos],
+            propensity_caliper=propensity_caliper,
+            outcome_caliper=outcome_caliper,
+            max_controls_per_candidate=max_controls_per_candidate,
+            nearest_fallback_controls=nearest_fallback_controls,
+        )
+        test_pair_delta = _predict_htr_pair_delta(
+            runner=runner,
+            model=model,
+            pairs=test_pairs,
+        )
+        fold_test_delta, fold_test_prob, fold_test_n = aggregate_pair_predictions(
+            test_pairs,
+            test_pair_delta,
+            len(test_df),
+        )
+        if native_capture_sink is not None:
+            native_capture_sink.record_htr_pair_fold(
+                fold=inner_fold,
+                fit_pos=fit_pos,
+                validation_pos=heldout_pos,
+                fit_pairs=fit_pairs,
+                validation_pairs=heldout_pairs,
+                heldout_pairs=test_pairs,
+                model=model,
+                validation_pair_delta=heldout_pair_delta,
+                validation_delta=fold_delta,
+                validation_probability=fold_prob,
+                validation_n_controls=fold_n,
+                heldout_pair_delta=test_pair_delta,
+                heldout_delta=fold_test_delta,
+                heldout_probability=fold_test_prob,
+                heldout_n_controls=fold_test_n,
+            )
+        treated_eval = (t_train[heldout_pos].astype(int) == 1) & np.isfinite(fold_prob)
+        evidence = {
+            "outer_fold": int(outer_fold),
+            "inner_fold": int(inner_fold),
+            "source_family": "htr_pair_uplift",
+            "objective": "matched_pair_uplift_delta_logit",
+            "target_name": "treated_observed_outcome",
+            "train_rows": int(len(fit_pos)),
+            "heldout_rows": int(len(heldout_pos)),
+            "outer_test_rows": int(len(test_df)),
+            "matched_pair_train_rows": int(len(fit_pairs)),
+            "heldout_candidate_pair_rows": int(len(heldout_pairs)),
+            "outer_test_candidate_pair_rows": int(len(test_pairs)),
+            "heldout_treated_auroc": _safe_roc(
+                y_train[heldout_pos][treated_eval],
+                fold_prob[treated_eval],
+            ),
+            "prediction_provenance": "inner_fold_pair_model_heldout_and_outer_test",
+        }
+        prediction_frame = pd.DataFrame()
+        if not heldout_pairs.empty:
+            prediction_frame = heldout_pairs[["candidate_row_id", "control_row_id"]].copy()
+            prediction_frame["outer_fold"] = int(outer_fold)
+            prediction_frame["inner_fold"] = int(inner_fold)
+            prediction_frame["split_role"] = "train_inner_oof_pairs"
+            prediction_frame["source_name"] = "htr__pair_uplift"
+            prediction_frame["pair_delta_logit"] = heldout_pair_delta
+            prediction_frame["pair_pred_prob"] = expit(
+                heldout_pairs["base_logit"].to_numpy(dtype=float) + heldout_pair_delta
+            )
+        return {
+            "heldout_pos": heldout_pos,
+            "fold_delta": fold_delta,
+            "fold_prob": fold_prob,
+            "fold_n": fold_n,
+            "test_delta": fold_test_delta,
+            "test_prob": fold_test_prob,
+            "test_n": fold_test_n,
+            "attention_rows": attention_rows,
+            "evidence": evidence,
+            "prediction_frame": prediction_frame,
+        }
+    finally:
+        if model is not None and hasattr(runner, "_cleanup_model"):
+            runner._cleanup_model(model)
+
+
+def _validate_pair_fold_checkpoint(
+    payload: Dict[str, Any],
+    *,
+    heldout_rows: int,
+    test_rows: int,
+) -> None:
+    if len(np.asarray(payload["heldout_pos"])) != int(heldout_rows):
+        raise ValueError("pair checkpoint held-out positions changed")
+    for name in ("fold_delta", "fold_prob", "fold_n"):
+        if len(np.asarray(payload[name])) != int(heldout_rows):
+            raise ValueError(f"pair checkpoint {name} row count changed")
+    for name in ("test_delta", "test_prob", "test_n"):
+        if len(np.asarray(payload[name])) != int(test_rows):
+            raise ValueError(f"pair checkpoint {name} row count changed")
+    if not isinstance(payload.get("prediction_frame"), pd.DataFrame):
+        raise ValueError("pair checkpoint prediction frame is invalid")
+
+
 def fit_htr_pair_uplift_train_test(
     *,
     runner: Any,
@@ -1040,6 +1435,8 @@ def fit_htr_pair_uplift_train_test(
     nearest_fallback_controls: int,
     max_attention_pairs: int,
     native_capture_sink: Optional[Any] = None,
+    checkpoint_store: Optional[Stage1CheckpointStore] = None,
+    checkpoint_dependencies: Sequence[str] = (),
 ) -> PairUpliftFitResult:
     y_train = np.asarray(y_train, dtype=float)
     t_train = np.asarray(t_train, dtype=float)
@@ -1063,148 +1460,74 @@ def fit_htr_pair_uplift_train_test(
     for inner_fold, (fit_pos, heldout_pos) in enumerate(splitter.split(train_df), start=1):
         fit_pos = np.asarray(fit_pos, dtype=int)
         heldout_pos = np.asarray(heldout_pos, dtype=int)
-        fit_df = train_df.iloc[fit_pos].reset_index(drop=True)
-        heldout_df = train_df.iloc[heldout_pos].reset_index(drop=True)
-        fit_pairs = build_training_pairs(
-            fit_df,
-            texts=[texts_train[int(pos)] for pos in fit_pos],
-            treatment=t_train[fit_pos],
-            outcome=y_train[fit_pos],
-            propensity=e_train[fit_pos],
-            outcome_prob=m_train[fit_pos],
-            propensity_caliper=propensity_caliper,
-            outcome_caliper=outcome_caliper,
-        )
-        model: Optional[HTRPairUpliftNet] = None
-        try:
-            model = _train_htr_pair_model(
+
+        def compute_fold() -> Dict[str, Any]:
+            return _fit_htr_pair_uplift_fold(
                 runner=runner,
-                pairs=fit_pairs,
+                train_df=train_df,
+                test_df=test_df,
+                texts_train=texts_train,
+                texts_test=texts_test,
+                y_train=y_train,
+                t_train=t_train,
+                e_train=e_train,
+                m_train=m_train,
+                e_test=e_test,
+                m_test=m_test,
                 outer_fold=outer_fold,
                 inner_fold=inner_fold,
-                total_folds=folds,
-            )
-            control_pos = fit_pos[t_train[fit_pos].astype(int) == 0]
-            control_df = train_df.iloc[control_pos].reset_index(drop=True)
-            heldout_pairs = build_candidate_pairs(
-                heldout_df,
-                control_df,
-                candidate_texts=[texts_train[int(pos)] for pos in heldout_pos],
-                control_texts=[texts_train[int(pos)] for pos in control_pos],
-                candidate_propensity=e_train[heldout_pos],
-                candidate_outcome_prob=m_train[heldout_pos],
-                control_propensity=e_train[control_pos],
-                control_outcome_prob=m_train[control_pos],
+                folds=folds,
+                fit_pos=fit_pos,
+                heldout_pos=heldout_pos,
                 propensity_caliper=propensity_caliper,
                 outcome_caliper=outcome_caliper,
                 max_controls_per_candidate=max_controls_per_candidate,
                 nearest_fallback_controls=nearest_fallback_controls,
+                max_attention_pairs=max_attention_pairs,
+                native_capture_sink=native_capture_sink,
             )
-            heldout_pair_delta = _predict_htr_pair_delta(
-                runner=runner,
-                model=model,
-                pairs=heldout_pairs,
-            )
-            fold_delta, fold_prob, fold_n = aggregate_pair_predictions(
-                heldout_pairs,
-                heldout_pair_delta,
-                len(heldout_df),
-            )
-            train_delta[heldout_pos] = fold_delta
-            train_prob[heldout_pos] = fold_prob
-            train_n_controls[heldout_pos] = fold_n
-            attention_rows.extend(
-                _htr_pair_attention_rows(
-                    runner=runner,
-                    model=model,
-                    pairs=heldout_pairs,
-                    pair_delta=heldout_pair_delta,
-                    outer_fold=outer_fold,
-                    inner_fold=inner_fold,
-                    max_pairs=max_attention_pairs,
-                )
-            )
-
-            test_pairs = build_candidate_pairs(
-                test_df,
-                control_df,
-                candidate_texts=texts_test,
-                control_texts=[texts_train[int(pos)] for pos in control_pos],
-                candidate_propensity=e_test,
-                candidate_outcome_prob=m_test,
-                control_propensity=e_train[control_pos],
-                control_outcome_prob=m_train[control_pos],
-                propensity_caliper=propensity_caliper,
-                outcome_caliper=outcome_caliper,
-                max_controls_per_candidate=max_controls_per_candidate,
-                nearest_fallback_controls=nearest_fallback_controls,
-            )
-            test_pair_delta = _predict_htr_pair_delta(
-                runner=runner,
-                model=model,
-                pairs=test_pairs,
-            )
-            fold_test_delta, fold_test_prob, fold_test_n = aggregate_pair_predictions(
-                test_pairs,
-                test_pair_delta,
-                len(test_df),
-            )
-            test_deltas.append(fold_test_delta)
-            test_probs.append(fold_test_prob)
-            test_n_controls.append(fold_test_n)
-            if native_capture_sink is not None:
-                native_capture_sink.record_htr_pair_fold(
-                    fold=inner_fold,
-                    fit_pos=fit_pos,
-                    validation_pos=heldout_pos,
-                    fit_pairs=fit_pairs,
-                    validation_pairs=heldout_pairs,
-                    heldout_pairs=test_pairs,
-                    model=model,
-                    validation_pair_delta=heldout_pair_delta,
-                    validation_delta=fold_delta,
-                    validation_probability=fold_prob,
-                    validation_n_controls=fold_n,
-                    heldout_pair_delta=test_pair_delta,
-                    heldout_delta=fold_test_delta,
-                    heldout_probability=fold_test_prob,
-                    heldout_n_controls=fold_test_n,
-                )
-            treated_eval = (t_train[heldout_pos].astype(int) == 1) & np.isfinite(fold_prob)
-            evidence_rows.append(
-                {
+        if checkpoint_store is None or native_capture_sink is not None:
+            fold_result = compute_fold()
+        else:
+            fold_result = checkpoint_store.run(
+                f"htr/pair_uplift/fold_{int(inner_fold):03d}",
+                compute_fold,
+                parameters={
                     "outer_fold": int(outer_fold),
                     "inner_fold": int(inner_fold),
-                    "source_family": "htr_pair_uplift",
-                    "objective": "matched_pair_uplift_delta_logit",
-                    "target_name": "treated_observed_outcome",
-                    "train_rows": int(len(fit_pos)),
-                    "heldout_rows": int(len(heldout_pos)),
-                    "outer_test_rows": int(len(test_df)),
-                    "matched_pair_train_rows": int(len(fit_pairs)),
-                    "heldout_candidate_pair_rows": int(len(heldout_pairs)),
-                    "outer_test_candidate_pair_rows": int(len(test_pairs)),
-                    "heldout_treated_auroc": _safe_roc(
-                        y_train[heldout_pos][treated_eval],
-                        fold_prob[treated_eval],
+                    "total_folds": int(folds),
+                    "propensity_caliper": float(propensity_caliper),
+                    "outcome_caliper": float(outcome_caliper),
+                    "max_controls_per_candidate": int(max_controls_per_candidate),
+                    "nearest_fallback_controls": int(nearest_fallback_controls),
+                    "max_attention_pairs": int(max_attention_pairs),
+                },
+                dependencies=tuple(checkpoint_dependencies),
+                rows={
+                    "fit": row_id_identity(train_df.iloc[fit_pos]["_oci_row_id"].to_numpy()),
+                    "validation": row_id_identity(
+                        train_df.iloc[heldout_pos]["_oci_row_id"].to_numpy()
                     ),
-                    "prediction_provenance": "inner_fold_pair_model_heldout_and_outer_test",
-                }
-            )
-            if not heldout_pairs.empty:
-                frame = heldout_pairs[["candidate_row_id", "control_row_id"]].copy()
-                frame["outer_fold"] = int(outer_fold)
-                frame["inner_fold"] = int(inner_fold)
-                frame["split_role"] = "train_inner_oof_pairs"
-                frame["source_name"] = "htr__pair_uplift"
-                frame["pair_delta_logit"] = heldout_pair_delta
-                frame["pair_pred_prob"] = expit(
-                    heldout_pairs["base_logit"].to_numpy(dtype=float) + heldout_pair_delta
-                )
-                prediction_frames.append(frame)
-        finally:
-            if model is not None and hasattr(runner, "_cleanup_model"):
-                runner._cleanup_model(model)
+                    "heldout": row_id_identity(test_df["_oci_row_id"].to_numpy()),
+                },
+                validator=lambda payload: _validate_pair_fold_checkpoint(
+                    payload,
+                    heldout_rows=len(heldout_pos),
+                    test_rows=len(test_df),
+                ),
+                deterministic_seed=True,
+            ).value
+        result_heldout_pos = np.asarray(fold_result["heldout_pos"], dtype=int)
+        train_delta[result_heldout_pos] = fold_result["fold_delta"]
+        train_prob[result_heldout_pos] = fold_result["fold_prob"]
+        train_n_controls[result_heldout_pos] = fold_result["fold_n"]
+        test_deltas.append(np.asarray(fold_result["test_delta"], dtype=float))
+        test_probs.append(np.asarray(fold_result["test_prob"], dtype=float))
+        test_n_controls.append(np.asarray(fold_result["test_n"], dtype=float))
+        attention_rows.extend(fold_result["attention_rows"])
+        evidence_rows.append(fold_result["evidence"])
+        if not fold_result["prediction_frame"].empty:
+            prediction_frames.append(fold_result["prediction_frame"])
 
     test_delta = np.nanmean(np.vstack(test_deltas), axis=0) if test_deltas else np.nan
     test_prob = np.nanmean(np.vstack(test_probs), axis=0) if test_probs else np.nan

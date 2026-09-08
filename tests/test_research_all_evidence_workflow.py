@@ -282,6 +282,63 @@ def test_text_model_context_serializes_nonfinite_diagnostics_as_null(
     assert "converted 3 non-finite evidence value(s) to JSON null" in caplog.text
 
 
+def test_text_model_context_resumes_from_final_substep_checkpoint(tmp_path, monkeypatch):
+    raw, _config = _inputs(tmp_path, components=("text_models",))
+    config = compile_config(raw, config_dir=tmp_path)
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
+    calls = 0
+
+    def run_contexts(**_kwargs):
+        nonlocal calls
+        calls += 1
+        return [{"outer_fold": 1, "scope": "full_outer_train", "metrics": {}}]
+
+    monkeypatch.setattr(
+        multi_model_stage1,
+        "run_multi_model_forest_handoff_contexts",
+        run_contexts,
+    )
+    context_dir = tmp_path / "resumable_context"
+    spec = {
+        "scope_id": "outer_001_full",
+        "fold_key": 1,
+        "outer_fold": 1,
+        "scope": "full_outer_train",
+        "train_idx": np.asarray([0, 1, 2, 3]),
+        "heldout_idx": np.asarray([4, 5]),
+    }
+
+    first = all_evidence_workflow._run_one_text_model_context(
+        dataset=context.dataset,
+        applied_config=context.applied_config,
+        spec=spec,
+        context_dir=context_dir,
+        device="cpu",
+        cpu_workers=1,
+    )
+    (context_dir / "complete.json").unlink()
+    second = all_evidence_workflow._run_one_text_model_context(
+        dataset=context.dataset,
+        applied_config=context.applied_config,
+        spec=spec,
+        context_dir=context_dir,
+        device="cpu",
+        cpu_workers=1,
+    )
+
+    assert calls == 1
+    assert second == first
+    progress = json.loads(
+        (
+            context_dir
+            / "checkpoints"
+            / "v1"
+            / "checkpoint_progress.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert progress["units"]["assembly/handoff_context"]["status"] == "reused"
+
+
 def test_text_model_handoff_row_omits_empty_htr_evidence():
     from oci.inference.multi_model_agentic_forest import (
         _agentic_discovery_handoff_row,
