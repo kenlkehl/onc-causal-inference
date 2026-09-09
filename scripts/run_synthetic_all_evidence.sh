@@ -22,6 +22,8 @@ gpu_limit="${GPU_COUNT:-auto}"
 physical_gpus="${PHYSICAL_GPUS:-}"
 stage1_workers="${STAGE1_WORKERS:-auto}"
 stage2_workers="${STAGE2_WORKERS:-32}"
+stage2_request_timeout="${STAGE2_REQUEST_TIMEOUT:-}"
+stage2_request_attempt_timeout="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-}"
 stage2_model="${STAGE2_MODEL:-}"
 stage2_extraction_model="${STAGE2_EXTRACTION_MODEL:-}"
 stage2_extraction_workers="${STAGE2_EXTRACTION_WORKERS:-}"
@@ -286,6 +288,12 @@ elif [[ -n "${stage2_extraction_endpoint}" ]]; then
     if [[ -n "${stage2_extraction_model}" ]]; then
         stage2_policy_args+=(--stage2-extraction-model "${stage2_extraction_model}")
     fi
+fi
+if [[ -n "${stage2_request_timeout}" ]]; then
+    stage2_policy_args+=(--set "stage2.request_timeout=${stage2_request_timeout}")
+fi
+if [[ -n "${stage2_request_attempt_timeout}" ]]; then
+    stage2_policy_args+=(--set "stage2.request_attempt_timeout=${stage2_request_attempt_timeout}")
 fi
 if [[ -n "${stage2_max_tokens}" ]]; then
     stage2_policy_args+=(--stage2-max-tokens "${stage2_max_tokens}")

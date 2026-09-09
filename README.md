@@ -123,8 +123,13 @@ GPU_COUNT=8 \
 
 `GPU_COUNT` and `PHYSICAL_GPUS` are mutually exclusive. The wrappers select all
 visible GPUs by default because their `MIN_FREE_GPU_GB` default is `0`. Stage 2
-runs independent outer folds concurrently and defaults to 32 globally bounded
-endpoint workers.
+runs independent outer folds concurrently. The one-confounder/one-modifier
+launcher defaults to 4 globally bounded endpoint workers, a 900-second HTTP
+attempt timeout, and a 2700-second logical request timeout for slow reasoning
+servers. The five-confounder/five-modifier launcher retains 32 workers and the
+core 300/900-second timeouts. Override these runtime settings with
+`STAGE2_WORKERS`, `STAGE2_REQUEST_ATTEMPT_TIMEOUT`, and `STAGE2_REQUEST_TIMEOUT`
+(timeouts are in seconds).
 
 Advanced overrides are `MIN_FREE_GPU_GB`, `STAGE1_WORKERS`, `STAGE2_WORKERS`,
 `DISABLE_HTR`, `STAGE1_ARCHITECTURES`, and `STAGE2_ENDPOINT` (set it explicitly
@@ -145,9 +150,12 @@ After a run has a completed `handoff/evidence.jsonl` checkpoint, either launcher
 automatically resumes in Stage 2-only mode under the default or an explicitly
 configured nonempty `STAGE2_ENDPOINT`.
 That path does not inspect or reserve local GPUs: it passes `--devices cpu` for
-workflow bookkeeping and uses 32 endpoint workers by default (or
+workflow bookkeeping and uses the launcher's default endpoint worker count (or
 `STAGE2_WORKERS` when set). Local GPU eligibility and `MIN_FREE_GPU_GB` apply
-only while Stage 1 still needs to run.
+only while Stage 1 still needs to run. To move a resumed run to another server,
+change `STAGE2_ENDPOINT` and keep the same served `STAGE2_MODEL` identifier and
+scientific settings. Endpoint addresses, worker counts, and request timeouts do
+not invalidate completed interpretation checkpoints.
 
 Both launchers preset Stage 2 to consolidation batches of 20, extraction
 feature batches of 10, five shifted-alphabetical plus up to fifty seeded-shuffle
@@ -908,8 +916,12 @@ For Qwen 3.8, the model-agnostic `high` policy is translated to the endpoint's
 wire-level effort enum and uses the family-specific hard-off controls.
 
 A logical request, including transport retries and validator-guided repair
-turns, is bounded by `request_timeout` (900 seconds by default). Each HTTP call
-is bounded by `request_attempt_timeout` (300 seconds by default), so a
+turns, is bounded by `request_timeout` (900 seconds by default in the core
+configuration). The clock starts after acquiring a global request slot; time
+waiting locally for that slot is excluded and logged separately. The request
+holds its slot through retries and response repairs, so they do not requeue
+behind other folds. Server-side queueing still consumes the request budget.
+Each HTTP call is bounded by `request_attempt_timeout` (300 seconds by default), so a
 straggling endpoint can be abandoned and retried. A transport failure receives
 up to `transport_max_attempts` attempts (3 by default). A completed response
 that fails JSON parsing or schema validation receives up to

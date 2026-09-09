@@ -489,7 +489,8 @@ def test_stage2_round_robins_requests_and_transport_retries_across_endpoints(mon
     ]
 
 
-def test_stage2_workers_bound_completion_concurrency_globally():
+@pytest.mark.parametrize("logical_request", [False, True])
+def test_stage2_workers_bound_completion_concurrency_globally(logical_request):
     lock = threading.Lock()
     release = threading.Event()
     saturated = threading.Event()
@@ -521,10 +522,15 @@ def test_stage2_workers_bound_completion_concurrency_globally():
     )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=6) as executor:
-        futures = [
-            executor.submit(runner.completion, [], runner.config)
-            for _ in range(6)
-        ]
+        def request():
+            if logical_request:
+                return stage2_workflow._request_json(
+                    messages=[], config=runner.config,
+                    completion=runner.completion, validate=dict,
+                )
+            return runner.completion([], runner.config)
+
+        futures = [executor.submit(request) for _ in range(6)]
         try:
             assert saturated.wait(timeout=2.0)
             with lock:
@@ -532,7 +538,9 @@ def test_stage2_workers_bound_completion_concurrency_globally():
                 assert peak == 2
         finally:
             release.set()
-        assert [future.result(timeout=2.0) for future in futures] == ["{}"] * 6
+        assert [future.result(timeout=2.0) for future in futures] == (
+            [{}] * 6 if logical_request else ["{}"] * 6
+        )
 
 
 def test_run_wrapper_keeps_managed_servers_alive_for_stage2_and_cleans_up(

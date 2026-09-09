@@ -21,11 +21,11 @@ import re
 import threading
 import time
 from collections import Counter, defaultdict
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from urllib.parse import urlparse
 
 import numpy as np
@@ -2817,6 +2817,19 @@ class _ConcurrencyLimitedCompletion:
         self.completion = completion
         self._semaphore = threading.BoundedSemaphore(max(1, int(max_concurrency)))
 
+    @contextmanager
+    def request_slot(self) -> Iterator[CompletionFunction]:
+        queued_at = time.monotonic()
+        with self._semaphore:
+            waited = time.monotonic() - queued_at
+            if waited >= 1.0:
+                LOGGER.info(
+                    "Stage 2 request admitted after %.1fs waiting for a local slot; "
+                    "queue time is excluded from the logical request deadline",
+                    waited,
+                )
+            yield self.completion
+
     def __call__(
         self,
         messages: Sequence[Mapping[str, str]],
@@ -3130,6 +3143,25 @@ def _request_json(
     conservative_validation_fallback: Mapping[str, Any] | None = None,
     fallback_after_same_error: int = 3,
 ) -> dict[str, Any]:
+    if isinstance(completion, _ConcurrencyLimitedCompletion):
+        # Admit the entire logical request before starting its deadline. Keep
+        # the slot through transport retries and semantic repairs so neither
+        # can be starved by other folds while its deadline keeps running.
+        with completion.request_slot() as admitted_completion:
+            return _request_json(
+                messages=messages,
+                config=config,
+                completion=admitted_completion,
+                validate=validate,
+                request_kind=request_kind,
+                prompt_token_counter=prompt_token_counter,
+                context_window_tokens=context_window_tokens,
+                context_margin_tokens=context_margin_tokens,
+                repair_context=repair_context,
+                validation_event_observer=validation_event_observer,
+                conservative_validation_fallback=conservative_validation_fallback,
+                fallback_after_same_error=fallback_after_same_error,
+            )
     request_policy = _stage2_request_policy(config, request_kind)
     request_config = replace(
         config,

@@ -429,3 +429,124 @@ def test_managed_vllm_pools_reject_overlapping_internal_ranges(
             internal_port_base=40_000,
         ),
     )
+
+
+def test_logical_request_excludes_queue_time_and_keeps_slot_through_retries(monkeypatch):
+    clock = [0.0]
+    slot_entries = []
+    slot_held = [False]
+    calls = []
+    events = []
+
+    class BusySemaphore:
+        def __enter__(self):
+            assert not slot_held[0]
+            # Waiting longer than the entire request budget must be harmless.
+            clock[0] += 100.0
+            slot_entries.append(clock[0])
+            slot_held[0] = True
+
+        def __exit__(self, *_args):
+            slot_held[0] = False
+
+    class TemporaryTransportError(Exception):
+        pass
+
+    def completion(messages, config):
+        assert slot_held[0]
+        calls.append((config.request_timeout, config.runtime_request_deadline))
+        assert config.runtime_request_kind == "extraction"
+        clock[0] += 2.0
+        if len(calls) == 1:
+            raise TemporaryTransportError("slow server")
+        if len(calls) == 2:
+            return "invalid JSON"
+        assert "repair sentinel" in messages[-1]["content"]
+        return '{"ok": true}'
+
+    limiter = stage2_workflow._ConcurrencyLimitedCompletion(completion, 1)
+    monkeypatch.setattr(limiter, "_semaphore", BusySemaphore())
+    monkeypatch.setattr(stage2_workflow.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        stage2_workflow.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
+    )
+    monkeypatch.setattr(
+        stage2_workflow, "_is_retryable_transport_error",
+        lambda exc: isinstance(exc, TemporaryTransportError),
+    )
+    config = PlainHandoffStage2Config(
+        endpoint="http://stage2.test/v1", model="test-model",
+        request_timeout=10.0, request_attempt_timeout=4.0, transport_retry_backoff=1.0,
+    )
+    result = stage2_workflow._request_json(
+        messages=[{"role": "user", "content": "Return JSON."}],
+        config=config, completion=limiter, validate=dict,
+        request_kind="extraction",
+        repair_context={"allowed_feature_ids": ["repair sentinel"]},
+        validation_event_observer=events.append,
+    )
+    assert result == {"ok": True}
+    assert slot_entries == [100.0]
+    assert calls == [(4.0, 110.0)] * 3
+    assert clock[0] == 107.0
+    assert not slot_held[0]
+    assert len(events) == 1
+
+
+def test_logical_request_releases_slot_on_deadline_failure(monkeypatch):
+    clock = [0.0]
+    calls = []
+
+    class TemporaryTransportError(Exception):
+        pass
+
+    def completion(_messages, _config):
+        calls.append("called")
+        clock[0] += 11.0
+        raise TemporaryTransportError("slow server")
+
+    monkeypatch.setattr(stage2_workflow.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        stage2_workflow, "_is_retryable_transport_error",
+        lambda exc: isinstance(exc, TemporaryTransportError),
+    )
+    limiter = stage2_workflow._ConcurrencyLimitedCompletion(completion, 1)
+    config = PlainHandoffStage2Config(
+        endpoint="http://stage2.test/v1", model="test-model", request_timeout=10.0,
+    )
+    with pytest.raises(Stage2RequestExhaustedError, match="deadline") as error:
+        stage2_workflow._request_json(
+            messages=[], config=config, completion=limiter, validate=dict,
+        )
+    assert isinstance(error.value.__cause__, TemporaryTransportError)
+    assert calls == ["called"]
+    assert limiter._semaphore.acquire(blocking=False)
+    limiter._semaphore.release()
+
+
+def test_leaf_checkpoint_survives_endpoint_and_runtime_budget_changes(tmp_path):
+    from dataclasses import replace
+
+    config = PlainHandoffStage2Config(
+        endpoint="http://old-server.test/v1", model="same-model", workers=32,
+    )
+    kwargs = dict(
+        output_dir=tmp_path / "initial",
+        input_value={"phase": "initial_interpretation", "packets": []},
+        messages=[{"role": "user", "content": "Return JSON."}],
+        validate=dict,
+    )
+    result = stage2_workflow._checkpointed_request_json(
+        **kwargs, config=config, completion=lambda *_args: '{"ok": true}',
+    )
+
+    def should_not_call(*_args):
+        pytest.fail("A server/runtime-only change must reuse the saved LLM response")
+
+    moved = replace(
+        config, endpoint="http://new-server.test/v1", workers=4,
+        request_timeout=2700.0, request_attempt_timeout=900.0,
+    )
+    assert stage2_workflow._checkpointed_request_json(
+        **kwargs, config=moved, completion=should_not_call,
+    ) == result

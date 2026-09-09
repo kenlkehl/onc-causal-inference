@@ -4,8 +4,15 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
 
-def test_example_wrappers_run_both_stages_by_default(tmp_path: Path):
+
+@pytest.mark.parametrize("runtime_overrides", [
+    {},
+    {"STAGE2_WORKERS": "8", "STAGE2_REQUEST_TIMEOUT": "3600",
+     "STAGE2_REQUEST_ATTEMPT_TIMEOUT": "1200"},
+])
+def test_example_wrappers_run_both_stages_by_default(tmp_path: Path, runtime_overrides):
     repo_root = Path(__file__).resolve().parents[1]
 
     for launcher in ("run_one_conf_one_mod.sh", "run_five_conf_five_mod.sh"):
@@ -37,6 +44,7 @@ fi
                 "PHYSICAL_GPUS": "",
             }
         )
+        environment.update(runtime_overrides)
         completed = subprocess.run(
             ["bash", str(repo_root / launcher), str(output_dir)],
             cwd=repo_root,
@@ -46,7 +54,16 @@ fi
             text=True,
         )
 
-        workflow = invocation_log.read_text(encoding="utf-8").splitlines()[-1]
+        invocations = invocation_log.read_text(encoding="utf-8").splitlines()
+        workflow = invocations[-1]
+        if runtime_overrides:
+            assert "--stage2-workers 8" in invocations[-2]
+            assert "stage2.request_attempt_timeout=1200" in workflow
+            assert "stage2.request_timeout=3600" in workflow
+        elif launcher == "run_one_conf_one_mod.sh":
+            assert "--stage2-workers 4" in invocations[-2]
+            assert "stage2.request_attempt_timeout=900" in workflow
+            assert "stage2.request_timeout=2700" in workflow
         assert "research_all_evidence_workflow" in workflow
         assert "--stage2-endpoint http://127.0.0.1:8010/v1" in workflow
         assert "--stage2-extraction-endpoint http://127.0.0.1:8020/v1" in workflow
@@ -91,6 +108,8 @@ fi
             "STAGE2_CLUSTER_SIMILARITY_THRESHOLD": "0.7",
             "STAGE2_CLUSTER_CONSENSUS_FRACTION": "0.8",
             "STAGE2_MAX_TOKENS": "150000",
+            "STAGE2_REQUEST_TIMEOUT": "3600",
+            "STAGE2_REQUEST_ATTEMPT_TIMEOUT": "1200",
             "STAGE2_EXTRACTION_MAX_TOKENS": "70000",
             "STAGE2_WORKERS": "",
             "STAGE2_VLLM_SERVERS": "0",
@@ -130,6 +149,8 @@ fi
     assert "--stage2-cluster-similarity-threshold 0.7" in invocations[1]
     assert "--stage2-cluster-consensus-fraction 0.8" in invocations[1]
     assert "--stage2-max-tokens 150000" in invocations[1]
+    assert "stage2.request_timeout=3600" in invocations[1]
+    assert "stage2.request_attempt_timeout=1200" in invocations[1]
     assert "--stage2-extraction-max-tokens 70000" in invocations[1]
     assert (
         "CUDA devices:   not required for endpoint-backed Stage 2" in completed.stdout
