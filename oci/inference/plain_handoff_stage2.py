@@ -2952,7 +2952,11 @@ def _completion_with_transport_retries(
                 raise cause
             if remaining_attempts <= 0:
                 raise Stage2RequestExhaustedError(
-                    f"Stage 2 transport exhausted {max_attempts} attempt(s)"
+                    f"Stage 2 transport exhausted {max_attempts} attempt(s); "
+                    f"kind={config.runtime_request_kind} endpoint={config.endpoint} "
+                    f"model={config.model} "
+                    f"attempt_timeout={config.request_attempt_timeout:g}s "
+                    f"request_timeout={config.request_timeout:g}s"
                 ) from cause
             remaining = logical_deadline - time.monotonic()
             if remaining <= 0:

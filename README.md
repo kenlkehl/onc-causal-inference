@@ -124,8 +124,8 @@ GPU_COUNT=8 \
 `GPU_COUNT` and `PHYSICAL_GPUS` are mutually exclusive. The wrappers select all
 visible GPUs by default because their `MIN_FREE_GPU_GB` default is `0`. Stage 2
 runs independent outer folds concurrently. The one-confounder/one-modifier
-launcher defaults to 4 globally bounded endpoint workers, a 900-second HTTP
-attempt timeout, and a 2700-second logical request timeout for slow reasoning
+launcher defaults to 4 globally bounded endpoint workers, an 1800-second HTTP
+attempt timeout, and a 6000-second logical request timeout for slow reasoning
 servers. The five-confounder/five-modifier launcher retains 32 workers and the
 core 300/900-second timeouts. Override these runtime settings with
 `STAGE2_WORKERS`, `STAGE2_REQUEST_ATTEMPT_TIMEOUT`, and `STAGE2_REQUEST_TIMEOUT`

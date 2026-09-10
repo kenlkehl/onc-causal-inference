@@ -62,8 +62,8 @@ fi
             assert "stage2.request_timeout=3600" in workflow
         elif launcher == "run_one_conf_one_mod.sh":
             assert "--stage2-workers 4" in invocations[-2]
-            assert "stage2.request_attempt_timeout=900" in workflow
-            assert "stage2.request_timeout=2700" in workflow
+            assert "stage2.request_attempt_timeout=1800" in workflow
+            assert "stage2.request_timeout=6000" in workflow
         assert "research_all_evidence_workflow" in workflow
         assert "--stage2-endpoint http://127.0.0.1:8010/v1" in workflow
         assert "--stage2-extraction-endpoint http://127.0.0.1:8020/v1" in workflow

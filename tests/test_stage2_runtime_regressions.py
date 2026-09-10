@@ -524,6 +524,56 @@ def test_logical_request_releases_slot_on_deadline_failure(monkeypatch):
     limiter._semaphore.release()
 
 
+@pytest.mark.parametrize("request_kind", ["interpretation", "extraction"])
+@pytest.mark.parametrize("recover", [True, False])
+def test_slow_server_budget_allows_three_full_attempts(monkeypatch, request_kind, recover):
+    clock = [0.0]
+    calls = []
+    runner = _runner(
+        request_timeout=6000.0,
+        request_attempt_timeout=1800.0,
+        extraction_llm=Stage2ExtractionLLMConfig(
+            endpoint="http://extractor.test/v1", model="extractor", workers=4,
+        ),
+    )
+    config = runner.extraction_request_config if request_kind == "extraction" else runner.config
+    assert config.request_timeout == 6000.0
+    assert config.request_attempt_timeout == 1800.0
+
+    from openai import APITimeoutError
+    import httpx
+
+    def completion(_messages, attempt_config):
+        calls.append(attempt_config.request_timeout)
+        assert attempt_config.runtime_request_kind == request_kind
+        clock[0] += attempt_config.request_timeout
+        if recover and len(calls) == 3:
+            return '{"ok": true}'
+        raise APITimeoutError(request=httpx.Request("POST", config.endpoint))
+
+    monkeypatch.setattr(stage2_workflow.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        stage2_workflow.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
+    )
+    limiter = stage2_workflow._ConcurrencyLimitedCompletion(completion, 1)
+    kwargs = dict(
+        messages=[], config=config, completion=limiter, validate=dict,
+        request_kind=request_kind,
+    )
+    if recover:
+        assert stage2_workflow._request_json(**kwargs) == {"ok": True}
+    else:
+        with pytest.raises(Stage2RequestExhaustedError) as error:
+            stage2_workflow._request_json(**kwargs)
+        assert isinstance(error.value.__cause__, APITimeoutError)
+        assert f"kind={request_kind} endpoint={config.endpoint}" in str(error.value)
+        assert "attempt_timeout=1800s request_timeout=6000s" in str(error.value)
+    assert calls == [1800.0] * 3
+    assert clock[0] == 5406.0
+    assert limiter._semaphore.acquire(blocking=False)
+    limiter._semaphore.release()
+
+
 def test_leaf_checkpoint_survives_endpoint_and_runtime_budget_changes(tmp_path):
     from dataclasses import replace
 
@@ -545,7 +595,7 @@ def test_leaf_checkpoint_survives_endpoint_and_runtime_budget_changes(tmp_path):
 
     moved = replace(
         config, endpoint="http://new-server.test/v1", workers=4,
-        request_timeout=2700.0, request_attempt_timeout=900.0,
+        request_timeout=6000.0, request_attempt_timeout=1800.0,
     )
     assert stage2_workflow._checkpointed_request_json(
         **kwargs, config=moved, completion=should_not_call,

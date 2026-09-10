@@ -31,8 +31,10 @@ export STAGE2_EXTRACTION_MODEL="${STAGE2_EXTRACTION_MODEL:-google/gemma-4-e4b-it
 # Bound load on a single reasoning server and allow slow generations to finish.
 # All values remain overridable when targeting a faster server or replica pool.
 export STAGE2_WORKERS="${STAGE2_WORKERS:-4}"
-export STAGE2_REQUEST_ATTEMPT_TIMEOUT="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-900}"
-export STAGE2_REQUEST_TIMEOUT="${STAGE2_REQUEST_TIMEOUT:-2700}"
+# Shared by interpretation and extraction, including thinking-enabled repairs.
+# Allow three full 30-minute attempts plus backoff and response repair time.
+export STAGE2_REQUEST_ATTEMPT_TIMEOUT="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-1800}"
+export STAGE2_REQUEST_TIMEOUT="${STAGE2_REQUEST_TIMEOUT:-6000}"
 
 # Stage 2 ontology preset for this example. Callers may override any setting
 # through the corresponding environment variable.
