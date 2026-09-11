@@ -28,6 +28,10 @@ export MKL_NUM_THREADS="${MKL_NUM_THREADS:-1}"
 export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 export STAGE2_MODEL="${STAGE2_MODEL:-RedHatAI/Gemma-4-31B-IT-FP8-Dynamic}"
 export STAGE2_EXTRACTION_MODEL="${STAGE2_EXTRACTION_MODEL:-google/gemma-4-e4b-it}"
+# Match the extraction server window and reserve room for token-count differences.
+# The extractor pages long records and caps repair output within this budget.
+export STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS="${STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS:-128000}"
+export STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS="${STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS:-4096}"
 # Bound load on a single reasoning server and allow slow generations to finish.
 # All values remain overridable when targeting a faster server or replica pool.
 export STAGE2_WORKERS="${STAGE2_WORKERS:-4}"
