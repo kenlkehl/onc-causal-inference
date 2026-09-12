@@ -1183,46 +1183,59 @@ def test_model_identity_resume_rejects_extractor_change_with_extraction_checkpoi
         runner("extractor-b")._check_and_record_model_identity(tmp_path)
 
 
-def test_model_identity_detects_changed_backing_root_behind_same_served_alias(
+@pytest.mark.parametrize("role", ["primary", "extraction"])
+@pytest.mark.parametrize("field", ["root", "parent", "revision"])
+def test_model_identity_resume_allows_backing_change_behind_same_served_alias(
     tmp_path: Path,
     monkeypatch,
+    role,
+    field,
 ):
-    backing_root = ["Qwen/Qwen3.8-27B-revision-a"]
+    backing_record = {
+        "id": "gemma4-31b",
+        "root": "RedHatAI/Gemma-4-31B-IT-FP8-Dynamic",
+        "parent": None,
+        "revision": None,
+    }
 
     def served_models(_config):
         return stage2_workflow._ServedModelIds(
-            ["stable-alias"],
-            records=[
-                {
-                    "id": "stable-alias",
-                    "root": backing_root[0],
-                    "parent": None,
-                    "revision": None,
-                }
-            ],
+            ["gemma4-31b"],
+            records=[dict(backing_record)],
         )
 
     monkeypatch.setattr(stage2_workflow, "_served_model_ids", served_models)
-    first = PlainHandoffStage2(
-        config=PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="stable-alias",
-        ),
-        clinical_question="Identify confounders.",
-    )
-    assert first.config.runtime_model_family == "qwen3"
-    first._check_and_record_model_identity(tmp_path)
 
-    backing_root[0] = "Qwen/Qwen3.8-27B-revision-b"
-    changed = PlainHandoffStage2(
-        config=PlainHandoffStage2Config(
-            endpoint="http://stage2.test/v1",
-            model="stable-alias",
-        ),
-        clinical_question="Identify confounders.",
-    )
-    with pytest.raises(RuntimeError, match="actual running model identity changed"):
-        changed._check_and_record_model_identity(tmp_path)
+    def runner():
+        return PlainHandoffStage2(
+            config=PlainHandoffStage2Config(
+                endpoint="http://stage2.test/v1",
+                model="gemma4-31b",
+                extraction_llm=(
+                    Stage2ExtractionLLMConfig(
+                        endpoint="http://extract.test/v1",
+                        model="gemma4-31b",
+                    )
+                    if role == "extraction"
+                    else None
+                ),
+            ),
+            clinical_question="Identify confounders.",
+        )
+
+    first = runner()
+    assert first.config.runtime_model_family == "gemma4"
+    first._check_and_record_model_identity(tmp_path)
+    # Existing extraction checkpoints must also allow a stable served name.
+    (tmp_path / "outer_001" / "ontology_supervision").mkdir(parents=True)
+
+    backing_record[field] = "nvidia/Gemma-4-31B-IT-NVFP4"
+    changed = runner()
+    changed._check_and_record_model_identity(tmp_path)
+
+    identity = json.loads((tmp_path / "model_identity.json").read_text(encoding="utf-8"))
+    assert identity[role]["selected_model"] == "gemma4-31b"
+    assert identity[role]["actual_model_identity"][field] == backing_record[field]
 
 
 def test_json_repair_retry_stays_within_full_initial_prompt_budget():

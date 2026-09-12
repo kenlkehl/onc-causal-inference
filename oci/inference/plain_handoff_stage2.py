@@ -1795,7 +1795,7 @@ def _model_identities_compatible(
     previous: Mapping[str, Any],
     current: Mapping[str, Any],
 ) -> bool:
-    """Allow adoption of old ID-only manifests, then compare rich identities."""
+    """Compare served model names; backing metadata is retained only for audit."""
 
     for role in ("primary", "extraction"):
         old = previous.get(role)
@@ -1807,14 +1807,6 @@ def _model_identities_compatible(
         if not isinstance(old, Mapping) or not isinstance(new, Mapping):
             return False
         if str(old.get("selected_model") or "") != str(new.get("selected_model") or ""):
-            return False
-        old_actual = old.get("actual_model_identity")
-        new_actual = new.get("actual_model_identity")
-        if (
-            isinstance(old_actual, Mapping)
-            and isinstance(new_actual, Mapping)
-            and dict(old_actual) != dict(new_actual)
-        ):
             return False
     return True
 
@@ -6578,7 +6570,7 @@ class PlainHandoffStage2:
         }
 
     def _check_and_record_model_identity(self, output_dir: Path) -> None:
-        """Fail closed on model changes while permitting endpoint URL changes."""
+        """Check served names while allowing endpoint and backing model changes."""
 
         identity_path = output_dir / "model_identity.json"
         current_scientific = _scientific_model_identity(self.model_identity)
