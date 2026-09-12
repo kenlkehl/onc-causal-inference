@@ -35,7 +35,7 @@
     "extraction_max_tokens": 75000,
     "max_response_repairs": 10,
     "thinking_after_response_repairs": 5,
-    "repetition_penalty": 1.1,
+    "repetition_penalty": null,
     "interpretation_reasoning_effort": "high",
     "extraction_reasoning_effort": "none",
     "operationalization_max_prompt_chars": 640000,

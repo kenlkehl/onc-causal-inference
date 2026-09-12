@@ -127,7 +127,7 @@ runs independent outer folds concurrently. The one-confounder/one-modifier
 launcher defaults to 4 globally bounded endpoint workers, an 1800-second HTTP
 attempt timeout, and a 6000-second logical request timeout for slow reasoning
 servers. The five-confounder/five-modifier launcher retains 32 workers and the
-core 300/900-second timeouts. Override these runtime settings with
+core 900/7200-second timeouts. Override these runtime settings with
 `STAGE2_WORKERS`, `STAGE2_REQUEST_ATTEMPT_TIMEOUT`, and `STAGE2_REQUEST_TIMEOUT`
 (timeouts are in seconds).
 
@@ -739,14 +739,14 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
       "api_key": "EMPTY",
       "workers": 32
     },
-    "request_timeout": 900,
-    "request_attempt_timeout": 300,
-    "transport_max_attempts": 3,
+    "request_timeout": 7200,
+    "request_attempt_timeout": 900,
+    "transport_max_attempts": 6,
     "max_tokens": 100000,
     "extraction_max_tokens": 75000,
-    "max_response_repairs": 10,
+    "max_response_repairs": 15,
     "thinking_after_response_repairs": 5,
-    "repetition_penalty": 1.1,
+    "repetition_penalty": null,
     "interpretation_reasoning_effort": "high",
     "extraction_reasoning_effort": "none",
     "evidence_compiler": "semantic_cluster_cards_v2",
@@ -909,23 +909,26 @@ template-level thinking switch, with portable prompt and request-field
 fallbacks for non-vLLM servers. It parses either separate reasoning fields or
 inline reasoning delimiters. The two efforts are recorded as
 `interpretation_reasoning_effort` and `extraction_reasoning_effort` in the
-Stage 2 configuration. Every Stage 2 completion request also sends the
-configured `repetition_penalty` (1.1 by default).
+Stage 2 configuration. Stage 2 resolves sampling defaults from the serving model family; explicit
+sampling settings override those defaults. See [sampling profiles](docs/stage2_sampling.md).
 For Qwen 3.8, the model-agnostic `high` policy is translated to the endpoint's
 `reasoning_effort: "xhigh"` wire value. Disabled extraction thinking omits the
 wire-level effort enum and uses the family-specific hard-off controls.
 
 A logical request, including transport retries and validator-guided repair
-turns, is bounded by `request_timeout` (900 seconds by default in the core
+turns, is bounded by `request_timeout` (7200 seconds by default in the core
 configuration). The clock starts after acquiring a global request slot; time
 waiting locally for that slot is excluded and logged separately. The request
 holds its slot through retries and response repairs, so they do not requeue
 behind other folds. Server-side queueing still consumes the request budget.
-Each HTTP call is bounded by `request_attempt_timeout` (300 seconds by default), so a
-straggling endpoint can be abandoned and retried. A transport failure receives
-up to `transport_max_attempts` attempts (3 by default). A completed response
+Each HTTP call is bounded by `request_attempt_timeout` (900 seconds by default), so a
+straggling endpoint can be abandoned and retried. Transport retries include the
+latest error in the model prompt, preserving existing validation feedback. The
+original input is retained losslessly; retries stop if error feedback cannot fit
+the prompt budget. A transport failure receives
+up to `transport_max_attempts` attempts (6 by default). A completed response
 that fails JSON parsing or schema validation receives up to
-`max_response_repairs` validator-guided retries (10 by default), each with the
+`max_response_repairs` validator-guided retries (15 by default), each with the
 concrete validation error. Repair attempts through
 `thinking_after_response_repairs` (5 by default) retain the request's normal
 reasoning policy; later repairs force `reasoning_effort` to at least `high`,

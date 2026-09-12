@@ -532,6 +532,7 @@ def test_slow_server_budget_allows_three_full_attempts(monkeypatch, request_kind
     runner = _runner(
         request_timeout=6000.0,
         request_attempt_timeout=1800.0,
+        transport_max_attempts=3,
         extraction_llm=Stage2ExtractionLLMConfig(
             endpoint="http://extractor.test/v1", model="extractor", workers=4,
         ),
@@ -568,6 +569,7 @@ def test_slow_server_budget_allows_three_full_attempts(monkeypatch, request_kind
         assert isinstance(error.value.__cause__, APITimeoutError)
         assert f"kind={request_kind} endpoint={config.endpoint}" in str(error.value)
         assert "attempt_timeout=1800s request_timeout=6000s" in str(error.value)
+        assert "last_error=APITimeoutError:" in str(error.value)
     assert calls == [1800.0] * 3
     assert clock[0] == 5406.0
     assert limiter._semaphore.acquire(blocking=False)
@@ -600,3 +602,94 @@ def test_leaf_checkpoint_survives_endpoint_and_runtime_budget_changes(tmp_path):
     assert stage2_workflow._checkpointed_request_json(
         **kwargs, config=moved, completion=should_not_call,
     ) == result
+
+
+def test_transport_feedback_preserves_semantic_error_and_original_input():
+    calls = []
+    original = [{"role": "user", "content": "Return the required value as JSON."}]
+
+    def completion(messages, _config):
+        calls.append([dict(row) for row in messages])
+        if len(calls) == 1:
+            return "{}"
+        if len(calls) == 2:
+            raise stage2_workflow._RetryableStage2ResponseError("empty response")
+        return '{"required": true}'
+
+    def validate(value):
+        if "required" not in value:
+            raise ValueError("missing required field")
+        return dict(value)
+
+    assert stage2_workflow._request_json(
+        messages=original,
+        config=_runner(transport_retry_backoff=0).config,
+        completion=completion,
+        validate=validate,
+    ) == {"required": True}
+    assert calls[2][:-1] == calls[1]
+    assert "missing required field" in calls[2][-2]["content"]
+    assert "empty response" in calls[2][-1]["content"]
+    assert original == calls[0]
+
+
+def test_transport_feedback_respects_context_and_adjusts_output_budget():
+    calls = []
+
+    def completion(messages, config):
+        calls.append(messages)
+        if len(calls) == 1:
+            raise stage2_workflow._RetryableStage2ResponseError("empty response")
+        prompt_tokens = sum(len(row["content"]) for row in messages)
+        assert config.extraction_max_tokens == 400 - prompt_tokens - 10
+        assert "empty response" in messages[-1]["content"]
+        return '{"ok": true}'
+
+    assert stage2_workflow._request_json(
+        messages=[{"role": "user", "content": "Return JSON."}],
+        config=_runner(transport_retry_backoff=0).config,
+        completion=completion,
+        validate=dict,
+        request_kind="extraction",
+        prompt_token_counter=lambda rows: sum(len(row["content"]) for row in rows),
+        context_window_tokens=400,
+        context_margin_tokens=10,
+    ) == {"ok": True}
+
+
+def test_transport_feedback_fails_closed_when_prompt_is_full():
+    original = [{"role": "user", "content": "x" * 100}]
+    with pytest.raises(ValueError, match="cannot fit the previous error"):
+        stage2_workflow._transport_retry_messages(
+            original, ValueError("empty response"), max_prompt_chars=100,
+            prompt_token_counter=None, context_window_tokens=None, context_margin_tokens=0,
+        )
+    assert original == [{"role": "user", "content": "x" * 100}]
+
+
+def test_default_deadline_allows_six_full_timeout_attempts(monkeypatch):
+    clock = [0.0]
+    timeouts = []
+
+    def completion(messages, config):
+        if timeouts:
+            assert f"timeout {len(timeouts)}" in messages[-1]["content"]
+            assert len(messages) == 2
+        timeouts.append(config.request_timeout)
+        clock[0] += config.request_timeout
+        if len(timeouts) == 6:
+            return '{"ok": true}'
+        raise stage2_workflow._RetryableStage2ResponseError(f"timeout {len(timeouts)}")
+
+    monkeypatch.setattr(stage2_workflow.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(
+        stage2_workflow.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
+    )
+    assert stage2_workflow._request_json(
+        messages=[{"role": "user", "content": "Return JSON."}],
+        config=_runner().config,
+        completion=completion,
+        validate=dict,
+    ) == {"ok": True}
+    assert timeouts == [900.0] * 6
+    assert clock[0] == 5462.0

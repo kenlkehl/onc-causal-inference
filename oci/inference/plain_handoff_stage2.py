@@ -58,6 +58,7 @@ from .stage2_role_adjudication import (
     Stage2RoleAdjudicationConfig,
     role_adjudication_config_from_mapping,
 )
+from .stage2_sampling import SAMPLING_FIELDS, recommended_sampling
 from .stage2_sequential_consolidation import (
     Stage2SequentialConsolidationConfig,
     sequential_consolidation_config_from_mapping,
@@ -81,11 +82,11 @@ ALLOWED_EVIDENCE_AXES = {
     "unclear",
 }
 ALLOWED_ROLES = {"confounder", "effect_modifier"}
-DEFAULT_MAX_RESPONSE_REPAIRS = 10
+DEFAULT_MAX_RESPONSE_REPAIRS = 15
 DEFAULT_THINKING_AFTER_RESPONSE_REPAIRS = 5
-DEFAULT_REQUEST_TIMEOUT = 15 * 60.0
-DEFAULT_REQUEST_ATTEMPT_TIMEOUT = 5 * 60.0
-DEFAULT_TRANSPORT_MAX_ATTEMPTS = 3
+DEFAULT_REQUEST_TIMEOUT = 120 * 60.0
+DEFAULT_REQUEST_ATTEMPT_TIMEOUT = 15 * 60.0
+DEFAULT_TRANSPORT_MAX_ATTEMPTS = 6
 THINKING_RESPONSE_REPAIR_EFFORT = "high"
 # This is an output ceiling, not a requested output length. Models still stop
 # normally at EOS as soon as the validated JSON object is complete.
@@ -98,7 +99,6 @@ DEFAULT_MAX_TOKENS = MINIMUM_MAX_TOKENS
 # fingerprints below).
 MINIMUM_EXTRACTION_MAX_TOKENS = 4_096
 DEFAULT_EXTRACTION_MAX_TOKENS = 75_000
-DEFAULT_REPETITION_PENALTY = 1.1
 DEFAULT_INTERPRETATION_REASONING_EFFORT = "high"
 DEFAULT_EXTRACTION_REASONING_EFFORT = "none"
 STAGE2_REQUEST_KINDS = frozenset({"interpretation", "extraction"})
@@ -882,8 +882,15 @@ class PlainHandoffStage2Config:
     propensity_clip: float = 0.02
     min_nonmissing_fraction: float = 0.05
     max_dominant_fraction: float = 0.98
-    temperature: float = 0.0
-    repetition_penalty: float = DEFAULT_REPETITION_PENALTY
+    # None selects the publisher profile after endpoint/model resolution.
+    # Explicit overrides apply to both primary and extraction requests.
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    min_p: float | None = None
+    presence_penalty: float | None = None
+    frequency_penalty: float | None = None
+    repetition_penalty: float | None = None
     explicit_features: tuple[Stage2ExplicitFeature, ...] = ()
     vllm: ManagedVLLMConfig | None = None
     # When two pipeline-managed models request each other again within this
@@ -908,6 +915,7 @@ class PlainHandoffStage2Config:
     # Detected from the live endpoint's model record (including its backing
     # root when available) so served aliases still receive the right controls.
     runtime_model_family: str = ""
+    runtime_sampling_model: str = ""
     # Operational guard for post-extraction reselection. Preserve the configured
     # extractor identity in checkpoints, but neither launch nor call it. Any
     # unexpected extraction request fails closed instead of occupying a GPU.
@@ -1168,15 +1176,30 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.min_nonmissing_fraction must be between 0 and 1")
         if not 0.0 <= self.max_dominant_fraction <= 1.0:
             raise ValueError("stage2.max_dominant_fraction must be between 0 and 1")
-        if not 0.0 <= self.temperature <= 2.0:
-            raise ValueError("stage2.temperature must be between 0 and 2")
-        if (
-            isinstance(self.repetition_penalty, bool)
-            or not isinstance(self.repetition_penalty, (int, float))
-            or not math.isfinite(float(self.repetition_penalty))
-            or self.repetition_penalty <= 0.0
-        ):
-            raise ValueError("stage2.repetition_penalty must be a finite number greater than zero")
+        for name in SAMPLING_FIELDS:
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise ValueError(f"stage2.{name} must be a finite number or null")
+            if name == "top_k":
+                valid = isinstance(value, int) and value >= -1
+            elif name == "repetition_penalty":
+                valid = value > 0
+            elif name == "top_p":
+                valid = 0 < value <= 1
+            elif name == "min_p":
+                valid = 0 <= value <= 1
+            elif name == "temperature":
+                valid = 0 <= value <= 2
+            else:
+                valid = -2 <= value <= 2
+            if not valid:
+                raise ValueError(f"stage2.{name} is outside its supported sampling range")
         names: list[str] = []
         for index, feature in enumerate(self.explicit_features):
             if not isinstance(feature, Stage2ExplicitFeature):
@@ -1204,6 +1227,7 @@ class PlainHandoffStage2Config:
         values.pop("runtime_request_deadline", None)
         values.pop("runtime_transport_attempt_budget", None)
         values.pop("runtime_model_family", None)
+        values.pop("runtime_sampling_model", None)
         values.pop("runtime_disable_extraction", None)
         values["explicit_features"] = [
             feature.as_definition() for feature in self.explicit_features
@@ -1525,8 +1549,7 @@ def plain_stage2_config_from_mapping(
         propensity_clip=float(raw.get("propensity_clip", 0.02)),
         min_nonmissing_fraction=float(raw.get("min_nonmissing_fraction", 0.05)),
         max_dominant_fraction=float(raw.get("max_dominant_fraction", 0.98)),
-        temperature=float(raw.get("temperature", 0.0)),
-        repetition_penalty=float(raw.get("repetition_penalty", DEFAULT_REPETITION_PENALTY)),
+        **{name: raw.get(name) for name in SAMPLING_FIELDS},
         explicit_features=explicit_features,
         vllm=managed_vllm,
         vllm_rapid_switch_seconds=float(
@@ -1755,6 +1778,7 @@ def _endpoint_model_identity(
         "role": role,
         "selected_model": selected_model,
         "model_family": _stage2_model_family(family_source),
+        "sampling_model": family_source,
         "actual_model_identity": actual_identities[0] if actual_identities else None,
         "live_endpoint_verified": bool(verify_live_endpoint),
         "endpoint_observations": observations,
@@ -2386,7 +2410,16 @@ def _stage2_request_policy(
         "max_tokens": int(
             config.extraction_max_tokens if kind == "extraction" else config.max_tokens
         ),
-        "repetition_penalty": float(config.repetition_penalty),
+        **recommended_sampling(
+            config.runtime_sampling_model or config.model,
+            config.runtime_model_family or _stage2_model_family(config.model),
+            _reasoning_enabled(reasoning_effort),
+        ),
+        **{
+            name: getattr(config, name)
+            for name in SAMPLING_FIELDS
+            if getattr(config, name) is not None
+        },
     }
 
 
@@ -2503,6 +2536,8 @@ def _openai_optional_parameter_error(exc: Exception) -> bool:
         "chat template kwargs",
         "response format",
         "repetition penalty",
+        "top k",
+        "min p",
         "extra body",
     )
     rejection_words = (
@@ -2559,29 +2594,32 @@ def _openai_request_variants(
         configured_effort=str(request_policy["reasoning_effort"]),
         model_family=model_family,
     )
-    repetition = float(request_policy["repetition_penalty"])
+    sampling_extra = {
+        name: request_policy[name] for name in ("repetition_penalty", "top_k", "min_p")
+        if name in request_policy
+    }
     family_bodies: list[dict[str, Any]] = []
     if model_family in {"qwen3", "gemma4", "lfm2.5"}:
         if model_family == "lfm2.5":
             family_bodies.append(
                 {
-                    "repetition_penalty": repetition,
+                    **sampling_extra,
                     "enableThinking": enabled,
                 }
             )
         family_bodies.extend(
             [
                 {
-                    "repetition_penalty": repetition,
+                    **sampling_extra,
                     "chat_template_kwargs": {"enable_thinking": enabled},
                 },
                 {
-                    "repetition_penalty": repetition,
+                    **sampling_extra,
                     "enable_thinking": enabled,
                 },
             ]
         )
-    family_bodies.extend([{"repetition_penalty": repetition}, {}])
+    family_bodies.extend([sampling_extra, {}])
 
     variants: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -2672,7 +2710,11 @@ def _openai_completion(
     base_kwargs: dict[str, Any] = {
         "model": config.model,
         "messages": controlled_messages,
-        "temperature": config.temperature,
+        **{
+            name: request_policy[name]
+            for name in ("temperature", "top_p", "presence_penalty", "frequency_penalty")
+            if name in request_policy
+        },
         "max_tokens": request_policy["max_tokens"],
     }
     prompt_chars = sum(len(str(message.get("content") or "")) for message in messages)
@@ -2685,7 +2727,7 @@ def _openai_completion(
     LOGGER.info(
         "Stage 2 request kind=%s endpoint=%s model=%s prompt_chars=%s "
         "family=%s reasoning_effort=%s wire_reasoning_effort=%s "
-        "max_tokens=%s repetition_penalty=%s",
+        "max_tokens=%s sampling=%s",
         request_policy["request_kind"],
         config.endpoint,
         config.model,
@@ -2694,7 +2736,7 @@ def _openai_completion(
         request_policy["reasoning_effort"],
         wire_reasoning_effort,
         request_policy["max_tokens"],
-        request_policy["repetition_penalty"],
+        {name: request_policy[name] for name in SAMPLING_FIELDS if name in request_policy},
     )
     variants = _openai_request_variants(
         base_kwargs=base_kwargs,
@@ -2748,6 +2790,20 @@ def _openai_completion(
                     "Stage 2 transport exhausted its HTTP attempt budget while "
                     "negotiating optional request controls"
                 ) from exc
+            # Do not spend the entire attempt budget resending an explicitly
+            # rejected sampling extension across thinking-control variants.
+            normalized_error = re.sub(r"[_-]+", " ", str(exc).lower())
+            rejected_sampling = {
+                name for name in ("top_k", "min_p", "repetition_penalty")
+                if name.replace("_", " ") in normalized_error
+            }
+            for remaining_variant in variants[variant_index:]:
+                body = remaining_variant.get("extra_body")
+                if body is not None:
+                    remaining_variant["extra_body"] = {
+                        key: value for key, value in body.items()
+                        if key not in rejected_sampling
+                    }
             LOGGER.warning(
                 "Stage 2 endpoint rejected optional request controls; trying "
                 "compatibility variant %s/%s (%s: %s)",
@@ -2912,6 +2968,9 @@ def _completion_with_transport_retries(
     completion: CompletionFunction,
     *,
     deadline: float | None = None,
+    prompt_token_counter: Callable[[Sequence[Mapping[str, str]]], int] | None = None,
+    context_window_tokens: int | None = None,
+    context_margin_tokens: int = 0,
 ) -> str:
     logical_deadline = (
         float(deadline)
@@ -2920,6 +2979,7 @@ def _completion_with_transport_retries(
     )
     max_attempts = max(1, int(config.transport_max_attempts))
     remaining_attempts = max_attempts
+    retry_messages = [dict(message) for message in messages]
     while remaining_attempts > 0:
         remaining = logical_deadline - time.monotonic()
         if remaining <= 0:
@@ -2932,8 +2992,21 @@ def _completion_with_transport_retries(
             runtime_request_deadline=logical_deadline,
             runtime_transport_attempt_budget=remaining_attempts,
         )
+        if prompt_token_counter is not None and context_window_tokens is not None:
+            available = (
+                int(context_window_tokens)
+                - int(prompt_token_counter(retry_messages))
+                - int(context_margin_tokens)
+            )
+            if available < 1:
+                raise ValueError("Stage 2 transport retry prompt leaves no model output context")
+            attempt_config = replace(
+                attempt_config,
+                max_tokens=min(attempt_config.max_tokens, available),
+                extraction_max_tokens=min(attempt_config.extraction_max_tokens, available),
+            )
         try:
-            return completion(messages, attempt_config)
+            return completion(retry_messages, attempt_config)
         except Exception as exc:
             cause = exc.cause if isinstance(exc, _Stage2TransportFailure) else exc
             attempts_used = (
@@ -2948,7 +3021,8 @@ def _completion_with_transport_retries(
                     f"kind={config.runtime_request_kind} endpoint={config.endpoint} "
                     f"model={config.model} "
                     f"attempt_timeout={config.request_attempt_timeout:g}s "
-                    f"request_timeout={config.request_timeout:g}s"
+                    f"request_timeout={config.request_timeout:g}s; "
+                    f"last_error={type(cause).__name__}: {cause}"
                 ) from cause
             remaining = logical_deadline - time.monotonic()
             if remaining <= 0:
@@ -2970,6 +3044,14 @@ def _completion_with_transport_retries(
                 delay,
                 type(cause).__name__,
                 cause,
+            )
+            retry_messages = _transport_retry_messages(
+                messages,
+                cause,
+                max_prompt_chars=int(config.max_prompt_chars),
+                prompt_token_counter=prompt_token_counter,
+                context_window_tokens=context_window_tokens,
+                context_margin_tokens=context_margin_tokens,
             )
             if delay > 0:
                 time.sleep(delay)
@@ -3039,6 +3121,49 @@ def _compact_json_messages(
     return compacted
 
 
+def _transport_retry_messages(
+    messages: Sequence[Mapping[str, str]],
+    exc: Exception,
+    *,
+    max_prompt_chars: int,
+    prompt_token_counter: Callable[[Sequence[Mapping[str, str]]], int] | None,
+    context_window_tokens: int | None,
+    context_margin_tokens: int,
+) -> list[dict[str, Any]]:
+    """Carry the latest call failure forward without accumulating retry turns."""
+
+    detail = f"{type(exc).__name__}: {exc}"
+    directive = (
+        f"The previous request failed: {detail}. "
+        "Retry the original task and return one complete JSON object using the required "
+        "schema. Keep the response concise. This is a request failure, not evidence "
+        "about the patient or the scientific result."
+    )
+
+    def fits(candidate: Sequence[Mapping[str, str]]) -> bool:
+        return (
+            sum(len(str(row.get("content") or "")) for row in candidate) <= max_prompt_chars
+            and (
+                prompt_token_counter is None
+                or context_window_tokens is None
+                or int(prompt_token_counter(candidate)) + context_margin_tokens
+                < context_window_tokens
+            )
+        )
+
+    # Preserve any semantic repair feedback already in the input. Compact JSON
+    # losslessly when needed; never truncate patient records to make room.
+    for base in ([dict(row) for row in messages], _compact_json_messages(messages)):
+        for content in (directive, detail):
+            candidate = [*base, {"role": "user", "content": content}]
+            if fits(candidate):
+                return candidate
+    raise ValueError(
+        "Stage 2 transport retry prompt cannot fit the previous error within its "
+        "prompt budget"
+    ) from exc
+
+
 def _repair_message(
     exc: Exception,
     *,
@@ -3047,7 +3172,8 @@ def _repair_message(
 ) -> dict[str, str]:
     if isinstance(exc, _Stage2OutputLengthError):
         content = (
-            "The previous JSON exceeded the available response length. Return one materially "
+            "The previous JSON exceeded the available response length. "
+            f"{type(exc).__name__}: {exc}. Return one materially "
             "shorter corrected JSON object using the same required schema. Remove redundancy, "
             "merge duplicate entries, and keep descriptions and rationales concise. Do not omit "
             "required records or fields. Return JSON only."
@@ -3246,6 +3372,9 @@ def _request_json(
                 attempt_config,
                 completion,
                 deadline=logical_deadline,
+                prompt_token_counter=prompt_token_counter,
+                context_window_tokens=context_window_tokens,
+                context_margin_tokens=context_margin_tokens,
             )
             parsed_response = _parse_json_object(response)
             return validate(parsed_response)
@@ -6427,6 +6556,7 @@ class PlainHandoffStage2:
         config = replace(
             config,
             runtime_model_family=str(primary_identity["model_family"]),
+            runtime_sampling_model=str(primary_identity.get("sampling_model") or ""),
         )
         config.validate()
         self.config = config
@@ -6453,6 +6583,7 @@ class PlainHandoffStage2:
                 vllm=None,
                 runtime_endpoints=(),
                 runtime_model_family="",
+                runtime_sampling_model="",
             )
             consolidation_identity = _endpoint_model_identity(
                 consolidation_request_config,
@@ -6463,6 +6594,7 @@ class PlainHandoffStage2:
             self.selection_consolidation_request_config = replace(
                 consolidation_request_config,
                 runtime_model_family=str(consolidation_identity["model_family"]),
+                runtime_sampling_model=str(consolidation_identity.get("sampling_model") or ""),
             )
             self.selection_consolidation_completion = _ConcurrencyLimitedCompletion(
                 _RoundRobinOpenAICompletion((consolidation_request_config.endpoint,)),
@@ -6501,6 +6633,7 @@ class PlainHandoffStage2:
                 vllm=None,
                 runtime_endpoints=(),
                 runtime_model_family="",
+                runtime_sampling_model="",
             )
             routed_extraction = extraction_completion or completion
             uses_default_extraction_transport = _uses_default_openai_transport(
@@ -6533,6 +6666,7 @@ class PlainHandoffStage2:
             self.extraction_request_config = replace(
                 extraction_request_config,
                 runtime_model_family=str(live_extraction_identity["model_family"]),
+                runtime_sampling_model=str(live_extraction_identity.get("sampling_model") or ""),
             )
             if routed_extraction is None:
                 routed_extraction = _RoundRobinOpenAICompletion(extraction_endpoints)

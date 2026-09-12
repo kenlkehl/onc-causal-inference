@@ -175,14 +175,14 @@ An external endpoint configuration is:
       "api_key": "EMPTY",
       "workers": 32
     },
-    "request_timeout": 900,
-    "request_attempt_timeout": 300,
-    "transport_max_attempts": 3,
+    "request_timeout": 7200,
+    "request_attempt_timeout": 900,
+    "transport_max_attempts": 6,
     "max_tokens": 100000,
     "extraction_max_tokens": 75000,
-    "max_response_repairs": 10,
+    "max_response_repairs": 15,
     "thinking_after_response_repairs": 5,
-    "repetition_penalty": 1.1,
+    "repetition_penalty": null,
     "interpretation_reasoning_effort": "high",
     "extraction_reasoning_effort": "none",
     "evidence_compiler": "semantic_cluster_cards_v2",
@@ -418,8 +418,8 @@ permit long responses but do not request minimum lengths; each model still stops
 at EOS as soon as its JSON is complete. A repair request dynamically lowers the
 ceiling when necessary to keep its prompt, output allowance, and safety margin
 inside the extraction model's context window.
-Every Stage 2 completion request also sends the configured
-`repetition_penalty` (1.1 by default).
+Stage 2 uses [publisher sampling profiles](stage2_sampling.md), with explicit
+configuration overrides taking precedence.
 Stage 2 first verifies each live endpoint's selected model through `/models`.
 It recognizes Qwen 3 (including 3.8), Gemma 4, and LFM 2.5 model IDs and sends
 their boolean chat-template thinking switch plus a portable prompt fallback.
@@ -432,12 +432,12 @@ Qwen 3.8 translates the configured `high` policy to its accepted wire value
 `xhigh`; thinking-off extraction requests omit the enabled-only effort enum and
 use the template switch and prompt fallback.
 
-A complete logical request is bounded by `request_timeout` (900 seconds by
+A complete logical request is bounded by `request_timeout` (7200 seconds by
 default), including transport retries and response-repair turns. Individual
-HTTP calls are bounded by `request_attempt_timeout` (300 seconds by default),
-and retryable transport failures receive at most `transport_max_attempts` (3 by
+HTTP calls are bounded by `request_attempt_timeout` (900 seconds by default),
+and retryable transport failures receive at most `transport_max_attempts` (6 by
 default). A completed response that fails JSON parsing or schema validation receives up
-to `max_response_repairs` validator-guided retries (10 by default). Every retry
+to `max_response_repairs` validator-guided retries (15 by default). Every retry
 includes the concrete validation error. Repairs through
 `thinking_after_response_repairs` (5 by default) retain the normal request
 policy; repairs after that threshold force `reasoning_effort` to at least
@@ -516,9 +516,9 @@ still returns an invalid ontology after all bounded repairs, Stage 2 writes
 extraction and aggregate supervision rather than aborting the fold.
 
 The API key may be set as `stage2.api_key` or in `OCI_STAGE2_API_KEY`. Other
-operational controls include `request_timeout` (900 seconds by default),
-`request_attempt_timeout` (300 seconds by default),
-`transport_max_attempts` (3 by default),
+operational controls include `request_timeout` (7200 seconds by default),
+`request_attempt_timeout` (900 seconds by default),
+`transport_max_attempts` (6 by default),
 `transport_retry_backoff`, `max_response_repairs`,
 `thinking_after_response_repairs`, `max_tokens`, `extraction_max_tokens`,
 `max_prompt_chars`,
@@ -537,7 +537,8 @@ operational controls include `request_timeout` (900 seconds by default),
 `max_ontology_refinement_rounds`, `input_temporal_scope`,
 `statistical_selection`, `estimation_trees`,
 `propensity_clip`, `min_nonmissing_fraction`, `max_dominant_fraction`,
-`temperature`, `repetition_penalty`, `interpretation_reasoning_effort`, and
+`temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`,
+`frequency_penalty`, `repetition_penalty`, `interpretation_reasoning_effort`,
 and `extraction_reasoning_effort`. The nested `extraction_llm` object controls its
 endpoint or managed `vllm` pool, model, API key, and workers. A configured primary endpoint or managed
 vLLM pool makes the default mode `full`. The modes can always be made explicit:

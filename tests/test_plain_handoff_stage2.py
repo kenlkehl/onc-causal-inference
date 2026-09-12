@@ -133,14 +133,14 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config is not None
     assert config.endpoint == "http://stage2.test/v1"
     assert config.model == ""
-    assert config.request_timeout == 900.0
-    assert config.request_attempt_timeout == 300.0
-    assert config.transport_max_attempts == 3
-    assert config.max_response_repairs == 10
+    assert config.request_timeout == 7200.0
+    assert config.request_attempt_timeout == 900.0
+    assert config.transport_max_attempts == 6
+    assert config.max_response_repairs == 15
     assert config.thinking_after_response_repairs == 5
     assert config.max_tokens == 100_000
     assert config.extraction_max_tokens == 75_000
-    assert config.repetition_penalty == 1.1
+    assert config.repetition_penalty is None
     assert config.interpretation_reasoning_effort == "high"
     assert config.extraction_reasoning_effort == "none"
     assert config.max_prompt_chars == 100_000
@@ -1284,7 +1284,7 @@ def test_json_repair_retry_stays_within_full_initial_prompt_budget():
         )
 
 
-def test_json_repair_stops_after_ten_repairs():
+def test_json_repair_stops_after_fifteen_repairs():
     calls = []
 
     def completion(messages, _config):
@@ -1294,7 +1294,7 @@ def test_json_repair_stops_after_ten_repairs():
     def reject(_value):
         raise ValueError("missing ok=true")
 
-    with pytest.raises(ValueError, match="remained invalid after 10 repairs"):
+    with pytest.raises(ValueError, match="remained invalid after 15 repairs"):
         stage2_workflow._request_json(
             messages=[
                 {"role": "system", "content": "Return JSON only."},
@@ -1308,7 +1308,7 @@ def test_json_repair_stops_after_ten_repairs():
             validate=reject,
         )
 
-    assert len(calls) == 11
+    assert len(calls) == 16
 
 
 def test_json_repair_audits_invalid_responses_and_uses_repeated_error_fallback():
@@ -2651,7 +2651,7 @@ def test_resume_retries_only_checkpoints_with_stale_range_ontology_repairs(tmp_p
     assert audit["previous_audit"]["resolution"] == "conservative_null"
 
 
-def test_extraction_uses_note_free_category_ontology_after_ten_failed_repairs(
+def test_extraction_uses_note_free_category_ontology_after_fifteen_failed_repairs(
     tmp_path: Path,
 ):
     note = "PRIVATE_NOTE_SENTINEL: prior immunotherapy was documented."
@@ -2721,7 +2721,7 @@ def test_extraction_uses_note_free_category_ontology_after_ten_failed_repairs(
         max_prompt_chars=config.max_prompt_chars,
     )
 
-    assert jobs == ["extract_stage2_patient_variables"] * 11 + [
+    assert jobs == ["extract_stage2_patient_variables"] * 16 + [
         "map_extracted_values_to_declared_category_ontology"
     ]
     assert ontology_body is not None
@@ -4243,7 +4243,9 @@ def test_stage2_retries_retryable_transport_errors_without_using_repair_turns(
     )
 
     assert result == {"ok": True}
-    assert calls[0] == calls[1] == calls[2]
+    assert calls[1] == calls[2]
+    assert calls[1][:-1] == calls[0]
+    assert "RetryableTransportError: temporary timeout" in calls[1][-1]["content"]
     assert delays == [0.25, 0.5]
 
 
@@ -4268,7 +4270,7 @@ def test_stage2_does_not_reclassify_a_pre_response_failure_as_invalid_science():
     assert calls == ["called"]
 
 
-def test_stage2_default_transport_policy_allows_three_attempts(monkeypatch):
+def test_stage2_default_transport_policy_allows_six_attempts(monkeypatch):
     class RetryableTransportError(Exception):
         pass
 
@@ -4276,7 +4278,7 @@ def test_stage2_default_transport_policy_allows_three_attempts(monkeypatch):
 
     def completion(messages, _config):
         calls.append([dict(message) for message in messages])
-        if len(calls) < 3:
+        if len(calls) < 6:
             raise RetryableTransportError("temporary timeout")
         return '{"ok": true}'
 
@@ -4300,8 +4302,9 @@ def test_stage2_default_transport_policy_allows_three_attempts(monkeypatch):
     )
 
     assert result == {"ok": True}
-    assert len(calls) == 3
-    assert all(call == calls[0] for call in calls)
+    assert len(calls) == 6
+    assert all(call[:-1] == calls[0] for call in calls[1:])
+    assert all("temporary timeout" in call[-1]["content"] for call in calls[1:])
 
 
 def test_stage2_logical_request_deadline_bounds_transport_retries(monkeypatch):
@@ -4420,7 +4423,7 @@ def test_openai_completion_sends_request_scoped_reasoning_and_token_cap(
     assert client.closed is True
     assert client_kwargs["max_retries"] == 0
     assert request_kwargs["reasoning_effort"] == reasoning_effort
-    assert request_kwargs["extra_body"] == {"repetition_penalty": 1.1}
+    assert "extra_body" not in request_kwargs
     assert request_kwargs["max_tokens"] == max_tokens
     assert "max_completion_tokens" not in request_kwargs
 
@@ -6232,7 +6235,7 @@ def test_iterative_consolidation_retains_batch_and_explicit_feature_after_invali
         output_dir=output_dir,
     )
 
-    assert calls == 11
+    assert calls == 16
     assert [group["name"] for group in consolidated] == [
         "alpha_measurement",
         "investigator_marker",
@@ -6302,7 +6305,7 @@ def test_iterative_consolidation_cannot_exclude_an_ordinary_candidate(tmp_path: 
         output_dir=output_dir,
     )
 
-    assert calls == 11
+    assert calls == 16
     assert [group["name"] for group in consolidated] == ["age", "serum_sodium"]
     fallback = json.loads(
         (output_dir / "round_001" / "batch_001" / "fallback.json").read_text(encoding="utf-8")
@@ -7675,7 +7678,7 @@ def test_operationalization_uses_audited_ambiguous_fallback_after_exhausted_repa
         output_dir=output_dir,
     )
 
-    assert calls == 11
+    assert calls == 16
     assert first == second
     assert first["value_type"] == "ambiguous"
     assert first["categories_or_unit"] == []

@@ -61,14 +61,14 @@ are:
       "model": "small-extractor",
       "workers": 32
     },
-    "request_timeout": 900,
-    "request_attempt_timeout": 300,
-    "transport_max_attempts": 3,
+    "request_timeout": 7200,
+    "request_attempt_timeout": 900,
+    "transport_max_attempts": 6,
     "max_tokens": 100000,
     "extraction_max_tokens": 75000,
-    "max_response_repairs": 10,
+    "max_response_repairs": 15,
     "thinking_after_response_repairs": 5,
-    "repetition_penalty": 1.1,
+    "repetition_penalty": null,
     "interpretation_reasoning_effort": "high",
     "extraction_reasoning_effort": "none",
     "evidence_compiler": "semantic_cluster_cards_v2",
@@ -124,7 +124,8 @@ patient records are processed serially in lossless source chunks
 of at most 50,000 tokens, carrying the validated structured extraction into the
 next chunk. The planner shrinks chunks as needed to preserve the model context,
 and checkpoints every chunk for restart.
-All Stage 2 completion requests send `repetition_penalty: 1.1` by default.
+Stage 2 uses [publisher sampling profiles](stage2_sampling.md); omitted or null
+sampling settings select the model defaults.
 Stage 2 probes `/models`, recognizes Qwen 3 (including 3.8), Gemma 4, and LFM
 2.5 IDs, and sends family-appropriate per-request thinking controls. It accepts
 either server-parsed reasoning fields or inline reasoning delimiters.
