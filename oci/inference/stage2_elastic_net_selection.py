@@ -80,8 +80,13 @@ class Stage2ElasticNetSelectionConfig:
     modifier_min_fold_r_loss_improvement: float = 0.0
     modifier_min_mean_r_loss_improvement: float = 0.0
     modifier_min_positive_fold_fraction: float = 0.4
+    # Opt-in task selection; omit the legacy value from checkpoint policy JSON.
+    selection_mode: str = "llm_roles"
 
     def validate(self) -> None:
+        if not isinstance(self.selection_mode, str) or self.selection_mode not in {"llm_roles", "independent_tasks"}:
+            raise ValueError("stage2.statistical_selection.selection_mode must be "
+                             "llm_roles or independent_tasks")
         for name in ("nuisance_selection_rule", "modifier_selection_rule"):
             if getattr(self, name) != "any_inner_fold_union":
                 raise ValueError(
@@ -195,6 +200,8 @@ class Stage2ElasticNetSelectionConfig:
 
     def public_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        if self.selection_mode == "llm_roles":
+            result.pop("selection_mode")
         for retired in (
             "nuisance_selection_frequency",
             "modifier_selection_frequency",
@@ -1974,6 +1981,11 @@ def select_stage2_features_elastic_net(
     nuisance_definitions = [
         by_id[feature_id] for feature_id in by_id if feature_id in confounder_union
     ]
+    if policy.selection_mode == "independent_tasks":
+        # Cross-fold screen votes are final routing evidence, not a feature
+        # gate for another fold's nuisance predictions. Fit both nuisances on
+        # all candidates, with independently CV-selected regularization.
+        nuisance_definitions = original
     treatment_definitions = nuisance_definitions
     outcome_definitions = nuisance_definitions
     all_fit_ids = sorted(
@@ -2504,6 +2516,10 @@ def select_stage2_features_elastic_net(
             _feature_key(feature) for feature in selected
         ],
     }
+    if policy.selection_mode == "independent_tasks":
+        from .stage2_taskwise_policy import finalize_taskwise_report
+
+        selected, report = finalize_taskwise_report(original, report)
     return selected, report, [copy.deepcopy(feature) for feature in selected], []
 
 
