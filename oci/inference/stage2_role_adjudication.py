@@ -602,6 +602,15 @@ def adjudicate_stage2_roles(
     policy.validate()
     if not policy.enabled:
         raise ValueError("adjudicate_stage2_roles requires role adjudication to be enabled")
+    from .stage2_taskwise_policy import independent_tasks_enabled
+
+    if independent_tasks_enabled(statistical_report):
+        from .stage2_taskwise_annotation import annotate_taskwise_selection
+
+        return annotate_taskwise_selection(
+            definitions=definitions, statistical_report=statistical_report,
+            request_json=request_json, output_dir=output_dir, policy=policy,
+        )
     definitions = [copy.deepcopy(dict(feature)) for feature in definitions]
     evidence = build_stage2_role_evidence(
         definitions=definitions,
