@@ -519,6 +519,9 @@ def test_logical_request_releases_slot_on_deadline_failure(monkeypatch):
             messages=[], config=config, completion=limiter, validate=dict,
         )
     assert isinstance(error.value.__cause__, TemporaryTransportError)
+    assert "kind=interpretation endpoint=http://stage2.test/v1" in str(error.value)
+    assert "model=test-model attempts_used=1" in str(error.value)
+    assert "last_error=TemporaryTransportError: slow server" in str(error.value)
     assert calls == ["called"]
     assert limiter._semaphore.acquire(blocking=False)
     limiter._semaphore.release()
@@ -693,3 +696,41 @@ def test_default_deadline_allows_six_full_timeout_attempts(monkeypatch):
     ) == {"ok": True}
     assert timeouts == [900.0] * 6
     assert clock[0] == 5462.0
+
+
+def test_extraction_failure_is_logged_before_executor_shutdown(tmp_path, monkeypatch, caplog):
+    import oci.inference.plain_handoff_stage2_analysis as analysis
+
+    output_dir = tmp_path / "outer_003" / "extraction"
+    error = Stage2RequestExhaustedError("logical request deadline expired")
+    executor_exit = analysis.concurrent.futures.ThreadPoolExecutor.__exit__
+    shutdown_checks = []
+
+    def checked_exit(executor, *args):
+        # The error must be visible before shutdown waits on sibling tasks.
+        assert f"Stage 2 extraction failed root={output_dir} batch=1" in caplog.text
+        assert "logical request deadline expired" in caplog.text
+        shutdown_checks.append(True)
+        return executor_exit(executor, *args)
+
+    monkeypatch.setattr(analysis.concurrent.futures.ThreadPoolExecutor, "__exit__", checked_exit)
+
+    def request_json(*args, **kwargs):
+        raise error
+
+    with pytest.raises(Stage2RequestExhaustedError) as caught:
+        analysis.extract_rows(
+            dataset=pd.DataFrame({"clinical_text": ["ECOG 1."]}),
+            row_ids=[0], text_column="clinical_text",
+            definitions=[{
+                "name": "ecog", "description": "Performance status",
+                "value_type": "continuous", "categories_or_unit": ["score"],
+                "measurement_definition": "Extract ECOG.",
+                "missing_value_rule": "Return null when undocumented.",
+            }],
+            output_dir=output_dir, request_json=request_json,
+            workers=1, max_prompt_chars=10000,
+        )
+    assert caught.value is error
+    assert shutdown_checks == [True]
+    assert not (output_dir / "batches" / "batch_00001" / "complete.json").exists()

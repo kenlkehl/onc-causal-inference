@@ -35,6 +35,9 @@ export STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS="${STAGE2_EXTRACTION_CONTEXT_MARG
 # Bound load on a single reasoning server and allow slow generations to finish.
 # All values remain overridable when targeting a faster server or replica pool.
 export STAGE2_WORKERS="${STAGE2_WORKERS:-4}"
+# Extraction has its own limiter; keep a single extractor bounded even when
+# primary-model concurrency is raised for a replica pool.
+export STAGE2_EXTRACTION_WORKERS="${STAGE2_EXTRACTION_WORKERS:-4}"
 # Shared by interpretation and extraction, including thinking-enabled repairs.
 # Allow three full 30-minute attempts plus backoff and response repair time.
 export STAGE2_REQUEST_ATTEMPT_TIMEOUT="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-1800}"
