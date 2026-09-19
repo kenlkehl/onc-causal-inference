@@ -1,0 +1,19 @@
+{
+  "python": "3.13.7 (main, Aug 18 2025, 19:20:03) [Clang 20.1.4 ]",
+  "interpreter": "/home/klkehl/thisenv/bin/python",
+  "packages": {
+    "numpy": "2.3.5",
+    "pandas": "3.0.5",
+    "scipy": "1.15.3",
+    "scikit-learn": "1.6.1",
+    "econml": "0.16.0",
+    "pytest": "9.1.1"
+  },
+  "CausalForestDML_default_cv": "2",
+  "effect_only_actual_nuisance_inputs": {
+    "treatment": [],
+    "outcome": [
+      "effect_only"
+    ]
+  }
+}

@@ -106,10 +106,18 @@ def test_empty_effect_selection_is_not_padded_with_top_n():
 def test_default_config_does_not_change_legacy_fingerprint():
     config = selection.Stage2ElasticNetSelectionConfig()
     expected = asdict(config)
-    for field in ("selection_mode", "nuisance_selection_frequency", "modifier_selection_frequency",
-                  "nuisance_forest_trees", "nuisance_forest_min_samples_leaf",
-                  "modifier_min_fold_r_loss_improvement", "modifier_min_mean_r_loss_improvement",
-                  "modifier_min_positive_fold_fraction"):
+    for field in (
+        "min_propensity",
+        "max_propensity",
+        "selection_mode",
+        "nuisance_selection_frequency",
+        "modifier_selection_frequency",
+        "nuisance_forest_trees",
+        "nuisance_forest_min_samples_leaf",
+        "modifier_min_fold_r_loss_improvement",
+        "modifier_min_mean_r_loss_improvement",
+        "modifier_min_positive_fold_fraction",
+    ):
         expected.pop(field)
     assert config.public_dict() == expected
     configured = selection.statistical_selection_config_from_mapping({"selection_mode": "independent_tasks"})

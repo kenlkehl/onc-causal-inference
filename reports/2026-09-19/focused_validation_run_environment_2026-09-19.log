@@ -1,0 +1,20 @@
+............................................................             [100%]
+=============================== warnings summary ===============================
+../../../../home/klkehl/thisenv/lib/python3.13/site-packages/shap/plots/colors/_colors.py:47
+  /home/klkehl/thisenv/lib/python3.13/site-packages/shap/plots/colors/_colors.py:47: PendingDeprecationWarning: The set_bad function will be deprecated in a future version. Use cmap.with_extremes(bad=...) or Colormap(bad=...) instead.
+    red_blue.set_bad(gray_rgb.tolist(), 1.0)
+
+../../../../home/klkehl/thisenv/lib/python3.13/site-packages/shap/plots/colors/_colors.py:48
+  /home/klkehl/thisenv/lib/python3.13/site-packages/shap/plots/colors/_colors.py:48: PendingDeprecationWarning: The set_over function will be deprecated in a future version. Use cmap.with_extremes(over=...) or Colormap(over=...) instead.
+    red_blue.set_over(gray_rgb.tolist(), 1.0)
+
+../../../../home/klkehl/thisenv/lib/python3.13/site-packages/shap/plots/colors/_colors.py:49
+  /home/klkehl/thisenv/lib/python3.13/site-packages/shap/plots/colors/_colors.py:49: PendingDeprecationWarning: The set_under function will be deprecated in a future version. Use cmap.with_extremes(under=...) or Colormap(under=...) instead.
+    red_blue.set_under(gray_rgb.tolist(), 1.0)  # "under" is incorrectly used instead of "bad" in the scatter plot
+
+tests/test_causal_forest_runtime.py::test_fitted_head_audits_every_crossfit_elastic_net_clone
+  /home/klkehl/thisenv/lib/python3.13/site-packages/econml/dml/causal_forest.py:72: UserWarning: Could not generate out-of-bag predictions on some training data. Consider increasing the number of trees. `ate_` results will take the average of the subset of training data for which out-of-bag predictions where available.
+    warn("Could not generate out-of-bag predictions on some training data. "
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+60 passed, 4 warnings in 20.86s

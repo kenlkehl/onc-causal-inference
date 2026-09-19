@@ -18,7 +18,7 @@ from __future__ import annotations
 import copy
 import logging
 import math
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -26,6 +26,13 @@ import pandas as pd
 from sklearn.linear_model import Ridge
 from sklearn.metrics import log_loss, mean_squared_error, roc_auc_score
 from sklearn.model_selection import KFold, StratifiedKFold
+
+from .nuisance_diagnostics import (
+    calibration_diagnostics,
+    overlap_diagnostics,
+    propensity_eligibility,
+    validate_propensity_bounds,
+)
 
 from .stage2_statistical_selection import (
     _binary_nested_p_value,
@@ -36,7 +43,7 @@ from .stage2_statistical_selection import (
 
 LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "stage2_all_evidence_statistical_components_v1"
+SCHEMA_VERSION = "stage2_all_evidence_statistical_components_v2_calibration_overlap"
 TEMPORAL_SCOPE = "pre_index_treatment"
 
 
@@ -44,6 +51,8 @@ TEMPORAL_SCOPE = "pre_index_treatment"
 class Stage2ElasticNetSelectionConfig:
     """Scientific and numerical policy for deterministic grouped selection."""
 
+    min_propensity: float | None = None
+    max_propensity: float | None = None
     l1_ratio: float = 0.8
     nuisance_selection_rule: str = "any_inner_fold_union"
     modifier_selection_rule: str = "any_inner_fold_union"
@@ -84,6 +93,7 @@ class Stage2ElasticNetSelectionConfig:
     selection_mode: str = "llm_roles"
 
     def validate(self) -> None:
+        validate_propensity_bounds(self.min_propensity, self.max_propensity)
         if not isinstance(self.selection_mode, str) or self.selection_mode not in {"llm_roles", "independent_tasks"}:
             raise ValueError("stage2.statistical_selection.selection_mode must be "
                              "llm_roles or independent_tasks")
@@ -200,6 +210,9 @@ class Stage2ElasticNetSelectionConfig:
 
     def public_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        for name in ("min_propensity", "max_propensity"):
+            if result[name] is None:
+                result.pop(name)
         if self.selection_mode == "llm_roles":
             result.pop("selection_mode")
         for retired in (
@@ -1258,6 +1271,9 @@ def _candidate_r_learner_test(
 ) -> dict[str, Any]:
     """Score one candidate using elastic-net nuisances and held-out R-loss."""
 
+    train_eligible = propensity_eligibility(
+        base_e_train, config.min_propensity, config.max_propensity
+    )
     strategy = _feature_strategy(feature)
     result: dict[str, Any] = {
         "feature_id": _feature_key(feature),
@@ -1290,8 +1306,8 @@ def _candidate_r_learner_test(
             continue
         values = design.train[:, index]
         present = values == float(np.max(values))
-        treated = int(np.sum(present & (treatment_train == 1)))
-        untreated = int(np.sum(present & (treatment_train == 0)))
+        treated = int(np.sum(present & train_eligible & (treatment_train == 1)))
+        untreated = int(np.sum(present & train_eligible & (treatment_train == 0)))
         if min(treated, untreated) >= int(config.categorical_min_count):
             interaction_indices.append(index)
         else:
@@ -1374,6 +1390,30 @@ def _candidate_r_learner_test(
         seed=seed + 10_001,
     )
 
+    train_keep = propensity_eligibility(base_e_train, config.min_propensity, config.max_propensity)
+    valid_keep = propensity_eligibility(base_e_valid, config.min_propensity, config.max_propensity)
+    result["propensity_overlap"] = {
+        "train": overlap_diagnostics(base_e_train, config.min_propensity, config.max_propensity),
+        "valid": overlap_diagnostics(base_e_valid, config.min_propensity, config.max_propensity),
+        "eligibility_source": "base_nuisance_common_to_all_candidates",
+    }
+    if (
+        train_keep.sum() < 2
+        or not valid_keep.any()
+        or len(np.unique(treatment_train[train_keep])) < 2
+    ):
+        return {
+            **result,
+            "status": "not_evaluable",
+            "reason": "insufficient_propensity_eligible_rows",
+        }
+    train, valid = train.iloc[np.flatnonzero(train_keep)], valid.iloc[np.flatnonzero(valid_keep)]
+    design = replace(design, train=design.train[train_keep], valid=design.valid[valid_keep])
+    treatment_train, outcome_train = treatment_train[train_keep], outcome_train[train_keep]
+    treatment_valid, outcome_valid = treatment_valid[valid_keep], outcome_valid[valid_keep]
+    e_train, m_train = e_train[train_keep], m_train[train_keep]
+    e_valid, m_valid = e_valid[valid_keep], m_valid[valid_keep]
+    base_e_valid, base_m_valid = base_e_valid[valid_keep], base_m_valid[valid_keep]
     rt_train = np.asarray(treatment_train - e_train, dtype=float)
     rt_valid = np.asarray(treatment_valid - e_valid, dtype=float)
     ry_train = np.asarray(outcome_train - m_train, dtype=float)
@@ -1654,8 +1694,21 @@ def _joint_modifier_elastic_net_fold(
 ) -> dict[str, Any]:
     """Fit one multivariable group-elastic-net R-loss interaction screen."""
 
+    context = dict(context)
+    trim = {}
+    for part in ("train", "valid"):
+        p = np.asarray(context[f"base_e_{part}"], dtype=float)
+        keep = propensity_eligibility(p, config.min_propensity, config.max_propensity)
+        trim[part] = overlap_diagnostics(p, config.min_propensity, config.max_propensity)
+        context[part] = context[part].iloc[np.flatnonzero(keep)].reset_index(drop=True)
+        for prefix in ("base_e", "base_m", "treatment", "outcome"):
+            context[f"{prefix}_{part}"] = np.asarray(context[f"{prefix}_{part}"])[keep]
     train = context["train"]
     valid = context["valid"]
+    if len(train) < 2 or not len(valid) or len(np.unique(context["treatment_train"])) < 2:
+        raise ValueError(
+            "propensity bounds leave insufficient rows or treatment arms for modifier selection"
+        )
     treatment_train = np.asarray(context["treatment_train"], dtype=float)
     treatment_valid = np.asarray(context["treatment_valid"], dtype=float)
     outcome_train = np.asarray(context["outcome_train"], dtype=float)
@@ -1747,14 +1800,13 @@ def _joint_modifier_elastic_net_fold(
     )
     full_loss = float(mean_squared_error(residual_outcome_valid, full_prediction))
     return {
+        "propensity_overlap": trim,
         "fit_rows": len(train),
         "heldout_rows": len(valid),
         "encoded_candidate_columns": int(design.train.shape[1]),
         "tested_interaction_columns": list(interaction_names),
         "excluded_missingness_interactions": True,
-        "excluded_interaction_columns_low_treatment_arm_support": (
-            excluded_low_support
-        ),
+        "excluded_interaction_columns_low_treatment_arm_support": (excluded_low_support),
         "constant_effect": constant_effect,
         "status": modifier_fit.status,
         "regularization_alpha": modifier_fit.regularization,
@@ -1927,6 +1979,9 @@ def select_stage2_features_elastic_net(
                 "heldout_rows": len(valid_ids),
                 "encoded_columns": int(design.train.shape[1]),
                 "treatment": {
+                    "calibration": calibration_diagnostics(
+                        t_valid, treatment_fit.valid_prediction, binary=True
+                    ),
                     "status": treatment_fit.status,
                     "selected_feature_ids": treatment_selected,
                     "feature_group_l2_norms": treatment_magnitudes,
@@ -1947,6 +2002,9 @@ def select_stage2_features_elastic_net(
                     ),
                 },
                 "outcome": {
+                    "calibration": calibration_diagnostics(
+                        y_valid, outcome_fit.valid_prediction, binary=binary_outcome
+                    ),
                     "status": outcome_fit.status,
                     "selected_feature_ids": outcome_selected,
                     "feature_group_l2_norms": outcome_magnitudes,
@@ -2099,23 +2157,32 @@ def select_stage2_features_elastic_net(
                 "outcome_encoded_columns": int(y_design.train.shape[1]),
                 "treatment_status": treatment_nuisance_fit.status,
                 "outcome_status": outcome_nuisance_fit.status,
-                "treatment_regularization_alpha": (
-                    treatment_nuisance_fit.regularization
-                ),
+                "treatment_regularization_alpha": (treatment_nuisance_fit.regularization),
                 "outcome_regularization_alpha": outcome_nuisance_fit.regularization,
                 "treatment_selected_feature_ids": treatment_nuisance_selected,
                 "outcome_selected_feature_ids": outcome_nuisance_selected,
-                "heldout_treatment_log_loss": float(
-                    log_loss(t_valid, e_valid, labels=[0, 1])
-                ),
+                "heldout_treatment_log_loss": float(log_loss(t_valid, e_valid, labels=[0, 1])),
                 "heldout_treatment_auroc": _safe_auroc(t_valid, e_valid),
                 "heldout_outcome_loss": _loss(y_valid, m_valid, binary=binary_outcome),
                 "heldout_outcome_auroc": (
                     _safe_auroc(y_valid, m_valid) if binary_outcome else None
                 ),
-                "nested_modifier_training_crossfit_folds": len(
-                    augmentation_splits
+                "calibration": {
+                    "heldout_treatment": calibration_diagnostics(t_valid, e_valid, binary=True),
+                    "heldout_outcome": calibration_diagnostics(
+                        y_valid, m_valid, binary=binary_outcome
+                    ),
+                    "nested_training_treatment": calibration_diagnostics(
+                        t_train, nested_e_train, binary=True
+                    ),
+                    "nested_training_outcome": calibration_diagnostics(
+                        y_train, nested_m_train, binary=binary_outcome
+                    ),
+                },
+                "propensity_overlap": overlap_diagnostics(
+                    e_valid, policy.min_propensity, policy.max_propensity
                 ),
+                "nested_modifier_training_crossfit_folds": len(augmentation_splits),
             }
         )
         modifier_contexts.append(
@@ -2142,6 +2209,12 @@ def select_stage2_features_elastic_net(
     t_all = dataset.iloc[all_fit_ids][treatment_column].to_numpy(dtype=float)
     y_all = dataset.iloc[all_fit_ids][outcome_column].to_numpy(dtype=float)
 
+    LOGGER.info(
+        "Stage 2 held-out nuisance calibration treatment=%s outcome=%s overlap=%s",
+        calibration_diagnostics(t_all, oof_e, binary=True),
+        calibration_diagnostics(y_all, oof_m, binary=binary_outcome),
+        overlap_diagnostics(oof_e, policy.min_propensity, policy.max_propensity),
+    )
     modifier_votes = {feature_id: 0 for feature_id in by_id}
     modifier_r_loss_improvements = {feature_id: [] for feature_id in by_id}
     modifier_folds: list[dict[str, Any]] = []
@@ -2377,16 +2450,10 @@ def select_stage2_features_elastic_net(
             "hard_selection_gate": False,
             "fit_scope": "inner_fold_fit_rows_only",
             "categorical_tests_are_omnibus": True,
-            "p_value_threshold": float(
-                policy.univariable_confounder_p_value_threshold
-            ),
-            "q_value_threshold": float(
-                policy.univariable_confounder_q_value_threshold
-            ),
+            "p_value_threshold": float(policy.univariable_confounder_p_value_threshold),
+            "q_value_threshold": float(policy.univariable_confounder_q_value_threshold),
             "multiplicity_adjustment": "benjamini_hochberg_within_inner_fold_endpoint",
-            "nominal_joint_support_votes": dict(
-                sorted(univariable_nominal_votes.items())
-            ),
+            "nominal_joint_support_votes": dict(sorted(univariable_nominal_votes.items())),
             "multiplicity_adjusted_joint_support_votes": dict(
                 sorted(univariable_adjusted_votes.items())
             ),
@@ -2397,23 +2464,42 @@ def select_stage2_features_elastic_net(
             "penalty": "group_lasso_plus_ridge",
             "l1_ratio": float(policy.l1_ratio),
             "regularization_selected_by_internal_cv": True,
-            "one_standard_error_rule": bool(
-                policy.nuisance_prediction_one_standard_error_rule
-            ),
+            "one_standard_error_rule": bool(policy.nuisance_prediction_one_standard_error_rule),
             "treatment_feature_ids": sorted(confounder_union),
             "outcome_feature_ids": sorted(confounder_union),
             "folds": nuisance_folds,
-            "overall_treatment_log_loss": float(
-                log_loss(t_all, oof_e, labels=[0, 1])
-            ),
+            "overall_treatment_log_loss": float(log_loss(t_all, oof_e, labels=[0, 1])),
             "overall_outcome_loss": _loss(y_all, oof_m, binary=binary_outcome),
             "overall_treatment_auroc": _safe_auroc(t_all, oof_e),
-            "overall_outcome_auroc": (
-                _safe_auroc(y_all, oof_m) if binary_outcome else None
-            ),
+            "overall_outcome_auroc": (_safe_auroc(y_all, oof_m) if binary_outcome else None),
             "propensity_min": float(np.min(oof_e)),
             "propensity_max": float(np.max(oof_e)),
             "predictions_are_inner_fold_out_of_fold": True,
+            "calibration": {
+                "treatment": calibration_diagnostics(t_all, oof_e, binary=True),
+                "outcome": calibration_diagnostics(y_all, oof_m, binary=binary_outcome),
+            },
+            "propensity_overlap": overlap_diagnostics(
+                oof_e, policy.min_propensity, policy.max_propensity
+            ),
+            "predictions": [
+                {
+                    "_oci_row_id": int(row_id),
+                    "treatment": float(t),
+                    "outcome": float(y),
+                    "propensity": float(e),
+                    "outcome_prediction": float(m),
+                    "effect_eligible": bool(keep),
+                }
+                for row_id, t, y, e, m, keep in zip(
+                    all_fit_ids,
+                    t_all,
+                    y_all,
+                    oof_e,
+                    oof_m,
+                    propensity_eligibility(oof_e, policy.min_propensity, policy.max_propensity),
+                )
+            ],
         },
         "effect_modifier_screen": {
             "objective": (
@@ -2432,9 +2518,7 @@ def select_stage2_features_elastic_net(
             },
             "continuous_candidate_winsorization": {
                 "fit_scope": "modifier_inner_fold_training_rows_only",
-                "two_sided_quantile": float(
-                    policy.modifier_continuous_winsor_quantile
-                ),
+                "two_sided_quantile": float(policy.modifier_continuous_winsor_quantile),
             },
             "r_learner_comparison": (
                 "reduced residual-outcome model has candidate main effects and a "
@@ -2458,9 +2542,7 @@ def select_stage2_features_elastic_net(
                 "and R-learner fitting"
             ),
             "folds": modifier_folds,
-            "selection_rule": (
-                "union_of_top_n_heldout_r_loss_gains_from_each_inner_fold"
-            ),
+            "selection_rule": ("union_of_top_n_heldout_r_loss_gains_from_each_inner_fold"),
             "top_n_per_inner_fold": int(policy.modifier_top_n_per_inner_fold),
             "required_votes": 1,
             "votes": dict(sorted(modifier_votes.items())),
@@ -2471,8 +2553,7 @@ def select_stage2_features_elastic_net(
         },
         "multivariable_modifier_elastic_net_screen": {
             "objective": (
-                "joint grouped elastic-net treatment-interaction selection under "
-                "squared R-loss"
+                "joint grouped elastic-net treatment-interaction selection under " "squared R-loss"
             ),
             "role": "selection_evidence_only",
             "hard_selection_gate": False,
@@ -2481,9 +2562,7 @@ def select_stage2_features_elastic_net(
             "nuisance_model_family": "group_elastic_net",
             "training_nuisance_predictions_are_nested_cross_fitted": True,
             "evaluation_rows_are_untouched_inner_heldout": True,
-            "one_standard_error_rule": bool(
-                policy.modifier_one_standard_error_rule
-            ),
+            "one_standard_error_rule": bool(policy.modifier_one_standard_error_rule),
             "missingness_interactions": False,
             "votes": dict(sorted(modifier_elastic_net_votes.items())),
             "selected_in_any_inner_fold_feature_ids": sorted(
@@ -2491,10 +2570,7 @@ def select_stage2_features_elastic_net(
             ),
             "mean_heldout_r_loss_improvement": float(
                 np.mean(
-                    [
-                        float(row["heldout_r_loss_improvement"])
-                        for row in modifier_elastic_net_folds
-                    ]
+                    [float(row["heldout_r_loss_improvement"]) for row in modifier_elastic_net_folds]
                 )
             ),
             "positive_heldout_r_loss_improvement_fraction": float(
@@ -2512,9 +2588,7 @@ def select_stage2_features_elastic_net(
         },
         "decisions": decisions,
         "retained_feature_ids": [_feature_key(feature) for feature in selected],
-        "measurement_dependency_feature_ids": [
-            _feature_key(feature) for feature in selected
-        ],
+        "measurement_dependency_feature_ids": [_feature_key(feature) for feature in selected],
     }
     if policy.selection_mode == "independent_tasks":
         from .stage2_taskwise_policy import finalize_taskwise_report

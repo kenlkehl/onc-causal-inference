@@ -18,7 +18,7 @@ import os
 import re
 import threading
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Protocol, Sequence
@@ -26,6 +26,13 @@ from typing import Any, Callable, Mapping, MutableMapping, Protocol, Sequence
 import numpy as np
 import pandas as pd
 from joblib.externals.loky import ProcessPoolExecutor as LokyProcessPoolExecutor
+
+from .nuisance_diagnostics import (
+    calibration_diagnostics,
+    overlap_diagnostics,
+    propensity_eligibility,
+    validate_propensity_bounds,
+)
 
 from ..models.causal_forest_head import CausalForestHead
 from ..models.elastic_net_nuisance import (
@@ -75,9 +82,7 @@ PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = (
 )
 REVIEW_CHECKPOINT_SCHEMA_VERSION = "stage2_aggregate_ontology_supervisor_v1"
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
-ESTIMATION_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_outer_estimation_v7_elastic_net_nuisance"
-)
+ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v8_calibration_overlap"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
 PRESELECTION_SNAPSHOT_SCHEMA_VERSION = "stage2_frozen_preselection_snapshot_v1"
 HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION = (
@@ -8439,7 +8444,10 @@ def estimate_outer_fold(
     propensity_clip: float,
     estimation_trees: int,
     output_dir: Path,
+    min_propensity: float | None = None,
+    max_propensity: float | None = None,
 ) -> dict[str, Any]:
+    validate_propensity_bounds(min_propensity, max_propensity)
     complete_path = output_dir / "complete.json"
     diagnostics_path = output_dir / "diagnostics.json"
     estimation_input_fingerprint = _value_fingerprint(
@@ -8453,6 +8461,8 @@ def estimate_outer_fold(
             "outcome_type": outcome_type,
             "inner_folds": inner_folds,
             "seed": seed,
+            "min_propensity": min_propensity,
+            "max_propensity": max_propensity,
             "propensity_clip": propensity_clip,
             "estimation_trees": estimation_trees,
             "dataset_modeling_fingerprint": _frame_fingerprint(
@@ -8500,10 +8510,47 @@ def estimate_outer_fold(
         for feature in adjustment_defs
         if str(feature["feature_id"]) not in effect_ids
     ]
+    # Eligibility for effect fitting must not use in-sample propensity predictions.
+    supplied_inner = list(split.get("inner_splits") or []) or _fallback_inner_splits(
+        fit_ids, folds=inner_folds, seed=seed
+    )
+    fit_propensity, fit_mu0, fit_mu1 = _cross_fitted_nuisance(
+        dataset=dataset,
+        extracted=extracted_fit,
+        definitions=definitions,
+        fit_ids=fit_ids,
+        inner_splits=supplied_inner,
+        treatment_column=treatment_column,
+        outcome_column=outcome_column,
+        binary=binary,
+        seed=seed + 30_000,
+    )
+    fit_keep = propensity_eligibility(fit_propensity, min_propensity, max_propensity)
+    _write_frame(
+        output_dir / "nuisance_fit_predictions.csv",
+        pd.DataFrame(
+            {
+                "_oci_row_id": fit_ids,
+                "treatment": t_fit,
+                "outcome": y_fit,
+                "propensity": fit_propensity,
+                "mu0": fit_mu0,
+                "mu1": fit_mu1,
+                "effect_eligible": fit_keep,
+            }
+        ),
+    )
+    fit_overlap = overlap_diagnostics(fit_propensity, min_propensity, max_propensity)
+    _write_json(output_dir / "propensity_overlap.json", {"fit": fit_overlap})
+    if fit_keep.sum() < 4 or min(np.sum(t_fit[fit_keep] == arm) for arm in (0, 1)) < 2:
+        raise ValueError(
+            "propensity bounds leave insufficient training rows or treatment arms for causal forest"
+        )
     t_encoder = _FeatureEncoder(propensity_defs).fit(extracted_fit)
     y_encoder = _FeatureEncoder(outcome_defs).fit(extracted_fit)
-    effect_encoder = _FeatureEncoder(effect_defs).fit(extracted_fit)
-    control_encoder = _FeatureEncoder(pure_confounder_defs).fit(extracted_fit)
+    eligible_fit = extracted_fit.iloc[np.flatnonzero(fit_keep)]
+    effect_encoder = _FeatureEncoder(effect_defs).fit(eligible_fit)
+    control_encoder = _FeatureEncoder(pure_confounder_defs).fit(eligible_fit)
     x_t_fit = t_encoder.transform(extracted_fit)
     x_t_heldout = t_encoder.transform(extracted_heldout)
     x_y_fit = y_encoder.transform(extracted_fit)
@@ -8526,6 +8573,16 @@ def estimate_outer_fold(
     )
     propensity = _predict_probability(treatment_model, x_t_heldout)
     mu0, mu1 = _predict_outcomes(outcome_models, x_y_heldout)
+    heldout_keep = propensity_eligibility(propensity, min_propensity, max_propensity)
+    overlap = {
+        "fit": fit_overlap,
+        "heldout": overlap_diagnostics(propensity, min_propensity, max_propensity),
+        "fit_eligibility_source": "inner_out_of_fold_external_propensity",
+        "heldout_eligibility_source": "outer_training_only_external_propensity",
+    }
+    _write_json(output_dir / "propensity_overlap.json", overlap)
+    if not heldout_keep.any():
+        raise ValueError("propensity bounds leave no held-out patients for effect estimation")
     if x_effect_fit.shape[1] == 0:
         # EconML requires X for heterogeneous-effect prediction. A constant X
         # yields one fold-level treatment effect when no modifier survived.
@@ -8534,7 +8591,7 @@ def estimate_outer_fold(
         constant_effect_design = True
     else:
         constant_effect_design = False
-    controls_fit = w_fit if w_fit.shape[1] else None
+    controls_fit = w_fit[fit_keep] if w_fit.shape[1] else None
     causal_forest = CausalForestHead(
         n_estimators=int(estimation_trees),
         max_depth=None,
@@ -8551,40 +8608,34 @@ def estimate_outer_fold(
         outcome_type=outcome_type,
     )
     causal_forest.fit(
-        x_effect_fit,
-        t_fit,
-        y_fit,
+        x_effect_fit[fit_keep],
+        t_fit[fit_keep],
+        y_fit[fit_keep],
         W=controls_fit,
     )
     causal_forest_predictions = causal_forest.predict(
-        x_effect_heldout,
+        x_effect_heldout[heldout_keep],
         return_ci=True,
     )
-    cate = np.asarray(causal_forest_predictions["tau_pred"], dtype=float)
-    cate_lower = causal_forest_predictions.get("tau_lower")
-    cate_upper = causal_forest_predictions.get("tau_upper")
-    cate_std = causal_forest_predictions.get("tau_std")
-    cate_lower_values = (
-        np.asarray(cate_lower, dtype=float)
-        if cate_lower is not None
-        else np.full(len(cate), np.nan)
-    )
-    cate_upper_values = (
-        np.asarray(cate_upper, dtype=float)
-        if cate_upper is not None
-        else np.full(len(cate), np.nan)
-    )
-    cate_std_values = (
-        np.asarray(cate_std, dtype=float)
-        if cate_std is not None
-        else np.full(len(cate), np.nan)
-    )
-    aipw = _dr_score(
-        y_heldout,
-        t_heldout,
-        mu0,
-        mu1,
-        propensity,
+
+    def scatter_prediction(key: str) -> np.ndarray:
+        values = np.full(len(heldout_ids), np.nan)
+        prediction = causal_forest_predictions.get(key)
+        if prediction is not None:
+            values[heldout_keep] = np.asarray(prediction, dtype=float).reshape(-1)
+        return values
+
+    cate = scatter_prediction("tau_pred")
+    cate_lower_values = scatter_prediction("tau_lower")
+    cate_upper_values = scatter_prediction("tau_upper")
+    cate_std_values = scatter_prediction("tau_std")
+    aipw = np.full(len(heldout_ids), np.nan)
+    aipw[heldout_keep] = _dr_score(
+        y_heldout[heldout_keep],
+        t_heldout[heldout_keep],
+        mu0[heldout_keep],
+        mu1[heldout_keep],
+        propensity[heldout_keep],
         clip=propensity_clip,
     )
     predictions = pd.DataFrame(
@@ -8596,6 +8647,7 @@ def estimate_outer_fold(
             "propensity": propensity,
             "mu0": mu0,
             "mu1": mu1,
+            "effect_eligible": heldout_keep,
             "aipw_score": aipw,
             "estimated_cate": cate,
             "estimated_cate_lower_95": cate_lower_values,
@@ -8615,12 +8667,8 @@ def estimate_outer_fold(
         "model_family": "causal_forest_dml",
         "primary_ate_estimator": "outer_cross_fitted_aipw",
         "nuisance_model_family": "elastic_net",
-        "binary_nuisance_model": (
-            "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier"
-        ),
-        "continuous_nuisance_model": (
-            "oci.models.elastic_net_nuisance.ElasticNetRegressor"
-        ),
+        "binary_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier"),
+        "continuous_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetRegressor"),
         "causal_forest_trees": int(estimation_trees),
         "causal_forest_honest": True,
         "causal_forest_inference": True,
@@ -8628,6 +8676,42 @@ def estimate_outer_fold(
         "causal_forest_fit_audit": causal_forest.fit_audit(),
         "rows": len(heldout_ids),
         "fit_rows": len(fit_ids),
+        "effect_fit_rows": int(fit_keep.sum()),
+        "effect_estimation_rows": int(heldout_keep.sum()),
+        "estimand": (
+            "average_treatment_effect_in_propensity_eligible_population"
+            if min_propensity is not None or max_propensity is not None
+            else "average_treatment_effect"
+        ),
+        "propensity_overlap": overlap,
+        "nuisance_calibration": {
+            "fit_out_of_fold_treatment": calibration_diagnostics(
+                t_fit, fit_propensity, binary=True
+            ),
+            "fit_out_of_fold_outcome_factual": calibration_diagnostics(
+                y_fit, np.where(t_fit == 1, fit_mu1, fit_mu0), binary=binary
+            ),
+            "heldout_treatment": calibration_diagnostics(t_heldout, propensity, binary=True),
+            "heldout_outcome_factual": calibration_diagnostics(
+                y_heldout, np.where(t_heldout == 1, mu1, mu0), binary=binary
+            ),
+            "heldout_outcome_by_arm": {
+                str(arm): calibration_diagnostics(
+                    y_heldout[t_heldout == arm],
+                    (mu1 if arm else mu0)[t_heldout == arm],
+                    binary=binary,
+                )
+                for arm in (0, 1)
+            },
+            "eligible_heldout_treatment": calibration_diagnostics(
+                t_heldout[heldout_keep], propensity[heldout_keep], binary=True
+            ),
+            "eligible_heldout_outcome_factual": calibration_diagnostics(
+                y_heldout[heldout_keep],
+                np.where(t_heldout == 1, mu1, mu0)[heldout_keep],
+                binary=binary,
+            ),
+        },
         "features": len(definitions),
         "confounders": len(adjustment_defs),
         "treatment_nuisance_features": len(propensity_defs),
@@ -8635,11 +8719,7 @@ def estimate_outer_fold(
         "effect_modifiers": len(effect_defs),
         "pure_confounders_in_w": len(pure_confounder_defs),
         "dual_role_features_in_x_only": len(
-            [
-                feature
-                for feature in adjustment_defs
-                if str(feature["feature_id"]) in effect_ids
-            ]
+            [feature for feature in adjustment_defs if str(feature["feature_id"]) in effect_ids]
         ),
         "constant_effect_design": constant_effect_design,
         "ate_aipw": ate,
@@ -8649,17 +8729,13 @@ def estimate_outer_fold(
             if standard_error is not None
             else None
         ),
-        "mean_estimated_cate": float(np.mean(cate)) if len(cate) else None,
-        "mean_causal_forest_effect": float(np.mean(cate)) if len(cate) else None,
+        "mean_estimated_cate": float(np.nanmean(cate)) if np.isfinite(cate).any() else None,
+        "mean_causal_forest_effect": float(np.nanmean(cate)) if np.isfinite(cate).any() else None,
         "mean_causal_forest_lower_95": (
-            float(np.nanmean(cate_lower_values))
-            if np.isfinite(cate_lower_values).any()
-            else None
+            float(np.nanmean(cate_lower_values)) if np.isfinite(cate_lower_values).any() else None
         ),
         "mean_causal_forest_upper_95": (
-            float(np.nanmean(cate_upper_values))
-            if np.isfinite(cate_upper_values).any()
-            else None
+            float(np.nanmean(cate_upper_values)) if np.isfinite(cate_upper_values).any() else None
         ),
         "propensity_min": float(np.min(propensity)) if len(propensity) else None,
         "propensity_max": float(np.max(propensity)) if len(propensity) else None,
@@ -8668,6 +8744,11 @@ def estimate_outer_fold(
         "clipped_high_rows": int(np.sum(propensity > 1.0 - propensity_clip)),
         "predictions_path": str(output_dir / "predictions.csv"),
     }
+    LOGGER.info(
+        "Stage 2 final nuisance calibration=%s overlap=%s",
+        diagnostics["nuisance_calibration"],
+        overlap,
+    )
     _write_json(diagnostics_path, diagnostics)
     _write_json(
         complete_path,
@@ -9103,6 +9184,8 @@ def _run_fold_analysis_legacy(
         inner_folds=inner_folds,
         seed=seed,
         propensity_clip=config.propensity_clip,
+        min_propensity=getattr(config, "min_propensity", None),
+        max_propensity=getattr(config, "max_propensity", None),
         estimation_trees=config.estimation_trees,
         output_dir=output_dir / "estimation",
     )
@@ -9692,6 +9775,11 @@ def run_fold_analysis(
     statistical_policy = getattr(config, "statistical_selection", None)
     if statistical_policy is None:
         raise ValueError("Stage 2 config is missing statistical_selection policy")
+    statistical_policy = replace(
+        statistical_policy,
+        min_propensity=getattr(config, "min_propensity", None),
+        max_propensity=getattr(config, "max_propensity", None),
+    )
     consolidation_policy = getattr(config, "selection_consolidation", None)
     if consolidation_policy is None:
         raise ValueError("Stage 2 config is missing selection_consolidation policy")
@@ -9708,6 +9796,7 @@ def run_fold_analysis(
         "outcome_type": outcome_type,
         "selection_consolidation_policy": consolidation_policy.scientific_dict(),
         "selection_consolidation_llm_model": str(getattr(config, "model", "")),
+        "statistical_component_schema_version": ELASTIC_NET_COMPONENT_SCHEMA_VERSION,
         "statistical_selection_policy": statistical_policy.public_dict(),
         "role_adjudication_policy": config.role_adjudication.public_dict(),
         "role_adjudication_llm_model": str(getattr(config, "model", "")),
@@ -9836,6 +9925,11 @@ def run_fold_analysis(
             selection_dir / "statistical_evidence.json",
             elastic_net_report,
         )
+        nuisance_rows = elastic_net_report.get("cross_fitted_nuisance_models", {}).get(
+            "predictions", []
+        )
+        if nuisance_rows:
+            _write_frame(selection_dir / "nuisance_predictions.csv", pd.DataFrame(nuisance_rows))
         if consolidated_definitions and config.role_adjudication.enabled:
             selected, role_adjudication_report, _role_evidence = (
                 adjudicate_stage2_roles(
@@ -10082,6 +10176,8 @@ def run_fold_analysis(
         inner_folds=inner_folds,
         seed=seed,
         propensity_clip=float(config.propensity_clip),
+        min_propensity=getattr(config, "min_propensity", None),
+        max_propensity=getattr(config, "max_propensity", None),
         estimation_trees=int(config.estimation_trees),
         output_dir=output_dir / "estimation",
     )

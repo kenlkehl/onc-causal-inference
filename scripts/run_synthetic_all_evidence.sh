@@ -17,6 +17,43 @@ output_name="$2"
 requested_output_dir="${3:-}"
 cd "${repo_root}"
 
+# Validate before dependency synchronization, GPU inspection, or checkpoint writes.
+for control in STAGE2_ONLY STAGE2_RESELECT OCI_PREFLIGHT_ONLY; do
+    value="${!control-0}"
+    if [[ "$value" != "0" && "$value" != "1" ]]; then
+        echo "$control must be 0 or 1." >&2
+        exit 2
+    fi
+done
+case "${STAGE2_SELECTION_MODE:-}" in
+    ""|llm_roles|independent_tasks) ;;
+    *) echo "STAGE2_SELECTION_MODE must be llm_roles or independent_tasks." >&2; exit 2 ;;
+esac
+if [[ "${STAGE2_RESELECT:-0}" == "1" && "${STAGE2_ONLY:-0}" != "1" ]]; then
+    echo "STAGE2_RESELECT=1 requires STAGE2_ONLY=1." >&2
+    exit 2
+fi
+if [[ -n "${OCI_RUN_CONFIG:-}" || -n "${OCI_STAGE2_SOURCE:-}" || "${STAGE2_ONLY:-0}" == "1" || "${OCI_PREFLIGHT_ONLY:-0}" == "1" ]]; then
+    if [[ "${STAGE2_ONLY:-0}" != "1" ]]; then
+        echo "OCI_RUN_CONFIG and OCI_PREFLIGHT_ONLY require STAGE2_ONLY=1." >&2
+        exit 2
+    fi
+    if [[ "${STAGE2_ENDPOINT-unset}" == "" ]]; then
+        echo "Stage 2-only reuse cannot be combined with STAGE2_ENDPOINT= (Stage 2 disabled)." >&2
+        exit 2
+    fi
+    python_bin="${OCI_PYTHON:-${repo_root}/.venv/bin/python}"
+    if [[ ! -x "$python_bin" ]]; then
+        echo "Set OCI_PYTHON to an existing executable; saved-run launch never syncs dependencies." >&2
+        exit 2
+    fi
+    if [[ -z "$requested_output_dir" && -z "${OCI_RUN_CONFIG:-}" ]]; then
+        requested_output_dir="${repo_root}/artifacts/research_all_evidence/${output_name}"
+    fi
+    export PYTHONDONTWRITEBYTECODE=1
+    exec "$python_bin" "${repo_root}/scripts/launch_saved_stage2.py" "$dataset" "$requested_output_dir"
+fi
+
 disable_htr="${DISABLE_HTR:-0}"
 gpu_limit="${GPU_COUNT:-auto}"
 physical_gpus="${PHYSICAL_GPUS:-}"
@@ -135,6 +172,10 @@ stage2_enabled=0
 if (( stage2_managed_orchestrator )) || [[ -n "${stage2_endpoint}" ]]; then
     stage2_enabled=1
 fi
+if (( ! stage2_enabled )) && [[ -n "${STAGE2_SELECTION_MODE:-}" ]]; then
+    echo "STAGE2_SELECTION_MODE requires Stage 2 to be enabled." >&2
+    exit 2
+fi
 if (( stage2_managed_extractor && ! stage2_enabled )); then
     echo "Managed extraction vLLM also requires an external or managed orchestrator." >&2
     exit 1
@@ -244,6 +285,9 @@ if [[ -z "${gpu_count}" || -z "${devices}" || -z "${worker_count}" ]]; then
 fi
 
 stage2_policy_args=()
+if [[ -n "${STAGE2_SELECTION_MODE:-}" ]]; then
+    stage2_policy_args+=(--set "stage2.statistical_selection.selection_mode=${STAGE2_SELECTION_MODE}")
+fi
 if (( stage2_managed_extractor )); then
     stage2_policy_args+=(
         --stage2-extraction-model "${stage2_extraction_model}"

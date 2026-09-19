@@ -1,0 +1,118 @@
+{
+  "review_date": "2026-09-19",
+  "repository_base_commit": "aca1828",
+  "scope": "current working tree including pre-existing local changes",
+  "report_file": "all_evidence_stage1_stage2_review_2026-09-19.md",
+  "report_sha256": "fc8ef8f6aa2b7183f3620a137c8fc1705e781485b22af5aa928bfe12ceb06f81",
+  "reviewed_source_links": {
+    "oci/inference/research_all_evidence_workflow.py": {
+      "sha256": "10108f0f5ed7924fe518fbe19a633d4d644f007c15cdedfb0664a3a33ee8f4fd",
+      "bytes": 139134
+    },
+    "oci/inference/tfidf_topic_stage1.py": {
+      "sha256": "ad144e14f141d0b927d66b4ebcbfe201e70245fc4720c8f08432657ff4e179a3",
+      "bytes": 62726
+    },
+    "oci/inference/stage1_architectures.py": {
+      "sha256": "eaad33d05d3d7507b236fb6d09ff081ea45d58505b2c620be5d404859d6e4fbe",
+      "bytes": 10415
+    },
+    "oci/inference/multi_model_forest_stage1.py": {
+      "sha256": "8c34009874d21af4526fe956dfc300db773ff5f7a93a824b42641412424deb4e",
+      "bytes": 217959
+    },
+    "oci/inference/multi_model_pair_uplift.py": {
+      "sha256": "424af6beae4a2d6eb1114633453f166d4feb161b25e085978b89bc2d35090a21",
+      "bytes": 61460
+    },
+    "oci/inference/embedding_contrast_discovery.py": {
+      "sha256": "2d14e609648383760400204c6b98ed45ad26236d4c699765744ee108cfe0925c",
+      "bytes": 99935
+    },
+    "oci/inference/tfidf_topic_discovery.py": {
+      "sha256": "790a402767d4a0c33f37232a37bb8e5ff7f1c8633a86f490d47f44c3a6700f6e",
+      "bytes": 91087
+    },
+    "oci/inference/neural_query_discovery_runtime.py": {
+      "sha256": "c761874c145d65260944133a06cc1952be08fdaa78f4b4afb5d95ace7216af17",
+      "bytes": 31227
+    },
+    "oci/inference/plain_handoff_stage2_evidence.py": {
+      "sha256": "abf19df284d6edc884c474d5b33492d310bcf9132ca1d02a5c9a6990cc29c6f6",
+      "bytes": 74947
+    },
+    "oci/inference/plain_handoff_stage2.py": {
+      "sha256": "db5b37085c45e1eb74277b90c5bdc36518ae89942dcd5f249dd6fbf9dd428995",
+      "bytes": 384606
+    },
+    "oci/inference/plain_handoff_stage2_analysis.py": {
+      "sha256": "28c1f4065df9451a32280ea35dd2f0000d02bac2fa86b86f304e24fc2489c943",
+      "bytes": 419244
+    },
+    "oci/inference/stage2_sequential_consolidation.py": {
+      "sha256": "7c03aefe176de4e2cb67a1ba945f73adea0d352eb34b6715d1129497fd6300d0",
+      "bytes": 81580
+    },
+    "oci/inference/stage2_elastic_net_selection.py": {
+      "sha256": "24dd5e67b590d3565a3982b31f9e28bd6d9ce86c9ae0521fb24dbdabddd77b70",
+      "bytes": 103446
+    },
+    "oci/inference/stage2_taskwise_policy.py": {
+      "sha256": "1875875adf34279ee39781033cc3733b0d91693b9b5143d49b6995493d4c9b8c",
+      "bytes": 9073
+    },
+    "oci/inference/stage2_role_adjudication.py": {
+      "sha256": "b1b061614b8b3095ec1cea7e80c17a2b9db59ab6024202e4f8ec8fc28ba1ff21",
+      "bytes": 32195
+    },
+    "oci/models/causal_forest_head.py": {
+      "sha256": "0154e16dacefd77ccf775668060de0a62df4246517c4dee0ac55a989d0e39a80",
+      "bytes": 30881
+    },
+    "oci/inference/nuisance_diagnostics.py": {
+      "sha256": "667ddc38592da496c4dff50d90ab7817ce13848be66fff7549912370bf5da8c7",
+      "bytes": 6427
+    },
+    "oci/evaluation/stage1.py": {
+      "sha256": "65539b9de4a5dd7a5adf7aba84e890042bc4d9d5c0e81ef7c8629243610f269a",
+      "bytes": 51067
+    },
+    "oci/inference/stage2_preflight.py": {
+      "sha256": "37954dd00926ec33357f0464fbd85bf956d295af1015305257b75ac051a2dcb5",
+      "bytes": 16100
+    },
+    "oci/inference/stage2_sampling.py": {
+      "sha256": "7bc88c10863bf2beb9bfd138a8e1e049b3ee37797a40c53599b6e91e490237ac",
+      "bytes": 2289
+    }
+  },
+  "document_checks": {
+    "top_level_outline_sections": 14,
+    "list_items_by_parser_level": {
+      "1": 14,
+      "3": 93,
+      "5": 307
+    },
+    "tables": 3,
+    "mermaid_diagrams": 1,
+    "local_links": 48,
+    "missing_local_links": [],
+    "out_of_range_source_lines": [],
+    "words": 8597,
+    "lines": 496
+  },
+  "validation": {
+    "test_modules": [
+      "tests/test_stage1_architecture_registry.py",
+      "tests/test_tfidf_topic_stage1_honesty.py",
+      "tests/test_stage2_independent_tasks.py",
+      "tests/test_stage2_propensity_overlap.py",
+      "tests/test_stage2_role_adjudication.py",
+      "tests/test_causal_forest_runtime.py"
+    ],
+    "result": "60 passed, 4 warnings in 20.86s",
+    "full_llm_gpu_workflow_rerun": false,
+    "full_test_suite_rerun": false,
+    "production_artifacts_modified": false
+  }
+}

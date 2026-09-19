@@ -1855,6 +1855,10 @@ class ResearchAllEvidenceWorkflow:
         )
 
     def run(self) -> Mapping[str, Any]:
+        if "stage2" in self.components:
+            from .stage2_preflight import validate_selection_resume
+
+            validate_selection_resume(self.config)
         context = (
             self._stage2_only_context()
             if self.components == ("stage2",)
@@ -2017,14 +2021,16 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
     return _stage2_value_fingerprint(
         {
             "schema_version": STAGE2_RESELECTION_SCHEMA_VERSION,
+            **(
+                {"propensity_bounds": [config.stage2.min_propensity, config.stage2.max_propensity]}
+                if config.stage2.min_propensity is not None
+                or config.stage2.max_propensity is not None
+                else {}
+            ),
             "role_selection_schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
             "input_temporal_scope": config.stage2.input_temporal_scope,
-            "selection_consolidation": (
-                config.stage2.selection_consolidation.scientific_dict()
-            ),
-            "statistical_selection": (
-                config.stage2.statistical_selection.public_dict()
-            ),
+            "selection_consolidation": (config.stage2.selection_consolidation.scientific_dict()),
+            "statistical_selection": (config.stage2.statistical_selection.public_dict()),
             "review_policy": frozen_preselection_review_policy(config.stage2),
             "primary_model": config.stage2.model,
             "extraction_model": extraction_model,
@@ -2161,6 +2167,25 @@ def _reselection_archive_path(stage2_dir: Path) -> Path:
         suffix += 1
         candidate = archive_root / f"reselection_{stamp}_{suffix:02d}"
     return candidate
+
+
+def _validate_reselection_archive_moves(stage2_dir: Path, state: Mapping[str, Any]) -> None:
+    archive_relative = Path(str(state.get("archive_path") or ""))
+    paths = state.get("planned_artifacts")
+    if not str(state.get("archive_path") or "") or not isinstance(paths, list):
+        raise RuntimeError("Stage 2 reselection state is incomplete")
+    archive = (stage2_dir / archive_relative).resolve()
+    if not archive.is_relative_to(stage2_dir.resolve()) or archive == stage2_dir.resolve():
+        raise RuntimeError("Stage 2 reselection archive escapes the Stage 2 directory")
+    for relative in paths:
+        path = Path(str(relative))
+        if path.is_absolute() or ".." in path.parts or not path.parts:
+            raise RuntimeError(f"invalid Stage 2 reselection artifact path: {relative}")
+        active, saved = stage2_dir / path, archive / "artifacts" / path
+        if state.get("status") == "preparing" and active.exists() == saved.exists():
+            raise RuntimeError(f"Stage 2 reselection artifact missing or duplicated: {relative}")
+        if state.get("status") == "prepared" and not saved.exists():
+            raise RuntimeError(f"Stage 2 reselection archive artifact missing: {relative}")
 
 
 def _resume_reselection_archive_moves(
@@ -2326,12 +2351,16 @@ def _backfill_reselection_heldout_caches(
 def prepare_stage2_reselection(
     *,
     config: ResearchStage1Config,
+    dry_run: bool = False,
+    source_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Freeze verified preselection inputs and archive selection-and-later output.
 
     The operation is intentionally fail-closed.  Every fold is checked before
     any completed result is moved, and interrupted archival can be resumed from
-    ``reselection_state.json``.
+    ``reselection_state.json``. ``dry_run`` performs the same compatibility
+    checks without writing snapshots or moving results. An archived ``source_dir``
+    is accepted only for that read-only validation.
     """
 
     if config.components != ("stage2",):
@@ -2347,6 +2376,10 @@ def prepare_stage2_reselection(
             f"{STAGE2_INPUT_TEMPORAL_SCOPE!r}"
         )
     stage2_dir = config.output_dir / "stage2"
+    if source_dir is not None:
+        if not dry_run:
+            raise ValueError("source_dir requires read-only reselection validation")
+        stage2_dir = Path(source_dir).resolve(strict=True)
     if not stage2_dir.is_dir():
         raise RuntimeError(f"no existing Stage 2 output to reselect: {stage2_dir}")
     policy_fingerprint = _stage2_reselection_policy_fingerprint(config)
@@ -2365,6 +2398,9 @@ def prepare_stage2_reselection(
                     "scientific policy; resume it with the same configuration or restore "
                     "its archive before starting another"
                 )
+            if dry_run:
+                _validate_reselection_archive_moves(stage2_dir, prior_state)
+                return {**prior_state, "dry_run": True}
             resumed = (
                 _resume_reselection_archive_moves(
                     stage2_dir=stage2_dir,
@@ -2727,6 +2763,16 @@ def prepare_stage2_reselection(
             if path.exists():
                 planned_paths.append(str(path.relative_to(stage2_dir)))
 
+    if dry_run:
+        return {
+            "dry_run": True,
+            "status": "validated",
+            "source_dir": str(stage2_dir),
+            "policy_fingerprint": policy_fingerprint,
+            "planned_artifacts": planned_paths,
+            "outer_folds": [int(s["outer_fold"]) for s in snapshot_payloads.values()],
+        }
+
     archive_dir.mkdir(parents=True, exist_ok=False)
     for outer_dir, snapshot in snapshot_payloads.items():
         snapshot_dir = outer_dir / "preselection"
@@ -2889,6 +2935,16 @@ def build_parser() -> argparse.ArgumentParser:
             "rerun selection from verified frozen feature definitions and "
             "outer-training extraction; requires Stage 2-only mode"
         ),
+    )
+    parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="validate saved Stage 1 and Stage 2 reuse without writing or running models",
+    )
+    parser.add_argument(
+        "--stage2-source",
+        type=Path,
+        help="archived Stage 2 source to validate; preflight and reselection only",
     )
     parser.add_argument("--stage2-endpoint", help="OpenAI-compatible Stage 2 base URL")
     parser.add_argument(
@@ -3429,6 +3485,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             "run.mode=stage2)"
         )
 
+    if args.stage2_source is not None and not (args.preflight_only and args.stage2_reselect):
+        parser.error("--stage2-source requires --preflight-only --stage2-reselect")
+    if args.preflight_only:
+        if args.rerun:
+            parser.error("--preflight-only cannot be combined with --rerun")
+        from .stage2_preflight import preflight_stage2
+
+        try:
+            result = preflight_stage2(
+                config, reselect=args.stage2_reselect, source_dir=args.stage2_source
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, indent=2, default=_json_default))
+        return 0
+
     _configure_logging(config.output_dir, config.log_level)
     if args.stage2_reselect:
         prepare_stage2_reselection(config=config)
@@ -3440,7 +3512,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         LOGGER.warning("workflow interrupted; rerun the same command to continue")
         return 130
-    if args.stage2_reselect:
+    if config.components == ("stage2",):
         finalize_stage2_reselection(config=config)
     print(json.dumps(result, indent=2, sort_keys=True, default=_json_default))
     return 0

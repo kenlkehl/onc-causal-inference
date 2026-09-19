@@ -31,6 +31,12 @@ from urllib.parse import urlparse
 import numpy as np
 import pandas as pd
 
+from .nuisance_diagnostics import (
+    calibration_diagnostics,
+    overlap_diagnostics,
+    validate_propensity_bounds,
+)
+
 from .plain_handoff_stage2_evidence import (
     EVIDENCE_COMPILER_VERSION,
     SUPPORTED_STAGE2_ARCHITECTURES,
@@ -879,6 +885,8 @@ class PlainHandoffStage2Config:
         default_factory=Stage2RoleAdjudicationConfig
     )
     estimation_trees: int = 200
+    min_propensity: float | None = None
+    max_propensity: float | None = None
     propensity_clip: float = 0.02
     min_nonmissing_fraction: float = 0.05
     max_dominant_fraction: float = 0.98
@@ -1170,6 +1178,14 @@ class PlainHandoffStage2Config:
         self.role_adjudication.validate()
         if self.estimation_trees < 10:
             raise ValueError("stage2.estimation_trees must be at least 10")
+        validate_propensity_bounds(self.min_propensity, self.max_propensity)
+        if (
+            self.statistical_selection.min_propensity is not None
+            or self.statistical_selection.max_propensity is not None
+        ):
+            raise ValueError(
+                "configure min_propensity/max_propensity at stage2 level, not statistical_selection"
+            )
         if not 0.0 < self.propensity_clip < 0.5:
             raise ValueError("stage2.propensity_clip must be between 0 and 0.5")
         if not 0.0 <= self.min_nonmissing_fraction <= 1.0:
@@ -1420,6 +1436,13 @@ def plain_stage2_config_from_mapping(
         statistical_selection_value = dict(raw_statistical_selection)
     else:
         raise ValueError("stage2.statistical_selection must be a configuration object")
+    if any(
+        statistical_selection_value.get(name) is not None
+        for name in ("min_propensity", "max_propensity")
+    ):
+        raise ValueError(
+            "configure min_propensity/max_propensity at stage2 level, not statistical_selection"
+        )
     config = PlainHandoffStage2Config(
         endpoint=endpoint.rstrip("/"),
         model=model,
@@ -1432,9 +1455,7 @@ def plain_stage2_config_from_mapping(
             raw.get("transport_max_attempts", DEFAULT_TRANSPORT_MAX_ATTEMPTS)
         ),
         transport_retry_backoff=float(raw.get("transport_retry_backoff", 2.0)),
-        max_response_repairs=int(
-            raw.get("max_response_repairs", DEFAULT_MAX_RESPONSE_REPAIRS)
-        ),
+        max_response_repairs=int(raw.get("max_response_repairs", DEFAULT_MAX_RESPONSE_REPAIRS)),
         thinking_after_response_repairs=int(
             raw.get(
                 "thinking_after_response_repairs",
@@ -1442,9 +1463,7 @@ def plain_stage2_config_from_mapping(
             )
         ),
         max_tokens=int(raw.get("max_tokens", DEFAULT_MAX_TOKENS)),
-        extraction_max_tokens=int(
-            raw.get("extraction_max_tokens", DEFAULT_EXTRACTION_MAX_TOKENS)
-        ),
+        extraction_max_tokens=int(raw.get("extraction_max_tokens", DEFAULT_EXTRACTION_MAX_TOKENS)),
         interpretation_reasoning_effort=interpretation_reasoning_effort,
         extraction_reasoning_effort=extraction_reasoning_effort,
         max_prompt_chars=int(raw.get("max_prompt_chars", 100_000)),
@@ -1529,12 +1548,8 @@ def plain_stage2_config_from_mapping(
                 DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS,
             )
         ),
-        input_temporal_scope=str(
-            raw.get("input_temporal_scope", TEMPORAL_SCOPE)
-        ).strip(),
-        agentic_selection=agentic_selection_config_from_mapping(
-            raw.get("agentic_selection")
-        ),
+        input_temporal_scope=str(raw.get("input_temporal_scope", TEMPORAL_SCOPE)).strip(),
+        agentic_selection=agentic_selection_config_from_mapping(raw.get("agentic_selection")),
         agentic_evidence_pair_chunk_size=int(raw_pair_chunk_size),
         selection_consolidation=sequential_consolidation_config_from_mapping(
             raw.get("selection_consolidation")
@@ -1542,10 +1557,10 @@ def plain_stage2_config_from_mapping(
         statistical_selection=statistical_selection_config_from_mapping(
             statistical_selection_value
         ),
-        role_adjudication=role_adjudication_config_from_mapping(
-            raw.get("role_adjudication")
-        ),
+        role_adjudication=role_adjudication_config_from_mapping(raw.get("role_adjudication")),
         estimation_trees=int(raw.get("estimation_trees", 200)),
+        min_propensity=raw.get("min_propensity"),
+        max_propensity=raw.get("max_propensity"),
         propensity_clip=float(raw.get("propensity_clip", 0.02)),
         min_nonmissing_fraction=float(raw.get("min_nonmissing_fraction", 0.05)),
         max_dominant_fraction=float(raw.get("max_dominant_fraction", 0.98)),
@@ -8259,6 +8274,14 @@ class PlainHandoffStage2:
                 output_dir=output_dir,
             )
             oracle_overall = dict(oracle_ite_evaluation.get("overall") or {})
+            if "effect_eligible" in predictions:
+                eligible = predictions["effect_eligible"].to_numpy(dtype=bool)
+                if predictions.loc[~eligible, ["aipw_score", "estimated_cate"]].notna().any().any():
+                    raise ValueError("propensity-excluded patients have effect estimates")
+                if predictions.loc[eligible, "aipw_score"].isna().any():
+                    raise ValueError("eligible patients have missing AIPW scores")
+            elif self.config.min_propensity is not None or self.config.max_propensity is not None:
+                raise ValueError("bounded effect estimation requires patient eligibility flags")
             scores = predictions["aipw_score"].to_numpy(dtype=float)
             scores = scores[np.isfinite(scores)]
             if not len(scores):
@@ -8269,7 +8292,31 @@ class PlainHandoffStage2:
             )
             causal_estimate = {
                 "estimator": "cross-fitted_aipw_with_fold_trained_nuisance_models",
-                "estimand": "average_treatment_effect",
+                "estimand": (
+                    "average_treatment_effect_in_propensity_eligible_population"
+                    if self.config.min_propensity is not None
+                    or self.config.max_propensity is not None
+                    else "average_treatment_effect"
+                ),
+                "effect_estimation_rows": len(scores),
+                "excluded_rows": len(predictions) - len(scores),
+                "propensity_overlap": overlap_diagnostics(
+                    predictions["propensity"],
+                    self.config.min_propensity,
+                    self.config.max_propensity,
+                ),
+                "nuisance_calibration": {
+                    "treatment": calibration_diagnostics(
+                        predictions["treatment"], predictions["propensity"], binary=True
+                    ),
+                    "outcome_factual": calibration_diagnostics(
+                        predictions["outcome"],
+                        np.where(
+                            predictions["treatment"] == 1, predictions["mu1"], predictions["mu0"]
+                        ),
+                        binary=outcome_type == "binary",
+                    ),
+                },
                 "rows": len(predictions),
                 "ate": ate,
                 "standard_error": standard_error,
