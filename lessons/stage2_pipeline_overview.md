@@ -30,10 +30,10 @@ aggregate ontology supervision and incremental re-extraction
 optional equivalence-only alias consolidation
     |
     v
-confounder elastic-net + univariable evidence; modifier candidate-R + joint elastic-net evidence
+treatment/outcome group-elastic-net + p/q evidence; candidate-wise + joint R-loss evidence
     |
     v
-allowlisted aggregate evidence -> validated LLM role adjudication
+llm_roles: binding LLM adjudication; independent_tasks: numerical selection + optional annotations
     |
     v
 freeze definitions and extract selected held-out dependencies
@@ -109,6 +109,12 @@ candidate order once. Each active pivot retrieves nearby active definitions.
 Pairwise Spearman, bias-corrected Cramer's V, or correlation-ratio evidence is
 computed on outer-training rows.
 
+`stage2.selection_consolidation.enabled` defaults to **false** when omitted,
+including fresh runs through the standard synthetic shell launchers. The
+checked-in example config explicitly sets it to `true`; saved-run launches
+preserve their supplied policy. This second pass is separate from the earlier
+merge-only name consolidation.
+
 A replacement must satisfy all of these conditions:
 
 - every source pair is evaluable and meets the configured association threshold;
@@ -129,13 +135,17 @@ active retrieval pool. Original columns and recursive lineage remain in the
 registry. Whether enabled, disabled, or trivial, the pass writes the report
 referenced from final definitions.
 
-## Statistical evidence and role adjudication
+## Statistical evidence and selection modes
 
 Every inner fold fits two group elastic nets: logistic treatment nuisance and
 the outcome-appropriate marginal nuisance. Nominal contrasts plus missingness
 form one group. Candidate-wise omnibus screens also test treatment, outcome,
-and treatment-adjusted outcome association, with within-fold FDR correction.
-Both views are retained as evidence; neither decides the final role alone.
+and treatment-adjusted outcome association, with within-fold Benjamini-Hochberg
+q-values. The `univariable_confounder_p_value_threshold` (0.05 by default) and
+`univariable_confounder_q_value_threshold` (0.10) generate support flags, not
+hard inclusion gates. Candidate discovery has already adapted to the
+outer-training data, so these are exploratory evidence rather than
+confirmatory tests of the full pipeline.
 
 Cross-fitted nuisance predictions feed candidate-specific grouped calibration
 and a ridge-stabilized R-learner. All estimable treatment interactions for one
@@ -144,11 +154,26 @@ R-loss gains per fold are selected by rank, without a positivity or p-value
 gate. In parallel, one grouped-elastic-net R-loss model per fold selects among
 all candidate interaction groups jointly and records held-out whole-model gain.
 
+`stage2.statistical_selection.selection_mode` chooses the binding rule:
+
+- `llm_roles` (default): treatment/outcome any-fold support forms a provisional
+  nuisance union used by both residual nuisance models. Candidate-wise top-N
+  R-loss support forms a provisional modifier union. The primary LLM adjudicates
+  final roles from all views. Disabling role adjudication uses the provisional
+  roles; failures of enabled adjudication do not silently use that fallback.
+- `independent_tasks`: residual nuisance models independently regularize over
+  all candidates within each inner fold. Separate treatment, outcome, and joint
+  R-loss tasks select any-fold nonzero groups. Neither nuisance support nor a
+  candidate-wise top-N rank is required for effect selection. P/q values and
+  candidate-wise ranks remain diagnostics, and optional LLM annotations cannot
+  change selection or routing.
+
 An allowlisted aggregate artifact packages all four views for the primary LLM.
 The artifact is submitted in bounded candidate batches while each candidate's
 global votes and ranks remain intact. The adjudicator covers every candidate,
 explicitly reconciles method disagreement and fold consistency, and may assign
-both roles or neither. Prompt construction has no dataset interface and excludes
+both roles or neither in `llm_roles`; in `independent_tasks` its interpretation
+is advisory. Prompt construction has no dataset interface and excludes
 row-level values, identifiers, outer-heldout data, oracle fields, paths or names,
 and generation metadata. Explicit investigator roles remain locked.
 
@@ -163,6 +188,15 @@ Selected modifiers form causal-forest `X`; pure confounders form `W`; dual-role
 features occur once in `X`. A constant-effect design is used when no modifier
 survives. Outer-heldout rows receive propensity, potential-outcome predictions,
 AIPW scores, causal-forest effects, and available uncertainty intervals.
+
+In independent-task mode, external propensity inputs are treatment-selected;
+external outcome inputs are outcome-selected **plus every selected effect
+modifier**. Forest X contains effect-selected features, and W contains the
+treatment/outcome union excluding X. Both internal forest nuisance models
+independently regularize over X plus W. The retained confounder/modifier fields
+are routing labels; `selection_authority` and `taskwise_routing` identify the
+binding numerical selections. See the
+[independent-task guide](../docs/stage2_independent_tasks.md).
 
 The only supported nuisance family is elastic net. Logistic elastic net is used
 for treatment and binary outcomes; squared-error elastic net is used for
@@ -181,8 +215,8 @@ fallback, iteration count, and iteration-limit status.
 | `outer_NNN/ontology_supervision/` | Aggregate review, revisions, and convergence |
 | `outer_NNN/selection/candidate_consolidation/` | Alias decisions, repair events, report, and latent registry |
 | `outer_NNN/selection/statistical_evidence.json` | Univariable and multivariable confounder evidence plus candidate-wise and joint modifier evidence |
-| `outer_NNN/selection/role_adjudication/` | Allowlisted evidence, bounded batch prompts/responses, and validated combined response |
-| `outer_NNN/selection/elastic_net_selection.json` | Final all-evidence role report (historical filename retained) |
+| `outer_NNN/selection/role_adjudication/` | Binding LLM adjudication in `llm_roles`; nonbinding annotations under `advisory/` in `independent_tasks` |
+| `outer_NNN/selection/elastic_net_selection.json` | Final decisions, selection policy/authority, and numerical/LLM audit (historical filename retained) |
 | `outer_NNN/final_definitions.json` | Frozen selected definitions and dependencies |
 | `outer_NNN/estimation/diagnostics.json` | Fitted model and nuisance-clone audit |
 | `cross_fitted_predictions.csv` | One held-out prediction per patient |

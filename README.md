@@ -210,15 +210,18 @@ not treatment-effect estimates.
 **Stage 2 is evidence interpretation and causal operationalization.** It reviews
 the Stage 1 evidence within and across architectures, consolidates supported
 clinical concepts, defines how each variable will be measured in a complete
-patient record, extracts those values, statistically assigns causal roles, and
+patient record, extracts those values, selects their model roles, and
 fits the study's final causal forest.
 Stage 2 may be human-led, language-model-assisted, or a combination of the two.
 The simplified runner supplies the language-model-assisted path. A primary
 OpenAI-compatible endpoint exhaustively interprets fold-scoped semantic cards,
 performs merge-only consolidation, and supervises ontologies. A different small
-endpoint performs the many one-patient extraction calls. Inner-fold regression
-screens assign discovered confounder and modifier roles before cross-fitted
-causal-forest estimation. Investigators remain responsible for judging the identification
+endpoint performs the many one-patient extraction calls. Inner-fold grouped
+elastic nets and R-loss models supply selection evidence. By default, the
+primary LLM adjudicates final roles (`llm_roles`); the opt-in
+`independent_tasks` mode selects treatment, outcome, and effect inputs
+numerically, with optional advisory LLM annotations. Investigators remain
+responsible for judging the identification
 assumptions, clinical validity, overlap, and sensitivity of the resulting
 estimate; the automated review is not a substitute for scientific review.
 
@@ -234,7 +237,7 @@ flowchart LR
     D --> E["Exhaustively list and merge concepts"]
     E --> F["Primary model defines ontologies"]
     F --> G["Small model extracts patient-level values"]
-    G --> H["Group-elastic-net nuisance and candidate-wise interaction screens assign roles"]
+    G --> H["Grouped elastic-net and R-loss evidence<br/>LLM roles or independent task selection"]
     H --> J["Cross-fitted causal forest"]
     J --> I["ATE, CATE or ITE estimates with diagnostics"]
 ```
@@ -1053,7 +1056,8 @@ cannot be renamed, distinct configured features cannot be merged, and their
 supplied ontology and roles remain authoritative. Python deterministically carries supporting packets,
 architectures, evidence axes, descriptions, and original-candidate dispositions
 through the rounds. Discovered features have no causal role at this point;
-roles are assigned only by the later statistical screens. Finally, independent one-feature requests receive only the
+model roles are assigned after extraction by the configured selection mode.
+Finally, independent one-feature requests receive only the
 canonical feature name and a deduplicated flat list of readable supporting-text
 strings. The model decides the value type, units or allowed categories,
 measurement rule, and missingness handling from that evidence; packet structure,
@@ -1114,8 +1118,13 @@ merged into the cached raw training matrix, while unchanged candidate columns
 are reused. Prompts still contain exactly one patient; feature batching within
 that patient is unchanged.
 
-Stage 2 first performs an optional sequential consolidation after the extracted
-candidate ontology is frozen and before any supervised role selection. For each
+Stage 2 can perform a second, sequential consolidation after the extracted
+candidate ontology is frozen and before supervised selection. It is **off when
+`stage2.selection_consolidation.enabled` is omitted**, including fresh runs
+through the standard synthetic shell launchers. The checked-in
+[`research_all_evidence.json`](example_configs/research_all_evidence.json)
+explicitly enables it; saved-run launches preserve their supplied policy.
+This switch does not disable the earlier discovery-time alias merge. For each
 still-active candidate, a local embedding model retrieves the ten nearest
 currently active candidates by default. Mixed-type pairwise association evidence
 is calculated from outer-training rows only, and the primary model either leaves
@@ -1136,15 +1145,21 @@ retrieved by later candidates. Original columns and recursive lineage remain
 available for audit and held-out reconstruction. Configured explicit features
 are protected from replacement.
 
-Stage 2 then builds fold-honest role evidence. In every inner fold, a logistic group elastic net predicts treatment
+Stage 2 then builds statistical evidence within the outer-training partition.
+In every inner fold, a logistic group elastic net predicts treatment
 and a separate group elastic net predicts the marginal outcome. Continuous and
 ordered measurements are standardized single-score groups, while every nominal
 factor's standardized contrasts and missingness indicator form one all-in/all-out
 group. Any feature group selected in at least one inner fold for either task
 enters a provisional confounder union. Candidate-wise omnibus screens also test
 treatment, outcome, and treatment-adjusted outcome associations, retaining raw
-p-values, within-fold FDR values, and fold support. Both nuisance models used to
-build modifier evidence use the provisional union. Reports include
+p-values, within-fold Benjamini-Hochberg q-values, and fold support. The
+`univariable_confounder_p_value_threshold` and
+`univariable_confounder_q_value_threshold` settings create evidence flags;
+they are not hard inclusion gates. In `llm_roles`, both nuisance models used to
+build modifier evidence use the provisional union. In `independent_tasks`,
+those nuisance fits instead independently regularize over all candidates
+within each inner fold. Reports include
 inner-heldout and pooled out-of-fold AUROC as well as log loss for binary tasks.
 
 Inner-fold grouped elastic nets produce cross-fitted propensity and marginal-
@@ -1159,7 +1174,8 @@ elastic net and records coefficient support plus held-out whole-model gain. The
 nuisance screens continue to use the one-standard-error rule, while nuisance
 prediction defaults to the minimum-CV-loss elastic net.
 
-Final primary-model adjudication receives only allowlisted definitions and these
+In the default `stage2.statistical_selection.selection_mode: "llm_roles"`,
+final primary-model adjudication receives only allowlisted definitions and these
 aggregate statistics. Large candidate sets are sliced into bounded requests of
 `stage2.role_adjudication.max_candidates_per_request` candidates (20 by
 default); each slice retains the global fold votes, ranks, and method evidence
@@ -1167,7 +1183,20 @@ for its candidates. The adjudicator reconciles all methods and fold consistency,
 assigning both roles or neither when warranted. The prompt interface excludes
 dataset rows, identifiers, outer-heldout information, oracle fields, paths or
 names, and generation metadata; failure does not silently fall back to
-provisional statistical unions.
+provisional statistical unions. If `stage2.role_adjudication.enabled` is
+explicitly false, the provisional nuisance union and candidate-wise top-N
+modifier union supply the final roles.
+
+In `selection_mode: "independent_tasks"`, treatment, outcome, and effect
+supports are selected separately by nonzero groups in any inner fold. Effect
+support comes from the joint R-loss model; it does not require a nuisance vote
+or candidate-wise top-N rank. P/q values and candidate-wise rankings remain
+diagnostics. LLM annotations, when enabled, cannot change inclusion or routing,
+and annotation failures do not veto estimation. See
+[independent task selection](docs/stage2_independent_tasks.md) for the full
+procedure and artifact fields. In either mode, inner-fold p/q values describe
+adaptively discovered candidates; they do not establish causal identification
+or confirmatory significance for the entire pipeline.
 
 The consolidation agent never receives treatment, outcome, or outer-heldout
 rows; pairwise associations are used only for this unsupervised replacement
@@ -1209,8 +1238,13 @@ pure confounders form its controls (a dual-role variable is represented once in
 the heterogeneity matrix). If no modifier survives, a constant effect design
 keeps the final model a causal forest. Cross-validated elastic-net nuisance
 models are fit without using outer-held-out outcomes and produce held-out
-propensities, potential-outcome predictions, and AIPW scores. `CausalForestDML`
-cross-fits the same nuisance family internally. The causal forest supplies
+propensities, potential-outcome predictions, and AIPW scores. In independent-task
+mode, the external propensity model uses treatment-selected features; the
+external outcome models use outcome-selected features **plus every selected
+effect modifier**, subject to investigator overrides. Forest `W` contains the
+treatment/outcome union excluding features already in `X`. `CausalForestDML`
+cross-fits the same nuisance family internally over `X + W`, without hard
+task-specific input masks. The causal forest supplies
 held-out conditional effects and confidence intervals; combining outer-held-out
 AIPW scores across folds supplies the reported cross-fitted average treatment
 effect and confidence interval. The retired strict random-forest runtime-config
@@ -1225,9 +1259,10 @@ flowchart LR
     C --> D["Small model extracts every candidate<br/>on outer-training records"]
     D --> E["Primary model reviews<br/>aggregate ontology"]
     E -->|"ontology revised"| D
-    E -->|"frozen"| F["Sequential equivalence-only<br/>alias consolidation"]
-    F --> G["Group-elastic-net nuisance screens<br/>and top-N interaction selection"]
-    G --> H["Small model extracts retained<br/>outer-held-out dependencies"]
+    E -->|"frozen"| F["Optional sequential equivalence-only<br/>alias consolidation"]
+    F --> G["Grouped elastic-net, p/q-value,<br/>candidate-wise and joint R-loss evidence"]
+    G --> S["LLM role adjudication or<br/>independent numerical task selection"]
+    S --> H["Small model extracts retained<br/>outer-held-out dependencies"]
     H --> I["Causal forest and<br/>held-out AIPW scores"]
     I --> J["Aggregate all outer folds"]
 ```

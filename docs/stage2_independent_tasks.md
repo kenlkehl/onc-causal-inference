@@ -71,9 +71,13 @@ or new instrument-exclusion rules.
 
 `modeling_tasks` is a subset of `treatment`, `outcome`, and `effect`.
 `nuisance_model_roles` preserves separate treatment/outcome selections for the
-existing external AIPW nuisance fits. Outcome-screen support is retained even
-without treatment support or an LLM confounder label.
+external AIPW nuisance fits. The estimator additionally puts every retained
+effect modifier into the external outcome models. Outcome-screen support is
+retained even without treatment support or an LLM confounder label.
 
+- External **propensity** model: treatment-selected features.
+- External **outcome** models (`mu0`, `mu1`): outcome-selected features **plus
+  every selected effect modifier**, deduplicated.
 - Forest **X**: effect-selected features.
 - Forest **W**: treatment/outcome-selected union, excluding features already in X.
 - No effect-selected feature: preserve the existing constant-X fallback.
@@ -81,9 +85,11 @@ without treatment support or an LLM confounder label.
 
 EconML's internal treatment and outcome nuisance models independently regularize
 on **X plus W**; they do not apply hard task-specific column masks. The external
-AIPW nuisance models use the separate task-specific feature lists. Thus this is
-not a claim that a treatment-only column is absent from every outcome-model
-input: inside the forest it is available but independently regularized.
+AIPW nuisance models use the task-specific lists with the outcome augmentation
+above. For example, a feature selected only for effect enters forest X and both
+external outcome models, but not the external propensity model. A feature
+selected only for treatment enters the external propensity model and forest W;
+it is available to both internal forest nuisances through X plus W.
 
 For compatibility with the existing estimator, `roles: ["confounder"]` encodes
 membership in the nuisance union, and `effect_modifier` encodes eligibility for

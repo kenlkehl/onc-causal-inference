@@ -45,10 +45,11 @@ Stage 2 does not stop at variable definitions. For each outer fold it exhaustive
 lists clinical features from every semantic evidence card, performs merge-only
 consolidation, uses a separate small model to extract all candidates on training
 records, and lets the primary model review only aggregate extraction ontologies.
-Fold-local regressions, mixed-type associations, consensus clustering, and
-bounded role agents then assign confounder and effect-modifier roles before a
-causal forest is fit and evaluated on outer-held-out records. The common controls
-are:
+An optional equivalence-only pass consolidates extracted aliases before grouped
+elastic nets and R-loss models generate selection evidence. The default
+`llm_roles` mode uses primary-model adjudication; `independent_tasks` selects
+treatment, outcome, and effect inputs numerically. A causal forest is then fit
+and evaluated on outer-held-out records. The common controls are:
 
 ```json
 {
@@ -110,6 +111,15 @@ are:
 }
 ```
 
+The example above and `example_configs/research_all_evidence.json` explicitly
+enable the second consolidation pass. When
+`stage2.selection_consolidation.enabled` is omitted, it defaults to **false**;
+fresh runs through the standard synthetic shell launchers also leave it off.
+Saved-run launches preserve their configured policy. The earlier discovery-time
+alias merge is separate and is not controlled by this switch. To enable the
+second pass in a new configured run, set it to `true` or add
+`--set stage2.selection_consolidation.enabled=true` to the Python entry point.
+
 Interpretation, consolidation, operationalization, category mapping, and
 aggregate ontology-review requests go to the primary model with
 `reasoning_effort: "high"`. One-patient value extraction alone goes to the
@@ -160,16 +170,35 @@ only a necessary condition: broader/narrower concepts and merely related
 variables must remain separate. Accepted aliases immediately replace their
 sources in later retrievals. Lossless nominal-category unions are allowed, and
 continuous coalescing skips malformed nonnumeric values in favor of the next
-valid alias; the original extraction dependencies remain recorded. Separate
-treatment and outcome group elastic nets run inside each outer fold alongside
-simple candidate-wise treatment and outcome screens. Inner-fold elastic nets
-generate cross-fitted nuisance predictions. Candidate-specific grouped
-calibrations feed held-out R-loss comparisons, while a second joint grouped
-elastic net selects among all candidate interactions. The primary LLM receives
-only an allowlisted aggregate bundle of those four evidence views and assigns
-final roles. The bundle excludes row values, identifiers, outer-heldout
-information, oracle fields, dataset identity, and generation metadata. Binary
-nuisance reports include AUROC and log loss.
+valid alias; the original extraction dependencies remain recorded.
+
+Separate treatment and marginal-outcome group elastic nets run in the inner
+folds. Candidate-wise tests add raw p-values and within-fold Benjamini-Hochberg
+q-values for treatment, outcome, and treatment-adjusted outcome associations.
+The `univariable_confounder_p_value_threshold` and
+`univariable_confounder_q_value_threshold` settings label evidence; they do not
+directly retain or discard candidates. Candidate-specific calibrations feed
+held-out R-loss comparisons, and a joint grouped elastic net fits candidate
+interactions together. Binary nuisance reports include AUROC and log loss.
+
+`stage2.statistical_selection.selection_mode` determines how this evidence is
+used:
+
+- `llm_roles` (default): a treatment/outcome any-fold union and the candidate-wise
+  top ten R-loss gains per fold give provisional roles. Top-N membership does
+  not require a positive gain. The primary LLM reconciles all evidence and
+  assigns final roles; disabling role adjudication uses the provisional roles.
+- `independent_tasks`: nonzero groups in any inner fold determine separate
+  treatment, outcome, and joint-R-loss effect supports. Residual nuisance fits
+  use all candidates within each fold. P/q values and top-N rankings are
+  diagnostic; optional LLM annotations cannot alter the selections.
+
+The LLM evidence bundle excludes row values, identifiers, outer-heldout
+information, oracle fields, dataset identity, and generation metadata. These
+adaptive inner-fold tests are exploratory, not confirmatory causal tests. See
+[independent task selection](stage2_independent_tasks.md) for estimator routing:
+external outcome models include outcome-selected features plus all selected
+effect modifiers.
 Consolidation receives neither treatment nor outcome and is not a role-selection
 screen. Outer-heldout rows remain inaccessible until selection is frozen;
 selected latent states are then applied to their held-out measurement dependencies.
@@ -228,8 +257,9 @@ candidate reranking, or feature-count cap. Discovery-time consolidation may only
 merge aliases, so every unmerged candidate proceeds to extraction. The distinct
 post-extraction selection-consolidation pass may replace empirically populated
 aliases with a canonical, information-preserving measurement before fold-local
-univariable/elastic-net evidence construction and final LLM role adjudication.
-Role adjudication uses bounded candidate batches (20 per request by default),
+univariable/elastic-net evidence construction and the configured selection mode.
+LLM role adjudication or advisory annotation uses bounded candidate batches
+(20 per request by default),
 while preserving each candidate's global fold votes and ranks. Each completed
 request is saved beneath the relevant outer-fold directory, so the same command
 resumes after interruption without repeating it.

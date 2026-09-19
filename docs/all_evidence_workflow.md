@@ -132,9 +132,14 @@ Only candidates whose prompt-facing schema changed are re-extracted; unchanged
 raw columns are reused and merged with the refreshed columns. Extraction remains
 one patient per prompt, with the existing per-patient feature batching.
 
-Once ontologies are frozen, simple regressions inside the inner folds assign
-discovered confounder and effect-modifier roles. Explicit investigator variables
-bypass both evidence and statistical gates. Only the retained variables are
+Once ontologies are frozen, an optional second pass consolidates equivalent
+extracted measurements. Inner-fold grouped elastic nets, candidate-wise tests,
+and R-loss models then produce selection evidence. The default `llm_roles`
+mode uses primary-model adjudication; the opt-in `independent_tasks` mode uses
+separate numerical treatment, outcome, and effect selections with optional
+advisory annotations. P/q values are evidence, not hard inclusion gates.
+Explicit investigator variables retain their configured ontologies and roles
+regardless of selection evidence. Only the retained variables are
 extracted from outer-held-out text. The final heterogeneous-effect model is an
 honest causal forest, while outer-held-out nuisance predictions supply
 cross-fitted AIPW scores. Stage 2 is enabled by specifying `stage2.endpoint` or
@@ -243,6 +248,16 @@ An external endpoint configuration is:
   }
 }
 ```
+
+The example above and `example_configs/research_all_evidence.json` explicitly
+enable `stage2.selection_consolidation.enabled`. The **omitted-setting default
+is false**, including fresh runs through the standard synthetic shell launchers.
+Saved-run launches preserve the supplied policy. This is the second,
+post-extraction pass; it does not control discovery-time merge-only
+consolidation. Set it explicitly in the run configuration, or use
+`--set stage2.selection_consolidation.enabled=true` on the Python entry point
+for a new run. Check `stage2/config.json` for a saved run's resolved policy;
+do not infer it from the example or from the presence of a consolidation report.
 
 The exhaustive interpretation output is written to
 `outer_NNN/interpreted_candidates.json`. Every candidate then enters
@@ -918,8 +933,11 @@ result it verifies every fold's feature-definition fingerprint, completed
 selector input, post-ontology definitions, training-matrix columns and row IDs,
 source text, treatment and outcome values, inner splits, review policy, and
 primary/extraction model IDs. Saved configurations from the retired p-value
-screen are accepted only in this mode; its obsolete p-value settings are
-ignored while the new `statistical_selection` defaults or overrides are applied.
+selector are accepted only in this mode; its obsolete selection settings are
+ignored while the current `statistical_selection` defaults or overrides are
+applied. The current `univariable_confounder_p_value_threshold` and
+`univariable_confounder_q_value_threshold` fields remain active as descriptive
+evidence thresholds, not inclusion gates.
 
 The prior selection, selected-feature extraction, estimation, and root results
 are moved without deletion to `stage2/reselection_archives/`. Each fold receives
@@ -956,8 +974,10 @@ raw training matrix, and repeats for at most
 `max_review_rounds`; `ontology_supervision/convergence.json` records whether the
 latest aggregate ontology was stable.
 
-Before supervised evidence construction, `selection/candidate_consolidation/` records a
-sequential, outer-training-only pass. The loop visits the original candidate
+Before supervised evidence construction, `selection/candidate_consolidation/`
+records the optional sequential, outer-training-only pass. When disabled, its
+report records that status and the candidate set passes through unchanged.
+When enabled, the loop visits the original candidate
 order once. At each still-active pivot, the configured embedding model retrieves
 the nearest active neighbors (ten by default), Python calculates Spearman,
 bias-corrected Cramer's V, or correlation-ratio evidence as appropriate, and the
@@ -981,7 +1001,9 @@ the active pool, so later pivots retrieve the canonical measurement instead.
 Treatment, outcome, causal roles, and outer-heldout rows are absent from every
 consolidation request.
 
-All-evidence role selection is written to the historically named
+### Numerical evidence and selection modes
+
+Final selection is written to the historically named
 `selection/elastic_net_selection.json`; its standalone numerical component is
 also written to `selection/statistical_evidence.json`. Every inner-training partition fits a
 logistic group elastic net for treatment and a separate group elastic net for
@@ -993,9 +1015,19 @@ single vote in either task places the feature in a provisional confounder
 union. In parallel, candidate-wise omnibus models test association with
 treatment, marginal outcome, and outcome adjusted for treatment. Raw p-values,
 within-fold Benjamini-Hochberg q-values, and cross-fold support counts are
-evidence only, never hard gates. Both the propensity and marginal-outcome
-grouped elastic nets used to construct modifier evidence use the provisional
-common union.
+evidence only, never hard gates. The
+`univariable_confounder_p_value_threshold` (default 0.05) and
+`univariable_confounder_q_value_threshold` (default 0.10) create nominal and
+multiplicity-adjusted joint-support flags for treatment and treatment-adjusted
+outcome association. They do not retain or discard a feature automatically.
+These tests concern adaptively discovered candidates; the within-fold q-values
+do not adjust for the complete upstream discovery and selection procedure.
+
+In `llm_roles`, the propensity and marginal-outcome grouped elastic nets used
+to construct modifier evidence both use the provisional common union. In
+`independent_tasks`, each inner fold instead fits both nuisances over all
+candidates, with separate regularization choices and no cross-fold screen-union
+restriction.
 For binary targets, the report records inner-heldout and pooled out-of-fold
 AUROC alongside log loss.
 
@@ -1008,12 +1040,21 @@ contrasts for a categorical candidate enter together and receive one held-out
 R-loss score. The ten largest gains per inner fold are selected by default,
 without a positive-gain gate. A second modifier view jointly fits all candidate
 treatment-interaction groups in one grouped-elastic-net R-loss model per fold.
-Its coefficient supports and held-out whole-model R-loss gains are additional
-evidence rather than a gate. The nuisance screens continue to use the
-one-standard-error rule.
+Its coefficient supports and held-out whole-model R-loss gains are retained.
+The joint supports are evidence in `llm_roles` and the binding effect-selection
+criterion in `independent_tasks`. Nuisance screens use the one-standard-error
+rule by default; nuisance prediction and joint modifier fitting default to
+minimum-CV-loss choices.
 
-The primary LLM then receives bounded slices of one allowlisted aggregate
-role-evidence artifact and assigns the final roles. A slice contains at most
+`stage2.statistical_selection.selection_mode` controls final selection:
+
+| Mode | Binding inclusion and routing | LLM role |
+| --- | --- | --- |
+| `llm_roles` (default when omitted) | Final adjudicated roles; if adjudication is disabled, the provisional nuisance union and candidate-wise top-N modifier union | Reconciles all aggregate evidence and assigns confounder, effect modifier, both, or neither |
+| `independent_tasks` | Separate treatment, outcome, and joint-R-loss effect supports; a nonzero group in any inner fold suffices for its task | Optional advisory annotations cannot add, remove, or reroute features |
+
+In `llm_roles`, the primary LLM receives bounded slices of one allowlisted
+aggregate role-evidence artifact and assigns final roles. A slice contains at most
 `role_adjudication.max_candidates_per_request` candidates (20 by default) and
 retains their global votes, ranks, and fold evidence. The adjudicator must
 reconcile multivariable and univariable confounder evidence, candidate-wise and
@@ -1021,7 +1062,21 @@ joint modifier evidence, method disagreement, and fold consistency. Its
 interface has no dataset argument and excludes row values, identifiers,
 outer-heldout information, oracle fields, dataset paths or names, and
 data-generation metadata. Investigator-locked roles remain exact. Failure does
-not fall back silently to the provisional unions.
+not fall back silently to the provisional unions. Explicitly setting
+`stage2.role_adjudication.enabled: false` uses those provisional roles instead.
+
+In `independent_tasks`, effect selection requires neither a nuisance-task vote
+nor a candidate-wise top-N rank. P/q values and candidate-wise ranks remain
+diagnostics. Annotation transport/validation failures do not veto numerical
+estimation. Use `selection_authority`, `modeling_tasks`, and `taskwise_routing`
+to interpret saved decisions; the legacy `final_role_assignment` string can
+still name the LLM branch without making annotations binding. The external
+propensity model uses treatment-task features; external outcome models use
+outcome-task features **plus every selected effect modifier**. Forest `X`
+contains effect features, `W` contains the treatment/outcome union excluding
+`X`, and both internal forest nuisance models regularize over `X + W`.
+See [independent task selection](stage2_independent_tasks.md) for routing,
+investigator overrides, diagnostics, and saved-run commands.
 
 Explicit investigator features retain exactly their configured roles. The
 outer-heldout partition is inaccessible during selection and receives only the
@@ -1137,10 +1192,13 @@ uv run python scripts/run_all_evidence.py \
   --status
 ```
 
-Because there is deliberately no config identity check, changing scientific
-settings does not invalidate existing completion markers. Use a new output
-directory for a scientifically different run, or explicitly rerun every
-affected component.
+The workflow does not rely on one global config-identity gate. Stage 2 validates
+scientific fingerprints at individual checkpoints, and incompatible changes
+can require recomputation or raise a compatibility error. A coarse progress
+marker alone does not establish that saved outputs match a changed config.
+Use a new output directory for a scientifically different run, the guarded
+`--stage2-reselect` path for supported downstream changes, or an explicit rerun
+of the affected components when appropriate.
 
 ## Components
 
@@ -1153,7 +1211,8 @@ affected component.
   independently.
 - `handoff` gathers the completed evidence into the stable Stage 2 input path.
 - `stage2` exhaustively interprets semantic cards, supervises small-model
-  extraction ontologies, applies fold-local mixed evidence and role agents, and writes held-out
+  extraction ontologies, builds statistical evidence, applies the configured
+  LLM-role or independent-task selection policy, and writes held-out
   causal-forest effects and AIPW scores before aggregating the outer folds.
 
 The Stage 1 scientific model implementations are reused. The plain Stage 2 path

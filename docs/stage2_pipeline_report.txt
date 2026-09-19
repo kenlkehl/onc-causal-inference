@@ -1,7 +1,7 @@
 STAGE 2 PIPELINE REPORT
 =======================
 
-Current implementation as of 30 August 2026
+Current implementation as of 19 September 2026
 
 
 PURPOSE
@@ -86,6 +86,12 @@ CURRENT FLOW FOR ONE OUTER FOLD
 
 6. Optionally consolidate equivalent extracted measurements
 
+   stage2.selection_consolidation.enabled defaults to false when omitted,
+   including fresh runs through the standard synthetic shell launchers. The
+   checked-in example configuration explicitly enables it; saved-run launches
+   preserve their supplied policy. This switch controls the post-extraction
+   pass only, not the discovery-time alias merging in step 3.
+
    selection/candidate_consolidation/ is an unsupervised, outer-training-only
    alias pass. In original-candidate order, an embedding retrieves nearby active
    definitions and Python computes mixed-type pairwise association evidence.
@@ -110,7 +116,7 @@ CURRENT FLOW FOR ONE OUTER FOLD
    reconstruction. Disabled or trivial consolidation still writes the report
    referenced by final definitions.
 
-7. Build complementary statistical evidence and adjudicate final roles
+7. Build statistical evidence and apply the configured selection mode
 
    Every inner-training partition fits a logistic group elastic net for
    treatment and a separate group elastic net for marginal outcome. A nominal
@@ -118,8 +124,11 @@ CURRENT FLOW FOR ONE OUTER FOLD
    continuous and ordered measurements use standardized score groups.
 
    Candidate-wise omnibus screens add treatment, outcome, and
-   treatment-adjusted-outcome evidence with within-fold FDR. The elastic-net
-   nuisance union and univariable screens are evidence, not final role gates.
+   treatment-adjusted-outcome evidence with within-fold Benjamini-Hochberg
+   q-values. The univariable_confounder_p_value_threshold (default 0.05) and
+   univariable_confounder_q_value_threshold (default 0.10) create joint-support
+   flags; they do not directly retain or discard candidates. The upstream
+   adaptive discovery process is not covered by those within-fold adjustments.
 
    Candidate-specific cross-fitted nuisance calibrations feed a
    ridge-stabilized R-learner. Each candidate is scored by the held-out R-loss
@@ -128,8 +137,23 @@ CURRENT FLOW FOR ONE OUTER FOLD
    even if a gain is nonpositive. A joint grouped-elastic-net R-loss screen adds
    multivariable interaction evidence.
 
-   The primary LLM reconciles all four aggregate views in bounded candidate
-   batches while retaining global votes and ranks. Its prompt boundary excludes
+   stage2.statistical_selection.selection_mode has two supported values:
+
+   - llm_roles (default): the treatment/outcome any-fold union supplies
+     provisional confounders and restricts both residual nuisance models.
+     Candidate-wise top-N R-loss support supplies provisional modifiers. The
+     primary LLM reconciles all evidence and assigns final roles. If role
+     adjudication is explicitly disabled, the provisional roles are final;
+     failures of enabled adjudication do not silently take that fallback.
+   - independent_tasks: residual nuisance models independently regularize over
+     all candidates within each inner fold. Nonzero groups in any fold select
+     separate treatment, outcome, and joint-R-loss effect supports. Effect
+     selection needs no nuisance vote or top-N rank. P/q values and candidate
+     ranks remain diagnostics. Optional LLM annotations cannot change routing,
+     and annotation transport/validation failures do not veto estimation.
+
+   LLM adjudication or annotation uses bounded candidate batches while retaining
+   global votes and ranks. Its prompt boundary excludes
    row-level values, identifiers, outer-heldout information, oracle fields,
    dataset identity, and generation metadata. Locked roles remain exact.
 
@@ -151,6 +175,15 @@ CURRENT FLOW FOR ONE OUTER FOLD
    confounders in W; a dual-role variable appears once in X. If no modifier is
    selected, a constant-effect design preserves the causal-forest estimator.
 
+   In independent_tasks, forest X contains effect-selected features; W contains
+   the treatment/outcome-selected union excluding X. External propensity inputs
+   are treatment-selected features. External mu0/mu1 inputs are outcome-selected
+   features plus every selected effect modifier. Internal forest nuisance models
+   independently regularize over X plus W without hard task-specific masks.
+   Investigator-configured roles remain locked. The confounder/modifier fields
+   are routing labels; selection_authority and taskwise_routing describe the
+   binding decisions, regardless of the legacy final_role_assignment string.
+
    The supported nuisance family is cross-validated elastic net: logistic for
    treatment and binary outcome, squared-error for continuous outcome. The
    former strict random-forest runtime-config contract has been retired and is
@@ -158,14 +191,19 @@ CURRENT FLOW FOR ONE OUTER FOLD
    every fitted EconML nuisance clone, including the selected regularization,
    effective CV folds, and whether its optimizer reached the iteration limit.
 
-   Each held-out row receives propensity, mu0, mu1, AIPW score, conditional
-   effect, and available causal-forest uncertainty bounds.
+   With default unbounded propensity eligibility, each held-out row receives
+   propensity, mu0, mu1, AIPW score, conditional effect, and available
+   causal-forest uncertainty bounds. Optional min_propensity/max_propensity
+   bounds restrict the effect-analysis population; excluded rows stay in the
+   output with missing effect/AIPW values. Bounds are separate from denominator
+   clipping. See docs/stage2_independent_tasks.md for overlap and inference details.
 
 10. Aggregate outer folds
 
    Exactly one held-out prediction per patient is combined into
    cross_fitted_predictions.csv. The cross-fitted AIPW scores produce the
-   reported average treatment effect, standard error, and confidence interval.
+   reported average treatment effect, standard error, and confidence interval
+   over eligible rows when propensity bounds are enabled.
    Feature and role stability are summarized across folds.
 
 
@@ -186,7 +224,7 @@ stage2/outer_NNN/selection/candidate_consolidation/
     report.json, registry.json, and completion marker.
 
 stage2/outer_NNN/selection/elastic_net_selection.json
-    Final all-evidence roles plus the numerical and LLM component audit.
+    Final decisions, selection policy/authority, and numerical/LLM component audit.
 
 stage2/outer_NNN/selection/statistical_evidence.json
     Inner-fold univariable and elastic-net confounder evidence plus
@@ -194,7 +232,8 @@ stage2/outer_NNN/selection/statistical_evidence.json
 
 stage2/outer_NNN/selection/role_adjudication/
     Allowlisted aggregate evidence, bounded batch prompts/responses, and the
-    validated combined LLM response.
+    validated combined LLM response. independent_tasks stores nonbinding
+    interpretations under advisory/.
 
 stage2/outer_NNN/final_definitions.json
     Frozen selected roles and measurement/latent dependencies.
