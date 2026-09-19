@@ -2995,10 +2995,22 @@ def _completion_with_transport_retries(
     max_attempts = max(1, int(config.transport_max_attempts))
     remaining_attempts = max_attempts
     retry_messages = [dict(message) for message in messages]
+
+    def exhausted(reason: str, cause: Exception | None = None) -> Stage2RequestExhaustedError:
+        detail = (
+            f"{reason}; kind={config.runtime_request_kind} endpoint={config.endpoint} "
+            f"model={config.model} attempts_used={max_attempts - remaining_attempts} "
+            f"attempt_timeout={config.request_attempt_timeout:g}s "
+            f"request_timeout={config.request_timeout:g}s"
+        )
+        if cause is not None:
+            detail += f"; last_error={type(cause).__name__}: {cause}"
+        return Stage2RequestExhaustedError(detail)
+
     while remaining_attempts > 0:
         remaining = logical_deadline - time.monotonic()
         if remaining <= 0:
-            raise Stage2RequestExhaustedError(
+            raise exhausted(
                 "Stage 2 logical request deadline expired before a transport attempt"
             )
         attempt_config = replace(
@@ -3031,32 +3043,34 @@ def _completion_with_transport_retries(
             if not _is_retryable_transport_error(cause):
                 raise cause
             if remaining_attempts <= 0:
-                raise Stage2RequestExhaustedError(
-                    f"Stage 2 transport exhausted {max_attempts} attempt(s); "
-                    f"kind={config.runtime_request_kind} endpoint={config.endpoint} "
-                    f"model={config.model} "
-                    f"attempt_timeout={config.request_attempt_timeout:g}s "
-                    f"request_timeout={config.request_timeout:g}s; "
-                    f"last_error={type(cause).__name__}: {cause}"
+                raise exhausted(
+                    f"Stage 2 transport exhausted {max_attempts} attempt(s)", cause,
                 ) from cause
             remaining = logical_deadline - time.monotonic()
             if remaining <= 0:
-                raise Stage2RequestExhaustedError(
-                    "Stage 2 logical request deadline expired after a transport failure"
+                raise exhausted(
+                    "Stage 2 logical request deadline expired after a transport failure", cause,
                 ) from cause
             consumed_attempts = max_attempts - remaining_attempts
             delay = float(config.transport_retry_backoff) * (
                 2 ** max(0, consumed_attempts - 1)
             )
             if delay >= remaining:
-                raise Stage2RequestExhaustedError(
-                    "Stage 2 logical request deadline would expire during retry backoff"
+                raise exhausted(
+                    "Stage 2 logical request deadline would expire during retry backoff", cause,
                 ) from cause
             LOGGER.warning(
-                "Stage 2 transport failed; retrying request attempt %s/%s " "after %.1fs (%s: %s)",
+                "Stage 2 transport failed; retrying request attempt %s/%s "
+                "after %.1fs kind=%s endpoint=%s model=%s "
+                "attempt_timeout=%.1fs remaining=%.1fs (%s: %s)",
                 consumed_attempts + 1,
                 max_attempts,
                 delay,
+                config.runtime_request_kind,
+                config.endpoint,
+                config.model,
+                attempt_config.request_timeout,
+                remaining,
                 type(cause).__name__,
                 cause,
             )
@@ -8192,7 +8206,16 @@ class PlainHandoffStage2:
                 }
                 for future in concurrent.futures.as_completed(futures):
                     outer_fold = futures[future]
-                    fold_results_by_id[outer_fold] = future.result()
+                    try:
+                        fold_results_by_id[outer_fold] = future.result()
+                    except Exception:
+                        # Report now: executor shutdown waits for sibling folds,
+                        # whose successful fits can otherwise hide this failure.
+                        LOGGER.exception(
+                            "Stage 2 failed outer_fold=%s; waiting for sibling folds to finish",
+                            outer_fold,
+                        )
+                        raise
                     LOGGER.info("Stage 2 completed outer_fold=%s", outer_fold)
         fold_results = [fold_results_by_id[outer_fold] for outer_fold in outer_fold_ids]
         _write_jsonl(output_dir / "features_by_outer_fold.jsonl", fold_results)

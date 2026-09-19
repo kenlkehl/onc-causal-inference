@@ -9,7 +9,8 @@ import pytest
 
 @pytest.mark.parametrize("runtime_overrides", [
     {},
-    {"STAGE2_WORKERS": "8", "STAGE2_REQUEST_TIMEOUT": "3600",
+    {"STAGE2_WORKERS": "8", "STAGE2_EXTRACTION_WORKERS": "12",
+     "STAGE2_REQUEST_TIMEOUT": "3600",
      "STAGE2_REQUEST_ATTEMPT_TIMEOUT": "1200"},
 ])
 def test_example_wrappers_run_both_stages_by_default(tmp_path: Path, runtime_overrides):
@@ -58,10 +59,12 @@ fi
         workflow = invocations[-1]
         if runtime_overrides:
             assert "--stage2-workers 8" in invocations[-2]
+            assert "--stage2-extraction-workers 12" in workflow
             assert "stage2.request_attempt_timeout=1200" in workflow
             assert "stage2.request_timeout=3600" in workflow
         elif launcher == "run_one_conf_one_mod.sh":
             assert "--stage2-workers 4" in invocations[-2]
+            assert "--stage2-extraction-workers 4" in workflow
             assert "stage2.request_attempt_timeout=1800" in workflow
             assert "stage2.request_timeout=6000" in workflow
         assert "research_all_evidence_workflow" in workflow

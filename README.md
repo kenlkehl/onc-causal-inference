@@ -98,6 +98,20 @@ their free VRAM, selects every visible GPU, sizes Stage 1 CPU workers, and runs
 or resumes both stages. Results default to
 `artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/`.
 
+For fresh runs, the one-confounder wrapper defaults to four primary requests and
+four extraction requests concurrently. Saved-run launches retain their configured
+worker counts. `STAGE2_EXTRACTION_WORKERS` controls the extraction server
+independently of `STAGE2_WORKERS`. The 128-worker extraction setting above is for
+the six-server pool; when using one external extraction server, start with
+`STAGE2_EXTRACTION_WORKERS=4`. Server queueing and response repairs consume the
+same logical request deadline, so increasing timeouts alone may not resolve an
+overloaded extractor. Resume into the same output directory to reuse compatible
+completed checkpoints.
+
+Extraction and forest fitting can overlap across folds. An extraction failure is
+logged immediately with its checkpoint root and batch, but the final traceback
+can appear later because executor shutdown waits for other in-flight work.
+
 The most useful overrides are environment variables:
 
 ```bash

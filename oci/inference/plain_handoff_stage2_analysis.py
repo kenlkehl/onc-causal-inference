@@ -4098,6 +4098,7 @@ def extract_rows(
             executor.submit(run_page, page): int(page["row_id"]) for page in page_requests
         }
         all_futures = [*batch_futures, *page_futures]
+        future = None
         try:
             for future in concurrent.futures.as_completed(all_futures):
                 if future in batch_futures:
@@ -4106,6 +4107,15 @@ def extract_rows(
                     row_id = page_futures[future]
                     completed_pages.setdefault(row_id, []).append(future.result())
         except BaseException:
+            # Log before executor shutdown waits for in-flight requests. Include
+            # the checkpoint location so interleaved folds remain distinguishable.
+            LOGGER.exception(
+                "Stage 2 extraction failed root=%s batch=%s row_id=%s; "
+                "cancelling queued work and waiting for in-flight requests",
+                output_dir,
+                batch_futures.get(future),
+                page_futures.get(future),
+            )
             cancellation.set()
             for pending in all_futures:
                 pending.cancel()
