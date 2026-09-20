@@ -32,7 +32,10 @@
       "workers": 32
     },
     "max_tokens": 100000,
-    "extraction_max_tokens": 75000,
+    "extraction_max_tokens": 4096,
+    "extraction_reasoning_max_tokens": 32768,
+    "extraction_stream": true,
+    "extraction_deferred_retry_passes": 1,
     "max_response_repairs": 10,
     "thinking_after_response_repairs": 5,
     "repetition_penalty": null,

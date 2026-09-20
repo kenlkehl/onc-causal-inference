@@ -184,7 +184,10 @@ An external endpoint configuration is:
     "request_attempt_timeout": 900,
     "transport_max_attempts": 6,
     "max_tokens": 100000,
-    "extraction_max_tokens": 75000,
+    "extraction_max_tokens": 4096,
+    "extraction_reasoning_max_tokens": 32768,
+    "extraction_stream": true,
+    "extraction_deferred_retry_passes": 1,
     "max_response_repairs": 15,
     "thinking_after_response_repairs": 5,
     "repetition_penalty": null,
@@ -428,7 +431,11 @@ ontology supervision, and ontology refinement go to the primary model with
 `reasoning_effort: "high"` by default. Only one-patient value extraction goes
 to the small model with `reasoning_effort: "none"` initially. Primary-model
 requests receive the configured `max_tokens` ceiling (100,000 by default), while
-patient extraction receives `extraction_max_tokens` (75,000 by default). These
+patient extraction receives `extraction_max_tokens` (75,000 when omitted;
+the recommended example uses 4,096 for ten-feature non-thinking requests).
+`extraction_reasoning_max_tokens` supplies a separate total allowance for reasoning
+plus final JSON when thinking is enabled, including repair escalation: 32,768 in
+the example, or the shared `extraction_max_tokens` ceiling when omitted/null. These
 permit long responses but do not request minimum lengths; each model still stops
 at EOS as soon as its JSON is complete. A repair request dynamically lowers the
 ceiling when necessary to keep its prompt, output allowance, and safety margin
@@ -449,14 +456,44 @@ use the template switch and prompt fallback.
 
 A complete logical request is bounded by `request_timeout` (7200 seconds by
 default), including transport retries and response-repair turns. Individual
-HTTP calls are bounded by `request_attempt_timeout` (900 seconds by default),
-and retryable transport failures receive at most `transport_max_attempts` (6 by
-default). A completed response that fails JSON parsing or schema validation receives up
+HTTP calls use `request_attempt_timeout` (900 seconds by default) for transport
+timeouts. With `extraction_stream: true`, this bounds waiting for the next network
+read, so active streaming can continue longer than 900 seconds, up to the shared
+logical deadline. Streaming is opt-in (false when omitted) for endpoint
+compatibility; the recommended example enables it. Retryable transport failures
+receive at most `transport_max_attempts` (6 by default) per response attempt,
+including compatibility negotiation. A completed response that fails JSON parsing or schema validation receives up
 to `max_response_repairs` validator-guided retries (15 by default). Every retry
 includes the concrete validation error. Repairs through
 `thinking_after_response_repairs` (5 by default) retain the normal request
 policy; repairs after that threshold force `reasoning_effort` to at least
-`high`, enabling thinking for the managed vLLM reasoning parsers.
+`high`, enabling thinking for the managed vLLM reasoning parsers. This includes
+structural extraction errors such as a missing `rows` array, row object, or
+`values` object. Reasoning-enabled extraction repairs use
+`extraction_reasoning_max_tokens` when configured, within the available context
+and the same logical request deadline.
+
+For a single patient, an exact, complete feature-value map, a single `values`
+object, or a `rows` object instead of an array can be wrapped into the canonical
+response. No values are inferred; supplied row IDs and all values still pass the
+normal validation. Partial or ambiguous wrappers are rejected.
+
+Extraction checkpoints append `request_events.jsonl` records with a logical
+request ID, patient/feature identifiers, retry counters, reasoning mode, output
+cap, provider request ID, timing, finish reason, and reported token usage.
+Streaming records the first progress and then progress every 30 seconds when
+chunks arrive, including content/reasoning character counts without their text.
+Missing usage is recorded as unavailable. An incomplete stream or a token-limit
+finish cannot become a successful measurement checkpoint.
+
+`extraction_deferred_retry_passes` defaults to 1. A patient or page task whose
+logical request is exhausted is recorded in `deferred_extraction.json`; other
+independent tasks continue before a bounded retry pass reuses its completed
+feature/chunk checkpoints. Remaining failures abort extraction and prevent
+fitting. Consecutive exhausted tasks (at least three, or the configured worker
+count if larger) abort early during a persistent outage. Set the option to 0 for
+the former immediate-abort behavior. Configuration/programming errors still
+abort immediately.
 
 Python first coalesces only exact normalized-name duplicates; this is identity
 bookkeeping and makes no semantic decision between distinct names. It then
@@ -536,6 +573,8 @@ operational controls include `request_timeout` (7200 seconds by default),
 `transport_max_attempts` (6 by default),
 `transport_retry_backoff`, `max_response_repairs`,
 `thinking_after_response_repairs`, `max_tokens`, `extraction_max_tokens`,
+`extraction_reasoning_max_tokens`,
+`extraction_stream`, `extraction_deferred_retry_passes`,
 `max_prompt_chars`,
 `consolidation_max_prompt_chars`,
 `operationalization_max_prompt_chars`,
@@ -569,12 +608,18 @@ definitions (10 by default); Stage 2 checkpoints and merges the feature batches.
 continues to bound interpretation and ontology-supervision planning. These character limits
 are safety/planning guards, not claims about the model's token context. Primary
 completions send `max_tokens` as a 100,000-token output ceiling; patient
-extraction sends `extraction_max_tokens` as a 75,000-token ceiling. Neither is a
+extraction sends `extraction_max_tokens` for non-thinking requests (4,096 in the
+recommended example; 75,000 when omitted) and `extraction_reasoning_max_tokens`
+when thinking is enabled (32,768 in the example). Neither is a
 generation target or minimum. A response that reaches its ceiling enters Stage
 2's bounded repair or fallback path. The extraction-only ceiling is transport
 policy and does not invalidate completed feature-definition checkpoints when it
 changes, so an interrupted extraction can resume under a safer ceiling (down to
-4,096 tokens).
+4,096 tokens for non-thinking extraction). Completed feature/patient measurements
+remain reusable. Incomplete serial-chunk fingerprints include the output
+reservation and may require re-extraction if that reservation changes; the normal
+fingerprint check remains enforced. The chunk planner reserves the larger of the
+two configured extraction ceilings so a reasoning repair has sufficient room.
 Extraction always isolates one patient and never sends more than the configured
 feature batch. Long records are read in ordered, lossless contiguous chunks of
 at most `extraction_chunk_size_tokens` (50,000 by default), preferring nearby

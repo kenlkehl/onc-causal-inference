@@ -33,6 +33,7 @@ from .nuisance_diagnostics import (
     propensity_eligibility,
     validate_propensity_bounds,
 )
+from . import stage2_request_audit as request_audit
 
 from ..models.causal_forest_head import CausalForestHead
 from ..models.elastic_net_nuisance import (
@@ -362,17 +363,25 @@ def _configured_serial_extraction(config: Any) -> dict[str, int]:
         "context_window_tokens": DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS,
         "max_output_tokens": DEFAULT_EXTRACTION_MAX_TOKENS,
         "context_margin_tokens": DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
+        "deferred_retry_passes": 1,
     }
     names = {
         "chunk_size_tokens": "extraction_chunk_size_tokens",
         "context_window_tokens": "extraction_context_window_tokens",
         "max_output_tokens": "extraction_max_tokens",
         "context_margin_tokens": "extraction_context_margin_tokens",
+        "deferred_retry_passes": "extraction_deferred_retry_passes",
     }
-    return {
+    settings = {
         key: int(getattr(config, attribute, defaults[key]))
         for key, attribute in names.items()
     }
+    # Reserve room for a reasoning-enabled repair of the same lossless chunk.
+    settings["max_output_tokens"] = max(
+        settings["max_output_tokens"],
+        int(getattr(config, "extraction_reasoning_max_tokens", None) or 0),
+    )
+    return settings
 
 
 def _value_fingerprint(value: Any) -> str:
@@ -1375,11 +1384,18 @@ def _request_validated_extraction(
                 raise
             except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
                 pending_path.unlink(missing_ok=True)
-        validated_response = request_json(
-            messages,
-            validate_candidate,
-            request_kind="extraction",
-        )
+        with request_audit.context(
+            _audit_path=str(ontology_audit_path.with_name("request_events.jsonl")),
+            checkpoint_dir=str(ontology_audit_path.parent),
+            patient_row_ids=list(map(int, row_ids)),
+            feature_ids=[str(feature.get("feature_id") or feature["name"])
+                         for feature in definitions],
+        ):
+            validated_response = request_json(
+                messages,
+                validate_candidate,
+                request_kind="extraction",
+            )
         pending_path.unlink(missing_ok=True)
         return validated_response
 
@@ -1958,12 +1974,45 @@ def _partition_feature_definitions(
     ]
 
 
+def _normalize_single_patient_wrapper(value, *, row_ids, feature_names):
+    """Repair only exact, complete single-patient wrappers; never invent values."""
+    if len(row_ids) != 1 or not isinstance(value, Mapping):
+        return value
+    if isinstance(value.get("rows"), list):
+        return value
+    expected = set(feature_names)
+    normalized = None
+    shape = None
+    if set(value) == expected:
+        normalized = {"row_id": int(row_ids[0]), "values": dict(value)}
+        shape = "flat_exact_feature_map"
+    elif set(value) in ({"values"}, {"row_id", "values"}):
+        values = value.get("values")
+        if isinstance(values, Mapping) and set(values) == expected:
+            normalized = {"row_id": value.get("row_id", int(row_ids[0])), "values": dict(values)}
+            shape = "single_row_object"
+    elif set(value) == {"rows"} and isinstance(value["rows"], Mapping):
+        row = value["rows"]
+        if (set(row) == {"row_id", "values"} and isinstance(row["values"], Mapping)
+                and set(row["values"]) == expected):
+            normalized = dict(row)
+            shape = "rows_object_instead_of_array"
+    if normalized is None:
+        return value
+    request_audit.event("response_shape_normalized", original_shape=shape,
+                        features=len(expected), inferred_measurements=0)
+    return {"rows": [normalized]}
+
+
 def _validate_extraction(
     value: Mapping[str, Any],
     *,
     row_ids: Sequence[int],
     definitions: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
+    value = _normalize_single_patient_wrapper(
+        value, row_ids=row_ids, feature_names=[str(feature["name"]) for feature in definitions],
+    )
     rows = value.get("rows")
     if not isinstance(rows, list):
         raise ValueError("extraction response requires a rows array")
@@ -2457,15 +2506,23 @@ def _request_validated_page_observations(
 
     issue_path = audit_dir / "extraction_issues.json"
     try:
-        validated = request_json(
-            messages,
-            lambda candidate: _validate_page_observations(
-                candidate,
-                page=page,
-                definitions=definitions,
-            ),
-            request_kind="extraction",
-        )
+        with request_audit.context(
+            _audit_path=str(audit_dir / "request_events.jsonl"),
+            checkpoint_dir=str(audit_dir),
+            patient_row_ids=[int(page["row_id"])],
+            page_index=page.get("page_index"),
+            feature_ids=[str(feature.get("feature_id") or feature["name"])
+                         for feature in definitions],
+        ):
+            validated = request_json(
+                messages,
+                lambda candidate: _validate_page_observations(
+                    candidate,
+                    page=page,
+                    definitions=definitions,
+                ),
+                request_kind="extraction",
+            )
         _write_json(
             issue_path,
             {
@@ -3383,10 +3440,14 @@ def extract_rows(
     context_window_tokens: int = DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS,
     max_output_tokens: int = DEFAULT_EXTRACTION_MAX_TOKENS,
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
+    deferred_retry_passes: int = 1,
 ) -> pd.DataFrame:
     """Extract one patient at a time, serializing long records across token chunks."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if (isinstance(deferred_retry_passes, bool) or not isinstance(deferred_retry_passes, int)
+            or deferred_retry_passes < 0):
+        raise ValueError("deferred_retry_passes must be a nonnegative integer")
     infrastructure_affected = _infrastructure_affected_directories(output_dir)
     if infrastructure_affected:
         LOGGER.warning(
@@ -4086,26 +4147,82 @@ def extract_rows(
 
     completed: list[tuple[int, list[dict[str, Any]]]] = []
     completed_pages: dict[int, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
-    task_count = len(batches) + len(page_requests)
+    tasks = [("batch", index, batch) for index, batch in enumerate(batches, start=1)]
+    tasks += [("page", int(page["row_id"]), page) for page in page_requests]
+    task_count = len(tasks)
+    failure_path = output_dir / "deferred_extraction.json"
+    failures = (list(json.loads(failure_path.read_text(encoding="utf-8"))["failures"])
+                if failure_path.exists() else [])
+    active_task = None
+
+    def task_label(task):
+        kind, index, payload = task
+        return {"kind": kind, "batch": index if kind == "batch" else None,
+                "row_ids": ([int(row["row_id"]) for row in payload] if kind == "batch"
+                            else [int(payload["row_id"])]),
+                "page_index": payload.get("page_index") if kind == "page" else None}
+
+    def save_deferred(status, retry_pass, unresolved):
+        _write_json(failure_path, {
+            "schema_version": "stage2_deferred_extraction_v1", "updated_at": _now(),
+            "status": status, "retry_pass": retry_pass,
+            "maximum_retry_passes": deferred_retry_passes,
+            "failures": failures, "unresolved": [task_label(task) for task in unresolved],
+        })
+
     with concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, min(int(workers), max(1, task_count)))
     ) as executor:
-        batch_futures = {
-            executor.submit(run_batch, index, batch): index
-            for index, batch in enumerate(batches, start=1)
-        }
-        page_futures = {
-            executor.submit(run_page, page): int(page["row_id"]) for page in page_requests
-        }
-        all_futures = [*batch_futures, *page_futures]
-        future = None
+        task_futures = {}
         try:
-            for future in concurrent.futures.as_completed(all_futures):
-                if future in batch_futures:
-                    completed.append((batch_futures[future], future.result()))
-                else:
-                    row_id = page_futures[future]
-                    completed_pages.setdefault(row_id, []).append(future.result())
+            for retry_pass in range(deferred_retry_passes + 1):
+                task_futures = {
+                    (executor.submit(run_batch, index, payload) if kind == "batch"
+                     else executor.submit(run_page, payload)): (kind, index, payload)
+                    for kind, index, payload in tasks
+                }
+                deferred = []
+                consecutive_failures = 0
+                for future in concurrent.futures.as_completed(task_futures):
+                    active_task = task_futures[future]
+                    kind, index, _payload = active_task
+                    try:
+                        result = future.result()
+                    except Stage2RequestExhaustedError as error:
+                        if deferred_retry_passes == 0:
+                            raise
+                        deferred.append((active_task, error))
+                        consecutive_failures += 1
+                        failures.append({**task_label(active_task), "retry_pass": retry_pass,
+                                         "failed_at": _now(), "error": str(error)[:2000]})
+                        save_deferred("deferred", retry_pass, [task for task, _ in deferred])
+                        LOGGER.warning(
+                            "Stage 2 extraction deferred root=%s task=%s retry_pass=%s: %s",
+                            output_dir, task_label(active_task), retry_pass, error,
+                        )
+                        # Avoid marching through the entire cohort during a
+                        # persistent outage. Isolated stragglers can be deferred.
+                        if consecutive_failures >= max(3, int(workers)):
+                            unresolved = [task for task, _ in deferred]
+                            unresolved += [task for f, task in task_futures.items() if not f.done()]
+                            save_deferred("aborted_consecutive_failures", retry_pass, unresolved)
+                            raise
+                        continue
+                    consecutive_failures = 0
+                    if kind == "batch":
+                        completed.append((index, result))
+                    else:
+                        completed_pages.setdefault(index, []).append(result)
+                if not deferred:
+                    if failures or failure_path.exists():
+                        save_deferred("resolved", retry_pass, [])
+                    break
+                tasks = [task for task, _error in deferred]
+                if retry_pass == deferred_retry_passes:
+                    save_deferred("unresolved", retry_pass, tasks)
+                    active_task, error = deferred[0]
+                    raise error
+                save_deferred("retrying_after_other_tasks", retry_pass + 1, tasks)
         except BaseException:
             # Log before executor shutdown waits for in-flight requests. Include
             # the checkpoint location so interleaved folds remain distinguishable.
@@ -4113,11 +4230,11 @@ def extract_rows(
                 "Stage 2 extraction failed root=%s batch=%s row_id=%s; "
                 "cancelling queued work and waiting for in-flight requests",
                 output_dir,
-                batch_futures.get(future),
-                page_futures.get(future),
+                active_task[1] if active_task and active_task[0] == "batch" else None,
+                active_task[1] if active_task and active_task[0] == "page" else None,
             )
             cancellation.set()
-            for pending in all_futures:
+            for pending in task_futures:
                 pending.cancel()
             raise
     values_by_row = {
@@ -8064,6 +8181,7 @@ def _extract_changed_features_and_merge(
     context_window_tokens: int,
     max_output_tokens: int,
     context_margin_tokens: int,
+    deferred_retry_passes: int = 1,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Extract changed features only and materialize a complete merged matrix."""
 
@@ -8095,6 +8213,7 @@ def _extract_changed_features_and_merge(
             context_window_tokens=context_window_tokens,
             max_output_tokens=max_output_tokens,
             context_margin_tokens=context_margin_tokens,
+            deferred_retry_passes=deferred_retry_passes,
         )
         summary = json.loads(
             (output_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8130,6 +8249,7 @@ def _extract_changed_features_and_merge(
         context_window_tokens=context_window_tokens,
         max_output_tokens=max_output_tokens,
         context_margin_tokens=context_margin_tokens,
+        deferred_retry_passes=deferred_retry_passes,
     )
     prior_names = [str(feature["name"]) for feature in prior_definitions]
     prior_indexed = _validated_extraction_index(
@@ -8244,6 +8364,7 @@ def _extract_training_with_ontology_feedback(
     context_window_tokens: int = DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS,
     max_output_tokens: int = DEFAULT_EXTRACTION_MAX_TOKENS,
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
+    deferred_retry_passes: int = 1,
     prior_extracted: pd.DataFrame | None = None,
     prior_definitions: Sequence[Mapping[str, Any]] | None = None,
     prior_failure_summary: Mapping[str, Any] | None = None,
@@ -8296,6 +8417,7 @@ def _extract_training_with_ontology_feedback(
                 context_window_tokens=context_window_tokens,
                 max_output_tokens=max_output_tokens,
                 context_margin_tokens=context_margin_tokens,
+                deferred_retry_passes=deferred_retry_passes,
             )
             summary = json.loads(
                 (extraction_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8322,6 +8444,7 @@ def _extract_training_with_ontology_feedback(
                 context_window_tokens=context_window_tokens,
                 max_output_tokens=max_output_tokens,
                 context_margin_tokens=context_margin_tokens,
+                deferred_retry_passes=deferred_retry_passes,
             )
         repeated = _repeated_ontology_failure_patterns(
             summary,

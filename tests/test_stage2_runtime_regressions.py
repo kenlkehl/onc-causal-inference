@@ -729,7 +729,7 @@ def test_extraction_failure_is_logged_before_executor_shutdown(tmp_path, monkeyp
                 "missing_value_rule": "Return null when undocumented.",
             }],
             output_dir=output_dir, request_json=request_json,
-            workers=1, max_prompt_chars=10000,
+            workers=1, max_prompt_chars=10000, deferred_retry_passes=0,
         )
     assert caught.value is error
     assert shutdown_checks == [True]

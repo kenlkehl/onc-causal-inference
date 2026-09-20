@@ -66,7 +66,10 @@ and evaluated on outer-held-out records. The common controls are:
     "request_attempt_timeout": 900,
     "transport_max_attempts": 6,
     "max_tokens": 100000,
-    "extraction_max_tokens": 75000,
+    "extraction_max_tokens": 4096,
+    "extraction_reasoning_max_tokens": 32768,
+    "extraction_stream": true,
+    "extraction_deferred_retry_passes": 1,
     "max_response_repairs": 15,
     "thinking_after_response_repairs": 5,
     "repetition_penalty": null,
@@ -126,10 +129,17 @@ aggregate ontology-review requests go to the primary model with
 configured `extraction_llm` model with `reasoning_effort: "none"`. The two
 models may use different endpoints or the same multi-model endpoint.
 `max_tokens` is the primary model's 100,000-token output ceiling;
-`extraction_max_tokens` is the patient extractor's 75,000-token ceiling. Neither
+`extraction_max_tokens` is the patient extractor's ceiling (4,096 in this example;
+75,000 when omitted for compatibility). `extraction_reasoning_max_tokens` gives
+reasoning-enabled extraction its own total allowance for reasoning plus final
+JSON (32,768 in this example; when omitted or null it shares `extraction_max_tokens`). Neither
 asks nor forces a model to generate that many tokens, and normal EOS stopping
 applies. The extraction ceiling may be lowered to 4,096 tokens to bound a
-runaway response without invalidating completed scientific checkpoints. Long
+runaway non-thinking response without invalidating completed feature or patient
+checkpoints. Reasoning repairs use their larger ceiling, reduced only when the
+remaining context requires it. Incomplete serial chunks are reused only if their
+exact planning fingerprint still matches; a changed output reservation can require
+re-extraction of those chunks. Long
 patient records are processed serially in lossless source chunks
 of at most 50,000 tokens, carrying the validated structured extraction into the
 next chunk. The planner shrinks chunks as needed to preserve the model context,
@@ -143,10 +153,25 @@ For Qwen 3.8, configured `high` is sent as `reasoning_effort: "xhigh"`;
 thinking-off extraction requests omit that enabled-only wire enum.
 The selected IDs are persisted in `stage2/model_identity.json`: endpoint URL
 changes may resume, but changing either running model ID raises an error.
-Transport failures receive up to 10 attempts by default.
-Invalid completed responses receive up to 10 validator-guided repair retries.
+Each logical request has a 7,200-second budget. Transport failures receive up to
+6 attempts per response attempt by default, with a 900-second transport timeout.
+With streaming enabled, that timeout measures network read inactivity; active
+generation remains bounded by the logical deadline and output cap.
+Invalid completed responses receive up to 15 validator-guided repair retries.
 The first five repairs retain the request's normal reasoning policy; repairs
-6–10 force `reasoning_effort` to at least `high`, enabling thinking.
+6–15 force `reasoning_effort` to at least `high`, including structural extraction
+errors such as a missing `rows` array. These reasoning repairs use the larger
+`extraction_reasoning_max_tokens` allowance when configured. Unambiguous complete
+single-patient wrappers are normalized and validated without inventing values.
+
+The example enables streaming progress and per-checkpoint `request_events.jsonl`
+logs, including request IDs, retry counts, timing, finish reasons, and available
+token usage. An exhausted patient/page task is deferred while other tasks finish,
+then retried once (`extraction_deferred_retry_passes: 1`, also the default).
+`deferred_extraction.json` records failures and recovery. Unresolved tasks still
+prevent fitting; repeated consecutive failures abort early. Set the retry-pass
+option to 0 for immediate abort, or `extraction_stream: false` for a server that
+does not support streaming. Streaming defaults to false when omitted.
 
 `stage2.explicit_features` may contain investigator-specified feature
 definitions. Each entry must include its complete extraction ontology and

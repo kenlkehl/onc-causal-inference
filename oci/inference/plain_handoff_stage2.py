@@ -65,6 +65,7 @@ from .stage2_role_adjudication import (
     role_adjudication_config_from_mapping,
 )
 from .stage2_sampling import SAMPLING_FIELDS, recommended_sampling
+from . import stage2_request_audit as request_audit
 from .stage2_sequential_consolidation import (
     Stage2SequentialConsolidationConfig,
     sequential_consolidation_config_from_mapping,
@@ -823,6 +824,13 @@ class PlainHandoffStage2Config:
     # This transport-only limit is deliberately absent from feature-definition
     # fingerprints, allowing completed discovery to resume under a safer cap.
     extraction_max_tokens: int = DEFAULT_EXTRACTION_MAX_TOKENS
+    # Separate total output allowance (reasoning plus final JSON) when thinking
+    # is enabled. None preserves the historical shared extraction ceiling.
+    extraction_reasoning_max_tokens: int | None = None
+    # Opt in for OpenAI-compatible servers that implement streaming and usage.
+    # Streaming separates active generation from a stalled HTTP response.
+    extraction_stream: bool = False
+    extraction_deferred_retry_passes: int = 1
     interpretation_reasoning_effort: str = DEFAULT_INTERPRETATION_REASONING_EFFORT
     extraction_reasoning_effort: str = DEFAULT_EXTRACTION_REASONING_EFFORT
     max_prompt_chars: int = 100_000
@@ -969,6 +977,12 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.transport_max_attempts must be positive")
         if self.transport_retry_backoff < 0:
             raise ValueError("stage2.transport_retry_backoff must be nonnegative")
+        if not isinstance(self.extraction_stream, bool):
+            raise ValueError("stage2.extraction_stream must be a boolean")
+        if (isinstance(self.extraction_deferred_retry_passes, bool)
+                or not isinstance(self.extraction_deferred_retry_passes, int)
+                or self.extraction_deferred_retry_passes < 0):
+            raise ValueError("stage2.extraction_deferred_retry_passes must be a nonnegative integer")
         if (
             isinstance(self.max_response_repairs, bool)
             or not isinstance(self.max_response_repairs, int)
@@ -1001,6 +1015,15 @@ class PlainHandoffStage2Config:
                 "stage2.extraction_max_tokens must be an integer of at least "
                 f"{MINIMUM_EXTRACTION_MAX_TOKENS}; it is an output ceiling, not a "
                 "minimum length"
+            )
+        if self.extraction_reasoning_max_tokens is not None and (
+            isinstance(self.extraction_reasoning_max_tokens, bool)
+            or not isinstance(self.extraction_reasoning_max_tokens, int)
+            or self.extraction_reasoning_max_tokens < MINIMUM_EXTRACTION_MAX_TOKENS
+        ):
+            raise ValueError(
+                "stage2.extraction_reasoning_max_tokens must be null or an integer "
+                f"of at least {MINIMUM_EXTRACTION_MAX_TOKENS}"
             )
         for field_name, effort in (
             ("interpretation_reasoning_effort", self.interpretation_reasoning_effort),
@@ -1078,11 +1101,13 @@ class PlainHandoffStage2Config:
                 )
                 raise ValueError(f"stage2.{field_name} must be {qualifier}")
         if (
-            self.extraction_max_tokens + self.extraction_context_margin_tokens
+            max(self.extraction_max_tokens, self.extraction_reasoning_max_tokens or 0)
+            + self.extraction_context_margin_tokens
             >= self.extraction_context_window_tokens
         ):
             raise ValueError(
                 "stage2 extraction context window must exceed extraction_max_tokens "
+                "and extraction_reasoning_max_tokens "
                 "plus extraction_context_margin_tokens"
             )
         if self.evidence_compiler != EVIDENCE_COMPILER_VERSION:
@@ -1464,6 +1489,9 @@ def plain_stage2_config_from_mapping(
         ),
         max_tokens=int(raw.get("max_tokens", DEFAULT_MAX_TOKENS)),
         extraction_max_tokens=int(raw.get("extraction_max_tokens", DEFAULT_EXTRACTION_MAX_TOKENS)),
+        extraction_reasoning_max_tokens=raw.get("extraction_reasoning_max_tokens"),
+        extraction_stream=raw.get("extraction_stream", False),
+        extraction_deferred_retry_passes=raw.get("extraction_deferred_retry_passes", 1),
         interpretation_reasoning_effort=interpretation_reasoning_effort,
         extraction_reasoning_effort=extraction_reasoning_effort,
         max_prompt_chars=int(raw.get("max_prompt_chars", 100_000)),
@@ -2419,11 +2447,14 @@ def _stage2_request_policy(
         else config.interpretation_reasoning_effort
     )
     reasoning_effort = config.runtime_reasoning_effort or configured_reasoning_effort
+    extraction_ceiling = config.extraction_max_tokens
+    if _reasoning_enabled(reasoning_effort) and config.extraction_reasoning_max_tokens is not None:
+        extraction_ceiling = config.extraction_reasoning_max_tokens
     return {
         "request_kind": kind,
         "reasoning_effort": reasoning_effort,
         "max_tokens": int(
-            config.extraction_max_tokens if kind == "extraction" else config.max_tokens
+            extraction_ceiling if kind == "extraction" else config.max_tokens
         ),
         **recommended_sampling(
             config.runtime_sampling_model or config.model,
@@ -2550,6 +2581,8 @@ def _openai_optional_parameter_error(exc: Exception) -> bool:
         "enablethinking",
         "chat template kwargs",
         "response format",
+        "stream options",
+        "include usage",
         "repetition penalty",
         "top k",
         "min p",
@@ -2742,7 +2775,7 @@ def _openai_completion(
     LOGGER.info(
         "Stage 2 request kind=%s endpoint=%s model=%s prompt_chars=%s "
         "family=%s reasoning_effort=%s wire_reasoning_effort=%s "
-        "max_tokens=%s sampling=%s",
+        "max_tokens=%s sampling=%s request_id=%s",
         request_policy["request_kind"],
         config.endpoint,
         config.model,
@@ -2752,12 +2785,17 @@ def _openai_completion(
         wire_reasoning_effort,
         request_policy["max_tokens"],
         {name: request_policy[name] for name in SAMPLING_FIELDS if name in request_policy},
+        request_audit.request_id(),
     )
     variants = _openai_request_variants(
         base_kwargs=base_kwargs,
         request_policy=request_policy,
         model_family=model_family,
     )
+    streaming = request_policy["request_kind"] == "extraction" and config.extraction_stream
+    if streaming:
+        variants = [dict(variant, stream=True, stream_options={"include_usage": True})
+                    for variant in variants]
     logical_deadline = (
         float(config.runtime_request_deadline)
         if config.runtime_request_deadline is not None
@@ -2789,9 +2827,31 @@ def _openai_completion(
             max_retries=0,
         )
         attempts_used += 1
+        attempt_started = time.monotonic()
+        request_audit.event(
+            "http_attempt_started", http_variant=variant_index,
+            reasoning_effort=request_policy["reasoning_effort"],
+            max_tokens=request_policy["max_tokens"], streaming=streaming,
+            read_timeout_seconds=min(float(config.request_timeout), remaining),
+        )
         try:
             response = client.chat.completions.create(**kwargs)
+            if streaming:
+                response = request_audit.collect_stream(
+                    response, deadline=logical_deadline,
+                    deadline_error=Stage2RequestExhaustedError,
+                    incomplete_error=_RetryableStage2ResponseError,
+                )
+            request_audit.event(
+                "http_attempt_completed", provider_request_id=getattr(response, "id", None),
+                duration_seconds=round(time.monotonic() - attempt_started, 3),
+                finish_reason=getattr(response.choices[0], "finish_reason", None),
+                **request_audit.usage_fields(getattr(response, "usage", None)),
+            )
         except Exception as exc:
+            request_audit.event("http_attempt_failed", error_type=type(exc).__name__,
+                                error=str(exc)[:2000],
+                                duration_seconds=round(time.monotonic() - attempt_started, 3))
             if (
                 variant_index == len(variants)
                 or not _openai_optional_parameter_error(exc)
@@ -2808,6 +2868,9 @@ def _openai_completion(
             # Do not spend the entire attempt budget resending an explicitly
             # rejected sampling extension across thinking-control variants.
             normalized_error = re.sub(r"[_-]+", " ", str(exc).lower())
+            if "stream options" in normalized_error or "include usage" in normalized_error:
+                for remaining_variant in variants[variant_index:]:
+                    remaining_variant.pop("stream_options", None)
             rejected_sampling = {
                 name for name in ("top_k", "min_p", "repetition_penalty")
                 if name.replace("_", " ") in normalized_error
@@ -2966,10 +3029,15 @@ def _is_retryable_transport_error(exc: Exception) -> bool:
     if isinstance(exc, _RetryableStage2ResponseError):
         return True
     try:
+        import httpx
         from openai import APIConnectionError, APIStatusError
     except ImportError:  # pragma: no cover - OpenAI is required for live requests
         return False
     if isinstance(exc, APIConnectionError):
+        return True
+    # The SDK translates errors while opening a response, but iteration over
+    # an already-open SSE response can expose the underlying HTTPX exception.
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.RemoteProtocolError)):
         return True
     if isinstance(exc, APIStatusError):
         status_code = int(exc.status_code)
@@ -3019,6 +3087,7 @@ def _completion_with_transport_retries(
             runtime_request_deadline=logical_deadline,
             runtime_transport_attempt_budget=remaining_attempts,
         )
+        request_audit.update(transport_attempt=max_attempts - remaining_attempts + 1)
         if prompt_token_counter is not None and context_window_tokens is not None:
             available = (
                 int(context_window_tokens)
@@ -3031,6 +3100,10 @@ def _completion_with_transport_retries(
                 attempt_config,
                 max_tokens=min(attempt_config.max_tokens, available),
                 extraction_max_tokens=min(attempt_config.extraction_max_tokens, available),
+                extraction_reasoning_max_tokens=(
+                    min(attempt_config.extraction_reasoning_max_tokens, available)
+                    if attempt_config.extraction_reasoning_max_tokens is not None else None
+                ),
             )
         try:
             return completion(retry_messages, attempt_config)
@@ -3279,6 +3352,7 @@ def _bounded_repair_directive(
     return detail[: max_chars - 3].rstrip() + "..."
 
 
+@request_audit.audited
 def _request_json(
     *,
     messages: Sequence[Mapping[str, str]],
@@ -3325,6 +3399,7 @@ def _request_json(
     max_repairs = int(config.max_response_repairs)
     max_attempts = 1 + max_repairs
     logical_deadline = time.monotonic() + float(config.request_timeout)
+    request_audit.event("request_admitted", logical_budget_seconds=config.request_timeout)
     validation_error_counts: Counter[str] = Counter()
     validation_failure_count = 0
     if fallback_after_same_error < 1:
@@ -3339,6 +3414,7 @@ def _request_json(
         )
 
     for attempt in range(max_attempts):
+        request_audit.update(response_attempt=attempt + 1, transport_attempt=0)
         if time.monotonic() >= logical_deadline:
             raise Stage2RequestExhaustedError(
                 "Stage 2 logical request deadline expired across response repairs"
@@ -3383,13 +3459,18 @@ def _request_json(
                         f"context_margin_tokens={context_margin_tokens}"
                     )
                 dynamic_output_ceiling = min(
-                    int(request_policy["max_tokens"]),
+                    int(_stage2_request_policy(attempt_config)["max_tokens"]),
                     available_output_tokens,
                 )
                 if request_policy["request_kind"] == "extraction":
+                    reasoning_ceiling = (
+                        _reasoning_enabled(_stage2_request_policy(attempt_config)["reasoning_effort"])
+                        and attempt_config.extraction_reasoning_max_tokens is not None
+                    )
                     attempt_config = replace(
                         attempt_config,
-                        extraction_max_tokens=dynamic_output_ceiling,
+                        **{("extraction_reasoning_max_tokens" if reasoning_ceiling else
+                            "extraction_max_tokens"): dynamic_output_ceiling},
                     )
                 else:  # pragma: no cover - token counting is extraction-only today
                     attempt_config = replace(
@@ -3414,6 +3495,8 @@ def _request_json(
             if response is None and not isinstance(exc, _Stage2OutputLengthError):
                 raise
             validation_failure_count += 1
+            request_audit.event("response_validation_failed", error_type=type(exc).__name__,
+                                error=str(exc)[:2000])
             error_signature = f"{type(exc).__name__}: {exc}"
             validation_error_counts[error_signature] += 1
             repeated_error_count = validation_error_counts[error_signature]
