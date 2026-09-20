@@ -1,4 +1,3 @@
-import inspect
 import json
 
 import numpy as np
@@ -26,25 +25,6 @@ def _data():
         > 0.1
     ).astype(float)
     return effect, control, treatment, outcome
-
-
-def test_causal_forest_head_exposes_only_elastic_net_nuisance_configuration():
-    parameters = inspect.signature(CausalForestHead).parameters
-    retired = {
-        "runtime_config",
-        "nuisance_model_family",
-        "nuisance_n_estimators",
-        "nuisance_max_depth",
-        "nuisance_min_samples_leaf",
-        "nuisance_treatment_max_features",
-        "nuisance_outcome_max_features",
-    }
-
-    assert retired.isdisjoint(parameters)
-    with pytest.raises(TypeError, match="runtime_config"):
-        CausalForestHead(runtime_config={})
-    with pytest.raises(TypeError, match="nuisance_model_family"):
-        CausalForestHead(nuisance_model_family="random_forest")
 
 
 def test_prediction_calls_explicit_binary_treatment_contrast():

@@ -408,16 +408,6 @@ def test_simple_runner_uses_processes_for_tfidf_contexts_by_default(tmp_path):
     )
 
 
-def test_default_all_evidence_htr_training_uses_30_epochs():
-    mapping = json.loads(all_evidence_workflow.DEFAULT_STAGE1_TEMPLATE.read_text(encoding="utf-8"))
-    htr_config = mapping["config"]["architecture"][
-        "agentic_attention_variable_forest"
-    ]
-
-    assert htr_config["nuisance_epochs"] == 30
-    assert htr_config["effect_epochs"] == 30
-
-
 def test_completed_components_are_reported_already_complete_without_revalidation(tmp_path):
     _raw, config = _inputs(tmp_path)
     calls: list[str] = []

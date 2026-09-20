@@ -81,7 +81,7 @@ def test_all_extraction_repairs_enable_thinking_with_larger_budget_after_thresho
         return "{}"
 
     def validate(value):
-        if len(policies) < 8:
+        if len(policies) < 16:
             raise ValueError(error)
         return value
 
@@ -92,15 +92,15 @@ def test_all_extraction_repairs_enable_thinking_with_larger_budget_after_thresho
             config=config(extraction_max_tokens=4096, extraction_reasoning_max_tokens=32768),
             completion=completion, validate=validate, request_kind="extraction")
     # Initial response plus repairs 1–5 use the ordinary extraction policy.
-    assert [p["reasoning_effort"] for p in policies] == ["none"] * 6 + ["high"] * 2
-    assert [p["max_tokens"] for p in policies] == [4096] * 6 + [32768] * 2
+    assert [p["reasoning_effort"] for p in policies] == ["none"] * 6 + ["high"] * 10
+    assert [p["max_tokens"] for p in policies] == [4096] * 6 + [32768] * 10
     for prompt in prompts[1:]:
         assert prompt[0]["content"] == "PRIVATE NOTE"
         assert prompt[-2] == {"role": "assistant", "content": "{}"}
         assert f"ValueError: {error}" in prompt[-1]["content"]
     records = events(path)
     assert records[-1]["event"] == "request_validated"
-    assert records[-1]["response_attempt"] == 8
+    assert records[-1]["response_attempt"] == 16
     assert len({r["request_id"] for r in records}) == 1
     assert "PRIVATE NOTE" not in path.read_text()
 

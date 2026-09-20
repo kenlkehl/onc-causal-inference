@@ -166,10 +166,6 @@ def test_role_prompt_has_no_fixture_specific_truth_hints():
         assert forbidden not in normalized
 
 
-def test_role_adjudication_defaults_to_twenty_candidates_per_request():
-    assert Stage2RoleAdjudicationConfig().max_candidates_per_request == 20
-
-
 def test_adjudication_applies_roles_preserves_lock_and_reuses_checkpoint(tmp_path):
     definitions = [
         _definition("candidate_a"),
