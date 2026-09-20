@@ -1,0 +1,122 @@
+{
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_001/feature_definitions.json": {
+    "sha256": "6ee86d52567c61da519277699d0bec7359ab80dcddc5f1c31bd54b1caa633000",
+    "bytes": 725543
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_001/final_definitions.json": {
+    "sha256": "ecf401147a82d16f14203079e442e6fa6e8ca88c1e046ee1d5c78da71f878ee3",
+    "bytes": 498875
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_001/interpreted_candidates.json": {
+    "sha256": "608e6dc523ea5ebcbc23da8f6956e4315432f514a317db69b45cd4ea69e47cc3",
+    "bytes": 572635
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_001/selection/statistical_evidence.json": {
+    "sha256": "ff82e6970e72e4820af1640d65e243e9353119c8801ff62c2df4082aa232b78e",
+    "bytes": 11056674
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_001/selection/elastic_net_selection.json": {
+    "sha256": "d91595708bd74e2a51fd9343054fc44be0629974f61107ced41cf65964255575",
+    "bytes": 11768952
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_001/estimation/diagnostics.json": {
+    "sha256": "a764390cc4c840d55e63eddc6513f372cd89ed42af385e6ac515b5cceaa805dd",
+    "bytes": 29640
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_002/feature_definitions.json": {
+    "sha256": "4cb5cec07d607304db169d51a44c2b14b2130d40d155cd2fe28367f61d21b636",
+    "bytes": 648022
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_002/final_definitions.json": {
+    "sha256": "23f73724c56fd65383ba92ba97071eb4e54e23490413fd311ad68643edde1e60",
+    "bytes": 486647
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_002/interpreted_candidates.json": {
+    "sha256": "81ab7dcabebd8ae251bfdd424096dec6235c832e6bfcb374ef480b65078e2d8a",
+    "bytes": 529521
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_002/selection/statistical_evidence.json": {
+    "sha256": "8fcf12a717d77f8480a0caaf4e9f89e574bbd29922ea709d1cd52185667cbab1",
+    "bytes": 9926085
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_002/selection/elastic_net_selection.json": {
+    "sha256": "363b97bb1a19aa5997e960649af1ff75749f31c3630c332095287c54c7f095c6",
+    "bytes": 10564904
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_002/estimation/diagnostics.json": {
+    "sha256": "1a8b816d957c317f3251a758e686213b30964f1efbc2e76c575be740f2c70e07",
+    "bytes": 29367
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_003/feature_definitions.json": {
+    "sha256": "b3eb281409978c294cc2140ed6ca884d3b79f16dab07e5e961943e23d8db8106",
+    "bytes": 723461
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_003/final_definitions.json": {
+    "sha256": "cb778d604f9f35a515a4e0b23875e631ba43dad5f37b7560e5236cbea0f8a749",
+    "bytes": 144905
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_003/interpreted_candidates.json": {
+    "sha256": "95a7c7182b521c1309e20dcf7e75b5fa8e28ee42d38b61fd36e727d0ac159e9e",
+    "bytes": 567444
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_003/selection/statistical_evidence.json": {
+    "sha256": "474a831119270e5cd377d4c260094bf0d33aab7102aeafc969335e8bccf6e5c9",
+    "bytes": 10884997
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_003/selection/elastic_net_selection.json": {
+    "sha256": "5e59270916c23882cedb1f0d350395a854b941a2595132cdff7ed470a2e28762",
+    "bytes": 11571200
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_003/estimation/diagnostics.json": {
+    "sha256": "f2f0cddf9fc022d6ac5ef999206fdcd27038886d626039fe9d46636981ba1121",
+    "bytes": 29589
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_004/feature_definitions.json": {
+    "sha256": "1d5efa03749929a0e883c4df4dd011808775a9d11684a4308a7a876b59a799fb",
+    "bytes": 839925
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_004/final_definitions.json": {
+    "sha256": "fe8864224137bbab5272d739a97772e4fd893b4fd055def50ee0a3bd36722101",
+    "bytes": 480307
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_004/interpreted_candidates.json": {
+    "sha256": "e3da20fec4ca03e149496d8680ae24ed0d46527424b9b05b363340bd816e489e",
+    "bytes": 651009
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_004/selection/statistical_evidence.json": {
+    "sha256": "0b180c5437b1eff487650e51c7b84cd70413cb35e79ed23d439dd97c409de4ec",
+    "bytes": 13061371
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_004/selection/elastic_net_selection.json": {
+    "sha256": "4a884747bc22fe4904b0f205d4b960aeb605df844f03017c76ff85fcb401bcea",
+    "bytes": 13917908
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_004/estimation/diagnostics.json": {
+    "sha256": "047ec5c9043987c4b8587e2ec56cbc31b9d08159f271d49e3b77963f76f32ec8",
+    "bytes": 29632
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_005/feature_definitions.json": {
+    "sha256": "23181b1c82ac396930012ff13cd8aff13a03938ae45dc81a00d11ce644b2e404",
+    "bytes": 672775
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_005/final_definitions.json": {
+    "sha256": "b6430ca39373bd3243147ab1b9f430a5dbbc349a519fc238df72da0f69e8c97d",
+    "bytes": 538080
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_005/interpreted_candidates.json": {
+    "sha256": "268f22f1cf314009a6b4ab92365246ce4f773118492ffc3dcf3f93e23a1d25c5",
+    "bytes": 542485
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_005/selection/statistical_evidence.json": {
+    "sha256": "94982a82bfe0b4b98048c252df8c72b8cebe3acb80ef0bf1481f3f8bcece8c9e",
+    "bytes": 10047465
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_005/selection/elastic_net_selection.json": {
+    "sha256": "e787759e88b99ea0615bce6e9d66fe61848c5b80b6340dc939a868624ff53c32",
+    "bytes": 10717609
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/outer_005/estimation/diagnostics.json": {
+    "sha256": "170012f9cb39fbe9500c38ae14fb0911715eed3ede594766acac63b93f84d9e9",
+    "bytes": 29536
+  }
+}

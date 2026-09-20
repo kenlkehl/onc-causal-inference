@@ -1,0 +1,2690 @@
+{
+  "date": "2026-09-19",
+  "run": "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor",
+  "completed_at": "2026-09-18T03:17:06Z",
+  "selection_mode": "llm_roles",
+  "selection_consolidation_enabled": false,
+  "frozen_prediction_hash_matches_saved_evaluation": true,
+  "method": "Post-hoc frozen-artifact audit. No LLM requests or causal model refits. Oracle lookup diagnostics use training-fold oracle effects only and are not deployable causal estimators.",
+  "folds": [
+    {
+      "outer_fold": 1,
+      "feature_id": "outer_001_feature_255",
+      "name": "pd_l1_expression",
+      "stage1_derived_cards_with_pdl1_text": 55,
+      "card_architectures_with_pdl1_text": [
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_semantic_retrieval_contrasts",
+        "tfidf_topics"
+      ],
+      "pdl1_discovery_candidates": 18,
+      "pdl1_discovery_architectures": [
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_semantic_retrieval_contrasts",
+        "tfidf_topics"
+      ],
+      "initial_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "%"
+        ],
+        "measurement_definition": "Extract the numerical percentage value of PD-L1 expression (Tumor Proportion Score/TPS) from the pretreatment pathology or molecular report. If only a threshold or category is provided, extract the reported threshold (e.g., '<1%' as 1, '>=50%' as 50) or the categorical range bounds if specified."
+      },
+      "final_ontology": {
+        "value_type": "ordinal",
+        "categories_or_unit": [
+          "< 1%",
+          "1-49%",
+          "≥ 50%"
+        ],
+        "measurement_definition": "Extract the reported PD-L1 expression category (Tumor Proportion Score/TPS). Common categories include '< 1%', '1-49%', and '≥ 50%'.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "statistical_decision": {
+        "configured_explicit_feature": false,
+        "feature_id": "outer_001_feature_255",
+        "modifier_max_heldout_r_loss_improvement": 0.003953344041334239,
+        "modifier_mean_heldout_r_loss_improvement": 0.0016433340183617585,
+        "modifier_selection_frequency": 0.6,
+        "modifier_votes": 3,
+        "multivariable_modifier_elastic_net_votes": 0,
+        "name": "pd_l1_expression",
+        "nuisance_model_roles": [],
+        "outcome_selection_frequency": 0.0,
+        "outcome_votes": 0,
+        "retained": true,
+        "roles": [
+          "effect_modifier"
+        ],
+        "selection_source": "group_elastic_net_nuisance_and_candidate_augmented_rlearner_any_inner_fold_union",
+        "treatment_selection_frequency": 0.0,
+        "treatment_votes": 0,
+        "univariable_adjusted_confounder_votes": 0,
+        "univariable_nominal_confounder_votes": 0
+      },
+      "llm_decision": {
+        "cross_method_reconciliation": "Strong evidence for effect modification from the R-learner, while univariable confounding evidence is absent.",
+        "evidence_against": [
+          "univariable_confounder_screen nominal_joint_support_votes: 0"
+        ],
+        "evidence_for": [
+          "candidate_augmented_r_learner top_n_votes: 3",
+          "strong relative r_loss improvement in 3/5 folds (ranks 2, 5, 9)"
+        ],
+        "feature_id": "outer_001_feature_255",
+        "inner_fold_consistency": "Moderate; top-n selected in 3 of 5 folds.",
+        "rationale": "The feature shows significant evidence of treatment-heterogeneity via the R-learner, despite lacking confounding evidence.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "age_roles": [
+        "confounder"
+      ],
+      "measurement": {
+        "first_round_training": {
+          "rows": 800,
+          "missing": 51,
+          "unparsed": 0,
+          "correct": 720,
+          "wrong_category": 29,
+          "accuracy_all_rows": 0.9,
+          "accuracy_nonmissing": 0.9612817089452603,
+          "missing_with_pdl1_text_mention": 50,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 282,
+              "1-49%": 29,
+              ">=50%": 0,
+              "missing": 24,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 275,
+              ">=50%": 0,
+              "missing": 15,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 163,
+              "missing": 12,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_raw_training": {
+          "rows": 800,
+          "missing": 92,
+          "unparsed": 0,
+          "correct": 698,
+          "wrong_category": 10,
+          "accuracy_all_rows": 0.8725,
+          "accuracy_nonmissing": 0.9858757062146892,
+          "missing_with_pdl1_text_mention": 91,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 285,
+              "1-49%": 6,
+              ">=50%": 0,
+              "missing": 44,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 260,
+              ">=50%": 0,
+              "missing": 30,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 1,
+              "1-49%": 3,
+              ">=50%": 153,
+              "missing": 18,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_model_training": {
+          "rows": 800,
+          "missing": 92,
+          "unparsed": 0,
+          "correct": 698,
+          "wrong_category": 10,
+          "accuracy_all_rows": 0.8725,
+          "accuracy_nonmissing": 0.9858757062146892,
+          "missing_with_pdl1_text_mention": 91,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 285,
+              "1-49%": 6,
+              ">=50%": 0,
+              "missing": 44,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 260,
+              ">=50%": 0,
+              "missing": 30,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 1,
+              "1-49%": 3,
+              ">=50%": 153,
+              "missing": 18,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "raw_heldout": {
+          "rows": 200,
+          "missing": 29,
+          "unparsed": 0,
+          "correct": 167,
+          "wrong_category": 4,
+          "accuracy_all_rows": 0.835,
+          "accuracy_nonmissing": 0.9766081871345029,
+          "missing_with_pdl1_text_mention": 29,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 83,
+              "1-49%": 4,
+              ">=50%": 0,
+              "missing": 12,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 52,
+              ">=50%": 0,
+              "missing": 5,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 32,
+              "missing": 12,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "model_heldout": {
+          "rows": 200,
+          "missing": 29,
+          "unparsed": 0,
+          "correct": 167,
+          "wrong_category": 4,
+          "accuracy_all_rows": 0.835,
+          "accuracy_nonmissing": 0.9766081871345029,
+          "missing_with_pdl1_text_mention": 29,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 83,
+              "1-49%": 4,
+              ">=50%": 0,
+              "missing": 12,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 52,
+              ">=50%": 0,
+              "missing": 5,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 32,
+              "missing": 12,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        }
+      },
+      "final_predictions": {
+        "n": 200,
+        "pearson": 0.5110754155500884,
+        "rmse": 0.14865246029847118,
+        "bias": 0.058359559571192605,
+        "predicted_sd": 0.08682231135578371,
+        "oracle_sd": 0.15892641685078818,
+        "negative_predictions": 10
+      },
+      "pdl1_group_predictions": {
+        "1-49%": {
+          "n": 57,
+          "true_effect": -0.06346583893969157,
+          "estimated_effect": 0.09395510203436683,
+          "negative_predictions": 4
+        },
+        "<1%": {
+          "n": 99,
+          "true_effect": 0.033411897645228394,
+          "estimated_effect": 0.10189894576614551,
+          "negative_predictions": 6
+        },
+        ">=50%": {
+          "n": 44,
+          "true_effect": 0.32010707368250696,
+          "estimated_effect": 0.2273502671994706,
+          "negative_predictions": 0
+        }
+      },
+      "correctly_measured_group_predictions": {
+        "1-49%": {
+          "n": 52,
+          "true_effect": -0.06351923360980995,
+          "estimated_effect": 0.08347496326816523
+        },
+        "<1%": {
+          "n": 83,
+          "true_effect": 0.03333591441658543,
+          "estimated_effect": 0.0903422423010968
+        },
+        ">=50%": {
+          "n": 32,
+          "true_effect": 0.3263436431999771,
+          "estimated_effect": 0.25097028936203447
+        }
+      },
+      "high_minus_middle_contrast": {
+        "true_effect_gap": 0.3835729126221985,
+        "estimated_effect_gap": 0.13339516516510377,
+        "fraction_retained": 0.34777003478473417
+      },
+      "harmonization_newly_missing_heldout": {
+        "n": 0,
+        "raw_values": {}
+      },
+      "true_negative_heldout_encoded_as_exactly_one": 0,
+      "oracle_true_category_lookup": {
+        "n": 200,
+        "pearson": 0.878658056977126,
+        "rmse": 0.07588121518446823,
+        "bias": 0.0002538708399992934,
+        "predicted_sd": 0.14005432630864434,
+        "oracle_sd": 0.15892641685078818,
+        "negative_predictions": 57
+      },
+      "oracle_measured_category_lookup": {
+        "n": 200,
+        "pearson": 0.7813476583109634,
+        "rmse": 0.09980237993829064,
+        "bias": -0.010899620880138296,
+        "predicted_sd": 0.12218155667724052,
+        "oracle_sd": 0.15892641685078818,
+        "negative_predictions": 56
+      },
+      "candidate_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "status": "ok",
+          "rank": 9,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.0022458582932912696,
+          "heldout_relative_r_loss_improvement": 0.010616609616922965,
+          "tested_interaction_columns": [
+            "pd_l1_expression:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 2,
+          "status": "ok",
+          "rank": 215,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": -0.002147400478756001,
+          "heldout_relative_r_loss_improvement": -0.013704277357281377,
+          "tested_interaction_columns": [
+            "pd_l1_expression:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 3,
+          "status": "ok",
+          "rank": 2,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.003953344041334239,
+          "heldout_relative_r_loss_improvement": 0.02692652513273264,
+          "tested_interaction_columns": [
+            "pd_l1_expression:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 4,
+          "status": "ok",
+          "rank": 12,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.0018027259406511176,
+          "heldout_relative_r_loss_improvement": 0.011160256728479692,
+          "tested_interaction_columns": [
+            "pd_l1_expression:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 5,
+          "status": "ok",
+          "rank": 5,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.0023621422952881665,
+          "heldout_relative_r_loss_improvement": 0.015817983797678743,
+          "tested_interaction_columns": [
+            "pd_l1_expression:ordered_score"
+          ]
+        }
+      ],
+      "joint_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 2,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 3,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 4,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 5,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        }
+      ],
+      "forest_design": {
+        "source": "Saved final feature definitions; counts are concepts, not encoded matrix columns.",
+        "effect_features": 8,
+        "control_features": 32,
+        "effect_feature_names": [
+          "biomarker_percentage_value",
+          "growth_factor_therapy",
+          "oxygen_saturation_room_air",
+          "pd_l1_expression",
+          "pemetrexed_use",
+          "serum_albumin",
+          "skin_erythema_location",
+          "time_since_diagnosis"
+        ],
+        "control_feature_names": [
+          "age",
+          "albuterol_use",
+          "atorvastatin_use",
+          "blood_pressure",
+          "cholecystectomy_history",
+          "comorbidities",
+          "copd_status",
+          "cytoplasm_morphology",
+          "employment_status",
+          "family_history_lung_cancer",
+          "functional_independence",
+          "gross_description",
+          "hematocrit_level",
+          "home_support_status",
+          "hyperlipidemia",
+          "hypertension",
+          "illicit_drug_use",
+          "lisinopril_use",
+          "living_arrangement",
+          "occupation",
+          "osteoarthritis_knees_presence",
+          "osteoarthritis_presence",
+          "osteopenia_status",
+          "oxygen_saturation",
+          "performance_status",
+          "platelet_count",
+          "retirement_status",
+          "smoking_cessation_years",
+          "smoking_pack_years",
+          "smoking_status",
+          "squamous_differentiation",
+          "systolic_blood_pressure"
+        ]
+      },
+      "age_measurement": {
+        "train_mae_nonmissing": 2.0149803545353175,
+        "age_in_forest_x": false
+      }
+    },
+    {
+      "outer_fold": 2,
+      "feature_id": "outer_002_feature_271",
+      "name": "pd_l1_expression",
+      "stage1_derived_cards_with_pdl1_text": 66,
+      "card_architectures_with_pdl1_text": [
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_topics"
+      ],
+      "pdl1_discovery_candidates": 13,
+      "pdl1_discovery_architectures": [
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_orphan_ngrams",
+        "tfidf_topics"
+      ],
+      "initial_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "%"
+        ],
+        "measurement_definition": "Extract the numeric value of the PD-L1 Tumor Proportion Score (TPS) as a percentage. If an exact percentage is provided (e.g., '30%'), extract that number. If a range is provided (e.g., '1-49%'), extract the lower bound (1). For threshold results such as '<1%', extract 0. For '>=50%', extract 50."
+      },
+      "final_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "%"
+        ],
+        "measurement_definition": "Extract the numeric value of the PD-L1 Tumor Proportion Score (TPS) as a percentage. If an exact percentage is provided (e.g., '30%'), extract that number. If a range is provided (e.g., '1-49%'), extract the lower bound (1). For threshold results such as '<1%', extract 0. For '>=50%', extract 50.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "statistical_decision": {
+        "configured_explicit_feature": false,
+        "feature_id": "outer_002_feature_271",
+        "modifier_max_heldout_r_loss_improvement": 0.008084817364652136,
+        "modifier_mean_heldout_r_loss_improvement": 0.004030022707264403,
+        "modifier_selection_frequency": 0.6,
+        "modifier_votes": 3,
+        "multivariable_modifier_elastic_net_votes": 4,
+        "name": "pd_l1_expression",
+        "nuisance_model_roles": [],
+        "outcome_selection_frequency": 0.0,
+        "outcome_votes": 0,
+        "retained": true,
+        "roles": [
+          "effect_modifier"
+        ],
+        "selection_source": "group_elastic_net_nuisance_and_candidate_augmented_rlearner_any_inner_fold_union",
+        "treatment_selection_frequency": 0.0,
+        "treatment_votes": 0,
+        "univariable_adjusted_confounder_votes": 0,
+        "univariable_nominal_confounder_votes": 0
+      },
+      "llm_decision": {
+        "cross_method_reconciliation": "Strong and consistent empirical evidence for treatment heterogeneity from both the R-learner and the multivariable interaction model.",
+        "evidence_against": [
+          "No multivariable nuisance elastic-net selection"
+        ],
+        "evidence_for": [
+          "Selected in multivariable modifier elastic-net in 4 out of 5 folds",
+          "Positive held-out R-loss improvement in all 5 folds, with top-n ranking in 3 folds"
+        ],
+        "feature_id": "outer_002_feature_271",
+        "inner_fold_consistency": "High consistency across folds for effect modification.",
+        "rationale": "The feature demonstrates robust, cross-method empirical evidence of effect modification.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "age_roles": [
+        "confounder"
+      ],
+      "measurement": {
+        "first_round_training": {
+          "rows": 800,
+          "missing": 36,
+          "unparsed": 0,
+          "correct": 745,
+          "wrong_category": 19,
+          "accuracy_all_rows": 0.93125,
+          "accuracy_nonmissing": 0.975130890052356,
+          "missing_with_pdl1_text_mention": 35,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 323,
+              "1-49%": 19,
+              ">=50%": 0,
+              "missing": 12,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 259,
+              ">=50%": 0,
+              "missing": 9,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 163,
+              "missing": 15,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_raw_training": {
+          "rows": 800,
+          "missing": 36,
+          "unparsed": 0,
+          "correct": 745,
+          "wrong_category": 19,
+          "accuracy_all_rows": 0.93125,
+          "accuracy_nonmissing": 0.975130890052356,
+          "missing_with_pdl1_text_mention": 35,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 323,
+              "1-49%": 19,
+              ">=50%": 0,
+              "missing": 12,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 259,
+              ">=50%": 0,
+              "missing": 9,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 163,
+              "missing": 15,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_model_training": {
+          "rows": 800,
+          "missing": 36,
+          "unparsed": 0,
+          "correct": 745,
+          "wrong_category": 19,
+          "accuracy_all_rows": 0.93125,
+          "accuracy_nonmissing": 0.975130890052356,
+          "missing_with_pdl1_text_mention": 35,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 323,
+              "1-49%": 19,
+              ">=50%": 0,
+              "missing": 12,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 259,
+              ">=50%": 0,
+              "missing": 9,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 163,
+              "missing": 15,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "raw_heldout": {
+          "rows": 200,
+          "missing": 22,
+          "unparsed": 0,
+          "correct": 146,
+          "wrong_category": 32,
+          "accuracy_all_rows": 0.73,
+          "accuracy_nonmissing": 0.8202247191011236,
+          "missing_with_pdl1_text_mention": 22,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 39,
+              "1-49%": 32,
+              ">=50%": 0,
+              "missing": 9,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 71,
+              ">=50%": 0,
+              "missing": 8,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 36,
+              "missing": 5,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "model_heldout": {
+          "rows": 200,
+          "missing": 23,
+          "unparsed": 0,
+          "correct": 145,
+          "wrong_category": 32,
+          "accuracy_all_rows": 0.725,
+          "accuracy_nonmissing": 0.8192090395480226,
+          "missing_with_pdl1_text_mention": 23,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 39,
+              "1-49%": 32,
+              ">=50%": 0,
+              "missing": 9,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 70,
+              ">=50%": 0,
+              "missing": 9,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 36,
+              "missing": 5,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        }
+      },
+      "final_predictions": {
+        "n": 200,
+        "pearson": 0.3337195586705102,
+        "rmse": 0.1917598772008284,
+        "bias": 0.12284181656786508,
+        "predicted_sd": 0.10385926167100976,
+        "oracle_sd": 0.1446430418175052,
+        "negative_predictions": 17
+      },
+      "pdl1_group_predictions": {
+        "1-49%": {
+          "n": 79,
+          "true_effect": -0.06037293114536988,
+          "estimated_effect": 0.15973279573477686,
+          "negative_predictions": 4
+        },
+        "<1%": {
+          "n": 80,
+          "true_effect": 0.033218185053539975,
+          "estimated_effect": 0.12342397885889615,
+          "negative_predictions": 13
+        },
+        ">=50%": {
+          "n": 41,
+          "true_effect": 0.27853556028446275,
+          "estimated_effect": 0.27764647212868043,
+          "negative_predictions": 0
+        }
+      },
+      "correctly_measured_group_predictions": {
+        "1-49%": {
+          "n": 70,
+          "true_effect": -0.05979502101343922,
+          "estimated_effect": 0.1685074214125469
+        },
+        "<1%": {
+          "n": 39,
+          "true_effect": 0.03135516600364598,
+          "estimated_effect": 0.12475080620759166
+        },
+        ">=50%": {
+          "n": 36,
+          "true_effect": 0.27261717095100946,
+          "estimated_effect": 0.2930821836462531
+        }
+      },
+      "high_minus_middle_contrast": {
+        "true_effect_gap": 0.33890849142983265,
+        "estimated_effect_gap": 0.11791367639390357,
+        "fraction_retained": 0.3479218708756264
+      },
+      "harmonization_newly_missing_heldout": {
+        "n": 1,
+        "raw_values": {
+          "1-49%": 1
+        }
+      },
+      "true_negative_heldout_encoded_as_exactly_one": 31,
+      "oracle_true_category_lookup": {
+        "n": 200,
+        "pearson": 0.863495963535841,
+        "rmse": 0.0765827210143197,
+        "bias": 0.009151035456857009,
+        "predicted_sd": 0.14632864117932,
+        "oracle_sd": 0.1446430418175052,
+        "negative_predictions": 79
+      },
+      "oracle_measured_category_lookup": {
+        "n": 200,
+        "pearson": 0.7541738156916505,
+        "rmse": 0.10157493682857453,
+        "bias": 0.005125781400786784,
+        "predicted_sd": 0.1447137769466158,
+        "oracle_sd": 0.1446430418175052,
+        "negative_predictions": 102
+      },
+      "candidate_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "status": "ok",
+          "rank": 3,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.0031168515687850784,
+          "heldout_relative_r_loss_improvement": 0.021178308635726166,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 2,
+          "status": "ok",
+          "rank": 1,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.008084817364652136,
+          "heldout_relative_r_loss_improvement": 0.041564118110296484,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 3,
+          "status": "ok",
+          "rank": 13,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.0015246428223061048,
+          "heldout_relative_r_loss_improvement": 0.009478109908792626,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 4,
+          "status": "ok",
+          "rank": 11,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.002026507660539939,
+          "heldout_relative_r_loss_improvement": 0.012648003075847038,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 5,
+          "status": "ok",
+          "rank": 1,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.005397294120038754,
+          "heldout_relative_r_loss_improvement": 0.03664943583883432,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        }
+      ],
+      "joint_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "pdl1_selected": true,
+          "total_selected": 12,
+          "regularization_alpha": 0.01584893192461114,
+          "heldout_r_loss_improvement": -0.005618481666263164
+        },
+        {
+          "inner_fold": 2,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 3,
+          "pdl1_selected": true,
+          "total_selected": 1,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0008595932755380009
+        },
+        {
+          "inner_fold": 4,
+          "pdl1_selected": true,
+          "total_selected": 1,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0009152886553331074
+        },
+        {
+          "inner_fold": 5,
+          "pdl1_selected": true,
+          "total_selected": 1,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.002273827869578887
+        }
+      ],
+      "forest_design": {
+        "source": "Saved final feature definitions; counts are concepts, not encoded matrix columns.",
+        "effect_features": 7,
+        "control_features": 31,
+        "effect_feature_names": [
+          "ctcae_fatigue_severity",
+          "ecog_performance_status",
+          "hemoglobin_level",
+          "mri_t1_weighted_findings",
+          "pd_l1_expression",
+          "rales_presence",
+          "right_supraclavicular_lymphadenopathy"
+        ],
+        "control_feature_names": [
+          "age",
+          "albuterol_use",
+          "alcohol_consumption",
+          "arthralgia_presence",
+          "atorvastatin_use",
+          "calcium_level",
+          "cancer_treatment_history",
+          "chronic_medical_conditions",
+          "comorbidity_ckd_stage",
+          "family_history_of_diabetes",
+          "hyperlipidemia",
+          "hypertension",
+          "hypertension_control_status",
+          "illicit_drug_use_history",
+          "immune_related_pneumonitis_presence",
+          "kidney_status",
+          "knee_condition",
+          "lisinopril_use",
+          "living_situation",
+          "occupation",
+          "osteoarthritis",
+          "osteopenia",
+          "oxygen_saturation",
+          "palpitations",
+          "platelet_count",
+          "serum_potassium",
+          "smoking_cessation_duration",
+          "smoking_pack_years",
+          "surgical_history",
+          "systolic_blood_pressure",
+          "tobacco_use_history"
+        ]
+      },
+      "age_measurement": {
+        "train_mae_nonmissing": 2.0386846305252706,
+        "age_in_forest_x": false
+      }
+    },
+    {
+      "outer_fold": 3,
+      "feature_id": "outer_003_feature_239",
+      "name": "pd_l1_expression",
+      "stage1_derived_cards_with_pdl1_text": 57,
+      "card_architectures_with_pdl1_text": [
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_semantic_retrieval_contrasts",
+        "tfidf_topics"
+      ],
+      "pdl1_discovery_candidates": 15,
+      "pdl1_discovery_architectures": [
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_semantic_retrieval_contrasts",
+        "tfidf_topics"
+      ],
+      "initial_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "%"
+        ],
+        "measurement_definition": "Extract the numeric percentage of PD-L1 positive tumor cells (TPS). If only a range is provided, extract the lower bound or the specific threshold value (e.g., for '<1%', extract 0; for '>=50%', extract 50)."
+      },
+      "final_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "%"
+        ],
+        "measurement_definition": "Extract the numeric percentage of PD-L1 positive tumor cells (TPS). If only a range is provided, extract the lower bound or the specific threshold value (e.g., for '<1%', extract 0; for '>=50%', extract 50).",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "statistical_decision": {
+        "configured_explicit_feature": false,
+        "feature_id": "outer_003_feature_239",
+        "modifier_max_heldout_r_loss_improvement": 0.0055297444879992275,
+        "modifier_mean_heldout_r_loss_improvement": 0.0034418251392962897,
+        "modifier_selection_frequency": 0.6,
+        "modifier_votes": 3,
+        "multivariable_modifier_elastic_net_votes": 2,
+        "name": "pd_l1_expression",
+        "nuisance_model_roles": [],
+        "outcome_selection_frequency": 0.0,
+        "outcome_votes": 0,
+        "retained": true,
+        "roles": [
+          "effect_modifier"
+        ],
+        "selection_source": "group_elastic_net_nuisance_and_candidate_augmented_rlearner_any_inner_fold_union",
+        "treatment_selection_frequency": 0.0,
+        "treatment_votes": 0,
+        "univariable_adjusted_confounder_votes": 0,
+        "univariable_nominal_confounder_votes": 0
+      },
+      "llm_decision": {
+        "cross_method_reconciliation": "Strong evidence for effect modification: augmented R-learner shows top_n selection in 3/5 folds with significant held-out R-loss improvement, and it's selected by the joint modifier elastic-net in 2/5 folds.",
+        "evidence_against": [
+          "univariable_confounder_screen multiplicity_adjusted_joint_support_votes: 0"
+        ],
+        "evidence_for": [
+          "candidate_augmented_r_learner top_n_votes: 3",
+          "multivariable_modifier_elastic_net selection_votes: 2"
+        ],
+        "feature_id": "outer_003_feature_239",
+        "inner_fold_consistency": "Consistent signal across multiple modification tests.",
+        "rationale": "Strong empirical evidence for treatment-heterogeneity.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "age_roles": [
+        "confounder"
+      ],
+      "measurement": {
+        "first_round_training": {
+          "rows": 800,
+          "missing": 88,
+          "unparsed": 0,
+          "correct": 664,
+          "wrong_category": 48,
+          "accuracy_all_rows": 0.83,
+          "accuracy_nonmissing": 0.9325842696629213,
+          "missing_with_pdl1_text_mention": 87,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 263,
+              "1-49%": 48,
+              ">=50%": 0,
+              "missing": 44,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 257,
+              ">=50%": 0,
+              "missing": 20,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 144,
+              "missing": 24,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_raw_training": {
+          "rows": 800,
+          "missing": 88,
+          "unparsed": 0,
+          "correct": 664,
+          "wrong_category": 48,
+          "accuracy_all_rows": 0.83,
+          "accuracy_nonmissing": 0.9325842696629213,
+          "missing_with_pdl1_text_mention": 87,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 263,
+              "1-49%": 48,
+              ">=50%": 0,
+              "missing": 44,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 257,
+              ">=50%": 0,
+              "missing": 20,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 144,
+              "missing": 24,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_model_training": {
+          "rows": 800,
+          "missing": 88,
+          "unparsed": 0,
+          "correct": 664,
+          "wrong_category": 48,
+          "accuracy_all_rows": 0.83,
+          "accuracy_nonmissing": 0.9325842696629213,
+          "missing_with_pdl1_text_mention": 87,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 263,
+              "1-49%": 48,
+              ">=50%": 0,
+              "missing": 44,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 257,
+              ">=50%": 0,
+              "missing": 20,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 144,
+              "missing": 24,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "raw_heldout": {
+          "rows": 200,
+          "missing": 25,
+          "unparsed": 1,
+          "correct": 164,
+          "wrong_category": 10,
+          "accuracy_all_rows": 0.82,
+          "accuracy_nonmissing": 0.9425287356321839,
+          "missing_with_pdl1_text_mention": 26,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 52,
+              "1-49%": 10,
+              ">=50%": 0,
+              "missing": 16,
+              "unparsed": 1
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 65,
+              ">=50%": 0,
+              "missing": 5,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 47,
+              "missing": 4,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {
+            "Present": 1
+          }
+        },
+        "model_heldout": {
+          "rows": 200,
+          "missing": 30,
+          "unparsed": 0,
+          "correct": 160,
+          "wrong_category": 10,
+          "accuracy_all_rows": 0.8,
+          "accuracy_nonmissing": 0.9411764705882353,
+          "missing_with_pdl1_text_mention": 30,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 51,
+              "1-49%": 10,
+              ">=50%": 0,
+              "missing": 18,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 63,
+              ">=50%": 0,
+              "missing": 7,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 46,
+              "missing": 5,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        }
+      },
+      "final_predictions": {
+        "n": 200,
+        "pearson": 0.4658947306871645,
+        "rmse": 0.16518399760887245,
+        "bias": 0.05348439466396883,
+        "predicted_sd": 0.06905193482095297,
+        "oracle_sd": 0.17601797562542573,
+        "negative_predictions": 12
+      },
+      "pdl1_group_predictions": {
+        "1-49%": {
+          "n": 70,
+          "true_effect": -0.06650255308052369,
+          "estimated_effect": 0.14013657657619075,
+          "negative_predictions": 0
+        },
+        "<1%": {
+          "n": 79,
+          "true_effect": 0.03523035820022522,
+          "estimated_effect": 0.06948751153221171,
+          "negative_predictions": 12
+        },
+        ">=50%": {
+          "n": 51,
+          "true_effect": 0.33156231677303694,
+          "estimated_effect": 0.20461770390238643,
+          "negative_predictions": 0
+        }
+      },
+      "correctly_measured_group_predictions": {
+        "1-49%": {
+          "n": 63,
+          "true_effect": -0.0669607324138595,
+          "estimated_effect": 0.1411323486555574
+        },
+        "<1%": {
+          "n": 51,
+          "true_effect": 0.034025338270668976,
+          "estimated_effect": 0.05385451007961117
+        },
+        ">=50%": {
+          "n": 46,
+          "true_effect": 0.33763311524424433,
+          "estimated_effect": 0.21085628100377726
+        }
+      },
+      "high_minus_middle_contrast": {
+        "true_effect_gap": 0.3980648698535606,
+        "estimated_effect_gap": 0.06448112732619568,
+        "fraction_retained": 0.16198648062039958
+      },
+      "harmonization_newly_missing_heldout": {
+        "n": 5,
+        "raw_values": {
+          "Present": 1,
+          "1–49%": 1,
+          "1%–49% (estimated)": 1,
+          "70%": 1,
+          "< 1%": 1
+        }
+      },
+      "true_negative_heldout_encoded_as_exactly_one": 10,
+      "oracle_true_category_lookup": {
+        "n": 200,
+        "pearson": 0.8877597349254767,
+        "rmse": 0.08136302500130878,
+        "bias": -0.0031247046822066946,
+        "predicted_sd": 0.14951183744044272,
+        "oracle_sd": 0.17601797562542573,
+        "negative_predictions": 70
+      },
+      "oracle_measured_category_lookup": {
+        "n": 200,
+        "pearson": 0.8445607612763434,
+        "rmse": 0.09476058919994669,
+        "bias": 0.002276552304697199,
+        "predicted_sd": 0.1391068138863695,
+        "oracle_sd": 0.17601797562542573,
+        "negative_predictions": 73
+      },
+      "candidate_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "status": "ok",
+          "rank": 2,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.005471967101534664,
+          "heldout_relative_r_loss_improvement": 0.03211535479554238,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 2,
+          "status": "ok",
+          "rank": 11,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.0014029493075082278,
+          "heldout_relative_r_loss_improvement": 0.006708108861692589,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 3,
+          "status": "ok",
+          "rank": 1,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.004507214707192009,
+          "heldout_relative_r_loss_improvement": 0.0294167695416709,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 4,
+          "status": "ok",
+          "rank": 52,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.0002972500922473198,
+          "heldout_relative_r_loss_improvement": 0.0017722498163199982,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 5,
+          "status": "ok",
+          "rank": 1,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.0055297444879992275,
+          "heldout_relative_r_loss_improvement": 0.033366415685693894,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        }
+      ],
+      "joint_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 2,
+          "pdl1_selected": true,
+          "total_selected": 1,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.00035996956374750866
+        },
+        {
+          "inner_fold": 3,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 4,
+          "pdl1_selected": true,
+          "total_selected": 1,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0008396519330730601
+        },
+        {
+          "inner_fold": 5,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        }
+      ],
+      "forest_design": {
+        "source": "Saved final feature definitions; counts are concepts, not encoded matrix columns.",
+        "effect_features": 8,
+        "control_features": 32,
+        "effect_feature_names": [
+          "biomarker_score",
+          "diastolic_blood_pressure",
+          "family_history_of_breast_cancer",
+          "family_history_of_death",
+          "metastasis_location",
+          "pd_l1_expression",
+          "rash_severity",
+          "sotorasib_use"
+        ],
+        "control_feature_names": [
+          "age",
+          "atorvastatin_dose",
+          "blood_pressure",
+          "ckd_status",
+          "copd_status",
+          "ecog_performance_status",
+          "employment_status",
+          "eortc_qlq_c30_social_function",
+          "family_history_of_lung_cancer",
+          "functional_status",
+          "hematocrit_level",
+          "her2_status",
+          "home_environment",
+          "housing_type",
+          "hyperlipidemia_status",
+          "hypertension_status",
+          "knee_osteoarthritis_status",
+          "living_situation",
+          "multivitamin_use",
+          "obstructive_pulmonary_disease",
+          "occupation",
+          "osteoarthritis_status",
+          "oxygen_saturation",
+          "platelet_count",
+          "prior_surgery_history",
+          "serum_albumin",
+          "smoking_pack_years",
+          "smoking_quit_status",
+          "smoking_status",
+          "systolic_blood_pressure",
+          "tiotropium_administration",
+          "tobacco_smoking_history"
+        ]
+      },
+      "age_measurement": {
+        "train_mae_nonmissing": 2.026151166126621,
+        "age_in_forest_x": false
+      }
+    },
+    {
+      "outer_fold": 4,
+      "feature_id": "outer_004_feature_265",
+      "name": "pd_l1_expression",
+      "stage1_derived_cards_with_pdl1_text": 61,
+      "card_architectures_with_pdl1_text": [
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_topics"
+      ],
+      "pdl1_discovery_candidates": 13,
+      "pdl1_discovery_architectures": [
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_topics"
+      ],
+      "initial_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "percentage"
+        ],
+        "measurement_definition": "Extract the numerical value of the PD-L1 Tumor Proportion Score (TPS) as a percentage from the pretreatment pathology or molecular reports. If only a range or threshold is provided (e.g., '>= 50%'), extract the lower bound of that threshold (e.g., 50)."
+      },
+      "final_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "percentage"
+        ],
+        "measurement_definition": "Extract the numerical value of the PD-L1 Tumor Proportion Score (TPS) as a percentage from the pretreatment pathology or molecular reports. If only a range or threshold is provided (e.g., '>= 50%'), extract the lower bound of that threshold (e.g., 50).",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "statistical_decision": {
+        "configured_explicit_feature": false,
+        "feature_id": "outer_004_feature_265",
+        "modifier_max_heldout_r_loss_improvement": 0.004797499170688502,
+        "modifier_mean_heldout_r_loss_improvement": 0.0023885067813249673,
+        "modifier_selection_frequency": 0.6,
+        "modifier_votes": 3,
+        "multivariable_modifier_elastic_net_votes": 0,
+        "name": "pd_l1_expression",
+        "nuisance_model_roles": [],
+        "outcome_selection_frequency": 0.0,
+        "outcome_votes": 0,
+        "retained": true,
+        "roles": [
+          "effect_modifier"
+        ],
+        "selection_source": "group_elastic_net_nuisance_and_candidate_augmented_rlearner_any_inner_fold_union",
+        "treatment_selection_frequency": 0.0,
+        "treatment_votes": 0,
+        "univariable_adjusted_confounder_votes": 0,
+        "univariable_nominal_confounder_votes": 0
+      },
+      "llm_decision": {
+        "cross_method_reconciliation": "R-learner provides strong evidence for treatment heterogeneity, although the joint elastic-net did not select the interaction.",
+        "evidence_against": [
+          "Multivariable interaction model not selected"
+        ],
+        "evidence_for": [
+          "Top-n votes in R-learner are 3/5",
+          "Positive held-out relative R-loss improvement in 4 of 5 folds"
+        ],
+        "feature_id": "outer_004_feature_265",
+        "inner_fold_consistency": "Generally consistent R-learner support across most folds.",
+        "rationale": "The augmented R-learner provides strong evidence of treatment-heterogeneity (3/5 top-n votes), which is sufficient to identify the feature as an effect modifier.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "age_roles": [
+        "confounder"
+      ],
+      "measurement": {
+        "first_round_training": {
+          "rows": 800,
+          "missing": 103,
+          "unparsed": 0,
+          "correct": 661,
+          "wrong_category": 36,
+          "accuracy_all_rows": 0.82625,
+          "accuracy_nonmissing": 0.9483500717360115,
+          "missing_with_pdl1_text_mention": 102,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 257,
+              "1-49%": 36,
+              ">=50%": 0,
+              "missing": 60,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 254,
+              ">=50%": 0,
+              "missing": 22,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 150,
+              "missing": 21,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_raw_training": {
+          "rows": 800,
+          "missing": 103,
+          "unparsed": 0,
+          "correct": 661,
+          "wrong_category": 36,
+          "accuracy_all_rows": 0.82625,
+          "accuracy_nonmissing": 0.9483500717360115,
+          "missing_with_pdl1_text_mention": 102,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 257,
+              "1-49%": 36,
+              ">=50%": 0,
+              "missing": 60,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 254,
+              ">=50%": 0,
+              "missing": 22,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 150,
+              "missing": 21,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_model_training": {
+          "rows": 800,
+          "missing": 103,
+          "unparsed": 0,
+          "correct": 661,
+          "wrong_category": 36,
+          "accuracy_all_rows": 0.82625,
+          "accuracy_nonmissing": 0.9483500717360115,
+          "missing_with_pdl1_text_mention": 102,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 257,
+              "1-49%": 36,
+              ">=50%": 0,
+              "missing": 60,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 254,
+              ">=50%": 0,
+              "missing": 22,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 150,
+              "missing": 21,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "raw_heldout": {
+          "rows": 200,
+          "missing": 30,
+          "unparsed": 0,
+          "correct": 163,
+          "wrong_category": 7,
+          "accuracy_all_rows": 0.815,
+          "accuracy_nonmissing": 0.9588235294117647,
+          "missing_with_pdl1_text_mention": 30,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 60,
+              "1-49%": 7,
+              ">=50%": 0,
+              "missing": 14,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 63,
+              ">=50%": 0,
+              "missing": 8,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 40,
+              "missing": 8,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "model_heldout": {
+          "rows": 200,
+          "missing": 32,
+          "unparsed": 0,
+          "correct": 161,
+          "wrong_category": 7,
+          "accuracy_all_rows": 0.805,
+          "accuracy_nonmissing": 0.9583333333333334,
+          "missing_with_pdl1_text_mention": 32,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 59,
+              "1-49%": 7,
+              ">=50%": 0,
+              "missing": 15,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 63,
+              ">=50%": 0,
+              "missing": 8,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 39,
+              "missing": 9,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        }
+      },
+      "final_predictions": {
+        "n": 200,
+        "pearson": 0.24279195660835842,
+        "rmse": 0.18243874776687577,
+        "bias": 0.06947247239593153,
+        "predicted_sd": 0.06127582040525631,
+        "oracle_sd": 0.17275089493124035,
+        "negative_predictions": 4
+      },
+      "pdl1_group_predictions": {
+        "1-49%": {
+          "n": 71,
+          "true_effect": -0.06258211364046322,
+          "estimated_effect": 0.13292582726914864,
+          "negative_predictions": 2
+        },
+        "<1%": {
+          "n": 81,
+          "true_effect": 0.03294278868860287,
+          "estimated_effect": 0.1265679472086462,
+          "negative_predictions": 2
+        },
+        ">=50%": {
+          "n": 48,
+          "true_effect": 0.3357778229470803,
+          "estimated_effect": 0.17806517366542107,
+          "negative_predictions": 0
+        }
+      },
+      "correctly_measured_group_predictions": {
+        "1-49%": {
+          "n": 63,
+          "true_effect": -0.06225166070598356,
+          "estimated_effect": 0.13052237213262205
+        },
+        "<1%": {
+          "n": 59,
+          "true_effect": 0.03146232366639639,
+          "estimated_effect": 0.12656670933397055
+        },
+        ">=50%": {
+          "n": 39,
+          "true_effect": 0.31859311538194324,
+          "estimated_effect": 0.17998103422418626
+        }
+      },
+      "high_minus_middle_contrast": {
+        "true_effect_gap": 0.39835993658754354,
+        "estimated_effect_gap": 0.04513934639627243,
+        "fraction_retained": 0.11331296711950503
+      },
+      "harmonization_newly_missing_heldout": {
+        "n": 2,
+        "raw_values": {
+          "< 1 %": 1,
+          ">= 50": 1
+        }
+      },
+      "true_negative_heldout_encoded_as_exactly_one": 7,
+      "oracle_true_category_lookup": {
+        "n": 200,
+        "pearson": 0.8918233879316679,
+        "rmse": 0.07864718255082426,
+        "bias": -0.004764507925493042,
+        "predicted_sd": 0.1466266281061989,
+        "oracle_sd": 0.17275089493124035,
+        "negative_predictions": 71
+      },
+      "oracle_measured_category_lookup": {
+        "n": 200,
+        "pearson": 0.7721865601246152,
+        "rmse": 0.10998310692764889,
+        "bias": -0.006755667660680202,
+        "predicted_sd": 0.13189780237263662,
+        "oracle_sd": 0.17275089493124035,
+        "negative_predictions": 70
+      },
+      "candidate_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "status": "ok",
+          "rank": 2,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.0032949366138836644,
+          "heldout_relative_r_loss_improvement": 0.017673077362100116,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 2,
+          "status": "ok",
+          "rank": 38,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.0007725118005760256,
+          "heldout_relative_r_loss_improvement": 0.004219832531088108,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 3,
+          "status": "ok",
+          "rank": 1,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.003319148736717792,
+          "heldout_relative_r_loss_improvement": 0.021450921813352505,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 4,
+          "status": "ok",
+          "rank": 2,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.004797499170688502,
+          "heldout_relative_r_loss_improvement": 0.031630942153429355,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        },
+        {
+          "inner_fold": 5,
+          "status": "ok",
+          "rank": 145,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": -0.00024156241524114774,
+          "heldout_relative_r_loss_improvement": -0.0015794393572168863,
+          "tested_interaction_columns": [
+            "pd_l1_expression:value"
+          ]
+        }
+      ],
+      "joint_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 2,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 3,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 4,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 5,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        }
+      ],
+      "forest_design": {
+        "source": "Saved final feature definitions; counts are concepts, not encoded matrix columns.",
+        "effect_features": 11,
+        "control_features": 38,
+        "effect_feature_names": [
+          "adl_status",
+          "body_temperature",
+          "bone_lesion_type",
+          "bone_metastasis_location",
+          "bone_metastasis_status",
+          "c_reactive_protein",
+          "global_health_status",
+          "pain_severity",
+          "pd_l1_expression",
+          "qol_status",
+          "serum_albumin_level"
+        ],
+        "control_feature_names": [
+          "age",
+          "alcohol_use",
+          "atorvastatin_dose",
+          "atorvastatin_use",
+          "blood_pressure",
+          "blood_pressure_systolic",
+          "blood_urea_nitrogen",
+          "cancer_histology",
+          "cancer_stage",
+          "cholecystectomy_history",
+          "chronic_kidney_disease_stage",
+          "comorbidities_present",
+          "copd_status",
+          "diabetes_mellitus_status",
+          "diagnostic_test",
+          "ecog_performance_status",
+          "employment_status",
+          "eortc_qlq_c30_physical_function_score",
+          "eortc_qlq_c30_role_function_score",
+          "eortc_qlq_c30_social_function_score",
+          "family_history_of_cancer",
+          "hemoglobin",
+          "hyperlipidemia_status",
+          "hypertension_status",
+          "lisinopril_dose",
+          "living_situation",
+          "multivitamin_treatment_history",
+          "occupation",
+          "osteoarthritis_location",
+          "osteoarthritis_status",
+          "osteopenia_status",
+          "oxygen_saturation",
+          "patient_age",
+          "platelet_count",
+          "smoking_cessation_duration",
+          "smoking_pack_years",
+          "smoking_status",
+          "systolic_blood_pressure"
+        ]
+      },
+      "age_measurement": {
+        "train_mae_nonmissing": 2.0178683278871423,
+        "age_in_forest_x": false
+      }
+    },
+    {
+      "outer_fold": 5,
+      "feature_id": "outer_005_feature_265",
+      "name": "pd_l1_expression_level",
+      "stage1_derived_cards_with_pdl1_text": 56,
+      "card_architectures_with_pdl1_text": [
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_semantic_retrieval_contrasts",
+        "tfidf_topics"
+      ],
+      "pdl1_discovery_candidates": 14,
+      "pdl1_discovery_architectures": [
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_semantic_retrieval_contrasts",
+        "tfidf_topics"
+      ],
+      "initial_ontology": {
+        "value_type": "continuous",
+        "categories_or_unit": [
+          "%"
+        ],
+        "measurement_definition": "Extract the PD-L1 Tumor Proportion Score (TPS) as a numeric percentage. If a specific percentage is provided (e.g., 30%), extract that value. If only a threshold or range is reported (e.g., <1%, 1-49%, ≥50%), extract the numeric threshold value provided."
+      },
+      "final_ontology": {
+        "value_type": "ordinal",
+        "categories_or_unit": [
+          "TPS < 1%",
+          "TPS 1-49%",
+          "TPS >= 50%"
+        ],
+        "measurement_definition": "Extract the PD-L1 Tumor Proportion Score (TPS) category. Map the reported percentage or range to one of the following: 'TPS < 1%', 'TPS 1-49%', or 'TPS >= 50%'.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "statistical_decision": {
+        "configured_explicit_feature": false,
+        "feature_id": "outer_005_feature_265",
+        "modifier_max_heldout_r_loss_improvement": 0.003877736317963537,
+        "modifier_mean_heldout_r_loss_improvement": 0.0019615160146250698,
+        "modifier_selection_frequency": 0.6,
+        "modifier_votes": 3,
+        "multivariable_modifier_elastic_net_votes": 0,
+        "name": "pd_l1_expression_level",
+        "nuisance_model_roles": [],
+        "outcome_selection_frequency": 0.0,
+        "outcome_votes": 0,
+        "retained": true,
+        "roles": [
+          "effect_modifier"
+        ],
+        "selection_source": "group_elastic_net_nuisance_and_candidate_augmented_rlearner_any_inner_fold_union",
+        "treatment_selection_frequency": 0.0,
+        "treatment_votes": 0,
+        "univariable_adjusted_confounder_votes": 0,
+        "univariable_nominal_confounder_votes": 0
+      },
+      "llm_decision": {
+        "cross_method_reconciliation": "Consistent held-out R-loss improvements in the R-learner justify effect modification despite lack of joint elastic-net selection.",
+        "evidence_against": [
+          "multivariable_modifier_elastic_net not selected",
+          "univariable_confounder_screen treatment p-values > 0.2"
+        ],
+        "evidence_for": [
+          "candidate_augmented_r_learner heldout_r_loss_improvement > 0 in all 5 folds",
+          "candidate_augmented_r_learner selected_top_n = true in 3/5 folds",
+          "univariable_confounder_screen outcome p-values < 0.001 in all folds"
+        ],
+        "feature_id": "outer_005_feature_265",
+        "inner_fold_consistency": "High",
+        "rationale": "Consistent evidence of treatment-heterogeneity via the R-learner's held-out R-loss improvements across all folds, paired with strong outcome prognosis.",
+        "roles": [
+          "effect_modifier"
+        ]
+      },
+      "age_roles": [
+        "confounder"
+      ],
+      "measurement": {
+        "first_round_training": {
+          "rows": 800,
+          "missing": 55,
+          "unparsed": 1,
+          "correct": 734,
+          "wrong_category": 10,
+          "accuracy_all_rows": 0.9175,
+          "accuracy_nonmissing": 0.9865591397849462,
+          "missing_with_pdl1_text_mention": 56,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 304,
+              "1-49%": 9,
+              ">=50%": 0,
+              "missing": 26,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 264,
+              ">=50%": 0,
+              "missing": 13,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 1,
+              ">=50%": 166,
+              "missing": 16,
+              "unparsed": 1
+            }
+          },
+          "unparsed_examples": {
+            "approximately 30%": 1
+          }
+        },
+        "final_raw_training": {
+          "rows": 800,
+          "missing": 68,
+          "unparsed": 0,
+          "correct": 725,
+          "wrong_category": 7,
+          "accuracy_all_rows": 0.90625,
+          "accuracy_nonmissing": 0.9904371584699454,
+          "missing_with_pdl1_text_mention": 68,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 312,
+              "1-49%": 0,
+              ">=50%": 0,
+              "missing": 27,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 2,
+              "1-49%": 252,
+              ">=50%": 0,
+              "missing": 23,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 5,
+              ">=50%": 161,
+              "missing": 18,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "final_model_training": {
+          "rows": 800,
+          "missing": 68,
+          "unparsed": 0,
+          "correct": 725,
+          "wrong_category": 7,
+          "accuracy_all_rows": 0.90625,
+          "accuracy_nonmissing": 0.9904371584699454,
+          "missing_with_pdl1_text_mention": 68,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 312,
+              "1-49%": 0,
+              ">=50%": 0,
+              "missing": 27,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 2,
+              "1-49%": 252,
+              ">=50%": 0,
+              "missing": 23,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 5,
+              ">=50%": 161,
+              "missing": 18,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "raw_heldout": {
+          "rows": 200,
+          "missing": 15,
+          "unparsed": 0,
+          "correct": 183,
+          "wrong_category": 2,
+          "accuracy_all_rows": 0.915,
+          "accuracy_nonmissing": 0.9891891891891892,
+          "missing_with_pdl1_text_mention": 14,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 88,
+              "1-49%": 0,
+              ">=50%": 0,
+              "missing": 7,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 64,
+              ">=50%": 2,
+              "missing": 4,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 31,
+              "missing": 4,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        },
+        "model_heldout": {
+          "rows": 200,
+          "missing": 15,
+          "unparsed": 0,
+          "correct": 183,
+          "wrong_category": 2,
+          "accuracy_all_rows": 0.915,
+          "accuracy_nonmissing": 0.9891891891891892,
+          "missing_with_pdl1_text_mention": 14,
+          "confusion_matrix": {
+            "<1%": {
+              "<1%": 88,
+              "1-49%": 0,
+              ">=50%": 0,
+              "missing": 7,
+              "unparsed": 0
+            },
+            "1-49%": {
+              "<1%": 0,
+              "1-49%": 64,
+              ">=50%": 2,
+              "missing": 4,
+              "unparsed": 0
+            },
+            ">=50%": {
+              "<1%": 0,
+              "1-49%": 0,
+              ">=50%": 31,
+              "missing": 4,
+              "unparsed": 0
+            }
+          },
+          "unparsed_examples": {}
+        }
+      },
+      "final_predictions": {
+        "n": 200,
+        "pearson": 0.6780230885536708,
+        "rmse": 0.12751334706634385,
+        "bias": 0.048746594457415374,
+        "predicted_sd": 0.08654038569081825,
+        "oracle_sd": 0.1578585472178851,
+        "negative_predictions": 13
+      },
+      "pdl1_group_predictions": {
+        "1-49%": {
+          "n": 70,
+          "true_effect": -0.06623143699001818,
+          "estimated_effect": 0.07858963997776283,
+          "negative_predictions": 5
+        },
+        "<1%": {
+          "n": 95,
+          "true_effect": 0.033545530802703546,
+          "estimated_effect": 0.06044023070911683,
+          "negative_predictions": 8
+        },
+        ">=50%": {
+          "n": 35,
+          "true_effect": 0.3351504160714264,
+          "estimated_effect": 0.25106033071797323,
+          "negative_predictions": 0
+        }
+      },
+      "correctly_measured_group_predictions": {
+        "1-49%": {
+          "n": 64,
+          "true_effect": -0.0672616280364171,
+          "estimated_effect": 0.06687341173265962
+        },
+        "<1%": {
+          "n": 88,
+          "true_effect": 0.03312171498177994,
+          "estimated_effect": 0.055403838996853944
+        },
+        ">=50%": {
+          "n": 31,
+          "true_effect": 0.344932308932038,
+          "estimated_effect": 0.26209073987800274
+        }
+      },
+      "high_minus_middle_contrast": {
+        "true_effect_gap": 0.4013818530614446,
+        "estimated_effect_gap": 0.1724706907402104,
+        "fraction_retained": 0.42969229780751483
+      },
+      "harmonization_newly_missing_heldout": {
+        "n": 0,
+        "raw_values": {}
+      },
+      "true_negative_heldout_encoded_as_exactly_one": 0,
+      "oracle_true_category_lookup": {
+        "n": 200,
+        "pearson": 0.8751018960121145,
+        "rmse": 0.07674055897112537,
+        "bias": -0.0018323614617683788,
+        "predicted_sd": 0.1310900928683412,
+        "oracle_sd": 0.1578585472178851,
+        "negative_predictions": 70
+      },
+      "oracle_measured_category_lookup": {
+        "n": 200,
+        "pearson": 0.8177835579492637,
+        "rmse": 0.09099182557932708,
+        "bias": 0.0035222045215927006,
+        "predicted_sd": 0.12547771436229385,
+        "oracle_sd": 0.1578585472178851,
+        "negative_predictions": 64
+      },
+      "candidate_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "status": "ok",
+          "rank": 39,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.0005843636559549614,
+          "heldout_relative_r_loss_improvement": 0.0034972775221421416,
+          "tested_interaction_columns": [
+            "pd_l1_expression_level:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 2,
+          "status": "ok",
+          "rank": 8,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.0014158339796046249,
+          "heldout_relative_r_loss_improvement": 0.008135649800176026,
+          "tested_interaction_columns": [
+            "pd_l1_expression_level:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 3,
+          "status": "ok",
+          "rank": 1,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.003877736317963537,
+          "heldout_relative_r_loss_improvement": 0.023069699328285478,
+          "tested_interaction_columns": [
+            "pd_l1_expression_level:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 4,
+          "status": "ok",
+          "rank": 11,
+          "selected_top_n": false,
+          "heldout_r_loss_improvement": 0.001294449371390033,
+          "heldout_relative_r_loss_improvement": 0.00922365250917856,
+          "tested_interaction_columns": [
+            "pd_l1_expression_level:ordered_score"
+          ]
+        },
+        {
+          "inner_fold": 5,
+          "status": "ok",
+          "rank": 3,
+          "selected_top_n": true,
+          "heldout_r_loss_improvement": 0.002635196748212193,
+          "heldout_relative_r_loss_improvement": 0.014699336438138234,
+          "tested_interaction_columns": [
+            "pd_l1_expression_level:ordered_score"
+          ]
+        }
+      ],
+      "joint_r_loss_by_inner_fold": [
+        {
+          "inner_fold": 1,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 2,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 3,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 4,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.054116952654646375,
+          "heldout_r_loss_improvement": 0.0
+        },
+        {
+          "inner_fold": 5,
+          "pdl1_selected": false,
+          "total_selected": 0,
+          "regularization_alpha": 0.029286445646252372,
+          "heldout_r_loss_improvement": 0.0
+        }
+      ],
+      "forest_design": {
+        "source": "Saved final feature definitions; counts are concepts, not encoded matrix columns.",
+        "effect_features": 6,
+        "control_features": 26,
+        "effect_feature_names": [
+          "family_history_hypertension",
+          "food_intake",
+          "lung_lesion_size",
+          "pd_l1_expression_level",
+          "radiation_dermatitis_grade",
+          "smarca4_mutation_status"
+        ],
+        "control_feature_names": [
+          "age",
+          "blood_pressure",
+          "bronchodilator_use",
+          "chronic_kidney_disease_stage",
+          "copd_presence",
+          "cough_suppressant_use",
+          "dextromethorphan_use",
+          "ecog_performance_status",
+          "employment_status",
+          "frontal_edema_presence",
+          "functional_independence",
+          "hyperlipidemia_presence",
+          "illicit_drug_use",
+          "inhibitor_use",
+          "living_situation",
+          "medication_albuterol_use",
+          "multivitamin_use",
+          "occupation",
+          "osteoarthritis_presence",
+          "osteopenia",
+          "oxygen_saturation",
+          "relationship_status",
+          "smoking_history",
+          "smoking_pack_years",
+          "surgical_history",
+          "systolic_blood_pressure"
+        ]
+      },
+      "age_measurement": {
+        "train_mae_nonmissing": 2.0910654358490284,
+        "age_in_forest_x": false
+      }
+    }
+  ],
+  "source_files": {
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/cross_fitted_predictions.csv": {
+      "sha256": "b2131f611e960c67191d657e14fc8808d155be5095bd9c521b45281c64133f4e",
+      "bytes": 151879
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/posthoc_oracle_ite_metrics.json": {
+      "sha256": "c3a1082b88324f3c5da6d456c8ec6357f1932a1a9ae7fcc1d9568609cf6b257f",
+      "bytes": 4128
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/feature_definitions.json": {
+      "sha256": "feefe1e2c1b0cc1081da7892aeec2d9b08f56c61c64da419e60414b53d58f2ba",
+      "bytes": 806023
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/final_definitions.json": {
+      "sha256": "de42dc0f65fa5aa11f6cea140ae332afac34d63b82fc199d78a4c23261b698a7",
+      "bytes": 185300
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/interpreted_candidates.json": {
+      "sha256": "19cac7c2a062d3d16743014a9473d497422d623022f978289dd7d4c14e1b26f8",
+      "bytes": 714842
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/selection/statistical_evidence.json": {
+      "sha256": "52bb4adafd5a0a092554d724f7589be717e1adb2700fe59880474be94a6a68a3",
+      "bytes": 8088817
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/selection/role_adjudication/response.json": {
+      "sha256": "e54393bab3d690fb218164a3c2e929decbf92b27dd2faff94bdf7333ad08d4d7",
+      "bytes": 228579
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/estimation/diagnostics.json": {
+      "sha256": "a2dca4b451de4b103c97cccfaab8599793c3466c8bd83dc36e918d84c77c92a6",
+      "bytes": 7302
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/extraction/all_candidates_fit/extracted.csv": {
+      "sha256": "19277edd50433faef735c0298a29c3cd7fe7065644a017c04f289c599d67b67a",
+      "bytes": 1600276
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/extraction/fit/harmonized.csv": {
+      "sha256": "d1eda33bfc014446c9c97f1a5b2c50099afb51d60ecfc71853331ed23c27a5c6",
+      "bytes": 382400
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/extraction/heldout/extracted.csv": {
+      "sha256": "dbc3decb8d737df3487ef75d6425f4de426be08b342dfb3526a8ba1cdd49fbdd",
+      "bytes": 99039
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/extraction/heldout/harmonized.csv": {
+      "sha256": "e171f476d8eff540209e59927c0d139009fec836134298d0b34239d8edcef0d5",
+      "bytes": 99041
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_001/ontology_supervision/round_001/extraction/extracted.csv": {
+      "sha256": "3d126db74b4736c8fadeead0ef39281907de8620e55cb1015932407ff50749d7",
+      "bytes": 1594263
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/evidence_compilation/outer_001/cards.jsonl": {
+      "sha256": "1b560da9dd3aa62ceaec0112728303e191f93228dd6be0537e4416ca5b38ba12",
+      "bytes": 1441648
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/feature_definitions.json": {
+      "sha256": "80c2986e4d56303655d6d330b40ad1cb948001f3126d8f4aeba3cb44d1025e8d",
+      "bytes": 786568
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/final_definitions.json": {
+      "sha256": "1ca555c63d5b073337bbc51c8fa66f901aca29256ca71860d3c1357614fa617c",
+      "bytes": 180107
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/interpreted_candidates.json": {
+      "sha256": "197bfba9238e8cf89c68f60b39a423ec6b5b3e911ea6a27ac02aeecb1b53c1c6",
+      "bytes": 633841
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/selection/statistical_evidence.json": {
+      "sha256": "914e298466a725b3068357c94e30c4cd59d70446fd7cf0a8359245518ddff85a",
+      "bytes": 8286805
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/selection/role_adjudication/response.json": {
+      "sha256": "891a202f5f4fc3555d8b4b21a9f9319cb4550db93b48a0bc9d2aa02523e293aa",
+      "bytes": 234372
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/estimation/diagnostics.json": {
+      "sha256": "b9f615b4c1f803c13c7e3f31b22a3bb5e9e97f0aa4b7d6c852c685bebf175986",
+      "bytes": 7299
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/extraction/all_candidates_fit/extracted.csv": {
+      "sha256": "c5062fbb45e1504dc490a062844e18fd4dbeafbbe6081c9d8e8f1bf2d8e789bb",
+      "bytes": 1293971
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/extraction/fit/harmonized.csv": {
+      "sha256": "3be64eb4ce4cc7d581a692047ebdd6f60cb19d6df1f11845591459943026ed21",
+      "bytes": 146491
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/extraction/heldout/extracted.csv": {
+      "sha256": "fcb1e35d19db964866a504c351a4554cea97cd6f453d9ebc12ff98dd7b1ee096",
+      "bytes": 38730
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/extraction/heldout/harmonized.csv": {
+      "sha256": "e15e8f65cdb7f62892aa2a895b1f121da4a51583e1d5f935dcda32f441d7014d",
+      "bytes": 38745
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_002/ontology_supervision/round_001/extraction/extracted.csv": {
+      "sha256": "6184f4ecd6e45768772efd185b0333a2bf5dba98d0bf5705a3c53195727272f5",
+      "bytes": 1291175
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/evidence_compilation/outer_002/cards.jsonl": {
+      "sha256": "c6df7d2ff67870a3e3a30dd1dbdc45db5406cc4131eb2af5f60060773569a842",
+      "bytes": 1473590
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/feature_definitions.json": {
+      "sha256": "5fcb07b916f5bf330a9b55a410699c4db61b17f6d9d2beb81053ea2ffcaaeab4",
+      "bytes": 729872
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/final_definitions.json": {
+      "sha256": "eca342881f8787f46ba4351f05183249e8634d1fe5b3527dfa6d74c0653a969d",
+      "bytes": 183043
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/interpreted_candidates.json": {
+      "sha256": "86f3bd0999295cf702696581e9ec017b68def311a992b9bb1993b16b99de5d74",
+      "bytes": 591759
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/selection/statistical_evidence.json": {
+      "sha256": "15ec6a99fb8e65adf67a94a7f03c80e15d36e497bbcf4115110369f5cf8e1011",
+      "bytes": 7595718
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/selection/role_adjudication/response.json": {
+      "sha256": "dcb118c45a0c6bb16e95c4147d24535ef0695ac6c864a5d0d6435d8c4bf53a61",
+      "bytes": 206935
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/estimation/diagnostics.json": {
+      "sha256": "7a1b044d81e8247963cf35f5661c1e0308778a63f50b8708fcc6daff430063d1",
+      "bytes": 7298
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/extraction/all_candidates_fit/extracted.csv": {
+      "sha256": "1d3f029cea8851577386c0bd23b72fb752df82e99b141fe8ec83a4a2fff23f7b",
+      "bytes": 1170951
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/extraction/fit/harmonized.csv": {
+      "sha256": "cb303a875db716acaee4c72356c6b4ffbdde7069a2af6fb9b466e64b19968776",
+      "bytes": 173105
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/extraction/heldout/extracted.csv": {
+      "sha256": "9a4b2fd958fd7955475f738a21818da1a59a346c360d9f5981abcb5ce0a2497e",
+      "bytes": 42512
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/extraction/heldout/harmonized.csv": {
+      "sha256": "51ce0950f172ff1b355d37036aca7e29c64f74e747fddb4c613ea088393dcef8",
+      "bytes": 42472
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_003/ontology_supervision/round_001/extraction/extracted.csv": {
+      "sha256": "0fddb1966e8273df4d9385f631bd803c8a6d362fe6749190f2f3da02bb9d1f45",
+      "bytes": 1175490
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/evidence_compilation/outer_003/cards.jsonl": {
+      "sha256": "19f6f8bf7c053f2c25b56491250787902d44e9d36cffdcc4179f3f22ba9f6980",
+      "bytes": 1453549
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/feature_definitions.json": {
+      "sha256": "a2fda92d8e83b49eb013de3d41465d0dd9b2ef57a08e988db68542bdc73d14cb",
+      "bytes": 836437
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/final_definitions.json": {
+      "sha256": "cb9bf5bb0f96d25f9fec9b67446730c3a64bd6dd38f5a1ac2c52f3f110a4b5b1",
+      "bytes": 248182
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/interpreted_candidates.json": {
+      "sha256": "4a05759bc65f7e3d2b114fe014625c4ed08121e15d7aca6b3b590ac3928bce42",
+      "bytes": 726651
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/selection/statistical_evidence.json": {
+      "sha256": "3b232d5a27b5465f6051916034714e1e0736b9c951e2f51c6ad01721c722c691",
+      "bytes": 8129635
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/selection/role_adjudication/response.json": {
+      "sha256": "8ec0d9d1b17575a3be852553de8e4c53059705e2359b9fa36fbf2426dc36daa1",
+      "bytes": 216911
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/estimation/diagnostics.json": {
+      "sha256": "e839eb48ab3e442212cce6cbc01a26ea4d4ed70027e5c649b3415e9389148fee",
+      "bytes": 7302
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/extraction/all_candidates_fit/extracted.csv": {
+      "sha256": "b7f33e185f5d0c3a13fe050098d586bbff995de2a14ca27a172489da92b31900",
+      "bytes": 1309217
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/extraction/fit/harmonized.csv": {
+      "sha256": "e71d449e309a102382a6adbae1c0295afc4ef3aa1c01fc3f40509c8ad9042e86",
+      "bytes": 201223
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/extraction/heldout/extracted.csv": {
+      "sha256": "5b1b626e548656413c3fc1df33cd4ca0d26a82d24badc2df2e9f2b94e28bd103",
+      "bytes": 48402
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/extraction/heldout/harmonized.csv": {
+      "sha256": "fab494c119330248fa230698a6518f2f3e5f07a9170c9622627374d033619a45",
+      "bytes": 48414
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_004/ontology_supervision/round_001/extraction/extracted.csv": {
+      "sha256": "ad91995d50be00057e52aaf876eaf164bb8ed840c056b66af15d56a8964fffa3",
+      "bytes": 1301579
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/evidence_compilation/outer_004/cards.jsonl": {
+      "sha256": "b1e1694f91ac386951cda4779d8855a8c74953411deb2bb3c613f3ea1bff7056",
+      "bytes": 1456357
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/feature_definitions.json": {
+      "sha256": "2a17cda4eb592f586be3ea14fa8e548193356778cb2341f018d1cba855f07552",
+      "bytes": 744327
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/final_definitions.json": {
+      "sha256": "0c79819d9d581c353204f0849a124b3c80e79cb0f61dc8c5ca1da2204afa635b",
+      "bytes": 142224
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/interpreted_candidates.json": {
+      "sha256": "1104102feaf50823a13e01342a10ec8cff765c51506956ec9565946c14a28046",
+      "bytes": 591928
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/selection/statistical_evidence.json": {
+      "sha256": "27f5b47f8544d375df95078380aa22a8c97bb910d34286edf61561527186b762",
+      "bytes": 7970953
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/selection/role_adjudication/response.json": {
+      "sha256": "0ec643f90fe9405f5f7c0776bd080393a4af8885cd740ff7ba696e740bd09c87",
+      "bytes": 227353
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/estimation/diagnostics.json": {
+      "sha256": "b2f456e203bb016ca1028c787702d7cba15fa03ff6b2690982e30c56907ddc82",
+      "bytes": 7298
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/extraction/all_candidates_fit/extracted.csv": {
+      "sha256": "feef80c98980a12bf3d6b00f6279a223deb9ecf5abf661e342f30b561724c097",
+      "bytes": 1304264
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/extraction/fit/harmonized.csv": {
+      "sha256": "6b80e9a61a9d052213c38a04f320a61c57fdb3af8590fdfe1f23560364668561",
+      "bytes": 126667
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/extraction/heldout/extracted.csv": {
+      "sha256": "b7d00264238027261d3af1ea216f5d99ba9aff65c03da8e89b75c94c25fd2396",
+      "bytes": 30096
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/extraction/heldout/harmonized.csv": {
+      "sha256": "b7d00264238027261d3af1ea216f5d99ba9aff65c03da8e89b75c94c25fd2396",
+      "bytes": 30096
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/outer_005/ontology_supervision/round_001/extraction/extracted.csv": {
+      "sha256": "9876750cc60921e77f7d395c83c69cc1a5cda01a9f9d90917dc48d4b4deaa285",
+      "bytes": 1296213
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/evidence_compilation/outer_005/cards.jsonl": {
+      "sha256": "0d2f014a6fcf80280979dc646db8352045d1d740dc84fc77556687253d40b9db",
+      "bytes": 1454476
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/config.json": {
+      "sha256": "1277fba3b7f3573cb43a7be4f77de153e7282d437dae81485fd99c9c4be8cf19",
+      "bytes": 4448
+    },
+    "artifacts/research_all_evidence/one_conf_one_mod_nsclc_full/stage2_pre_roles_refactor/complete.json": {
+      "sha256": "f8f41779d99ff9e2fa9ae64102703988181c1f2d0be0369334b680aafe2da0f2",
+      "bytes": 294954
+    },
+    "synthetic_data/example_synthetic_datasets/one_confounder_one_effect_modifier_nsclc_with_structured/metadata.json": {
+      "sha256": "c82ac38aac337ab24f0452cca7bf892317770a5cdd415e8e95817641b747486f",
+      "bytes": 4817
+    },
+    "synthetic_data/example_synthetic_datasets/one_confounder_one_effect_modifier_nsclc_with_structured/dataset.parquet": {
+      "sha256": "6566aef4350ac1f78589d87d6a383bb49dce4a63ae5c9661921e925e3e854fe0",
+      "bytes": 28057298
+    }
+  }
+}

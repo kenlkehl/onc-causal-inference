@@ -1,0 +1,22 @@
+{
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/evidence_compilation/outer_001/cards.jsonl": {
+    "sha256": "f86b1032db3c9c26c3de1e8a747f3654940e453ca918437cd65b88c174beb912",
+    "bytes": 1485915
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/evidence_compilation/outer_002/cards.jsonl": {
+    "sha256": "28179a42b256bb367a710105f8865243d89cf4a2444f5dda95a59df235c1c718",
+    "bytes": 1465737
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/evidence_compilation/outer_003/cards.jsonl": {
+    "sha256": "653e3680721384314419404ebb124025d79a939a4f4a9ae124e771d9dfaa91af",
+    "bytes": 1495742
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/evidence_compilation/outer_004/cards.jsonl": {
+    "sha256": "d87ce7e8e2fa5bbbae7bab21df5852216f5756e21ca6c9e080461f45916f3064",
+    "bytes": 1467038
+  },
+  "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/stage2/evidence_compilation/outer_005/cards.jsonl": {
+    "sha256": "19bdecab6dd13d97109f60f411e52d27d1b07ab7c7b41afd3797d41ac96ee32f",
+    "bytes": 1475880
+  }
+}
