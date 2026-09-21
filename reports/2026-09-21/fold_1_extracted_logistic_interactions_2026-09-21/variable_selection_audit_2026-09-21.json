@@ -1,0 +1,572 @@
+{
+  "audited_at": "2026-09-21T20:56:27+00:00",
+  "prediction_freeze_preceded_oracle_audit": true,
+  "predictions_frozen_at": "2026-09-21T20:41:11+00:00",
+  "selection_rule": "At least one encoded coefficient with absolute value greater than 1e-08 in the indicated block.",
+  "source_hashes": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_interim_oracle_review_2026-09-21/fold_1_feature_recovery_2026-09-21.json": "a277c04b46c01a63252229fe2a276edc93008d22faa811225676d9a011b07744",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/predictions_frozen_2026-09-21.json": "3bdd2d4617756fc48e676c6945658307e8dfd81620e660cc9c81168fbd2edf0c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/fits/all_800/elastic_net/coefficients.csv": "aa7496db5baa00195ee6d0b5d06c745c09f4ed6c7c10b47c576a507ce018da1a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/fits/eligible_720/elastic_net/coefficients.csv": "8689d634ac2be64d84ed97eeb0024134b78955c0cc4d5737002c57ccc0a75a9a"
+  },
+  "audit_script_sha256": "b8ce585304e1632fa451e309eaf5fbfe86a9001901062dfd60b2f69be8d41e01",
+  "notes": [
+    "This audits the final penalized outcome models, not the earlier statistical-selection or nuisance models.",
+    "Direct identities come from the saved lineage review and were read only after model fitting and prediction freezing.",
+    "Direct concept retention does not establish faithful extraction, full category recovery, or sufficient adjustment.",
+    "Possible proxies are not credited as direct matches; their correlations with oracle values were not evaluated here.",
+    "The designated DGP modifier role refers to log-odds treatment interactions. Main effects can also change probability-scale treatment differences through the inverse link.",
+    "Unmatched interactions are not automatically established causal false positives; predictive proxies, measurement error, and model misspecification complicate that interpretation.",
+    "Categorical indicators and missingness columns are separate coefficients; all counts distinguish coefficients from candidate identities."
+  ],
+  "cohorts": {
+    "all_800": {
+      "main_coefficients": 67,
+      "main_candidate_ids": 60,
+      "interaction_coefficients": 13,
+      "interaction_candidate_ids": 13,
+      "confounders_main_selected": 3,
+      "confounders_any_selected": 4,
+      "modifiers_interaction_selected": 1,
+      "modifiers_any_selected": 2,
+      "concepts": [
+        {
+          "concept": "age",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_009"
+          ],
+          "main_selected": true,
+          "interaction_selected": false,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_009",
+              "feature_name": "age",
+              "encoded_term": "age:value",
+              "coefficient": -0.4702921797512156
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "sex",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_302"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Primary biological-sex feature omits the oracle Other category; gender_identity is a separate construct and is excluded from direct-sex retention."
+        },
+        {
+          "concept": "ecog_performance_status",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_109"
+          ],
+          "main_selected": true,
+          "interaction_selected": false,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=0",
+              "coefficient": 0.4171538824064558
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=1",
+              "coefficient": 0.1182833244698941
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=2",
+              "coefficient": -0.2882148503125914
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=3",
+              "coefficient": -0.4283974766026068
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "creatinine_clearance",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_095"
+          ],
+          "main_selected": false,
+          "interaction_selected": true,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_095",
+              "feature_name": "creatinine_clearance",
+              "encoded_term": "creatinine_clearance:value",
+              "coefficient": 0.0423822110036058
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "prior_platinum_therapy",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_267"
+          ],
+          "main_selected": true,
+          "interaction_selected": true,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_267",
+              "feature_name": "prior_platinum_chemotherapy",
+              "encoded_term": "prior_platinum_chemotherapy:category=Yes",
+              "coefficient": -0.1249959020459914
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_267",
+              "feature_name": "prior_platinum_chemotherapy",
+              "encoded_term": "prior_platinum_chemotherapy:category=No",
+              "coefficient": 0.2002695389124988
+            },
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_267",
+              "feature_name": "prior_platinum_chemotherapy",
+              "encoded_term": "prior_platinum_chemotherapy:category=No",
+              "coefficient": 0.0321238243140138
+            }
+          ],
+          "measurement_lineage_note": "Four-level oracle history is reduced to any prior platinum Yes/No. Agreement below evaluates that coarsened contrast only."
+        },
+        {
+          "concept": "histology_type",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_192"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Oracle Other is not equivalent to an unspecified NSCLC subtype. Generic NSCLC is treated as unspecified, not relabeled as Other."
+        },
+        {
+          "concept": "egfr_mutation_status",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_032",
+            "outer_001_feature_111"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Positive/Negative map to Mutant/Wild-type; oracle Unknown is distinct from both. Two direct EGFR features are mapped."
+        },
+        {
+          "concept": "baseline_nlr",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_228"
+          ],
+          "main_selected": false,
+          "interaction_selected": true,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_228",
+              "feature_name": "neutrophil_to_lymphocyte_ratio",
+              "encoded_term": "neutrophil_to_lymphocyte_ratio:value",
+              "coefficient": -0.5054019563361524
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "brain_metastases_status",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_052"
+          ],
+          "main_selected": true,
+          "interaction_selected": false,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_052",
+              "feature_name": "brain_metastases_presence",
+              "encoded_term": "brain_metastases_presence:category=absent",
+              "coefficient": -0.0979561809010943
+            }
+          ],
+          "measurement_lineage_note": "Oracle Unknown is distinct from Yes/No; the extracted definition has only present/absent and missing."
+        },
+        {
+          "concept": "baseline_hemoglobin",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_155"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        }
+      ],
+      "possible_proxies_not_counted_as_direct_recovery": [
+        {
+          "name": "gender_identity",
+          "feature_id": "outer_001_feature_140",
+          "note": "Separate construct; not a direct biological-sex match.",
+          "main_selected": true,
+          "interaction_selected": false,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_140",
+              "feature_name": "gender_identity",
+              "encoded_term": "gender_identity:category=Female",
+              "coefficient": -0.2147625374482951
+            }
+          ]
+        },
+        {
+          "name": "brain_lesion_count",
+          "feature_id": "outer_001_feature_049",
+          "note": "Possible proxy for brain-metastasis presence; not a direct match.",
+          "main_selected": false,
+          "interaction_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_049",
+              "feature_name": "brain_lesion_count",
+              "encoded_term": "brain_lesion_count:value",
+              "coefficient": 0.0428601632486867
+            }
+          ]
+        },
+        {
+          "name": "hematocrit",
+          "feature_id": "outer_001_feature_153",
+          "note": "Possible proxy for hemoglobin; not a direct match.",
+          "main_selected": false,
+          "interaction_selected": false,
+          "selected_coefficients": []
+        },
+        {
+          "name": "estimated_glomerular_filtration_rate",
+          "feature_id": "outer_001_feature_125",
+          "note": "Possible proxy for creatinine clearance; not a direct match.",
+          "main_selected": false,
+          "interaction_selected": false,
+          "selected_coefficients": []
+        }
+      ]
+    },
+    "eligible_720": {
+      "main_coefficients": 63,
+      "main_candidate_ids": 58,
+      "interaction_coefficients": 12,
+      "interaction_candidate_ids": 12,
+      "confounders_main_selected": 3,
+      "confounders_any_selected": 4,
+      "modifiers_interaction_selected": 1,
+      "modifiers_any_selected": 2,
+      "concepts": [
+        {
+          "concept": "age",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_009"
+          ],
+          "main_selected": true,
+          "interaction_selected": false,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_009",
+              "feature_name": "age",
+              "encoded_term": "age:value",
+              "coefficient": -0.456956825903583
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "sex",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_302"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Primary biological-sex feature omits the oracle Other category; gender_identity is a separate construct and is excluded from direct-sex retention."
+        },
+        {
+          "concept": "ecog_performance_status",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_109"
+          ],
+          "main_selected": true,
+          "interaction_selected": false,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=0",
+              "coefficient": 0.3543885122052933
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=1",
+              "coefficient": 0.0631151729215675
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=2",
+              "coefficient": -0.306011541207772
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_109",
+              "feature_name": "ecog_performance_status",
+              "encoded_term": "ecog_performance_status:category=3",
+              "coefficient": -0.4703384669560109
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "creatinine_clearance",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_095"
+          ],
+          "main_selected": false,
+          "interaction_selected": true,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_095",
+              "feature_name": "creatinine_clearance",
+              "encoded_term": "creatinine_clearance:value",
+              "coefficient": 0.0919143497151672
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "prior_platinum_therapy",
+          "oracle_role": "confounder",
+          "direct_feature_ids": [
+            "outer_001_feature_267"
+          ],
+          "main_selected": true,
+          "interaction_selected": false,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_267",
+              "feature_name": "prior_platinum_chemotherapy",
+              "encoded_term": "prior_platinum_chemotherapy:category=Yes",
+              "coefficient": -0.0762501709320573
+            },
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_267",
+              "feature_name": "prior_platinum_chemotherapy",
+              "encoded_term": "prior_platinum_chemotherapy:category=No",
+              "coefficient": 0.2518172552419869
+            }
+          ],
+          "measurement_lineage_note": "Four-level oracle history is reduced to any prior platinum Yes/No. Agreement below evaluates that coarsened contrast only."
+        },
+        {
+          "concept": "histology_type",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_192"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Oracle Other is not equivalent to an unspecified NSCLC subtype. Generic NSCLC is treated as unspecified, not relabeled as Other."
+        },
+        {
+          "concept": "egfr_mutation_status",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_032",
+            "outer_001_feature_111"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Positive/Negative map to Mutant/Wild-type; oracle Unknown is distinct from both. Two direct EGFR features are mapped."
+        },
+        {
+          "concept": "baseline_nlr",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_228"
+          ],
+          "main_selected": false,
+          "interaction_selected": true,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_228",
+              "feature_name": "neutrophil_to_lymphocyte_ratio",
+              "encoded_term": "neutrophil_to_lymphocyte_ratio:value",
+              "coefficient": -0.4504135308575527
+            }
+          ],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        },
+        {
+          "concept": "brain_metastases_status",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_052"
+          ],
+          "main_selected": true,
+          "interaction_selected": false,
+          "any_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_052",
+              "feature_name": "brain_metastases_presence",
+              "encoded_term": "brain_metastases_presence:category=absent",
+              "coefficient": -0.1024939848309804
+            }
+          ],
+          "measurement_lineage_note": "Oracle Unknown is distinct from Yes/No; the extracted definition has only present/absent and missing."
+        },
+        {
+          "concept": "baseline_hemoglobin",
+          "oracle_role": "effect_modifier",
+          "direct_feature_ids": [
+            "outer_001_feature_155"
+          ],
+          "main_selected": false,
+          "interaction_selected": false,
+          "any_selected": false,
+          "selected_coefficients": [],
+          "measurement_lineage_note": "Current definition retains the direct concept."
+        }
+      ],
+      "possible_proxies_not_counted_as_direct_recovery": [
+        {
+          "name": "gender_identity",
+          "feature_id": "outer_001_feature_140",
+          "note": "Separate construct; not a direct biological-sex match.",
+          "main_selected": true,
+          "interaction_selected": false,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_140",
+              "feature_name": "gender_identity",
+              "encoded_term": "gender_identity:category=Female",
+              "coefficient": -0.1317091957177633
+            }
+          ]
+        },
+        {
+          "name": "brain_lesion_count",
+          "feature_id": "outer_001_feature_049",
+          "note": "Possible proxy for brain-metastasis presence; not a direct match.",
+          "main_selected": false,
+          "interaction_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_049",
+              "feature_name": "brain_lesion_count",
+              "encoded_term": "brain_lesion_count:value",
+              "coefficient": 0.0689951540789528
+            }
+          ]
+        },
+        {
+          "name": "hematocrit",
+          "feature_id": "outer_001_feature_153",
+          "note": "Possible proxy for hemoglobin; not a direct match.",
+          "main_selected": true,
+          "interaction_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "main",
+              "feature_id": "outer_001_feature_153",
+              "feature_name": "hematocrit",
+              "encoded_term": "hematocrit:value",
+              "coefficient": -0.0229030978713138
+            },
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_153",
+              "feature_name": "hematocrit",
+              "encoded_term": "hematocrit:value",
+              "coefficient": -0.0139428529002736
+            }
+          ]
+        },
+        {
+          "name": "estimated_glomerular_filtration_rate",
+          "feature_id": "outer_001_feature_125",
+          "note": "Possible proxy for creatinine clearance; not a direct match.",
+          "main_selected": false,
+          "interaction_selected": true,
+          "selected_coefficients": [
+            {
+              "block": "interaction",
+              "feature_id": "outer_001_feature_125",
+              "feature_name": "estimated_glomerular_filtration_rate",
+              "encoded_term": "estimated_glomerular_filtration_rate:value",
+              "coefficient": 0.0272825854602312
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

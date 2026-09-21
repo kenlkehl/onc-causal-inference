@@ -1,0 +1,39 @@
+{
+  "grouped_feature_importance": {
+    "baseline_hemoglobin": 0.20748451912943916,
+    "baseline_nlr": 0.26048710736608044,
+    "brain_metastases_status": 0.2224267708215156,
+    "egfr_mutation_status": 0.1178722149040658,
+    "histology_type": 0.191729387778899
+  },
+  "mean_cate": -0.08566373887419738,
+  "native_score": 0.16803327185131536,
+  "nuisance_hash": "65563f7ac6f071f367a5cededd89c8512cff9261d5d28b17008636155f2fb88f",
+  "parameters": {
+    "criterion": "mse",
+    "fit_intercept": true,
+    "honest": true,
+    "inference": true,
+    "max_depth": null,
+    "max_features": "sqrt",
+    "max_samples": 0.45,
+    "min_balancedness_tol": 0.45,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 10,
+    "min_samples_split": 10,
+    "min_var_fraction_leaf": null,
+    "min_var_leaf_on_val": false,
+    "min_weight_fraction_leaf": 0.0,
+    "n_estimators": 200,
+    "n_jobs": 1,
+    "random_state": 1120042,
+    "subforest_size": 4,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "r_loss": 0.16803327185131536,
+  "scenario": "c",
+  "sd_cate": 0.0820885926442955,
+  "search": "sqrt",
+  "seed": 1120042
+}

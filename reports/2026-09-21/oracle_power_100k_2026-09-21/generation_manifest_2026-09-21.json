@@ -1,0 +1,34 @@
+{
+  "clinical_text_or_llm_used": false,
+  "created_at": "2026-09-21T18:38:48+00:00",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/dgp_specification_2026-09-21.json": "ce2ae75db88dc9e7f53a96174624cea78c4dd5f57c34e9be3945709a58045e71",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/generation_validation_2026-09-21.json": "21f38f902cb35bc71f2ab55faadc363b4178616a5180b30440833590fdf152f5",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/splits_2026-09-21.json": "712ba2d9d5c77452e26d65eb31ee59b848e89880124b934caa3425a33f61ad98",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/structured_oracle_100k.parquet": "9e4f75d2c888805879479f520428936fd28c4e3e8bce77270ce659cce247efb0"
+  },
+  "generation_seed": 20260921,
+  "heldout_rows": 20000,
+  "inner_split_seed": 51043,
+  "nested_subset_seed": 120042,
+  "new_equations_or_calibration": false,
+  "outer_split_seed": 42,
+  "rows": 100000,
+  "source_configuration_logged": "Only explicitly allowlisted DGP sampling options; no service credentials.",
+  "sources": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/generate_oracle_100k_2026-09-21.py": "8baaf672ac386dc69698fa1b35ba3f1a240a3bcfa4631e83cde119c679433cc1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/config.py": "0bc4d230b05e1f6aa2ae67337b81789a7149c61ff2368130589e35e31af122c3",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/dataset.parquet": "abed84f263290f20f59a04e565833676fa4b656971117a4b2deaa7a666d4c396",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/generation_config.json": "88695df4998f84b40ff49b0672aa8373d1272de95af073cc556580bae6a1adcd",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/metadata.json": "52897cf1ca16241a141bd9b896757d4767df1177658bea2170ef48b82a8aa437",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/generator.py": "d2b2a91eb00400a3a4707a4c02c2aae177d7ba65599a37fde0328ee5a505cd1c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/prompts.py": "748f6a063a9964b4d055dad50600e3e423cc54cacd55cf5488a7a20fab07ca96"
+  },
+  "temporary_dataset": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/structured_oracle_100k.parquet",
+  "temporary_directory": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t",
+  "training_sizes": [
+    800,
+    8000,
+    80000
+  ]
+}

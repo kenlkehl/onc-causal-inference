@@ -1,0 +1,107 @@
+{
+  "all_baseline_replays_identical": true,
+  "baseline_replays": [
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 1120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 2120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "a",
+      "search": "all",
+      "seed": 120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "a",
+      "search": "all",
+      "seed": 1120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "a",
+      "search": "all",
+      "seed": 2120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 1120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 2120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "c",
+      "search": "all",
+      "seed": 120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "c",
+      "search": "all",
+      "seed": 1120042
+    },
+    {
+      "max_prediction_error": 0.0,
+      "scenario": "c",
+      "search": "all",
+      "seed": 2120042
+    }
+  ],
+  "created_at": "2026-09-21T15:43:24+00:00",
+  "forests_fitted": 24,
+  "noiseless_residual_identity_verified": true,
+  "parametric_audits": {
+    "elastic_net_logistic": {
+      "constant_prediction": null,
+      "effective_cv_folds": 3,
+      "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+      "fit_mode": "cross_validated",
+      "n_features": 27,
+      "optimization": {
+        "configured_max_iter": 5000,
+        "iteration_limit_reached": false,
+        "maximum_iterations_observed": 221
+      },
+      "requested_cv_folds": 3,
+      "selected_regularization": {
+        "parameter": "C",
+        "value": 1.0
+      }
+    },
+    "unpenalized_logistic": {
+      "iteration_limit_reached": false,
+      "iterations": [
+        61
+      ]
+    }
+  },
+  "parametric_models_fitted": 2,
+  "warnings": []
+}

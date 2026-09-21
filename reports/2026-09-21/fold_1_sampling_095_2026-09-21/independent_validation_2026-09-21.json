@@ -1,0 +1,11 @@
+{
+  "all_metrics_independently_recalculated": true,
+  "all_source_and_artifact_hashes_verified": true,
+  "identical_nuisance_predictions_across_all_fits": true,
+  "maximum_saved_prediction_difference": 0.0,
+  "models_reloaded": 12,
+  "new_frozen_artifacts": 19,
+  "new_tree_sample_sizes_verified": true,
+  "report_links_verified": 7,
+  "validated_at": "2026-09-21T16:51:30+00:00"
+}

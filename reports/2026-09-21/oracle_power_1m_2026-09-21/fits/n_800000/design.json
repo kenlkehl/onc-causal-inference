@@ -1,0 +1,119 @@
+{
+  "confounder_columns": [
+    "age",
+    "sex=Male",
+    "sex=Female",
+    "sex=Other",
+    "ecog_performance_status=0",
+    "ecog_performance_status=1",
+    "ecog_performance_status=2",
+    "ecog_performance_status=3",
+    "creatinine_clearance",
+    "prior_platinum_therapy=None",
+    "prior_platinum_therapy=Adjuvant",
+    "prior_platinum_therapy=First\u2011line",
+    "prior_platinum_therapy=Multiple"
+  ],
+  "encoding": [
+    {
+      "name": "age",
+      "training_mean": 66.0080159768453,
+      "training_sd": 11.010048792768227,
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "Male",
+        "Female",
+        "Other"
+      ],
+      "name": "sex",
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ],
+      "name": "ecog_performance_status",
+      "type": "categorical"
+    },
+    {
+      "name": "creatinine_clearance",
+      "training_mean": 80.0202711680739,
+      "training_sd": 24.999583142367396,
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "None",
+        "Adjuvant",
+        "First\u2011line",
+        "Multiple"
+      ],
+      "name": "prior_platinum_therapy",
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "Squamous",
+        "Adenocarcinoma",
+        "Large cell",
+        "Other"
+      ],
+      "name": "histology_type",
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "Positive",
+        "Negative",
+        "Unknown"
+      ],
+      "name": "egfr_mutation_status",
+      "type": "categorical"
+    },
+    {
+      "name": "baseline_nlr",
+      "training_mean": 4.5016344761852976,
+      "training_sd": 2.498337417426238,
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "Yes",
+        "No",
+        "Unknown"
+      ],
+      "name": "brain_metastases_status",
+      "type": "categorical"
+    },
+    {
+      "name": "baseline_hemoglobin",
+      "training_mean": 13.19987742370067,
+      "training_sd": 1.4003623155074205,
+      "type": "continuous"
+    }
+  ],
+  "modifier_columns": [
+    "histology_type=Squamous",
+    "histology_type=Adenocarcinoma",
+    "histology_type=Large cell",
+    "histology_type=Other",
+    "egfr_mutation_status=Positive",
+    "egfr_mutation_status=Negative",
+    "egfr_mutation_status=Unknown",
+    "baseline_nlr",
+    "brain_metastases_status=Yes",
+    "brain_metastases_status=No",
+    "brain_metastases_status=Unknown",
+    "baseline_hemoglobin"
+  ],
+  "test_all_sha256": "1fb4511bd5617f90616a00027483fbceee9e22c967b14861a52ee3fbb4feae1a",
+  "test_modifiers_sha256": "507d83f097e732c461e88cd768f35617cec900b63532b3a93881256d9953baff",
+  "train_all_sha256": "102c2b0761b6a48fb1381ddf1aba8b8ecaf6fd84c6fe29514c3f5a84608d47d7",
+  "train_modifiers_sha256": "4e37eca3a1b6e7343d1ee7d745978b44c88f1d22952285506e3acaa3d915544f",
+  "training_rows": 800000
+}

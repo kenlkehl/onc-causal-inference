@@ -1,0 +1,11 @@
+{
+  "all_cells_have_identical_nuisance_predictions": true,
+  "all_forests_use_all_800_patients_in_both_roles": true,
+  "all_metric_rows_independently_recalculated": true,
+  "honesty_off_improves_rmse_in_all_six_matched_comparisons": true,
+  "maximum_saved_prediction_difference": 0.0,
+  "models_reloaded": 12,
+  "new_frozen_artifacts_verified": 29,
+  "report_links_verified": 8,
+  "validated_at": "2026-09-21T16:07:55+00:00"
+}

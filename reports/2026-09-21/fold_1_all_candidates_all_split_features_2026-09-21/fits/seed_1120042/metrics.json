@@ -1,0 +1,25 @@
+{
+  "constant_effect": -0.03798372965638751,
+  "constant_r_loss": 0.19073416378826175,
+  "elapsed_seconds": 2.2490919388365,
+  "mean_cate": -0.034921168435034594,
+  "method": "all_candidates_all_split_features",
+  "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29",
+  "parameters": {
+    "honest": true,
+    "inference": true,
+    "max_depth": null,
+    "max_features": 1.0,
+    "min_samples_leaf": 10,
+    "n_estimators": 200,
+    "n_jobs": 1,
+    "random_state": 1120042,
+    "subforest_size": 4
+  },
+  "r_loss": 0.1891984141743051,
+  "r_score": 0.008051780464780833,
+  "replicate": 1,
+  "rows": 180,
+  "sd_cate": 0.03331664533769678,
+  "seed": 1120042
+}

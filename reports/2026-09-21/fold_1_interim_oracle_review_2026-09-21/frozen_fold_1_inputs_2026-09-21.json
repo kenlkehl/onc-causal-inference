@@ -1,0 +1,172 @@
+{
+  "schema": "requested_fold_interim_evaluation_v1",
+  "frozen_at": "2026-09-21T13:07:00.682309+00:00",
+  "outer_fold": 1,
+  "purpose": "User requested oracle confounder/modifier recovery and causal estimation performance for the completed fold 1 while the prespecified comparison continues. This is a separately labeled early interim analysis, departing from the original all-60-fits timing gate. No refitting, retuning, oracle-based selection, or changes to active experiment inputs are authorized by this review.",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_1120042/predictions.csv": "0b0269c2ac5a4cea0e08aba76120feeecce6ec44906a793cf2e6f7f45f857808",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_120042/predictions.csv": "b2f637e39ffa53355ab14dbc14610a1d1568038f8b6f79d87045a0e7ac156b68",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_2120042/predictions.csv": "6c6625d6ed1bf4f4a01825b73477da12a9eaafe812cd47ef7a04893f38c35ef7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_1120042/predictions.csv": "e9d4b444dc0877102a6c03281040b49a90cfc2cf7b648580ef94c0352cf8d232",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_120042/predictions.csv": "c36c8bd4eaa778a22ee62714a15b8ab3d3ccb89c2846abf365f13d61551ef007",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_2120042/predictions.csv": "6123e7b6f280ee088a9b4361a826f5c9854daa9c9a1f62ddfd6180e4adafd6b9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_1120042/predictions.csv": "a3e59bd7ba7a8d928363c47c101601faf001bcd42fae0c36edc35fa65765dae0",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_120042/predictions.csv": "66d9be6ae655e324ce908b01125e8e7de021886c2240cbeff2b9b5cd1f1f0ac1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_2120042/predictions.csv": "3a726b330ce2024ca87680a6923e87a9c03a280ebf01605e3429f42e40116c37",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_1120042/predictions.csv": "77ed250eda92f290a7cf5d4d401791b1f879c8a83f98818af652f0ba7d46872d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_120042/predictions.csv": "1bdd8a0909ee56f3f3240086281bfb0a6da4dbbd1b01272185e5584b7a30445c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_2120042/predictions.csv": "33d0c4e2ef72b0405a482d2edd0b1f572fe96d07738a7f2f544273c165faf2ae"
+  },
+  "ancillary_files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_1120042/complete.json": "324ad1cc2446c319695d55602a0538c5f4ba3d38b7273359229cf3c5847fba65",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_1120042/metrics.json": "86048bdcf2c71ce2f47f010832b2eb7f3bdce6a9d594f2b764473b8a7ab5b423",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_120042/complete.json": "bbedd5cf1f571a73b7514f7bd0b02fd7e293f52c6fcc12e4e1d9479720b0dbb8",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_120042/metrics.json": "c1ca165e245f8d3e62ab2e05e2bbf6a8200b8b8d133cead281976dd4158d346f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_2120042/complete.json": "a6498ce3203934147d73d7aee0dd6d9a7db3927468f0350a5d2f7371e2f57b47",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_2120042/metrics.json": "093c893cd7f6f817d233b34a8808940a05e7e11fe6be484863285b58d752f779",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_1120042/complete.json": "296dbfb0d2a32e31c4b29d129920beab2356e67690b95f58e3d761ccb73af9fe",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_1120042/metrics.json": "5b0db18de18cd69ec8af66bfd75d3266465a4d6cd1901d764814e0f1a2abd113",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_120042/complete.json": "263157e1ba224d4dbebbbb9a2caa3be47e033dd4f0ffd5c44e57062d09770802",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_120042/metrics.json": "0f72793488f39f850a3b90912b01eb57ed81b8bf15f4400bced3f3bdca2e769a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_2120042/complete.json": "450067aaefab8b91d42e7c3992978601ec2c850f6545265b75dd3068ad435956",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/current_joint/seed_2120042/metrics.json": "68d1aafe70b59633fa7f3204895f29ea49612abf16915faa0bf61fd386deb96e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_1120042/complete.json": "199aef41fc70c39861b6ed679877f2783c8562aeee2ab4638053f0c6b3170e94",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_1120042/metrics.json": "6ca6b7830c2adf1ac2ce650f9fe3edd6bd582f40fa741669e333960591f43b0f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_120042/complete.json": "bbb9bc0ec26e096eb4422b2e41c0728cb471a2877468b950be7fb131d621e14d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_120042/metrics.json": "60db0a18d010998380768e54d3358d003df5b03ffb3202037deeace71be9c7c1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_2120042/complete.json": "63d80c96062598b4293f5262f333d8ad3933cde0d1860a2e475e03ab5a071d2e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/llm_adjudication/seed_2120042/metrics.json": "e6b0199fe5a23bcea80ce0a68711b90483e3ac0bd024c25b22891cde13031a83",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_1120042/complete.json": "33857f91f5c95926ffb1a94e4160dafec9227960d91c74e06f7b9541551d14f4",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_1120042/metrics.json": "937bee2f42b45a4d375eecd669a928cbea4a440de73b9123fc4fa1a7fc5cb64b",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_120042/complete.json": "4bcc009ec35fbf6378e7bd7eb9492d2ceb20757df5c93423fc171700b6b4b4b8",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_120042/metrics.json": "fb86899a724b060eae64e4fed11c47c4a47525683600f3e77a89d61774d158f1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_2120042/complete.json": "32ec0de085ee4c06b4a3cb39b849f1edb75c1060766c2b8c39da079d73ccfa15",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/permissive_union/seed_2120042/metrics.json": "f9115d6edd68b3d223c3c35ee7a8984c8f2d7c236ac13e49dac272c10327a881",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_admissions.json": "f182bdd8dac356fba58425bfe4096f5708befdb473dd3ec452d704e583f817c6",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/final_definitions.json": "a4fa84c571b3286d17b20e38ed46000b3d25c835fe352452e53b6232d0d2857e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/selection/input.json": "d1f793d519083087db2ffd6ed9ddb6441f6ac1ed6a3a240187331c0cc4bcb079",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/selection/measurement_definitions.json": "2428572aa17e7e393fb41b5832b28866cff626aa876277933a91f8031f4da7bb",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/selection/selected_definitions.json": "ba35d9c1d629b3b17a7df6977b4c33a74429bf7287e2a7770d6184d0d32be24e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/selection/elastic_net_selection.json": "48bd398634ed0c5220ffd613318189310ad2b00c4740c81824aaea392af5f4c6",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/selection/statistical_evidence.json": "85bacf3c16d13684a605a85ba680e2073dfd4487f813e38b3d352acc8329f2a3",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_nuisances/fit.csv": "814661a95cf2e1328f855e8575299c2329b48a08f0fd4ae0e33f84329b70fb67",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_nuisances/heldout.csv": "0b6af7764d9547cdb50ff7d045343407435cae1f1de77c9b5f834718c643dcc7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_nuisances/fit_audit.json": "a784ebd5f2f8e05e9076c12061b71353b9715b9fe69afade5be79ec555d03597",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_nuisances/complete.json": "95b09fd09f0956894c50fbf40156702f4570a859db88764a40035b260b3d39b9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_measurements/fit.pkl": "b4a7138e8dd0aeec93577caed8256d2f29996ff0adaea1e39452fdafbcdb0948",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_measurements/fit.json": "59afaee74d6b680fe0a7e68b1f46fd00c75a2f0fa25e59475cf3f6d946ba7e09",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_measurements/heldout.csv": "2b6e67c75bb335a15eb35187ddf1bfc5e279f0bae66f473445bf0f1810dbc9ef",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_measurements/heldout_harmonization.json": "c52f1a3663b806cc526b9cfbef201fc8dcea8b711c4728cbbb6011594fb95a17",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_llm/request_budget.json": "3ab4475066f881d1ec5aeb8528b3a438cf805657f2e4bb1f4c24f9520df5fe35",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/inputs/splits.json": "45a05edf7171936aa9b2377be89d8412b9daa6211635b44fd57a85feace050b0",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/inputs/outer_001_definitions.json": "6ee86d52567c61da519277699d0bec7359ab80dcddc5f1c31bd54b1caa633000",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/inputs/run_settings.json": "8c711c2e1e7e9e9992b056ce703aab7eef2c98ef7e2a99957a0098fe1ab91883",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/revisions/adjudication_budget_v4/manifest.json": "34edc68314bea5ab97954427fc862f478709cc1195c481aca9b1166035a00a4d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/PROTOCOL_2026-09-19.md": "aa986af73f9e5c3670f39330d9a248c8db432205ab4215cb050e87213dad719b",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/EXECUTION_2026-09-19.md": "5c31c54a25c9cb4e912e8c7b0141e64f25e2ed2250337612a453fb955e112b3f"
+  },
+  "fits": [
+    {
+      "method": "all_candidates",
+      "replicate": 1,
+      "features": 352,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "all_candidates",
+      "replicate": 0,
+      "features": 352,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "all_candidates",
+      "replicate": 2,
+      "features": 352,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "current_joint",
+      "replicate": 1,
+      "features": 18,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "current_joint",
+      "replicate": 0,
+      "features": 18,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "current_joint",
+      "replicate": 2,
+      "features": 18,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "llm_adjudication",
+      "replicate": 1,
+      "features": 11,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "llm_adjudication",
+      "replicate": 0,
+      "features": 11,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "llm_adjudication",
+      "replicate": 2,
+      "features": 11,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "permissive_union",
+      "replicate": 1,
+      "features": 49,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "permissive_union",
+      "replicate": 0,
+      "features": 49,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    },
+    {
+      "method": "permissive_union",
+      "replicate": 2,
+      "features": 49,
+      "rows": 180,
+      "fit_rows": 720,
+      "nuisance_hash": "fc0814beb20fdbc3001ad6bc259896e87dd758f4a72f5d71d86b228d7541ee29"
+    }
+  ],
+  "heldout_rows": 180,
+  "full_heldout_rows": 200,
+  "fit_rows": 720,
+  "full_training_rows": 800,
+  "shared_identity_sha256": "2ace9aa634204995bf790b779a0393d5b23c58cc80484d2c301dc57801ef9fbf",
+  "oracle_read_in_this_review_before_freeze": false
+}

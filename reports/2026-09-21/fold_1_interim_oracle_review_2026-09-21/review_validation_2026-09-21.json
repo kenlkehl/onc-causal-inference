@@ -1,0 +1,19 @@
+{
+  "verified_at": "2026-09-21T13:16:14.940450+00:00",
+  "frozen_prediction_files_unchanged": 12,
+  "frozen_supporting_files_unchanged": 46,
+  "seed_results": 12,
+  "policies": 4,
+  "reviewed_oracle_concepts": 10,
+  "effect_oracle_csv_matches_dataset_by_row": true,
+  "saved_r_loss_recomputed_from_predictions": true,
+  "fitting_or_selection_changed": false,
+  "report_artifacts": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_interim_oracle_review_2026-09-21/fold_1_causal_metrics_by_seed_2026-09-21.csv": "15f9aaca8494d24a83c54c3528a441ad224d84f4b8f591e0e4e93bf42b06af49",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_interim_oracle_review_2026-09-21/fold_1_predictions_with_oracle_2026-09-21.csv": "4e3beb4a656697a713cd08f22ad3b85800bf857ae136bb0b20457b3922a05b44",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_interim_oracle_review_2026-09-21/frozen_fold_1_inputs_2026-09-21.json": "19834439dd81d9a47c5c107bbe4fc7496a7589ab50421fac820cd7aa433eeedf",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_interim_oracle_review_2026-09-21/fold_1_interim_oracle_report_2026-09-21.md": "7c380fbf53849d18a0977301d3630c7a0ee1832a8825e5e3ffb3efa3faba08a8",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_interim_oracle_review_2026-09-21/fold_1_feature_recovery_2026-09-21.json": "a277c04b46c01a63252229fe2a276edc93008d22faa811225676d9a011b07744",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_interim_oracle_review_2026-09-21/fold_1_causal_metrics_2026-09-21.json": "9d35c02fa4cf1da74f5b71a7cfef1ca482dab64190a32469c41de670debe180b"
+  }
+}

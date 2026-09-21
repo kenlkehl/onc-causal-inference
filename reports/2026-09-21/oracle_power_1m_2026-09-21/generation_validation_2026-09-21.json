@@ -1,0 +1,20 @@
+{
+  "all_probability_and_effect_columns_independently_recomputed": true,
+  "first_100000_rows_identical_to_previous_cohort": true,
+  "generated_rows": 1000000,
+  "maximum_probability_errors": {
+    "true_ite_prob": 4.440892098500626e-16,
+    "true_outcome_prob": 3.3306690738754696e-16,
+    "true_treatment_prob": 2.220446049250313e-16,
+    "true_y0_prob": 2.220446049250313e-16,
+    "true_y1_prob": 3.3306690738754696e-16
+  },
+  "no_identical_covariate_rows_with_original_1000_cohort": true,
+  "no_missing_values": true,
+  "outcome_rate": 0.45628,
+  "previous_category_label_mismatch_preserved": true,
+  "propensity_above_0_9_fraction": 0.131389,
+  "propensity_below_0_1_fraction": 0.14098,
+  "treatment_rate": 0.496764,
+  "unique_patient_ids": 1000000
+}

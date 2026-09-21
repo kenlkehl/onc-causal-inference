@@ -1,0 +1,122 @@
+{
+  "categorical_sampling_audit": {
+    "brain_metastases_status": {
+      "No": {
+        "effective_generator_probability": 0.7,
+        "observed_fraction": 0.70058
+      },
+      "Unknown": {
+        "effective_generator_probability": 0.05,
+        "observed_fraction": 0.0494
+      },
+      "Yes": {
+        "effective_generator_probability": 0.25,
+        "observed_fraction": 0.25002
+      }
+    },
+    "ecog_performance_status": {
+      "0": {
+        "effective_generator_probability": 0.15,
+        "observed_fraction": 0.15101
+      },
+      "1": {
+        "effective_generator_probability": 0.35,
+        "observed_fraction": 0.34956
+      },
+      "2": {
+        "effective_generator_probability": 0.35,
+        "observed_fraction": 0.34914
+      },
+      "3": {
+        "effective_generator_probability": 0.15,
+        "observed_fraction": 0.15029
+      }
+    },
+    "egfr_mutation_status": {
+      "Negative": {
+        "effective_generator_probability": 0.7,
+        "observed_fraction": 0.70036
+      },
+      "Positive": {
+        "effective_generator_probability": 0.15,
+        "observed_fraction": 0.1493
+      },
+      "Unknown": {
+        "effective_generator_probability": 0.15,
+        "observed_fraction": 0.15034
+      }
+    },
+    "histology_type": {
+      "Adenocarcinoma": {
+        "effective_generator_probability": 0.55,
+        "observed_fraction": 0.54967
+      },
+      "Large cell": {
+        "effective_generator_probability": 0.05,
+        "observed_fraction": 0.05007
+      },
+      "Other": {
+        "effective_generator_probability": 0.1,
+        "observed_fraction": 0.09953
+      },
+      "Squamous": {
+        "effective_generator_probability": 0.3,
+        "observed_fraction": 0.30073
+      }
+    },
+    "prior_platinum_therapy": {
+      "Adjuvant": {
+        "effective_generator_probability": 0.3846153846153846,
+        "observed_fraction": 0.38396
+      },
+      "First\u2011line": {
+        "effective_generator_probability": 0.0,
+        "observed_fraction": 0.0
+      },
+      "Multiple": {
+        "effective_generator_probability": 0.15384615384615385,
+        "observed_fraction": 0.15149
+      },
+      "None": {
+        "effective_generator_probability": 0.4615384615384615,
+        "observed_fraction": 0.46455
+      }
+    },
+    "sex": {
+      "Female": {
+        "effective_generator_probability": 0.44,
+        "observed_fraction": 0.43812
+      },
+      "Male": {
+        "effective_generator_probability": 0.55,
+        "observed_fraction": 0.55179
+      },
+      "Other": {
+        "effective_generator_probability": 0.01,
+        "observed_fraction": 0.01009
+      }
+    }
+  },
+  "generated_rows": 100000,
+  "maximum_probability_errors_new": {
+    "true_ite_prob": 3.3306690738754696e-16,
+    "true_outcome_prob": 3.3306690738754696e-16,
+    "true_treatment_prob": 2.220446049250313e-16,
+    "true_y0_prob": 2.220446049250313e-16,
+    "true_y1_prob": 3.3306690738754696e-16
+  },
+  "maximum_probability_errors_original": {
+    "true_ite_prob": 2.220446049250313e-16,
+    "true_outcome_prob": 2.220446049250313e-16,
+    "true_treatment_prob": 1.1102230246251565e-16,
+    "true_y0_prob": 2.220446049250313e-16,
+    "true_y1_prob": 2.220446049250313e-16
+  },
+  "no_identical_covariate_rows_with_original_cohort": true,
+  "no_missing_values": true,
+  "outcome_rate": 0.45575,
+  "propensity_above_0_9_fraction": 0.13205,
+  "propensity_below_0_1_fraction": 0.14022,
+  "treatment_rate": 0.49689,
+  "unique_patient_ids": 100000
+}

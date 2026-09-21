@@ -1,0 +1,139 @@
+{
+  "fits": [
+    {
+      "directory": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_120042",
+      "reloaded_predictions_identical": true,
+      "seed": 120042,
+      "tree_audit": {
+        "all_800_patients_used_in_both_roles": true,
+        "depth": {
+          "max": 12.0,
+          "mean": 7.4,
+          "median": 7.0,
+          "min": 2.0
+        },
+        "effect_patients_per_leaf": {
+          "max": 328.0,
+          "mean": 21.958971395550417,
+          "median": 17.0,
+          "min": 10.0
+        },
+        "effect_trees_per_patient": {
+          "max": 115.0,
+          "mean": 95.0,
+          "median": 95.0,
+          "min": 75.0
+        },
+        "leaves_per_tree": {
+          "max": 24.0,
+          "mean": 17.305,
+          "median": 17.0,
+          "min": 3.0
+        },
+        "sample_split_effect_counts": [
+          [
+            760,
+            380,
+            380
+          ]
+        ],
+        "split_trees_per_patient": {
+          "max": 116.0,
+          "mean": 95.0,
+          "median": 95.0,
+          "min": 75.0
+        }
+      }
+    },
+    {
+      "directory": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_1120042",
+      "reloaded_predictions_identical": true,
+      "seed": 1120042,
+      "tree_audit": {
+        "all_800_patients_used_in_both_roles": true,
+        "depth": {
+          "max": 13.0,
+          "mean": 7.42,
+          "median": 7.0,
+          "min": 3.0
+        },
+        "effect_patients_per_leaf": {
+          "max": 319.0,
+          "mean": 21.77650429799427,
+          "median": 17.0,
+          "min": 10.0
+        },
+        "effect_trees_per_patient": {
+          "max": 113.0,
+          "mean": 95.0,
+          "median": 95.0,
+          "min": 77.0
+        },
+        "leaves_per_tree": {
+          "max": 24.0,
+          "mean": 17.45,
+          "median": 18.0,
+          "min": 5.0
+        },
+        "sample_split_effect_counts": [
+          [
+            760,
+            380,
+            380
+          ]
+        ],
+        "split_trees_per_patient": {
+          "max": 116.0,
+          "mean": 95.0,
+          "median": 95.0,
+          "min": 74.0
+        }
+      }
+    },
+    {
+      "directory": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_2120042",
+      "reloaded_predictions_identical": true,
+      "seed": 2120042,
+      "tree_audit": {
+        "all_800_patients_used_in_both_roles": true,
+        "depth": {
+          "max": 11.0,
+          "mean": 7.255,
+          "median": 7.0,
+          "min": 3.0
+        },
+        "effect_patients_per_leaf": {
+          "max": 338.0,
+          "mean": 22.235225277940316,
+          "median": 17.0,
+          "min": 10.0
+        },
+        "effect_trees_per_patient": {
+          "max": 114.0,
+          "mean": 95.0,
+          "median": 95.0,
+          "min": 73.0
+        },
+        "leaves_per_tree": {
+          "max": 24.0,
+          "mean": 17.09,
+          "median": 18.0,
+          "min": 4.0
+        },
+        "sample_split_effect_counts": [
+          [
+            760,
+            380,
+            380
+          ]
+        ],
+        "split_trees_per_patient": {
+          "max": 119.0,
+          "mean": 95.0,
+          "median": 95.0,
+          "min": 72.0
+        }
+      }
+    }
+  ]
+}

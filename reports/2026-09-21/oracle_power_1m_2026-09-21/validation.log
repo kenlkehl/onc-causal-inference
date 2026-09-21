@@ -1,0 +1,8 @@
+Verified all 800,000 out-of-fold nuisance predictions and all 10 fitted nuisance clones.
+{"validated_forests": 1, "total": 6, "scenario": "all", "seed": 1120042}
+{"validated_forests": 2, "total": 6, "scenario": "all", "seed": 120042}
+{"validated_forests": 3, "total": 6, "scenario": "all", "seed": 2120042}
+{"validated_forests": 4, "total": 6, "scenario": "modifiers", "seed": 1120042}
+{"validated_forests": 5, "total": 6, "scenario": "modifiers", "seed": 2120042}
+{"validated_forests": 6, "total": 6, "scenario": "modifiers", "seed": 120042}
+All six forests, full test predictions/intervals, both sets of scores, nuisance models, and hashes verified.

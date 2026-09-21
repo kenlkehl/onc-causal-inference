@@ -1,0 +1,24 @@
+{"updated_at": "2026-09-21T19:28:01+00:00", "phase": "fitting_nuisances_and_initial_forest", "training_rows": 800000, "heldout_rows": 200000}
+{"updated_at": "2026-09-21T19:44:34+00:00", "phase": "nuisances_and_first_forest_complete", "seconds": 878.5109210631344, "warnings": 0, "completed_forests": 1, "total_forests": 6}
+{"updated_at": "2026-09-21T19:44:34+00:00", "phase": "fitting_remaining_forests", "remaining_forests": 5, "completed_forests": 1}
+{"updated_at": "2026-09-21T19:44:36+00:00", "phase": "fitting_forest", "scenario": "modifiers", "seed": 1120042}
+{"updated_at": "2026-09-21T19:44:36+00:00", "phase": "fitting_forest", "scenario": "all", "seed": 120042}
+{"updated_at": "2026-09-21T19:44:36+00:00", "phase": "fitting_forest", "scenario": "modifiers", "seed": 2120042}
+{"updated_at": "2026-09-21T19:49:04+00:00", "phase": "saving_forest", "scenario": "modifiers", "seed": 2120042, "seconds": 267.9798613381572}
+{"updated_at": "2026-09-21T19:49:07+00:00", "phase": "saving_forest", "scenario": "modifiers", "seed": 1120042, "seconds": 270.93854976887815}
+{"updated_at": "2026-09-21T19:50:07+00:00", "phase": "saving_forest", "scenario": "all", "seed": 120042, "seconds": 330.81743102381006}
+{"updated_at": "2026-09-21T19:50:26+00:00", "phase": "forest_complete", "scenario": "modifiers", "seed": 2120042, "seconds": 349.50746148009785}
+{"updated_at": "2026-09-21T19:50:26+00:00", "phase": "forest_completed", "scenario": "modifiers", "seed": 2120042, "completed_forests": 2, "total_forests": 6}
+{"updated_at": "2026-09-21T19:50:26+00:00", "phase": "fitting_forest", "scenario": "all", "seed": 1120042}
+{"updated_at": "2026-09-21T19:50:29+00:00", "phase": "forest_complete", "scenario": "modifiers", "seed": 1120042, "seconds": 352.4786681118421}
+{"updated_at": "2026-09-21T19:50:29+00:00", "phase": "forest_completed", "scenario": "modifiers", "seed": 1120042, "completed_forests": 3, "total_forests": 6}
+{"updated_at": "2026-09-21T19:50:29+00:00", "phase": "fitting_forest", "scenario": "all", "seed": 2120042}
+{"updated_at": "2026-09-21T19:51:23+00:00", "phase": "forest_complete", "scenario": "all", "seed": 120042, "seconds": 406.64457647292875}
+{"updated_at": "2026-09-21T19:51:23+00:00", "phase": "forest_completed", "scenario": "all", "seed": 120042, "completed_forests": 4, "total_forests": 6}
+{"updated_at": "2026-09-21T19:55:47+00:00", "phase": "saving_forest", "scenario": "all", "seed": 1120042, "seconds": 320.6027371729724}
+{"updated_at": "2026-09-21T19:55:47+00:00", "phase": "saving_forest", "scenario": "all", "seed": 2120042, "seconds": 318.25429489300586}
+{"updated_at": "2026-09-21T19:57:00+00:00", "phase": "forest_complete", "scenario": "all", "seed": 1120042, "seconds": 394.3266326370649}
+{"updated_at": "2026-09-21T19:57:00+00:00", "phase": "forest_completed", "scenario": "all", "seed": 1120042, "completed_forests": 5, "total_forests": 6}
+{"updated_at": "2026-09-21T19:57:01+00:00", "phase": "forest_complete", "scenario": "all", "seed": 2120042, "seconds": 391.8041565378662}
+{"updated_at": "2026-09-21T19:57:01+00:00", "phase": "forest_completed", "scenario": "all", "seed": 2120042, "completed_forests": 6, "total_forests": 6}
+{"updated_at": "2026-09-21T19:57:23+00:00", "phase": "predictions_frozen", "new_forests": 6}

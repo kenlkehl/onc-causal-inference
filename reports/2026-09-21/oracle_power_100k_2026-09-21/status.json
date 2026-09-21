@@ -1,0 +1,16 @@
+{
+  "updated_at": "2026-09-21T18:54:58+00:00",
+  "phase": "completed",
+  "generated_rows": 100000,
+  "heldout_rows": 20000,
+  "training_sizes": [
+    800,
+    8000,
+    80000
+  ],
+  "new_forests": 18,
+  "original_forests_reused": 6,
+  "validated_saved_forests": 24,
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/oracle_power_100k_report_2026-09-21.md",
+  "temporary_dataset": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/structured_oracle_100k.parquet"
+}

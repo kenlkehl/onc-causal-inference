@@ -1,0 +1,28 @@
+{
+  "baseline_fits_reused": 12,
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/baseline_reuse_validation_2026-09-21.json": "33bfc060f9055bb10c8c87354c28183ab3a5ac7f0a69c448e97edc35e6a80b76",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fit_validation_2026-09-21.json": "58b4af23b0cf57a8358d0b837b5bb19a4517345447a7cc5a4f3dfd0f4f45bf3d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_1120042/fit_audit.json": "8d7c85ac85bf91b8e5e7f8ab7b166aec75ab53d0709a098235b01553dbafc6da",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_1120042/forest.joblib": "fafadb93d740f15e4f34a841ab08b394780e6d3a509b126e905e871f46b99304",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_1120042/predictions.csv": "e8b0bd8f6e09ae12219e250f8dec5fe4b5e0413f010c61902588584d527a521d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_120042/fit_audit.json": "00a30390e3a2b329cb68780f0799321e6cc4812cb5a9ad8fe0bf627e55488eb3",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_120042/forest.joblib": "b43967a708d5007550018dcd4d7e633508c07e1b56c9f070ef3b2f0cfdf0cdd8",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_120042/predictions.csv": "d253f9df1a14f9c6ee763250b18d55c67a8e6b1ee95621b872b20145691110bd",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_2120042/fit_audit.json": "5a1345a9234177baf1ca15608e7bc92c913161013c2532d60e56e37795e108bd",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_2120042/forest.joblib": "bed8c39651a005357bcc1f872514d939c87c6acadd4766b245a63396d39ef803",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_false/seed_2120042/predictions.csv": "225c9cf18018c33ca95d469dafdb67694418fa90dfce6b7658a95e35f974e7e6",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_1120042/fit_audit.json": "b8603d65443ab3caf06ef43ab5826a605726090754e4337285511f34a4974c89",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_1120042/forest.joblib": "3324182dfe6b6478262e33881a981781b1d2c3c703dcae4d4b38762c1247b07e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_1120042/predictions.csv": "35bf2fe77b5bacec92f6f89588dc1d6aaeba7466b468dea83e529759593a9572",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_120042/fit_audit.json": "25da6491aabf612712c8b3fc3b7ebd545e0c656b75d6e447061b6622fcf62c5c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_120042/forest.joblib": "2645f658dd63ca0a095e8543eccb7e14f5f0f0e7099cba97c290340ece6a33bf",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_120042/predictions.csv": "a590e3e003af9d9c9b459bb9196f25d0d18f20350dc44bfd7421da7773f7d4e1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_2120042/fit_audit.json": "9cfc3658d53581fdc2c6fb4685d5a4dfa16a0978fdaa26082b0648e00d50b182",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_2120042/forest.joblib": "38232b9c27363db6b300ae8e38acb013bc408ac9dd5996d80d18ad0860e8d901",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_010_2026-09-21/fits/honesty_true/seed_2120042/predictions.csv": "9732704c21139fbff10dfebe00d24d789ca38febdc4832b6bea31b3c79fb0806"
+  },
+  "frozen_at": "2026-09-21T18:24:36+00:00",
+  "input_manifest_sha256": "848bcf22ca6eb251c6461328270b07d62750ce08dea5b54a5df7437daeaff6fb",
+  "new_fits": 6
+}

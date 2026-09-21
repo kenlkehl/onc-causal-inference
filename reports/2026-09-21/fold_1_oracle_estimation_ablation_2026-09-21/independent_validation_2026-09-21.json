@@ -1,0 +1,10 @@
+{
+  "known_logistic_design_covers_declared_DGP_terms": true,
+  "logistic_predictor_columns": 27,
+  "maximum_reloaded_prediction_difference": 0.0,
+  "metric_rows_independently_recalculated": 38,
+  "new_frozen_files_verified": 53,
+  "new_models_reloaded_and_predictions_reproduced": 26,
+  "original_frozen_files_verified": 63,
+  "validated_at": "2026-09-21T15:48:51+00:00"
+}

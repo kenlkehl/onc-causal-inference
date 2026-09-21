@@ -1,0 +1,9 @@
+{
+  "all_predictions_finite": true,
+  "baseline_fits_reused": 3,
+  "cached_residuals_unchanged": true,
+  "new_fits": 9,
+  "new_fits_without_warnings": 9,
+  "only_inference_and_honesty_parameters_changed": true,
+  "per_tree_and_whole_forest_patient_usage_verified": true
+}

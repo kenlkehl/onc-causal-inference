@@ -1,0 +1,10 @@
+{
+  "additional_rows": 900000,
+  "additional_rows_split": "First of five shuffled KFold splits, seed 42",
+  "common_previous_test_rows": 20000,
+  "inner_split": "Five shuffled KFold splits, seed 51043",
+  "previous_training_and_test_membership_preserved": true,
+  "split_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/splits_2026-09-21.npz",
+  "test_rows": 200000,
+  "train_rows": 800000
+}

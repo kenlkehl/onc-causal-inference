@@ -1,0 +1,224 @@
+{
+  "all_source_and_artifact_hashes_verified": true,
+  "fits": [
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 1120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 2120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 1120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 2120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 1120042,
+      "training_rows": 8000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 120042,
+      "training_rows": 8000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 2120042,
+      "training_rows": 8000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 1120042,
+      "training_rows": 8000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 120042,
+      "training_rows": 8000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 2120042,
+      "training_rows": 8000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 1120042,
+      "training_rows": 80000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 120042,
+      "training_rows": 80000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 2120042,
+      "training_rows": 80000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 1120042,
+      "training_rows": 80000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 120042,
+      "training_rows": 80000
+    },
+    {
+      "cohort": "new",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 2120042,
+      "training_rows": 80000
+    },
+    {
+      "cohort": "original",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 1120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "original",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "original",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "all",
+      "seed": 2120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "original",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 1120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "original",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 120042,
+      "training_rows": 800
+    },
+    {
+      "cohort": "original",
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_recomputed": true,
+      "scenario": "modifiers",
+      "seed": 2120042,
+      "training_rows": 800
+    }
+  ],
+  "identical_nuisance_predictions_across_X_configurations": true,
+  "maximum_prediction_and_interval_error": 0.0,
+  "metrics_recomputed": 24,
+  "nuisance_checks": [
+    {
+      "fitted_clones_verified": 10,
+      "iteration_limits_reached": 0,
+      "training_rows": 800,
+      "warnings": []
+    },
+    {
+      "fitted_clones_verified": 10,
+      "iteration_limits_reached": 0,
+      "training_rows": 8000,
+      "warnings": []
+    },
+    {
+      "fitted_clones_verified": 10,
+      "iteration_limits_reached": 0,
+      "training_rows": 80000,
+      "warnings": []
+    }
+  ],
+  "nuisance_clones_checked": 30,
+  "saved_forests_reloaded": 24,
+  "validated_at": "2026-09-21T18:50:15+00:00",
+  "validation_script_sha256": "e3d4a853f7c2f988a32d434d9292356dd6563b6712f6331fa101296d5954e920"
+}

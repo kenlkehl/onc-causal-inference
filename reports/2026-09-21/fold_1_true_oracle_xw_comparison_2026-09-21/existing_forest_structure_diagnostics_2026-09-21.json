@@ -1,0 +1,1710 @@
+{
+  "analysis": "Read-only inspection of previously frozen fits. No models refitted. Training metrics are apparent, not held-out.",
+  "created_at": "2026-09-21T15:36:04+00:00",
+  "descriptive_heldout_overlap_subgroups": [
+    {
+      "correlation": 0.6284790975873972,
+      "n": 151,
+      "rmse": 0.174731233568785,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.525567986365779,
+      "n": 49,
+      "rmse": 0.10497957830274002,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6287429956630121,
+      "n": 151,
+      "rmse": 0.1733514084163347,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 1120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.585842080020349,
+      "n": 49,
+      "rmse": 0.10049286177968678,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 1120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6660259779736662,
+      "n": 151,
+      "rmse": 0.17606767584171118,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 2120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.6101191089315069,
+      "n": 49,
+      "rmse": 0.11359445993766189,
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 2120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6291790466966731,
+      "n": 151,
+      "rmse": 0.16741446464579698,
+      "scenario": "a",
+      "search": "all",
+      "seed": 120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.4761284341412742,
+      "n": 49,
+      "rmse": 0.11186403034012192,
+      "scenario": "a",
+      "search": "all",
+      "seed": 120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.633031228372336,
+      "n": 151,
+      "rmse": 0.16762285861929668,
+      "scenario": "a",
+      "search": "all",
+      "seed": 1120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.5526003290829185,
+      "n": 49,
+      "rmse": 0.10163012832756455,
+      "scenario": "a",
+      "search": "all",
+      "seed": 1120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6148911790860109,
+      "n": 151,
+      "rmse": 0.17223295468794458,
+      "scenario": "a",
+      "search": "all",
+      "seed": 2120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.5513191181017738,
+      "n": 49,
+      "rmse": 0.10830403104488619,
+      "scenario": "a",
+      "search": "all",
+      "seed": 2120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6391333835805699,
+      "n": 151,
+      "rmse": 0.1742056036673572,
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.5252260821644092,
+      "n": 49,
+      "rmse": 0.10412751383818747,
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6394411991389499,
+      "n": 151,
+      "rmse": 0.17228732435824456,
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 1120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.6023043744926891,
+      "n": 49,
+      "rmse": 0.09872977481362703,
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 1120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6578707005074872,
+      "n": 151,
+      "rmse": 0.1763802754088101,
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 2120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.6099123381489331,
+      "n": 49,
+      "rmse": 0.11496381040324935,
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 2120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6226566276086027,
+      "n": 151,
+      "rmse": 0.16683357703413246,
+      "scenario": "b",
+      "search": "all",
+      "seed": 120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.46429914027617336,
+      "n": 49,
+      "rmse": 0.11306676697835392,
+      "scenario": "b",
+      "search": "all",
+      "seed": 120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.63047866847423,
+      "n": 151,
+      "rmse": 0.16737818129195411,
+      "scenario": "b",
+      "search": "all",
+      "seed": 1120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.568530749098547,
+      "n": 49,
+      "rmse": 0.099496149363861,
+      "scenario": "b",
+      "search": "all",
+      "seed": 1120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.616550355988144,
+      "n": 151,
+      "rmse": 0.1720383087325036,
+      "scenario": "b",
+      "search": "all",
+      "seed": 2120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.5384210456605252,
+      "n": 49,
+      "rmse": 0.10956471539449142,
+      "scenario": "b",
+      "search": "all",
+      "seed": 2120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6900456643804203,
+      "n": 151,
+      "rmse": 0.16084796039436525,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.7035542720844711,
+      "n": 49,
+      "rmse": 0.08616135794091498,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6882441141372057,
+      "n": 151,
+      "rmse": 0.1619828609197655,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 1120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.6954237646934823,
+      "n": 49,
+      "rmse": 0.0871450551685881,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 1120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6568617060907842,
+      "n": 151,
+      "rmse": 0.17155184569728862,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 2120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.706297239169443,
+      "n": 49,
+      "rmse": 0.09690242606284852,
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 2120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6298347873597606,
+      "n": 151,
+      "rmse": 0.1626148188284417,
+      "scenario": "c",
+      "search": "all",
+      "seed": 120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.5960887273567954,
+      "n": 49,
+      "rmse": 0.09689576587307132,
+      "scenario": "c",
+      "search": "all",
+      "seed": 120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6455692688445223,
+      "n": 151,
+      "rmse": 0.16139260117201745,
+      "scenario": "c",
+      "search": "all",
+      "seed": 1120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.6149942948854771,
+      "n": 49,
+      "rmse": 0.09247136423627395,
+      "scenario": "c",
+      "search": "all",
+      "seed": 1120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    },
+    {
+      "correlation": 0.6213763386184157,
+      "n": 151,
+      "rmse": 0.1671563365213779,
+      "scenario": "c",
+      "search": "all",
+      "seed": 2120042,
+      "subgroup": "within_0_1_0_9",
+      "true_ite_sd": 0.20592694647102142
+    },
+    {
+      "correlation": 0.5605399042457292,
+      "n": 49,
+      "rmse": 0.10833551317438454,
+      "scenario": "c",
+      "search": "all",
+      "seed": 2120042,
+      "subgroup": "outside_0_1_0_9",
+      "true_ite_sd": 0.10726710271643743
+    }
+  ],
+  "ensembles": [
+    {
+      "pairwise_seed_prediction_correlations": [
+        0.8839397733863011,
+        0.8973572553784587,
+        0.9007549960202534
+      ],
+      "scenario": "a",
+      "search": "sqrt",
+      "three_seed_ensemble_correlation": 0.645336119760119,
+      "three_seed_ensemble_rmse": 0.15968704938435874
+    },
+    {
+      "pairwise_seed_prediction_correlations": [
+        0.940109552291623,
+        0.958125238220485,
+        0.9290853273477608
+      ],
+      "scenario": "a",
+      "search": "all",
+      "three_seed_ensemble_correlation": 0.6207654093097192,
+      "three_seed_ensemble_rmse": 0.15534841974489796
+    },
+    {
+      "pairwise_seed_prediction_correlations": [
+        0.8940761826534626,
+        0.8911379376587703,
+        0.9093477076887556
+      ],
+      "scenario": "b",
+      "search": "sqrt",
+      "three_seed_ensemble_correlation": 0.647665917572258,
+      "three_seed_ensemble_rmse": 0.15930284487861948
+    },
+    {
+      "pairwise_seed_prediction_correlations": [
+        0.9503960997654507,
+        0.9551839260774191,
+        0.9316119732870158
+      ],
+      "scenario": "b",
+      "search": "all",
+      "three_seed_ensemble_correlation": 0.6156236030961345,
+      "three_seed_ensemble_rmse": 0.15503241418388533
+    },
+    {
+      "pairwise_seed_prediction_correlations": [
+        0.9417448694618689,
+        0.9632672740723267,
+        0.914169171651532
+      ],
+      "scenario": "c",
+      "search": "sqrt",
+      "three_seed_ensemble_correlation": 0.6905863332775894,
+      "three_seed_ensemble_rmse": 0.14891055116066015
+    },
+    {
+      "pairwise_seed_prediction_correlations": [
+        0.965900949508224,
+        0.9627346566498685,
+        0.9421072307838713
+      ],
+      "scenario": "c",
+      "search": "all",
+      "three_seed_ensemble_correlation": 0.6336051528755497,
+      "three_seed_ensemble_rmse": 0.14918263906958412
+    }
+  ],
+  "fits": [
+    {
+      "apparent_training_correlation": 0.5991674430560462,
+      "apparent_training_prediction_sd": 0.06237351939043078,
+      "apparent_training_rmse": 0.15111764423952845,
+      "control_patients_per_leaf": {
+        "max": 44.0,
+        "mean": 7.63677130044843,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.645,
+        "median": 5.0,
+        "min": 3.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 82.0,
+        "mean": 16.143497757847534,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 23.0
+      },
+      "heldout_correlation": 0.6047894352529728,
+      "heldout_rmse": 0.16047112641882494,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.38565022421524664,
+      "leaf_fraction_missing_one_treatment_arm": 0.010762331838565023,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 11.15,
+        "median": 11.0,
+        "min": 6.0,
+        "p10": 10.0,
+        "p90": 12.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 120042,
+      "structure_patients_per_leaf": {
+        "max": 100.0,
+        "mean": 16.143497757847534,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 24.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 46.0,
+        "mean": 8.506726457399104,
+        "median": 8.0,
+        "min": 0.0,
+        "p10": 4.0,
+        "p90": 14.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6417305828427688,
+      "apparent_training_prediction_sd": 0.06369389044947008,
+      "apparent_training_rmse": 0.1470203122032232,
+      "control_patients_per_leaf": {
+        "max": 30.0,
+        "mean": 7.823902218198279,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.59,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 4.900000000000002,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 51.0,
+        "mean": 16.296966953372568,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 24.0
+      },
+      "heldout_correlation": 0.6201177962151578,
+      "heldout_rmse": 0.15862690942828472,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.38886373924852874,
+      "leaf_fraction_missing_one_treatment_arm": 0.010864644635581712,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 11.045,
+        "median": 11.0,
+        "min": 7.0,
+        "p10": 10.0,
+        "p90": 12.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 1120042,
+      "structure_patients_per_leaf": {
+        "max": 59.0,
+        "mean": 16.296966953372568,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 24.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 32.0,
+        "mean": 8.473064735174287,
+        "median": 8.0,
+        "min": 0.0,
+        "p10": 4.0,
+        "p90": 14.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6359557416392545,
+      "apparent_training_prediction_sd": 0.05697081864574235,
+      "apparent_training_rmse": 0.15256256092061124,
+      "control_patients_per_leaf": {
+        "max": 31.0,
+        "mean": 7.834841628959276,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.56,
+        "median": 5.0,
+        "min": 4.0,
+        "p10": 4.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 65.0,
+        "mean": 16.289592760180994,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 23.0
+      },
+      "heldout_correlation": 0.6435763995408559,
+      "heldout_rmse": 0.16299164339038227,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.3945701357466063,
+      "leaf_fraction_missing_one_treatment_arm": 0.014479638009049774,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 11.05,
+        "median": 11.0,
+        "min": 7.0,
+        "p10": 10.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "a",
+      "search": "sqrt",
+      "seed": 2120042,
+      "structure_patients_per_leaf": {
+        "max": 70.0,
+        "mean": 16.289592760180994,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 23.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 37.0,
+        "mean": 8.45475113122172,
+        "median": 8.0,
+        "min": 0.0,
+        "p10": 4.0,
+        "p90": 14.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.593181160625765,
+      "apparent_training_prediction_sd": 0.08371957052536831,
+      "apparent_training_rmse": 0.14690484426316444,
+      "control_patients_per_leaf": {
+        "max": 24.0,
+        "mean": 6.982369823698237,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 2.0,
+        "p90": 12.0
+      },
+      "depth": {
+        "max": 8.0,
+        "mean": 5.9,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 36.0,
+        "mean": 14.760147601476016,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "heldout_correlation": 0.6053044766713666,
+      "heldout_rmse": 0.15564916562226266,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.4829848298482985,
+      "leaf_fraction_missing_one_treatment_arm": 0.018040180401804017,
+      "leaves_per_tree": {
+        "max": 15.0,
+        "mean": 12.195,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "a",
+      "search": "all",
+      "seed": 120042,
+      "structure_patients_per_leaf": {
+        "max": 41.0,
+        "mean": 14.760147601476016,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 28.0,
+        "mean": 7.777777777777778,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.5842084979119322,
+      "apparent_training_prediction_sd": 0.0793574574413011,
+      "apparent_training_rmse": 0.14793968041609623,
+      "control_patients_per_leaf": {
+        "max": 25.0,
+        "mean": 7.062934205149162,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 12.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 6.035,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 34.0,
+        "mean": 14.711892112791173,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "heldout_correlation": 0.621310396989831,
+      "heldout_rmse": 0.15409114670702856,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.4728238659583163,
+      "leaf_fraction_missing_one_treatment_arm": 0.021659174499387004,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 12.235,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "a",
+      "search": "all",
+      "seed": 1120042,
+      "structure_patients_per_leaf": {
+        "max": 37.0,
+        "mean": 14.711892112791173,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 27.0,
+        "mean": 7.648957907642011,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.5912179667514574,
+      "apparent_training_prediction_sd": 0.07712538627132791,
+      "apparent_training_rmse": 0.14965900336043686,
+      "control_patients_per_leaf": {
+        "max": 26.0,
+        "mean": 6.976228847703465,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 2.0,
+        "p90": 12.0
+      },
+      "depth": {
+        "max": 10.0,
+        "mean": 6.025,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 34.0,
+        "mean": 14.5044319097502,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "heldout_correlation": 0.5999549727835101,
+      "heldout_rmse": 0.15896621003611877,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.5072522159548751,
+      "leaf_fraction_missing_one_treatment_arm": 0.016116035455278,
+      "leaves_per_tree": {
+        "max": 15.0,
+        "mean": 12.41,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 12.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "a",
+      "search": "all",
+      "seed": 2120042,
+      "structure_patients_per_leaf": {
+        "max": 36.0,
+        "mean": 14.5044319097502,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 26.0,
+        "mean": 7.528203062046736,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6181736145316851,
+      "apparent_training_prediction_sd": 0.062370205640927656,
+      "apparent_training_rmse": 0.1495985802181158,
+      "control_patients_per_leaf": {
+        "max": 44.0,
+        "mean": 7.678088367899008,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.595,
+        "median": 5.0,
+        "min": 3.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 82.0,
+        "mean": 16.230838593327324,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 23.0
+      },
+      "heldout_correlation": 0.6122966260445056,
+      "heldout_rmse": 0.1599026401045857,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.3751127141568981,
+      "leaf_fraction_missing_one_treatment_arm": 0.012623985572587917,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 11.09,
+        "median": 11.0,
+        "min": 6.0,
+        "p10": 10.0,
+        "p90": 12.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 120042,
+      "structure_patients_per_leaf": {
+        "max": 100.0,
+        "mean": 16.230838593327324,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 24.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 46.0,
+        "mean": 8.552750225428314,
+        "median": 8.0,
+        "min": 0.0,
+        "p10": 4.0,
+        "p90": 14.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6469755669686349,
+      "apparent_training_prediction_sd": 0.06399436959289025,
+      "apparent_training_rmse": 0.14644199060211377,
+      "control_patients_per_leaf": {
+        "max": 30.0,
+        "mean": 7.806233062330623,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.595,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 51.0,
+        "mean": 16.260162601626018,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 24.0
+      },
+      "heldout_correlation": 0.628848982388115,
+      "heldout_rmse": 0.15747622194502406,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.3893405600722674,
+      "leaf_fraction_missing_one_treatment_arm": 0.011291779584462511,
+      "leaves_per_tree": {
+        "max": 13.0,
+        "mean": 11.07,
+        "median": 11.0,
+        "min": 7.0,
+        "p10": 10.0,
+        "p90": 12.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 1120042,
+      "structure_patients_per_leaf": {
+        "max": 59.0,
+        "mean": 16.260162601626018,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 24.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 32.0,
+        "mean": 8.453929539295393,
+        "median": 8.0,
+        "min": 0.0,
+        "p10": 4.0,
+        "p90": 14.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6283823862156257,
+      "apparent_training_prediction_sd": 0.05720335008581601,
+      "apparent_training_rmse": 0.15268330318844708,
+      "control_patients_per_leaf": {
+        "max": 34.0,
+        "mean": 7.817155756207675,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.555,
+        "median": 5.0,
+        "min": 4.0,
+        "p10": 4.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 63.0,
+        "mean": 16.252821670428894,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 23.0
+      },
+      "heldout_correlation": 0.635847599139831,
+      "heldout_rmse": 0.1634813053833025,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.38781038374717836,
+      "leaf_fraction_missing_one_treatment_arm": 0.01309255079006772,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 11.075,
+        "median": 11.0,
+        "min": 7.0,
+        "p10": 10.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "b",
+      "search": "sqrt",
+      "seed": 2120042,
+      "structure_patients_per_leaf": {
+        "max": 70.0,
+        "mean": 16.252821670428894,
+        "median": 15.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 23.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 36.0,
+        "mean": 8.43566591422122,
+        "median": 8.0,
+        "min": 0.0,
+        "p10": 4.0,
+        "p90": 14.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.5870706626336911,
+      "apparent_training_prediction_sd": 0.08587580373850079,
+      "apparent_training_rmse": 0.14713210760352374,
+      "control_patients_per_leaf": {
+        "max": 24.0,
+        "mean": 6.979508196721311,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 2.0,
+        "p90": 12.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.93,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 36.0,
+        "mean": 14.754098360655737,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "heldout_correlation": 0.5969005805181711,
+      "heldout_rmse": 0.1553909650249735,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.4913934426229508,
+      "leaf_fraction_missing_one_treatment_arm": 0.019262295081967213,
+      "leaves_per_tree": {
+        "max": 15.0,
+        "mean": 12.2,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "b",
+      "search": "all",
+      "seed": 120042,
+      "structure_patients_per_leaf": {
+        "max": 41.0,
+        "mean": 14.754098360655737,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 21.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 28.0,
+        "mean": 7.774590163934426,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.5867379025077604,
+      "apparent_training_prediction_sd": 0.08132006470844312,
+      "apparent_training_rmse": 0.1473109639688724,
+      "control_patients_per_leaf": {
+        "max": 25.0,
+        "mean": 7.057166190281747,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 12.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 6.07,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 34.0,
+        "mean": 14.699877501020826,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "heldout_correlation": 0.620446792092596,
+      "heldout_rmse": 0.15354817639158877,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.4740710494079216,
+      "leaf_fraction_missing_one_treatment_arm": 0.018783176806859942,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 12.245,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "b",
+      "search": "all",
+      "seed": 1120042,
+      "structure_patients_per_leaf": {
+        "max": 38.0,
+        "mean": 14.699877501020826,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 27.0,
+        "mean": 7.642711310739077,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 13.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6056869362867398,
+      "apparent_training_prediction_sd": 0.07977335157725152,
+      "apparent_training_rmse": 0.14768101195900193,
+      "control_patients_per_leaf": {
+        "max": 26.0,
+        "mean": 6.9874899112187245,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 2.0,
+        "p90": 12.0
+      },
+      "depth": {
+        "max": 10.0,
+        "mean": 6.015,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 34.0,
+        "mean": 14.527845036319613,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "heldout_correlation": 0.5968561736875586,
+      "heldout_rmse": 0.1590187260437728,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.5048426150121066,
+      "leaf_fraction_missing_one_treatment_arm": 0.016142050040355124,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 12.39,
+        "median": 12.0,
+        "min": 11.0,
+        "p10": 12.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "b",
+      "search": "all",
+      "seed": 2120042,
+      "structure_patients_per_leaf": {
+        "max": 36.0,
+        "mean": 14.527845036319613,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 23.0,
+        "mean": 7.540355125100888,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 3.0,
+        "p90": 12.300000000000182
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.7198854854963546,
+      "apparent_training_prediction_sd": 0.08962395720154027,
+      "apparent_training_rmse": 0.13123975216396558,
+      "control_patients_per_leaf": {
+        "max": 64.0,
+        "mean": 9.83256351039261,
+        "median": 8.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 17.0
+      },
+      "depth": {
+        "max": 8.0,
+        "mean": 5.03,
+        "median": 5.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 139.0,
+        "mean": 20.785219399538107,
+        "median": 17.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 36.0
+      },
+      "heldout_correlation": 0.6867800074819828,
+      "heldout_rmse": 0.14612404356104478,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.18995381062355657,
+      "leaf_fraction_missing_one_treatment_arm": 0.0,
+      "leaves_per_tree": {
+        "max": 13.0,
+        "mean": 8.66,
+        "median": 9.0,
+        "min": 2.0,
+        "p10": 6.0,
+        "p90": 11.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 120042,
+      "structure_patients_per_leaf": {
+        "max": 140.0,
+        "mean": 20.785219399538107,
+        "median": 17.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 35.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 75.0,
+        "mean": 10.952655889145497,
+        "median": 9.0,
+        "min": 1.0,
+        "p10": 5.0,
+        "p90": 19.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.7289935431794438,
+      "apparent_training_prediction_sd": 0.08456456485957219,
+      "apparent_training_rmse": 0.13159196755650385,
+      "control_patients_per_leaf": {
+        "max": 74.0,
+        "mean": 9.91566265060241,
+        "median": 8.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 18.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.205,
+        "median": 5.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 144.0,
+        "mean": 20.65404475043029,
+        "median": 17.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 36.0
+      },
+      "heldout_correlation": 0.6820800633901551,
+      "heldout_rmse": 0.14720944778394898,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.19219736087205966,
+      "leaf_fraction_missing_one_treatment_arm": 0.0,
+      "leaves_per_tree": {
+        "max": 12.0,
+        "mean": 8.715,
+        "median": 9.0,
+        "min": 2.0,
+        "p10": 6.0,
+        "p90": 11.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 1120042,
+      "structure_patients_per_leaf": {
+        "max": 134.0,
+        "mean": 20.65404475043029,
+        "median": 17.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 35.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 70.0,
+        "mean": 10.738382099827882,
+        "median": 9.0,
+        "min": 1.0,
+        "p10": 5.0,
+        "p90": 19.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.7005001461148652,
+      "apparent_training_prediction_sd": 0.07352544743344407,
+      "apparent_training_rmse": 0.14073988414300148,
+      "control_patients_per_leaf": {
+        "max": 67.0,
+        "mean": 10.15542521994135,
+        "median": 8.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 18.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.085,
+        "median": 5.0,
+        "min": 2.0,
+        "p10": 4.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 129.0,
+        "mean": 21.114369501466275,
+        "median": 17.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 36.0
+      },
+      "heldout_correlation": 0.6584571801798145,
+      "heldout_rmse": 0.1565894205997091,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.1906158357771261,
+      "leaf_fraction_missing_one_treatment_arm": 0.0,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 8.525,
+        "median": 9.0,
+        "min": 3.0,
+        "p10": 6.0,
+        "p90": 11.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "c",
+      "search": "sqrt",
+      "seed": 2120042,
+      "structure_patients_per_leaf": {
+        "max": 135.0,
+        "mean": 21.114369501466275,
+        "median": 17.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 35.600000000000136
+      },
+      "treated_patients_per_leaf": {
+        "max": 65.0,
+        "mean": 10.958944281524927,
+        "median": 9.0,
+        "min": 1.0,
+        "p10": 5.0,
+        "p90": 19.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6225044413751495,
+      "apparent_training_prediction_sd": 0.11783814979103292,
+      "apparent_training_rmse": 0.14090294107570006,
+      "control_patients_per_leaf": {
+        "max": 22.0,
+        "mean": 7.005347593582887,
+        "median": 7.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 11.0
+      },
+      "depth": {
+        "max": 11.0,
+        "mean": 6.085,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.099999999999994
+      },
+      "effect_patients_per_leaf": {
+        "max": 40.0,
+        "mean": 14.808720691073633,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 21.0
+      },
+      "heldout_correlation": 0.623856921098465,
+      "heldout_rmse": 0.14921513256797997,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.26820238584944467,
+      "leaf_fraction_missing_one_treatment_arm": 0.0,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 12.155,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "c",
+      "search": "all",
+      "seed": 120042,
+      "structure_patients_per_leaf": {
+        "max": 34.0,
+        "mean": 14.808720691073633,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 21.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 22.0,
+        "mean": 7.803373097490745,
+        "median": 7.0,
+        "min": 1.0,
+        "p10": 5.0,
+        "p90": 12.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6457645927137619,
+      "apparent_training_prediction_sd": 0.11103518539026504,
+      "apparent_training_rmse": 0.1372598438109508,
+      "control_patients_per_leaf": {
+        "max": 20.0,
+        "mean": 7.094827586206897,
+        "median": 7.0,
+        "min": 0.0,
+        "p10": 4.0,
+        "p90": 11.0
+      },
+      "depth": {
+        "max": 10.0,
+        "mean": 6.19,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 8.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 39.0,
+        "mean": 14.77832512315271,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "heldout_correlation": 0.6401807911340257,
+      "heldout_rmse": 0.1475157624739763,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.2697044334975369,
+      "leaf_fraction_missing_one_treatment_arm": 0.00041050903119868636,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 12.18,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "c",
+      "search": "all",
+      "seed": 1120042,
+      "structure_patients_per_leaf": {
+        "max": 35.0,
+        "mean": 14.77832512315271,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 26.0,
+        "mean": 7.683497536945813,
+        "median": 7.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 12.0
+      },
+      "trees": 200
+    },
+    {
+      "apparent_training_correlation": 0.6286817123161729,
+      "apparent_training_prediction_sd": 0.1117980760747929,
+      "apparent_training_rmse": 0.141727515645521,
+      "control_patients_per_leaf": {
+        "max": 21.0,
+        "mean": 7.157916494419181,
+        "median": 7.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 11.0
+      },
+      "depth": {
+        "max": 9.0,
+        "mean": 5.985,
+        "median": 6.0,
+        "min": 4.0,
+        "p10": 5.0,
+        "p90": 7.0
+      },
+      "effect_patients_per_leaf": {
+        "max": 37.0,
+        "mean": 14.882182720132286,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 21.0
+      },
+      "heldout_correlation": 0.6101216264372368,
+      "heldout_rmse": 0.15482603066102246,
+      "leaf_fraction_fewer_than_five_in_one_arm": 0.2521703183133526,
+      "leaf_fraction_missing_one_treatment_arm": 0.0,
+      "leaves_per_tree": {
+        "max": 14.0,
+        "mean": 12.095,
+        "median": 12.0,
+        "min": 10.0,
+        "p10": 11.0,
+        "p90": 13.0
+      },
+      "per_tree_sample_counts": [
+        [
+          360,
+          180,
+          180
+        ]
+      ],
+      "scenario": "c",
+      "search": "all",
+      "seed": 2120042,
+      "structure_patients_per_leaf": {
+        "max": 38.0,
+        "mean": 14.882182720132286,
+        "median": 14.0,
+        "min": 10.0,
+        "p10": 10.0,
+        "p90": 20.0
+      },
+      "treated_patients_per_leaf": {
+        "max": 23.0,
+        "mean": 7.724266225713104,
+        "median": 7.0,
+        "min": 1.0,
+        "p10": 4.0,
+        "p90": 12.0
+      },
+      "trees": 200
+    }
+  ],
+  "heldout_rows": 200,
+  "input_manifest_sha256": "fb2fa53c43e8f610fe128c0389c1b6010e9d25caa24e73ef298804f256808e3e",
+  "positivity_configuration": {
+    "enforce_positivity": false,
+    "max_treatment_rate_per_stratum": 0.9,
+    "min_treatment_rate_per_stratum": 0.1
+  },
+  "test_distribution": {
+    "mean_conditional_bernoulli_variance": 0.16030518308738137,
+    "mean_oracle_residual_effect_energy": 0.006929388713904094,
+    "outcome_count": 89,
+    "overlap_counts": {
+      "above_0_9": 25,
+      "below_0_1": 24,
+      "controls_above_0_9": 1,
+      "treated_below_0_1": 0
+    },
+    "treatment_count": 104,
+    "true_effect_sd": 0.18807373312265038,
+    "true_propensity": {
+      "max": 0.9973527060325942,
+      "mean": 0.5043715050519758,
+      "median": 0.484213645408565,
+      "min": 0.0026243135065499405,
+      "p10": 0.08418180651781741,
+      "p90": 0.9325739570661608
+    }
+  },
+  "train_distribution": {
+    "mean_conditional_bernoulli_variance": 0.1591616522440539,
+    "mean_oracle_residual_effect_energy": 0.006689543052900751,
+    "outcome_count": 360,
+    "overlap_counts": {
+      "above_0_9": 122,
+      "below_0_1": 101,
+      "controls_above_0_9": 4,
+      "treated_below_0_1": 5
+    },
+    "treatment_count": 417,
+    "true_effect_sd": 0.17919239217296426,
+    "true_propensity": {
+      "max": 0.9964243295144797,
+      "mean": 0.5156328522923794,
+      "median": 0.5214827868898164,
+      "min": 0.0012797147168247937,
+      "p10": 0.07408593610511377,
+      "p90": 0.9345789734839626
+    }
+  },
+  "training_rows": 800
+}

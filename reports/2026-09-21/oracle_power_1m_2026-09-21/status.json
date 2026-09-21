@@ -1,0 +1,24 @@
+{
+  "updated_at": "2026-09-21T20:04:54+00:00",
+  "phase": "completed",
+  "generated_rows": 1000000,
+  "training_rows": 800000,
+  "heldout_rows": 200000,
+  "common_test_rows": 20000,
+  "new_forests": 6,
+  "previous_forests_reused_on_common_test": 18,
+  "independently_validated_forests": 6,
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/oracle_power_1m_report_2026-09-21.md",
+  "temporary_dataset": "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/structured_oracle_1m.parquet",
+  "report_links_verified": 16,
+  "report_artifact_sha256": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/oracle_power_1m_report_2026-09-21.md": "29d4a9f6e5b94ae00db30a78645621441feedf14eac558e0ee27c5bd3a446f64",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/learning_curve_2026-09-21.png": "3505f96e26de5c28b5f5a9859f0b9feed79d57dc167deee97dcd5ce663906b8d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/learning_curve_2026-09-21.pdf": "d902576e2f7001da0f121cf542ccadd78f7c3158372af6fe5da6ff098c174914",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/metrics_by_seed_2026-09-21.csv": "a000ba382afabdab608a43466bbfcca51db891a3fbf47bcd2ab3ba2499c25bf8",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/summary_metrics_2026-09-21.csv": "ab1896f6a2b777771f81d1c27230a6b3ea22da64b1e32de57672516ec7a1c4c7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/independent_validation_2026-09-21.json": "683821ba2532e51290b7355b33e40b8e5871a15dc245b7cb0b245fee4e55f785",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/write_report_2026-09-21.py": "81a2c608f1c44d549246fb96db78ca87584433f3154f5126ffa066d4ec3623c5",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/plot_learning_curve_2026-09-21.py": "2e00f5a5e9da63d47ab6b8b627fa4b9db7c2c47ec9c7a2497c20081e4e6a75e7"
+  }
+}

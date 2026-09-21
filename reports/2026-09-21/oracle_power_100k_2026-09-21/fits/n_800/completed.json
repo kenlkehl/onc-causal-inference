@@ -1,0 +1,29 @@
+{
+  "completed_at": "2026-09-21T18:43:58+00:00",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/all/seed_1120042/fit_audit.json": "c3e2d75394cf9637aab4b9ae9b1686a99f9368198d5975fc773caaa7a4e4619c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/all/seed_1120042/predictions.parquet": "5a51cb2abc3291f962bb0fe17305e4e7dc99f9b2c52b591a0c4ab24aa48a8d9f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/all/seed_120042/fit_audit.json": "e5afc01165424f68222443977145b90315eddb5f923767a6f036b26a29776985",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/all/seed_120042/predictions.parquet": "32e534cf4b2635e7e8380e68d22a7f12868ad5771655e7f0db8713cf59597717",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/all/seed_2120042/fit_audit.json": "3c06b8ccdb225de1326719a2e7a95794032d5a35f8a23f2556cfea695222b672",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/all/seed_2120042/predictions.parquet": "17e94aec8e456ac0f8e5dbf0ae54d57e0ed4f3878ab57562a7d1b578c5972610",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/design.json": "242cf1a66b95d65658195900c1e6c13170b6d5646c56ca0441f4dda2e34eac1e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/modifiers/seed_1120042/fit_audit.json": "93a7724fdec834f89d5f2119e86014729eaddcfc57bb74d4e0d9b317c6fd89a4",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/modifiers/seed_1120042/predictions.parquet": "945324f947e4aed55c738eb2de01dfff5691bc1cadb0142dec996e00202cc4fe",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/modifiers/seed_120042/fit_audit.json": "7fc9ed0ab3026da2ba91be68a3fb2006f9087e24ee1711dbe6619dc07bca76ed",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/modifiers/seed_120042/predictions.parquet": "205bec56a3f74d417086358f76a365cdac181e9f060ea55f6ab407e8d69c2c71",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/modifiers/seed_2120042/fit_audit.json": "303c4a01372156eb6be85a94f3b7d70d2eaf133888b1c692968e8c29abb2c133",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/modifiers/seed_2120042/predictions.parquet": "b8b86f7abd7e6728c07ff841801feba7fdf28d009988c46a0762c2fde8640ac1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/nuisance_audit.json": "12e139b00ce9893ef2468eded89568296e8a40d0f59cc2627c8ef9644fdc36b3",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_800/training_nuisances.parquet": "0cbb188700dc3b8af7b959726941e612e19d53cacee7245bd69165f9ab31d357",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/all/seed_1120042.joblib": "d5f7e0fc3f2a3da4498f67e2bc2c69ff7ed43497b2f2835ca73c4fe64bc583b7",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/all/seed_120042.joblib": "f6fdb33b458b833c14eb15bbfe54eab1e6755ed04e28e0c7b003dfaa6c0fc14d",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/all/seed_2120042.joblib": "f3579f0e67ae68518e07c18c92ff67289d4c07af6250efebc5399b9188b07fb3",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/initial_model.joblib": "4c2145e63f63e62cfbf348ca390c75012d774f0224422d093d1a5cdd1cd67ece",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/modifiers/seed_1120042.joblib": "780193f8bbef9770b44d031ca579df144c56f61f2f83ee9e41f4f250ff435860",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/modifiers/seed_120042.joblib": "7cdcb50cb704676d63021b616865c9512c923a544fa7707ae476210934938e24",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/modifiers/seed_2120042.joblib": "c0da3f51596c159940aec64f97f39171abab114c3a5b4f59fb30d527cbf8b33e",
+    "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/residuals.npz": "f287ba7bf19ad659cd4c6cd3c5242d9c3d26778551206508a18950c6193b3ab3"
+  },
+  "forests": 6
+}

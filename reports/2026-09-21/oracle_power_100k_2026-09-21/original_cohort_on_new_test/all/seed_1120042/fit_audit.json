@@ -1,0 +1,58 @@
+{
+  "cohort": "original",
+  "model_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/fits/a/sqrt/seed_1120042/forest.joblib",
+  "parameters": {
+    "criterion": "mse",
+    "fit_intercept": true,
+    "honest": true,
+    "inference": true,
+    "max_depth": null,
+    "max_features": "sqrt",
+    "max_samples": 0.45,
+    "min_balancedness_tol": 0.45,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 10,
+    "min_samples_split": 10,
+    "min_var_fraction_leaf": null,
+    "min_var_leaf_on_val": false,
+    "min_weight_fraction_leaf": 0.0,
+    "n_estimators": 200,
+    "n_jobs": 1,
+    "random_state": 1120042,
+    "subforest_size": 4,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "reused_without_refitting": true,
+  "scenario": "all",
+  "seed": 1120042,
+  "training_rows": 800,
+  "tree_audit": {
+    "depth": {
+      "max": 9.0,
+      "mean": 5.59,
+      "median": 6.0,
+      "min": 4.0
+    },
+    "effect_patients_per_leaf": {
+      "max": 51.0,
+      "mean": 16.296966953372568,
+      "median": 15.0,
+      "min": 10.0
+    },
+    "leaves_per_tree": {
+      "max": 14.0,
+      "mean": 11.045,
+      "median": 11.0,
+      "min": 7.0
+    },
+    "patients_used_for_effects": 800,
+    "patients_used_for_splits": 800,
+    "sample_split_estimation_counts": [
+      360,
+      180,
+      180
+    ],
+    "trees": 200
+  }
+}

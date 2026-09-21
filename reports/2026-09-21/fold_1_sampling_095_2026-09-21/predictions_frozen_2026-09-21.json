@@ -1,0 +1,27 @@
+{
+  "baseline_fits_reused": 6,
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fit_validation_2026-09-21.json": "d65ab0093a1ff143be6f898a9866d45c20fae5a5ffb1b75205de14622cf39f31",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_1120042/fit_audit.json": "e35b8ff031be7b35e2060f3a21e3025d7b42096dbf803ab5d00c412194ce7d3f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_1120042/forest.joblib": "f62b3633133ef06cc8244387aa9b160fec7e99923c409d2aff1ab97130b0c456",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_1120042/predictions.csv": "c55e08b88145120f2bb1357c7828832fdd96553c2fcb6973181a4b03064d11c8",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_120042/fit_audit.json": "ac16ec63958299c556531808dd2881c6d86d85a0d71bd660f1a398d8d02098f7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_120042/forest.joblib": "16c754053916fc28260b5331cb50038743e74d44df4d57055db6cf26e7a4f4a8",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_120042/predictions.csv": "f0788e1bc0c50fd99fb105278f35678aef3b2790d325932a78c832f49eae63b4",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_2120042/fit_audit.json": "3b7daac6eee8ce2cbc8deeaefb6a27d7bcc49a03d99bad3fcdf81a8151b74337",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_2120042/forest.joblib": "f0275499d48ab5367edaeef32eb4880e8f6a4dbbce9c6ca6e5dcf40a97d1660a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_false/seed_2120042/predictions.csv": "adb64e4511b0453a26a722e8252289bdda6698d021997fb0b2c64c874eb3afee",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_1120042/fit_audit.json": "ede424bfd1dde764aed2b60ed50e138244cd36b0065150c0a1383b7c404fbb74",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_1120042/forest.joblib": "67177d3aaa5ca082af5156d313dc7900e6352770edc88b3f389df769d8a115db",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_1120042/predictions.csv": "2502e08e86e535ef8bebe1732d8479c53934066a9c8b8dca7c6174274daec1af",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_120042/fit_audit.json": "fd1b4a1c3fbb93300513e2d0c6e6769300980e155daf073c4d60802bec39af6a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_120042/forest.joblib": "60d19ac45a62681722fc8cd386e629961ee1bfca5ba20f3edc8ac680a7288649",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_120042/predictions.csv": "ee4397853ade6edadc31c2ee5c9dc0ba2529c8e07d41009a4ca5fb2c3d381675",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_2120042/fit_audit.json": "8e668d93f47dc2b7b62292a883c05fe89cbca188105684c2ae5ea3a00161650b",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_2120042/forest.joblib": "aa98cc5afc14c5652618c24e634546c42727c1184a6a5ed08ae2306aeebd5564",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_sampling_095_2026-09-21/fits/honesty_true/seed_2120042/predictions.csv": "a2b4f034542ed83704f892199793d6b11e734a1a66d2466c20655d6131c94378"
+  },
+  "frozen_at": "2026-09-21T16:48:18+00:00",
+  "input_manifest_sha256": "f6903088c87479d0a9bad36147745fa54efe236b112eff9b26d6199f00787bfe",
+  "new_fits": 6
+}

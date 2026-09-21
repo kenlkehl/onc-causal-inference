@@ -1,0 +1,10 @@
+{
+  "all_baseline_predictions_reproduced_from_saved_models": true,
+  "baseline_fits_reused": 3,
+  "cached_residuals_unchanged": true,
+  "new_fits": 9,
+  "new_fits_without_warnings": 9,
+  "only_minimum_leaf_size_changed": true,
+  "per_tree_760_with_disjoint_380_380_halves_verified": true,
+  "same_subsamples_and_honesty_halves_as_baseline": true
+}

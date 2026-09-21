@@ -1,0 +1,149 @@
+{
+  "baseline_fits_reused": 3,
+  "fits": [
+    {
+      "forest_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/fits/c/sqrt/seed_120042/forest.joblib",
+      "predictions_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/fits/c/sqrt/seed_120042/predictions.csv",
+      "reloaded_predictions_identical": true,
+      "seed": 120042,
+      "tree_audit": {
+        "depth": {
+          "max": 8.0,
+          "mean": 5.03,
+          "median": 5.0,
+          "min": 1.0
+        },
+        "distinct_patients_used_for_effects": 800,
+        "distinct_patients_used_for_splits": 800,
+        "effect_patients_per_leaf": {
+          "max": 139.0,
+          "mean": 20.785219399538107,
+          "median": 17.0,
+          "min": 10.0
+        },
+        "leaves_per_tree": {
+          "max": 13.0,
+          "mean": 8.66,
+          "median": 9.0,
+          "min": 2.0
+        },
+        "sample_split_effect_counts": [
+          [
+            360,
+            180,
+            180
+          ]
+        ],
+        "trees": 200,
+        "trees_per_patient_for_effects": {
+          "max": 73.0,
+          "mean": 45.0,
+          "median": 45.0,
+          "min": 23.0
+        },
+        "trees_per_patient_for_splits": {
+          "max": 77.0,
+          "mean": 45.0,
+          "median": 45.0,
+          "min": 18.0
+        }
+      }
+    },
+    {
+      "forest_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/fits/c/sqrt/seed_1120042/forest.joblib",
+      "predictions_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/fits/c/sqrt/seed_1120042/predictions.csv",
+      "reloaded_predictions_identical": true,
+      "seed": 1120042,
+      "tree_audit": {
+        "depth": {
+          "max": 9.0,
+          "mean": 5.205,
+          "median": 5.0,
+          "min": 1.0
+        },
+        "distinct_patients_used_for_effects": 800,
+        "distinct_patients_used_for_splits": 800,
+        "effect_patients_per_leaf": {
+          "max": 144.0,
+          "mean": 20.65404475043029,
+          "median": 17.0,
+          "min": 10.0
+        },
+        "leaves_per_tree": {
+          "max": 12.0,
+          "mean": 8.715,
+          "median": 9.0,
+          "min": 2.0
+        },
+        "sample_split_effect_counts": [
+          [
+            360,
+            180,
+            180
+          ]
+        ],
+        "trees": 200,
+        "trees_per_patient_for_effects": {
+          "max": 69.0,
+          "mean": 45.0,
+          "median": 45.0,
+          "min": 25.0
+        },
+        "trees_per_patient_for_splits": {
+          "max": 71.0,
+          "mean": 45.0,
+          "median": 45.0,
+          "min": 22.0
+        }
+      }
+    },
+    {
+      "forest_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/fits/c/sqrt/seed_2120042/forest.joblib",
+      "predictions_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/fits/c/sqrt/seed_2120042/predictions.csv",
+      "reloaded_predictions_identical": true,
+      "seed": 2120042,
+      "tree_audit": {
+        "depth": {
+          "max": 9.0,
+          "mean": 5.085,
+          "median": 5.0,
+          "min": 2.0
+        },
+        "distinct_patients_used_for_effects": 800,
+        "distinct_patients_used_for_splits": 800,
+        "effect_patients_per_leaf": {
+          "max": 129.0,
+          "mean": 21.114369501466275,
+          "median": 17.0,
+          "min": 10.0
+        },
+        "leaves_per_tree": {
+          "max": 14.0,
+          "mean": 8.525,
+          "median": 9.0,
+          "min": 3.0
+        },
+        "sample_split_effect_counts": [
+          [
+            360,
+            180,
+            180
+          ]
+        ],
+        "trees": 200,
+        "trees_per_patient_for_effects": {
+          "max": 71.0,
+          "mean": 45.0,
+          "median": 45.0,
+          "min": 21.0
+        },
+        "trees_per_patient_for_splits": {
+          "max": 70.0,
+          "mean": 45.0,
+          "median": 45.0,
+          "min": 23.0
+        }
+      }
+    }
+  ]
+}

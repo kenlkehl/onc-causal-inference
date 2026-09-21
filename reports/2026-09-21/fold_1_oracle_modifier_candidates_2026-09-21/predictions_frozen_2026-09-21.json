@@ -1,0 +1,21 @@
+{
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_all/seed_1120042/metrics.json": "056e4292eb2a7f5a86a37bb6c72d567596d084680011f134bd282f331ac84308",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_all/seed_1120042/predictions.csv": "ac18e16dc7ad3f9a69e2aee4d41172fe0c5e29d9631293fc69dfd436a871a96e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_all/seed_120042/metrics.json": "46ae512a0f28bdc3fc7d862966021f31a1e5ac77fe3c7f687e551412b84e7140",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_all/seed_120042/predictions.csv": "a6bec904a8c660d620652a41b9ac3dfdb8449d084ae552bb55750ca0909a38bb",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_all/seed_2120042/metrics.json": "12473e0d402817e721e310726065353f037bf7766d517d3b29b96206a56aa6e1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_all/seed_2120042/predictions.csv": "6d8d7a795de6048e0041d1153f45ae976b8d2484ee7fc1b0f132a59ab8657717",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_sqrt/seed_1120042/metrics.json": "81882d80640a578b2997a475ecacd6afca2fd77cdf4b1a8d6667086a09fe7494",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_sqrt/seed_1120042/predictions.csv": "797c1c3c8d601fdfa8ff4ba66a00095867c6fcc58304c1ec03f65828463a8eb5",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_sqrt/seed_120042/metrics.json": "2819cd0a6df7d1b17a09604d9a758306033cf890fdc84b02ad593e389d7093a3",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_sqrt/seed_120042/predictions.csv": "812ed1797477e9fee76d871c286e8246c5fa51dd13fd491532cb0ef423d91d8a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_sqrt/seed_2120042/metrics.json": "606928e3d8a798953d160a86cd6168942febf721316e817b4e98af330cdca2ec",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fits/oracle_modifier_candidates_sqrt/seed_2120042/predictions.csv": "2f0694b783116e23b22766164a432cbc1025e8f2b9e5fb9a1404dee26bee874d"
+  },
+  "frozen_at": "2026-09-21T14:16:17+00:00",
+  "input_manifest_sha256": "f47f3af595c5c5bce7795f2e9a4ce7d08fba024f2a42a4bb33357bffd1db8fde",
+  "new_fits": 6,
+  "oracle_effect_values_read_by_fit_phase": false,
+  "oracle_identities_used_for_candidate_selection": true
+}

@@ -1,0 +1,183 @@
+{
+  "initial_model_path": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/initial_model.joblib",
+  "models": {
+    "outcome": [
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 522
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 0.3981071705534973
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 106
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 2.5118864315095824
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 521
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 1.0
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 491
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 1.0
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 550
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 1.0
+        }
+      }
+    ],
+    "treatment": [
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 239
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 0.3981071705534973
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 189
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 0.3981071705534973
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 167
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 1.0
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 120
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 0.3981071705534973
+        }
+      },
+      {
+        "constant_prediction": null,
+        "effective_cv_folds": 3,
+        "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "fit_mode": "cross_validated",
+        "n_features": 25,
+        "optimization": {
+          "configured_max_iter": 5000,
+          "iteration_limit_reached": false,
+          "maximum_iterations_observed": 112
+        },
+        "requested_cv_folds": 3,
+        "selected_regularization": {
+          "parameter": "C",
+          "value": 0.3981071705534973
+        }
+      }
+    ]
+  },
+  "residual_sha256": "d4cd79f3929356bf05350cb896b87b0a495784657f0b17e3f5ccd75913a56e3f",
+  "residuals_path": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_800/residuals.npz",
+  "seconds_including_initial_forest": 6.092711260076612,
+  "warnings": []
+}

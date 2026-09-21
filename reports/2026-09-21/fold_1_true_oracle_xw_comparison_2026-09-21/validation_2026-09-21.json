@@ -1,0 +1,13 @@
+{
+  "all_source_and_prediction_hashes_verified": true,
+  "cached_nuisances_unchanged_across_final_forests": true,
+  "finite_ordered_intervals": true,
+  "fits": 18,
+  "fixed_five_fold_crossfit_coverage": true,
+  "full_heldout_rows_each": 200,
+  "manual_r_loss_matches_native_score": true,
+  "oracle_effect_values_excluded_from_fitting": true,
+  "secondary_rows_each": 180,
+  "training_rows": 800,
+  "validated_at": "2026-09-21T15:14:26+00:00"
+}

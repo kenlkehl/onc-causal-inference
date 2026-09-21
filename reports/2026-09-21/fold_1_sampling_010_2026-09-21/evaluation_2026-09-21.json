@@ -1,0 +1,466 @@
+{
+  "evaluated_at": "2026-09-21T18:25:07+00:00",
+  "heldout_rows_each": 200,
+  "oracle_mean": -0.06073934649121985,
+  "oracle_sd": 0.18807373312265038,
+  "paired_contrasts": [
+    {
+      "baseline_fraction": 0.45,
+      "honesty": true,
+      "seed": 120042,
+      "ten_percent_minus_baseline": {
+        "correlation": -0.10827969137463855,
+        "r_loss": 0.0030731462976385793,
+        "rmse": 0.026189419019541554
+      }
+    },
+    {
+      "baseline_fraction": 0.95,
+      "honesty": true,
+      "seed": 120042,
+      "ten_percent_minus_baseline": {
+        "correlation": -0.11682393846221983,
+        "r_loss": 0.003069413407701449,
+        "rmse": 0.031450594383910346
+      }
+    },
+    {
+      "baseline_fraction": 0.45,
+      "honesty": true,
+      "seed": 1120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.03555199379105001,
+        "r_loss": 0.002234858808644047,
+        "rmse": 0.013991149535033387
+      }
+    },
+    {
+      "baseline_fraction": 0.95,
+      "honesty": true,
+      "seed": 1120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.05166022062431497,
+        "r_loss": 0.002402210360192003,
+        "rmse": 0.01914212428271697
+      }
+    },
+    {
+      "baseline_fraction": 0.45,
+      "honesty": true,
+      "seed": 2120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.029896027607387188,
+        "r_loss": 0.0025987337685815792,
+        "rmse": 0.02114233863871487
+      }
+    },
+    {
+      "baseline_fraction": 0.95,
+      "honesty": true,
+      "seed": 2120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.026086708603881403,
+        "r_loss": 0.0024552935606663717,
+        "rmse": 0.02609632201322884
+      }
+    },
+    {
+      "baseline_fraction": 0.45,
+      "honesty": false,
+      "seed": 120042,
+      "ten_percent_minus_baseline": {
+        "correlation": -0.014161105254539952,
+        "r_loss": -0.00014075512080660713,
+        "rmse": 0.0026265719503787976
+      }
+    },
+    {
+      "baseline_fraction": 0.95,
+      "honesty": false,
+      "seed": 120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.05964145265370313,
+        "r_loss": -0.0010318325066801803,
+        "rmse": -0.023809036537648876
+      }
+    },
+    {
+      "baseline_fraction": 0.45,
+      "honesty": false,
+      "seed": 1120042,
+      "ten_percent_minus_baseline": {
+        "correlation": -0.027157311185747823,
+        "r_loss": 0.0011232968130863719,
+        "rmse": 0.008358216670101143
+      }
+    },
+    {
+      "baseline_fraction": 0.95,
+      "honesty": false,
+      "seed": 1120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.05690657367646956,
+        "r_loss": -0.0020771714941698605,
+        "rmse": -0.022866771469364305
+      }
+    },
+    {
+      "baseline_fraction": 0.45,
+      "honesty": false,
+      "seed": 2120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.008133878198670508,
+        "r_loss": 0.0010697394553191852,
+        "rmse": 0.008537134335116575
+      }
+    },
+    {
+      "baseline_fraction": 0.95,
+      "honesty": false,
+      "seed": 2120042,
+      "ten_percent_minus_baseline": {
+        "correlation": 0.10278325527020593,
+        "r_loss": -0.000531213802231395,
+        "rmse": -0.02179659182748736
+      }
+    }
+  ],
+  "summaries": [
+    {
+      "honesty": false,
+      "metrics": {
+        "bias": {
+          "max": -0.022406824285441065,
+          "mean": -0.03121370395002382,
+          "min": -0.043272540378864605
+        },
+        "correlation": {
+          "max": 0.6957051773359385,
+          "mean": 0.6665518354290979,
+          "min": 0.6484485963057994
+        },
+        "mae": {
+          "max": 0.11505095894243976,
+          "mean": 0.11362067291036519,
+          "min": 0.11174415457190934
+        },
+        "median_depth": {
+          "max": 3.0,
+          "mean": 3.0,
+          "min": 3.0
+        },
+        "median_effect_patients_per_leaf": {
+          "max": 14.0,
+          "mean": 13.666666666666666,
+          "min": 13.0
+        },
+        "median_leaves_per_tree": {
+          "max": 5.0,
+          "mean": 5.0,
+          "min": 5.0
+        },
+        "prediction_sd": {
+          "max": 0.09933469338310831,
+          "mean": 0.08687259954197744,
+          "min": 0.07891685975922526
+        },
+        "r_loss": {
+          "max": 0.1690051852917349,
+          "mean": 0.16870705283272558,
+          "min": 0.16835654659985322
+        },
+        "rmse": {
+          "max": 0.15117166772842988,
+          "mean": 0.14927050694341967,
+          "min": 0.14672586567002213
+        },
+        "unsplit_trees": {
+          "max": 2.0,
+          "mean": 1.0,
+          "min": 0.0
+        }
+      },
+      "sample_fraction": 0.1
+    },
+    {
+      "honesty": true,
+      "metrics": {
+        "bias": {
+          "max": -0.03370106859335704,
+          "mean": -0.03792044773176817,
+          "min": -0.0416464367198277
+        },
+        "correlation": {
+          "max": 0.7052555245867705,
+          "mean": 0.6532471104388037,
+          "min": 0.5568883964241226
+        },
+        "mae": {
+          "max": 0.13629520133289819,
+          "mean": 0.13298268952226536,
+          "min": 0.12809475446102225
+        },
+        "median_depth": {
+          "max": 1.0,
+          "mean": 1.0,
+          "min": 1.0
+        },
+        "median_effect_patients_per_leaf": {
+          "max": 16.0,
+          "mean": 15.666666666666666,
+          "min": 15.0
+        },
+        "median_leaves_per_tree": {
+          "max": 2.0,
+          "mean": 2.0,
+          "min": 2.0
+        },
+        "prediction_sd": {
+          "max": 0.040873800600782516,
+          "mean": 0.036764790990482264,
+          "min": 0.033287456902917685
+        },
+        "r_loss": {
+          "max": 0.1712250271218018,
+          "mean": 0.1707999195641089,
+          "min": 0.17058139043169251
+        },
+        "rmse": {
+          "max": 0.17488302475024917,
+          "mean": 0.17063757436308746,
+          "min": 0.16533346198922513
+        },
+        "unsplit_trees": {
+          "max": 43.0,
+          "mean": 38.666666666666664,
+          "min": 36.0
+        }
+      },
+      "sample_fraction": 0.1
+    },
+    {
+      "honesty": false,
+      "metrics": {
+        "bias": {
+          "max": -0.025650458904640825,
+          "mean": -0.029959024811640273,
+          "min": -0.033806244020506825
+        },
+        "correlation": {
+          "max": 0.687571299137268,
+          "mean": 0.6776133481763037,
+          "min": 0.6696628379000957
+        },
+        "mae": {
+          "max": 0.11501332936465924,
+          "mean": 0.11316137803170058,
+          "min": 0.11214955047678977
+        },
+        "median_depth": {
+          "max": 8.0,
+          "mean": 8.0,
+          "min": 8.0
+        },
+        "median_effect_patients_per_leaf": {
+          "max": 14.0,
+          "mean": 14.0,
+          "min": 14.0
+        },
+        "median_leaves_per_tree": {
+          "max": 20.0,
+          "mean": 20.0,
+          "min": 20.0
+        },
+        "prediction_sd": {
+          "max": 0.1503861960542698,
+          "mean": 0.14544637818289508,
+          "min": 0.14267602659211717
+        },
+        "r_loss": {
+          "max": 0.16849730172065983,
+          "mean": 0.16802295911685924,
+          "min": 0.1676361297935022
+        },
+        "rmse": {
+          "max": 0.14409929371964333,
+          "mean": 0.14276319929155415,
+          "min": 0.1413768530966904
+        },
+        "unsplit_trees": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        }
+      },
+      "sample_fraction": 0.45
+    },
+    {
+      "honesty": true,
+      "metrics": {
+        "bias": {
+          "max": -0.025687335303811017,
+          "mean": -0.03234497803265065,
+          "min": -0.03732034921273246
+        },
+        "correlation": {
+          "max": 0.6697035307957205,
+          "mean": 0.6675243337642041,
+          "min": 0.6651680877987611
+        },
+        "mae": {
+          "max": 0.11581276340033404,
+          "mean": 0.11423992114681153,
+          "min": 0.11234582362917614
+        },
+        "median_depth": {
+          "max": 5.0,
+          "mean": 5.0,
+          "min": 5.0
+        },
+        "median_effect_patients_per_leaf": {
+          "max": 17.0,
+          "mean": 17.0,
+          "min": 17.0
+        },
+        "median_leaves_per_tree": {
+          "max": 9.0,
+          "mean": 9.0,
+          "min": 9.0
+        },
+        "prediction_sd": {
+          "max": 0.08352671626887044,
+          "mean": 0.08220826930654557,
+          "min": 0.08118447740871146
+        },
+        "r_loss": {
+          "max": 0.16834653162304847,
+          "mean": 0.16816433993915417,
+          "min": 0.16799460737025085
+        },
+        "rmse": {
+          "max": 0.15134231245419175,
+          "mean": 0.15019660529865753,
+          "min": 0.1486936057307076
+        },
+        "unsplit_trees": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        }
+      },
+      "sample_fraction": 0.45
+    },
+    {
+      "honesty": false,
+      "metrics": {
+        "bias": {
+          "max": -0.020318826137600263,
+          "mean": -0.021092702929606605,
+          "min": -0.021600395795370795
+        },
+        "correlation": {
+          "max": 0.5958602799918526,
+          "mean": 0.5934414082289717,
+          "min": 0.5915420226293299
+        },
+        "mae": {
+          "max": 0.14169497469071998,
+          "mean": 0.13954100756248947,
+          "min": 0.13801929375451805
+        },
+        "median_depth": {
+          "max": 11.0,
+          "mean": 10.666666666666666,
+          "min": 10.0
+        },
+        "median_effect_patients_per_leaf": {
+          "max": 14.0,
+          "mean": 13.666666666666666,
+          "min": 13.0
+        },
+        "median_leaves_per_tree": {
+          "max": 42.0,
+          "mean": 42.0,
+          "min": 42.0
+        },
+        "prediction_sd": {
+          "max": 0.1938877531141624,
+          "mean": 0.19068082546559295,
+          "min": 0.18859202134627656
+        },
+        "r_loss": {
+          "max": 0.17083659810075844,
+          "mean": 0.16992045876708603,
+          "min": 0.1693883791065334
+        },
+        "rmse": {
+          "max": 0.1740384391977942,
+          "mean": 0.17209464022158652,
+          "min": 0.170534902207671
+        },
+        "unsplit_trees": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        }
+      },
+      "sample_fraction": 0.95
+    },
+    {
+      "honesty": true,
+      "metrics": {
+        "bias": {
+          "max": -0.029877249023563545,
+          "mean": -0.03163392002703234,
+          "min": -0.03488327516608802
+        },
+        "correlation": {
+          "max": 0.6737123348863424,
+          "mean": 0.6662727801834782,
+          "min": 0.6535953039624556
+        },
+        "mae": {
+          "max": 0.11206793316426573,
+          "mean": 0.11103692365897759,
+          "min": 0.10922266817884661
+        },
+        "median_depth": {
+          "max": 7.0,
+          "mean": 7.0,
+          "min": 7.0
+        },
+        "median_effect_patients_per_leaf": {
+          "max": 17.0,
+          "mean": 17.0,
+          "min": 17.0
+        },
+        "median_leaves_per_tree": {
+          "max": 18.0,
+          "mean": 17.666666666666668,
+          "min": 17.0
+        },
+        "prediction_sd": {
+          "max": 0.10871071561238299,
+          "mean": 0.10632329672435385,
+          "min": 0.10261194075620485
+        },
+        "r_loss": {
+          "max": 0.1681791800715005,
+          "mean": 0.1681576137879223,
+          "min": 0.16813804757816606
+        },
+        "rmse": {
+          "max": 0.14619133770650816,
+          "mean": 0.14507456080313538,
+          "min": 0.14343243036633882
+        },
+        "unsplit_trees": {
+          "max": 0.0,
+          "mean": 0.0,
+          "min": 0.0
+        }
+      },
+      "sample_fraction": 0.95
+    }
+  ]
+}

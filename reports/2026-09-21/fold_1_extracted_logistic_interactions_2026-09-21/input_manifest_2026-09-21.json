@@ -1,0 +1,47 @@
+{
+  "C_grid": [
+    0.0001,
+    0.00031622776601683794,
+    0.001,
+    0.0031622776601683794,
+    0.01,
+    0.03162277660168379,
+    0.1,
+    0.31622776601683794,
+    1.0,
+    3.1622776601683795,
+    10.0,
+    31.622776601683793,
+    100.0
+  ],
+  "cohorts": [
+    "all_800",
+    "eligible_720"
+  ],
+  "constant_and_redundant_columns": "Retained exactly as represented by the existing feature encoder",
+  "created_at": "2026-09-21T20:36:53+00:00",
+  "cv_folds": 5,
+  "cv_max_iter": 5000,
+  "cv_preprocessing": "Encoder fitted separately using only each inner training partition",
+  "cv_splits": "Original fold-1 inner splits, intersected with each cohort",
+  "elastic_net_l1_ratio": 0.8,
+  "final_max_iter": 20000,
+  "known_DGP_structure_supplied": false,
+  "model_formula": "logit P(Y=1|T,Z) = intercept + beta*Z + delta*T + gamma*(T*Z)",
+  "oracle_values_used_for_fitting_or_tuning": false,
+  "penalties": [
+    "elastic_net",
+    "ridge"
+  ],
+  "penalty_scope": "All slopes including treatment main effect; intercept unpenalized",
+  "prior_results_already_seen": true,
+  "purpose": "All extracted candidates as outcome main effects and treatment interactions.\n\nFive-fold training-only outcome log-loss selects C separately for elastic net\nand ridge, on all 800 training patients and the previous 720 eligible patients.\nNo oracle values, feature-role identities, or known DGP interactions enter fit.\n",
+  "sources": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2_analysis.py": "76194d6723da234fb712960e2c3a2d12f7e496d47dbc2d47a3ec3f3f0bdd43d4",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs_frozen_2026-09-21.json": "d96ee2823f5575771082d747d956c593923bfa2df4959c1cc9ee1fa15451db0a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/prepare_inputs_2026-09-21.py": "93155ce3386c0059e6b69584535a902f4940dadc3566030d0ea000ac264243fb",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/run_logistic_interactions_2026-09-21.py": "2defcc620a5120ae0dfad33b0ac1172a3531a2940c466744c2a73d3648a7e848",
+    "/home/klkehl/thisenv/lib/python3.13/site-packages/sklearn/linear_model/_logistic.py": "148a6827b2b62cac430cb28990323fb94d554c8c07a497601e84fd219c800fdc"
+  },
+  "tolerance": 0.0001
+}

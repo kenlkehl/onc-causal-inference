@@ -1,0 +1,77 @@
+{
+  "CV_validation_scores_recomputed": 260,
+  "all_source_and_frozen_artifact_hashes_verified": true,
+  "cv_checks": [
+    {
+      "all_65_validation_predictions_and_losses_recomputed": true,
+      "all_five_inner_encoders_fit_on_inner_training_only": true,
+      "cohort": "all_800",
+      "penalty": "elastic_net",
+      "selected_C": 0.1
+    },
+    {
+      "all_65_validation_predictions_and_losses_recomputed": true,
+      "all_five_inner_encoders_fit_on_inner_training_only": true,
+      "cohort": "all_800",
+      "penalty": "ridge",
+      "selected_C": 0.0031622776601683794
+    },
+    {
+      "all_65_validation_predictions_and_losses_recomputed": true,
+      "all_five_inner_encoders_fit_on_inner_training_only": true,
+      "cohort": "eligible_720",
+      "penalty": "elastic_net",
+      "selected_C": 0.1
+    },
+    {
+      "all_65_validation_predictions_and_losses_recomputed": true,
+      "all_five_inner_encoders_fit_on_inner_training_only": true,
+      "cohort": "eligible_720",
+      "penalty": "ridge",
+      "selected_C": 0.0031622776601683794
+    }
+  ],
+  "final_checks": [
+    {
+      "both_test_set_metrics_verified": true,
+      "cohort": "all_800",
+      "effects_independently_reconstructed_from_coefficients": true,
+      "maximum_prediction_error": 2.220446049250313e-16,
+      "penalty": "elastic_net"
+    },
+    {
+      "both_test_set_metrics_verified": true,
+      "cohort": "all_800",
+      "effects_independently_reconstructed_from_coefficients": true,
+      "maximum_prediction_error": 5.551115123125783e-16,
+      "penalty": "ridge"
+    },
+    {
+      "both_test_set_metrics_verified": true,
+      "cohort": "eligible_720",
+      "effects_independently_reconstructed_from_coefficients": true,
+      "maximum_prediction_error": 2.220446049250313e-16,
+      "penalty": "elastic_net"
+    },
+    {
+      "both_test_set_metrics_verified": true,
+      "cohort": "eligible_720",
+      "effects_independently_reconstructed_from_coefficients": true,
+      "maximum_prediction_error": 4.440892098500626e-16,
+      "penalty": "ridge"
+    }
+  ],
+  "inner_preprocessors_verified": 20,
+  "models_reloaded": 4,
+  "oracle_not_used_for_fit_or_penalty_selection": true,
+  "reference_forest_prediction_hashes": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_1120042/predictions.csv": "0b0269c2ac5a4cea0e08aba76120feeecce6ec44906a793cf2e6f7f45f857808",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_120042/predictions.csv": "b2f637e39ffa53355ab14dbc14610a1d1568038f8b6f79d87045a0e7ac156b68",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_forests/all_candidates/seed_2120042/predictions.csv": "6c6625d6ed1bf4f4a01825b73477da12a9eaafe812cd47ef7a04893f38c35ef7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_all_candidates_all_split_features_2026-09-21/fits/seed_1120042/predictions.csv": "83f00dd3a72fd29d82a2b8cfef7efc289572634c8a8a4572c8ae436bb756383b",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_all_candidates_all_split_features_2026-09-21/fits/seed_120042/predictions.csv": "3d6c199b14810f38fe6e47f9e2da3bd891680946765fe2c8877fbf92b29cd2c9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_all_candidates_all_split_features_2026-09-21/fits/seed_2120042/predictions.csv": "555f0ddde60d71a945dcd10c62e1b3e59962b0267531d48c4336a02ec517c239"
+  },
+  "validated_at": "2026-09-21T20:46:04+00:00",
+  "validation_script_sha256": "8a4847a1926d46798d41dbe743ced404bfce331d7f6693e5ae263c73488dd89e"
+}

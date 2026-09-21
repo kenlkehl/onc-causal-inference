@@ -1,0 +1,72 @@
+{
+  "honesty": false,
+  "inference": false,
+  "parameters": {
+    "criterion": "mse",
+    "fit_intercept": true,
+    "honest": false,
+    "inference": false,
+    "max_depth": null,
+    "max_features": "sqrt",
+    "max_samples": 0.45,
+    "min_balancedness_tol": 0.45,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 10,
+    "min_samples_split": 10,
+    "min_var_fraction_leaf": null,
+    "min_var_leaf_on_val": false,
+    "min_weight_fraction_leaf": 0.0,
+    "n_estimators": 200,
+    "n_jobs": 1,
+    "random_state": 2120042,
+    "subforest_size": 4,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "r_loss": 0.1679354458364157,
+  "residual_sha256": "f3aec50d62828cbd5dd821f6c19b6b439b8b83bbc0e833b26ddc7da89c3cec70",
+  "seed": 2120042,
+  "tree_audit": {
+    "depth": {
+      "max": 12.0,
+      "mean": 7.86,
+      "median": 8.0,
+      "min": 4.0
+    },
+    "distinct_patients_used_for_effects": 800,
+    "distinct_patients_used_for_splits": 800,
+    "effect_patients_per_leaf": {
+      "max": 251.0,
+      "mean": 18.41903300076746,
+      "median": 14.0,
+      "min": 10.0
+    },
+    "leaves_per_tree": {
+      "max": 27.0,
+      "mean": 19.545,
+      "median": 20.0,
+      "min": 6.0
+    },
+    "sample_split_effect_counts": [
+      [
+        360,
+        360,
+        360
+      ]
+    ],
+    "trees": 200,
+    "trees_per_patient_for_effects": {
+      "max": 114.0,
+      "mean": 90.0,
+      "median": 90.0,
+      "min": 70.0
+    },
+    "trees_per_patient_for_splits": {
+      "max": 114.0,
+      "mean": 90.0,
+      "median": 90.0,
+      "min": 70.0
+    }
+  },
+  "warnings": []
+}

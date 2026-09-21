@@ -1,0 +1,63 @@
+{
+  "cohort": "new",
+  "model_path": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/models/n_8000/all/seed_2120042.joblib",
+  "native_initial_forest_reused": false,
+  "nuisances_shared_across_X_configurations": true,
+  "parameters": {
+    "criterion": "mse",
+    "fit_intercept": true,
+    "honest": true,
+    "inference": true,
+    "max_depth": null,
+    "max_features": "sqrt",
+    "max_samples": 0.45,
+    "min_balancedness_tol": 0.45,
+    "min_impurity_decrease": 0.0,
+    "min_samples_leaf": 10,
+    "min_samples_split": 10,
+    "min_var_fraction_leaf": null,
+    "min_var_leaf_on_val": false,
+    "min_weight_fraction_leaf": 0.0,
+    "n_estimators": 200,
+    "n_jobs": 1,
+    "random_state": 2120042,
+    "subforest_size": 4,
+    "verbose": 0,
+    "warm_start": false
+  },
+  "prediction_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/fits/n_8000/all/seed_2120042/predictions.parquet",
+  "r_loss": 0.1659194835511699,
+  "residual_sha256": "4bbc37f00880727dd5ad4bf8ee52e8bb1a8318d85d6fc7bb2e4d2078c774ccd6",
+  "scenario": "all",
+  "seed": 2120042,
+  "training_rows": 8000,
+  "tree_audit": {
+    "depth": {
+      "max": 18.0,
+      "mean": 13.595,
+      "median": 13.0,
+      "min": 10.0
+    },
+    "effect_patients_per_leaf": {
+      "max": 232.0,
+      "mean": 16.93081879320886,
+      "median": 15.0,
+      "min": 10.0
+    },
+    "leaves_per_tree": {
+      "max": 119.0,
+      "mean": 106.315,
+      "median": 107.0,
+      "min": 91.0
+    },
+    "patients_used_for_effects": 8000,
+    "patients_used_for_splits": 8000,
+    "sample_split_estimation_counts": [
+      3600,
+      1800,
+      1800
+    ],
+    "trees": 200
+  },
+  "warnings": []
+}

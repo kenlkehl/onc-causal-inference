@@ -1,0 +1,20 @@
+{
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/fits/n_800000/design.json": "c6568fa3d0529994c757fec7acaae0df01a9fa7f23850b077f710864b24e03a9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/fits/n_800000/modifiers/seed_120042/fit_audit.json": "bd61c523a30c3ad94948564e458845cb39ecb38f4c44483aacbfb1bce3f06c3e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/fits/n_800000/modifiers/seed_120042/predictions.parquet": "c1e2f8963e37f7598fcbd56b9df25cdc72fb935680d83e8d856a40d48a6137ac",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/fits/n_800000/nuisance_audit.json": "4774c19c6ff126d5a65947f487763bc3c433546fc52a4a51e1493ef3b6b53018",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/fits/n_800000/training_nuisances.parquet": "a6dcb3cc0046ec98580364f7f9f8fb662cac55344ce9985343d101ab7aa1a3fa",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/forest_parameters.json": "09ab15b9e8e629a81a1302f98cd99849dd40382456da4a56655b50d6d6cb210c",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/initial_model.joblib": "73570435eee342d8888c841d32efa410e878d5f41b6abeeb5eb1fd04105d3045",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/modifiers/seed_120042.joblib": "e51a1af41db253a8cc311e801c28f9d01df797ecad7912d9eda8ef802a544f2b",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/prediction_base.parquet": "6a915229891c730e64d08f8dc9ec846b658a0f6186ab65a4971ffc55f4f2050e",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/residuals.npz": "0572debf40c26755b5d7f60e7ca1a3a5901578a0c00fc7955ce38f3ee4c12d0d",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/test_all.npy": "6b69a98d9675f9e775631524f14f75d4f243cf8ad88e2e1f996286bc90683eb8",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/test_modifiers.npy": "4db27fbc669736cafc8526f5846296cf1240d4984190a3ce1b6e4b237596d546",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/train_all.npy": "ef7737912a4ddbcb8a67c8e9e7aa232139f5374abded803869b73cc25abc5d21",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/train_modifiers.npy": "9f1f3b84fbaca6d9eb2083f68fe852d894763cc5b3bf29df104a3409d53516a2"
+  },
+  "prepared_at": "2026-09-21T19:44:34+00:00",
+  "residual_sha256": "fec3ccfb84789b015fa483e07afc27b88874267ca9e951b98d3ebf6d1741cce7"
+}

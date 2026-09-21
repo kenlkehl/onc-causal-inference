@@ -1,0 +1,639 @@
+{
+  "checked_at": "2026-09-21T13:11:45.395236+00:00",
+  "outer_fold": 1,
+  "trace_source_sha256": "617074521a7a72135921a513a1883ada7325211ac31312307c1b157cbd9040cf",
+  "dataset_sha256": "abed84f263290f20f59a04e565833676fa4b656971117a4b2deaa7a666d4c396",
+  "counts": {
+    "candidate_confounder_concepts": 5,
+    "candidate_modifier_concepts": 5,
+    "confounders_in_at_least_one_nuisance_screen": 5,
+    "effect_modifier_admissions": {
+      "all_candidates": 5,
+      "current_joint": 1,
+      "llm_adjudication": 2,
+      "permissive_union": 2
+    }
+  },
+  "measurement_interpretation": "Agreement is against simulation latent values, not manually adjudicated extraction accuracy. Text generation, timing, category definitions, and extraction can all contribute to discordance.",
+  "concepts": [
+    {
+      "concept": "age",
+      "oracle_roles": [
+        "confounder"
+      ],
+      "primary_feature_id": "outer_001_feature_009",
+      "direct_feature_ids": [
+        "outer_001_feature_009"
+      ],
+      "current_names": [
+        "age"
+      ],
+      "measurement_definition": "Extract the patient's age in years from the demographic section, pathology reports, or clinical narratives (e.g., '86-year-old', 'age 45').",
+      "categories_or_unit": [
+        "years"
+      ],
+      "lineage_review": "Current definition retains the direct concept.",
+      "selected_nuisance_roles": {
+        "treatment": true,
+        "outcome": true
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "outcome": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": false
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 198,
+        "missing": 2,
+        "agreement_type": "continuous_vs_latent_oracle",
+        "correlation": 0.9889074721856224,
+        "mae": 1.0426791626108867,
+        "rmse": 1.6976270484400782,
+        "oracle_negative_rows": 0
+      }
+    },
+    {
+      "concept": "sex",
+      "oracle_roles": [
+        "confounder"
+      ],
+      "primary_feature_id": "outer_001_feature_302",
+      "direct_feature_ids": [
+        "outer_001_feature_302"
+      ],
+      "current_names": [
+        "sex"
+      ],
+      "measurement_definition": "Extract the patient's biological sex from the pretreatment medical record, typically found in the patient demographics, header, or pathology report patient information section.",
+      "categories_or_unit": [
+        "Male",
+        "Female"
+      ],
+      "lineage_review": "Primary biological-sex feature omits the oracle Other category; gender_identity is a separate construct and is excluded from direct-sex retention.",
+      "selected_nuisance_roles": {
+        "treatment": false,
+        "outcome": true
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [],
+        "outcome": [
+          2,
+          3,
+          5
+        ]
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": false
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 196,
+        "missing": 4,
+        "agreement_type": "semantic_category_vs_latent_oracle",
+        "correct": 196,
+        "agreement_among_available": 1.0,
+        "agreement_all_rows": 0.98,
+        "confusion": {
+          "<missing>": {
+            "female": 1,
+            "male": 1,
+            "other": 2
+          },
+          "female": {
+            "female": 92,
+            "male": 0,
+            "other": 0
+          },
+          "male": {
+            "female": 0,
+            "male": 104,
+            "other": 0
+          }
+        }
+      }
+    },
+    {
+      "concept": "ecog_performance_status",
+      "oracle_roles": [
+        "confounder"
+      ],
+      "primary_feature_id": "outer_001_feature_109",
+      "direct_feature_ids": [
+        "outer_001_feature_109"
+      ],
+      "current_names": [
+        "ecog_performance_status"
+      ],
+      "measurement_definition": "Extract the numeric ECOG performance status score (typically 0-5) from the pretreatment clinical record, typically found in the physical examination or assessment sections.",
+      "categories_or_unit": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "lineage_review": "Current definition retains the direct concept.",
+      "selected_nuisance_roles": {
+        "treatment": true,
+        "outcome": true
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "outcome": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": false
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 198,
+        "missing": 2,
+        "agreement_type": "semantic_category_vs_latent_oracle",
+        "correct": 186,
+        "agreement_among_available": 0.9393939393939394,
+        "agreement_all_rows": 0.93,
+        "confusion": {
+          "0.0": {
+            "0": 31,
+            "1": 0,
+            "2": 1,
+            "3": 0
+          },
+          "1.0": {
+            "0": 0,
+            "1": 62,
+            "2": 0,
+            "3": 0
+          },
+          "2.0": {
+            "0": 0,
+            "1": 2,
+            "2": 62,
+            "3": 0
+          },
+          "3.0": {
+            "0": 0,
+            "1": 0,
+            "2": 8,
+            "3": 31
+          },
+          "4.0": {
+            "0": 0,
+            "1": 0,
+            "2": 0,
+            "3": 1
+          },
+          "<missing>": {
+            "0": 0,
+            "1": 1,
+            "2": 1,
+            "3": 0
+          }
+        }
+      }
+    },
+    {
+      "concept": "creatinine_clearance",
+      "oracle_roles": [
+        "confounder"
+      ],
+      "primary_feature_id": "outer_001_feature_095",
+      "direct_feature_ids": [
+        "outer_001_feature_095"
+      ],
+      "current_names": [
+        "creatinine_clearance"
+      ],
+      "measurement_definition": "The most recent value for creatinine clearance (CrCl) or estimated creatinine clearance (eCrCl) documented in the pretreatment record, typically reported in mL/min.",
+      "categories_or_unit": [
+        "mL/min"
+      ],
+      "lineage_review": "Current definition retains the direct concept.",
+      "selected_nuisance_roles": {
+        "treatment": true,
+        "outcome": false
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "outcome": []
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": true
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 195,
+        "missing": 5,
+        "agreement_type": "continuous_vs_latent_oracle",
+        "correlation": 0.9907893799695056,
+        "mae": 1.2038317720279241,
+        "rmse": 3.366476064420488,
+        "oracle_negative_rows": 0
+      }
+    },
+    {
+      "concept": "prior_platinum_therapy",
+      "oracle_roles": [
+        "confounder"
+      ],
+      "primary_feature_id": "outer_001_feature_267",
+      "direct_feature_ids": [
+        "outer_001_feature_267"
+      ],
+      "current_names": [
+        "prior_platinum_chemotherapy"
+      ],
+      "measurement_definition": "Extract whether the patient has received chemotherapy containing a platinum agent (e.g., cisplatin, carboplatin, oxaliplatin) from the past medical history, oncology progress notes, or discharge summaries.",
+      "categories_or_unit": [
+        "Yes",
+        "No"
+      ],
+      "lineage_review": "Four-level oracle history is reduced to any prior platinum Yes/No. Agreement below evaluates that coarsened contrast only.",
+      "selected_nuisance_roles": {
+        "treatment": false,
+        "outcome": true
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [
+          3
+        ],
+        "outcome": [
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": false
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 189,
+        "missing": 11,
+        "agreement_type": "coarsened_any_prior_vs_none",
+        "correct": 183,
+        "agreement_among_available": 0.9682539682539683,
+        "agreement_all_rows": 0.915,
+        "confusion": {
+          "<missing>": {
+            "no": 9,
+            "yes": 2
+          },
+          "no": {
+            "no": 68,
+            "yes": 0
+          },
+          "yes": {
+            "no": 6,
+            "yes": 115
+          }
+        }
+      }
+    },
+    {
+      "concept": "histology_type",
+      "oracle_roles": [
+        "effect_modifier"
+      ],
+      "primary_feature_id": "outer_001_feature_192",
+      "direct_feature_ids": [
+        "outer_001_feature_192"
+      ],
+      "current_names": [
+        "lung_cancer_histology"
+      ],
+      "measurement_definition": "Extract the histological type of the lung cancer (e.g., adenocarcinoma, squamous cell carcinoma, large-cell carcinoma) from pathology reports or diagnostic assessments. If only the broad category 'non-small cell lung cancer' (NSCLC) is specified without a subtype, extract that as the histology.",
+      "categories_or_unit": [
+        "Adenocarcinoma",
+        "Squamous cell carcinoma",
+        "Large-cell carcinoma",
+        "Non-small cell lung cancer"
+      ],
+      "lineage_review": "Oracle Other is not equivalent to an unspecified NSCLC subtype. Generic NSCLC is treated as unspecified, not relabeled as Other.",
+      "selected_nuisance_roles": {
+        "treatment": false,
+        "outcome": false
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [],
+        "outcome": []
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": true,
+        "permissive_union": true
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 198,
+        "missing": 2,
+        "agreement_type": "semantic_category_vs_latent_oracle",
+        "correct": 175,
+        "agreement_among_available": 0.8838383838383839,
+        "agreement_all_rows": 0.875,
+        "confusion": {
+          "<missing>": {
+            "adenocarcinoma": 1,
+            "large cell": 0,
+            "other": 1,
+            "squamous": 0
+          },
+          "adenocarcinoma": {
+            "adenocarcinoma": 99,
+            "large cell": 0,
+            "other": 0,
+            "squamous": 0
+          },
+          "large cell": {
+            "adenocarcinoma": 0,
+            "large cell": 16,
+            "other": 20,
+            "squamous": 0
+          },
+          "squamous": {
+            "adenocarcinoma": 0,
+            "large cell": 0,
+            "other": 0,
+            "squamous": 60
+          },
+          "unspecified": {
+            "adenocarcinoma": 0,
+            "large cell": 0,
+            "other": 3,
+            "squamous": 0
+          }
+        }
+      }
+    },
+    {
+      "concept": "egfr_mutation_status",
+      "oracle_roles": [
+        "effect_modifier"
+      ],
+      "primary_feature_id": "outer_001_feature_111",
+      "direct_feature_ids": [
+        "outer_001_feature_111",
+        "outer_001_feature_032"
+      ],
+      "current_names": [
+        "egfr_mutation_status",
+        "biomarker_egfr_status"
+      ],
+      "measurement_definition": "Extract the EGFR mutation status from molecular pathology, NGS, or PCR reports. Map 'Wild-type', 'Negative', or 'No activating mutation detected' to 'Wild-type'. Map 'Mutant', 'Positive', or the identification of a specific activating mutation (e.g., 'exon 19 deletion', 'L858R', 'p.E746_A750del') to 'Mutant'.",
+      "categories_or_unit": [
+        "Wild-type",
+        "Mutant"
+      ],
+      "lineage_review": "Positive/Negative map to Mutant/Wild-type; oracle Unknown is distinct from both. Two direct EGFR features are mapped.",
+      "selected_nuisance_roles": {
+        "treatment": false,
+        "outcome": true
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [],
+        "outcome": [
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": false
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 192,
+        "missing": 8,
+        "agreement_type": "semantic_category_vs_latent_oracle",
+        "correct": 157,
+        "agreement_among_available": 0.8177083333333334,
+        "agreement_all_rows": 0.785,
+        "confusion": {
+          "<missing>": {
+            "negative": 1,
+            "positive": 1,
+            "unknown": 6
+          },
+          "negative": {
+            "negative": 135,
+            "positive": 0,
+            "unknown": 22
+          },
+          "positive": {
+            "negative": 7,
+            "positive": 22,
+            "unknown": 6
+          }
+        }
+      }
+    },
+    {
+      "concept": "baseline_nlr",
+      "oracle_roles": [
+        "effect_modifier"
+      ],
+      "primary_feature_id": "outer_001_feature_228",
+      "direct_feature_ids": [
+        "outer_001_feature_228"
+      ],
+      "current_names": [
+        "neutrophil_to_lymphocyte_ratio"
+      ],
+      "measurement_definition": "Extract the explicitly reported neutrophil-to-lymphocyte ratio (NLR) from laboratory results. If the ratio is not explicitly provided but absolute neutrophil and lymphocyte counts are available in the CBC differential, the value is the quotient of absolute neutrophils divided by absolute lymphocytes.",
+      "categories_or_unit": [
+        "unitless"
+      ],
+      "lineage_review": "Current definition retains the direct concept.",
+      "selected_nuisance_roles": {
+        "treatment": false,
+        "outcome": true
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [],
+        "outcome": [
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": true,
+        "llm_adjudication": true,
+        "permissive_union": true
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 155,
+        "missing": 45,
+        "agreement_type": "continuous_vs_latent_oracle",
+        "correlation": 0.915325224077185,
+        "mae": 0.3222163237880647,
+        "rmse": 1.0622884003267592,
+        "oracle_negative_rows": 11
+      }
+    },
+    {
+      "concept": "brain_metastases_status",
+      "oracle_roles": [
+        "effect_modifier"
+      ],
+      "primary_feature_id": "outer_001_feature_052",
+      "direct_feature_ids": [
+        "outer_001_feature_052"
+      ],
+      "current_names": [
+        "brain_metastases_presence"
+      ],
+      "measurement_definition": "Extract whether brain metastases (intracranial lesions) are present or absent based on radiographic evidence (e.g., brain MRI, CT) or clinical documentation in the pretreatment record.",
+      "categories_or_unit": [
+        "present",
+        "absent"
+      ],
+      "lineage_review": "Oracle Unknown is distinct from Yes/No; the extracted definition has only present/absent and missing.",
+      "selected_nuisance_roles": {
+        "treatment": false,
+        "outcome": true
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [],
+        "outcome": [
+          2,
+          3,
+          4,
+          5
+        ]
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": false
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 197,
+        "missing": 3,
+        "agreement_type": "semantic_category_vs_latent_oracle",
+        "correct": 185,
+        "agreement_among_available": 0.9390862944162437,
+        "agreement_all_rows": 0.925,
+        "confusion": {
+          "<missing>": {
+            "no": 2,
+            "unknown": 1,
+            "yes": 0
+          },
+          "no": {
+            "no": 136,
+            "unknown": 10,
+            "yes": 2
+          },
+          "yes": {
+            "no": 0,
+            "unknown": 0,
+            "yes": 49
+          }
+        }
+      }
+    },
+    {
+      "concept": "baseline_hemoglobin",
+      "oracle_roles": [
+        "effect_modifier"
+      ],
+      "primary_feature_id": "outer_001_feature_155",
+      "direct_feature_ids": [
+        "outer_001_feature_155"
+      ],
+      "current_names": [
+        "hemoglobin_level"
+      ],
+      "measurement_definition": "Extract the numeric value for hemoglobin (Hgb) from the pretreatment complete blood count (CBC) result, reported in g/dL.",
+      "categories_or_unit": [
+        "g/dL"
+      ],
+      "lineage_review": "Current definition retains the direct concept.",
+      "selected_nuisance_roles": {
+        "treatment": false,
+        "outcome": false
+      },
+      "crossfit_selected_inner_folds": {
+        "treatment": [],
+        "outcome": []
+      },
+      "effect_admission": {
+        "all_candidates": true,
+        "current_joint": false,
+        "llm_adjudication": false,
+        "permissive_union": false
+      },
+      "heldout_measurement_agreement": {
+        "rows": 200,
+        "available": 198,
+        "missing": 2,
+        "agreement_type": "continuous_vs_latent_oracle",
+        "correlation": 0.9055641420294619,
+        "mae": 0.48947888074654383,
+        "rmse": 0.7816090708423501,
+        "oracle_negative_rows": 0
+      }
+    }
+  ]
+}

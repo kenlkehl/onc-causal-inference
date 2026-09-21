@@ -1,0 +1,34 @@
+{
+  "artifacts_sha256": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_all_candidates_all_split_features_2026-09-21/evaluation_2026-09-21.json": "2f89a293be91e8fe680bc63efde35f6d8774548f2d9e30beaa6f933cc36a33ca",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_all_candidates_all_split_features_2026-09-21/fold_1_all_features_report_2026-09-21.md": "c58dd81a51f31af6f5facc069bf2723d9d2ad07ad65d0c103d3a708d3c62e24e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_all_candidates_all_split_features_2026-09-21/metrics_by_seed_2026-09-21.csv": "8ef820da0a92397c7cf0fc55d21c6005fb8fee49a6656e7c2424ce749efbf0c0",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_all_candidates_all_split_features_2026-09-21/predictions_with_oracle_2026-09-21.csv": "1880248bc2fb44704c07ebc73fbb71f6560dd5fc4abe8af6783dbc34b8b9e5f3"
+  },
+  "evaluated_fits": 15,
+  "frozen_new_artifact_files_verified": 6,
+  "heldout_patients_per_fit": 180,
+  "methods": 5,
+  "new_seeds": 3,
+  "original_forest_replays_exact": 3,
+  "row_nuisance_checks": [
+    {
+      "finite_ordered_intervals": true,
+      "identical_heldout_patients_nuisances_and_observed_values": true,
+      "seed": 120042
+    },
+    {
+      "finite_ordered_intervals": true,
+      "identical_heldout_patients_nuisances_and_observed_values": true,
+      "seed": 1120042
+    },
+    {
+      "finite_ordered_intervals": true,
+      "identical_heldout_patients_nuisances_and_observed_values": true,
+      "seed": 2120042
+    }
+  ],
+  "saved_fitting_metrics_recomputed": true,
+  "source_and_input_files_verified": 461,
+  "validated_at": "2026-09-21T14:08:30.757432+00:00"
+}

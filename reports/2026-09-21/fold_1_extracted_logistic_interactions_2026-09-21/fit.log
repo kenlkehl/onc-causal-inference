@@ -1,0 +1,47 @@
+{"updated_at": "2026-09-21T20:37:28+00:00", "phase": "cross_validating", "jobs": 20, "candidate_penalties": 13, "final_models": 4}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "ridge", "fold": 1, "nonconverged_candidates": 0}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "ridge", "fold": 2, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:37:37+00:00", "phase": "cross_validation_progress", "completed_jobs": 1, "total_jobs": 20}
+{"updated_at": "2026-09-21T20:37:37+00:00", "phase": "cross_validation_progress", "completed_jobs": 2, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "ridge", "fold": 3, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:37:41+00:00", "phase": "cross_validation_progress", "completed_jobs": 3, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "elastic_net", "fold": 2, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:25+00:00", "phase": "cross_validation_progress", "completed_jobs": 4, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "elastic_net", "fold": 1, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:27+00:00", "phase": "cross_validation_progress", "completed_jobs": 5, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "ridge", "fold": 4, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:29+00:00", "phase": "cross_validation_progress", "completed_jobs": 6, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "elastic_net", "fold": 3, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:30+00:00", "phase": "cross_validation_progress", "completed_jobs": 7, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "ridge", "fold": 5, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:32+00:00", "phase": "cross_validation_progress", "completed_jobs": 8, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "elastic_net", "fold": 4, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:34+00:00", "phase": "cross_validation_progress", "completed_jobs": 9, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "ridge", "fold": 1, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:36+00:00", "phase": "cross_validation_progress", "completed_jobs": 10, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "ridge", "fold": 2, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:38:39+00:00", "phase": "cross_validation_progress", "completed_jobs": 11, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "elastic_net", "fold": 2, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:39:18+00:00", "phase": "cross_validation_progress", "completed_jobs": 12, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "elastic_net", "fold": 1, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:39:20+00:00", "phase": "cross_validation_progress", "completed_jobs": 13, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "ridge", "fold": 3, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:39:21+00:00", "phase": "cross_validation_progress", "completed_jobs": 14, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "elastic_net", "fold": 3, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:39:23+00:00", "phase": "cross_validation_progress", "completed_jobs": 15, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "ridge", "fold": 4, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:39:25+00:00", "phase": "cross_validation_progress", "completed_jobs": 16, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "all_800", "penalty": "elastic_net", "fold": 5, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:39:27+00:00", "phase": "cross_validation_progress", "completed_jobs": 17, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "ridge", "fold": 5, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:39:28+00:00", "phase": "cross_validation_progress", "completed_jobs": 18, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "elastic_net", "fold": 4, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:40:02+00:00", "phase": "cross_validation_progress", "completed_jobs": 19, "total_jobs": 20}
+{"phase": "cv_fold_complete", "cohort": "eligible_720", "penalty": "elastic_net", "fold": 5, "nonconverged_candidates": 0}
+{"updated_at": "2026-09-21T20:40:07+00:00", "phase": "cross_validation_progress", "completed_jobs": 20, "total_jobs": 20}
+{"updated_at": "2026-09-21T20:40:08+00:00", "phase": "fitting_final_models", "final_models": 4}
+{"phase": "final_model_fitted", "cohort": "all_800", "penalty": "elastic_net", "training_rows": 800, "selected_C": 0.1, "iterations": 572, "nonzero_interaction_coefficients": 13}
+{"phase": "final_model_fitted", "cohort": "all_800", "penalty": "ridge", "training_rows": 800, "selected_C": 0.0031622776601683794, "iterations": 43, "nonzero_interaction_coefficients": 991}
+{"phase": "final_model_fitted", "cohort": "eligible_720", "penalty": "elastic_net", "training_rows": 720, "selected_C": 0.1, "iterations": 627, "nonzero_interaction_coefficients": 12}
+{"phase": "final_model_fitted", "cohort": "eligible_720", "penalty": "ridge", "training_rows": 720, "selected_C": 0.0031622776601683794, "iterations": 47, "nonzero_interaction_coefficients": 982}
+{"updated_at": "2026-09-21T20:41:11+00:00", "phase": "predictions_frozen", "new_models": 4}

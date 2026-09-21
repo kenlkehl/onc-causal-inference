@@ -1,0 +1,7 @@
+{
+  "all_source_and_artifact_hashes_verified": true,
+  "baseline_fits_reused": 6,
+  "new_fits": 6,
+  "same_200_heldout_rows_each": true,
+  "validated_at": "2026-09-21T16:48:41+00:00"
+}

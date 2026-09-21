@@ -1,0 +1,9 @@
+{
+  "common_test_rows": 20000,
+  "heldout_rows": 200000,
+  "phase": "generation_complete",
+  "temporary_dataset": "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/structured_oracle_1m.parquet",
+  "total": 1000000,
+  "training_rows": 800000,
+  "updated_at": "2026-09-21T19:26:20+00:00"
+}

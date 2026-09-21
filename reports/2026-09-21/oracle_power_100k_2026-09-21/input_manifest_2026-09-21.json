@@ -1,0 +1,178 @@
+{
+  "confounders": [
+    {
+      "name": "age",
+      "roles": [
+        "confounder"
+      ],
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "Male",
+        "Female",
+        "Other"
+      ],
+      "name": "sex",
+      "roles": [
+        "confounder"
+      ],
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ],
+      "name": "ecog_performance_status",
+      "roles": [
+        "confounder"
+      ],
+      "type": "categorical"
+    },
+    {
+      "name": "creatinine_clearance",
+      "roles": [
+        "confounder"
+      ],
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "None",
+        "Adjuvant",
+        "First\u2011line",
+        "Multiple"
+      ],
+      "name": "prior_platinum_therapy",
+      "roles": [
+        "confounder"
+      ],
+      "type": "categorical"
+    }
+  ],
+  "created_at": "2026-09-21T18:43:35+00:00",
+  "five_crossfit_folds": true,
+  "forest_parameters": {
+    "criterion": "mse",
+    "honest": true,
+    "inference": true,
+    "max_depth": null,
+    "max_features": "sqrt",
+    "max_samples": 0.45,
+    "min_samples_leaf": 10,
+    "n_estimators": 200,
+    "n_jobs": 1,
+    "subforest_size": 4
+  },
+  "forest_seeds": [
+    120042,
+    1120042,
+    2120042
+  ],
+  "heldout_rows": 20000,
+  "modifiers": [
+    {
+      "categories": [
+        "Squamous",
+        "Adenocarcinoma",
+        "Large cell",
+        "Other"
+      ],
+      "name": "histology_type",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "Positive",
+        "Negative",
+        "Unknown"
+      ],
+      "name": "egfr_mutation_status",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "categorical"
+    },
+    {
+      "name": "baseline_nlr",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "Yes",
+        "No",
+        "Unknown"
+      ],
+      "name": "brain_metastases_status",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "categorical"
+    },
+    {
+      "name": "baseline_hemoglobin",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "continuous"
+    }
+  ],
+  "nuisance_parameters": {
+    "cv_folds": 3,
+    "l1_ratio": 0.8,
+    "max_iter": 5000,
+    "maximum_log10_c": 4.0,
+    "minimum_log10_c": -2.0,
+    "n_jobs": 1,
+    "random_state": 120042,
+    "regularization_grid_size": 16,
+    "tolerance": 0.0001
+  },
+  "nuisance_policy": "Fit once per sample size, sharing exact residuals across six forests; no duplicated controls.",
+  "oracle_effects_or_probabilities_used_for_fitting": false,
+  "process_parallelism": "Three independent sample sizes; each estimator retains historical n_jobs=1.",
+  "propensity_filtering": false,
+  "purpose": "Sample-size diagnostic with historical forest/nuisance settings.\n\nNested 800/8,000/80,000 training samples share 20,000 independent test rows.\nUse modifiers-only X and all-oracle X, sharing estimated nuisance residuals.\nThree fixed forest seeds; no oracle probability or effect labels enter fitting.\nAlso evaluate the existing original-cohort 800-patient forests on the new test.\n",
+  "scenarios": {
+    "all": {
+      "W": "none",
+      "X": "C+M"
+    },
+    "modifiers": {
+      "W": "C",
+      "X": "M"
+    }
+  },
+  "sources": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/models/elastic_net_nuisance.py": "2aa470459a08b4a71d7153e8ad93d80a50c803f491f5ea4b4c705cc5f68887c7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/input_manifest_2026-09-21.json": "fb2fa53c43e8f610fe128c0389c1b6010e9d25caa24e73ef298804f256808e3e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/predictions_frozen_2026-09-21.json": "3192216ccdf617dbe28abafc9fe3cbfe16a85dc7b5e1d01940c6e3ccdcdc14b5",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_true_oracle_xw_comparison_2026-09-21/run_true_oracle_xw_comparison.py": "105994bae2502d1106df71d5080c8790d89e652433c7757690d693889874b69d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/generation_manifest_2026-09-21.json": "e81f0931c091ef723146e73ed8db2c460d1323ec1b803111aebb7fee7f7f45fe",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_100k_2026-09-21/run_power_comparison_2026-09-21.py": "d8a8cf5191569a777f299bc61e4a630e038b7da6a9336299b2a82681cd8872f3",
+    "/home/klkehl/thisenv/lib/python3.13/site-packages/econml/dml/causal_forest.py": "1c939a6981c07a5442ff798e438d674053c016c6be48dad46b8fafb5406b245d",
+    "/home/klkehl/thisenv/lib/python3.13/site-packages/econml/grf/classes.py": "47f5b70114070404648c4f8e69798a84c1435d7c8a17083dc84c5015746a13a7"
+  },
+  "temporary_dataset": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/structured_oracle_100k.parquet",
+  "temporary_directory": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t",
+  "training_sizes": [
+    800,
+    8000,
+    80000
+  ],
+  "versions": {
+    "econml": "0.16.0",
+    "numpy": "2.3.5",
+    "pandas": "3.0.5",
+    "scikit-learn": "1.6.1"
+  }
+}

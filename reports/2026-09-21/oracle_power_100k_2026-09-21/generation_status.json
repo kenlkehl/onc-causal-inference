@@ -1,0 +1,13 @@
+{
+  "dataset_sha256": "9e4f75d2c888805879479f520428936fd28c4e3e8bce77270ce659cce247efb0",
+  "heldout_rows": 20000,
+  "phase": "generation_complete",
+  "temporary_dataset": "/tmp/oci_oracle_power_100k_2026-09-21_f9irsz3t/structured_oracle_100k.parquet",
+  "total": 100000,
+  "training_sizes": [
+    800,
+    8000,
+    80000
+  ],
+  "updated_at": "2026-09-21T18:38:53+00:00"
+}

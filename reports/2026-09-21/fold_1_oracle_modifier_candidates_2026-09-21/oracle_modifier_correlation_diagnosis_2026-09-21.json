@@ -1,0 +1,124 @@
+{
+  "affine_rescaling_correlation_check": {
+    "after_multiply_by_3_add_0_1": 0.44696510084931007,
+    "before": 0.44696510084931057
+  },
+  "audited_at": "2026-09-21T14:32:02.331819+00:00",
+  "baseline_risk_quantiles_eligible": {
+    "maximum": 0.972040045003356,
+    "median": 0.46865550231234376,
+    "minimum": 0.026528100992398846,
+    "p10": 0.14097314232140784,
+    "p90": 0.8479969705887759
+  },
+  "contribution_sizes_identified": false,
+  "dgp_max_absolute_errors": {
+    "true_ite_prob": 2.220446049250313e-16,
+    "true_y0_prob": 2.220446049250313e-16,
+    "true_y1_prob": 2.220446049250313e-16
+  },
+  "dgp_rows_verified": 1000,
+  "eligible_rows": 180,
+  "illustration_constant_log_odds_effect": 1.0,
+  "illustration_risk_differences": {
+    "0.1": 0.131969316684074,
+    "0.5": 0.2310585786300049,
+    "0.9": 0.06072969944994944
+  },
+  "measurement_availability": [
+    {
+      "available": 178,
+      "candidate": "lung_cancer_histology",
+      "eligible_rows": 180,
+      "missing": 2
+    },
+    {
+      "available": 172,
+      "candidate": "egfr_mutation_status",
+      "eligible_rows": 180,
+      "missing": 8
+    },
+    {
+      "available": 171,
+      "candidate": "biomarker_egfr_status",
+      "eligible_rows": 180,
+      "missing": 9
+    },
+    {
+      "available": 141,
+      "candidate": "neutrophil_to_lymphocyte_ratio",
+      "correlation_vs_latent_among_available": 0.9104808793316592,
+      "eligible_rows": 180,
+      "mae_vs_latent_among_available": 0.34133200759517934,
+      "missing": 39
+    },
+    {
+      "available": 177,
+      "candidate": "brain_metastases_presence",
+      "eligible_rows": 180,
+      "missing": 3
+    },
+    {
+      "available": 178,
+      "candidate": "hemoglobin_level",
+      "correlation_vs_latent_among_available": 0.9027864936816968,
+      "eligible_rows": 180,
+      "mae_vs_latent_among_available": 0.5063933885127694,
+      "missing": 2
+    }
+  ],
+  "new_forest_fits": 0,
+  "nuisance_comparison": {
+    "marginal_outcome": {
+      "bias": -0.016675605761110317,
+      "correlation_vs_full_latent_probability": 0.8302140065916491,
+      "rmse_vs_full_latent_probability": 0.15188982598816608
+    },
+    "propensity": {
+      "bias": 0.019388131242641164,
+      "correlation_vs_full_latent_probability": 0.9195489989760364,
+      "rmse_vs_full_latent_probability": 0.12429413744619938
+    }
+  },
+  "ongoing_experiment_modified": false,
+  "probability_effect_formula": "sigmoid(g(confounders)+h(modifiers)) - sigmoid(g(confounders))",
+  "purpose": "Explain remaining correlation limits using saved predictions, exact DGP reconstruction, and a read-only measurement/nuisance audit; no new fitting.",
+  "source_sha256": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/comparison_nuisances/heldout.csv": "0b6af7764d9547cdb50ff7d045343407435cae1f1de77c9b5f834718c643dcc7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/evaluation_2026-09-21.json": "28422a8d641f6877f18063e12fa7c2ad4efb819f3171659c2c4958a10fbcd1c3",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/input_manifest_2026-09-21.json": "f47f3af595c5c5bce7795f2e9a4ce7d08fba024f2a42a4bb33357bffd1db8fde",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/predictions_frozen_2026-09-21.json": "92911c49fddb67cab08bbbcf167054cbc9c45d2f448b0a96a20a09d6a66567c6",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/run_oracle_modifier_diagnostic.py": "a94d5ece5a57ec0d42d9e44c8e4d6fba3f07dc6697152c552c03a93ee6553e82",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/dataset.parquet": "abed84f263290f20f59a04e565833676fa4b656971117a4b2deaa7a666d4c396",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/metadata.json": "52897cf1ca16241a141bd9b896757d4767df1177658bea2170ef48b82a8aa437",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/synthetic_data/generator.py": "d2b2a91eb00400a3a4707a4c02c2aae177d7ba65599a37fde0328ee5a505cd1c"
+  },
+  "unrepresented_oracle_categories": {
+    "brain_metastases_status": {
+      "extracted_values": {
+        "absent": 10,
+        "nan": 1
+      },
+      "oracle_category": "Unknown",
+      "rows": 11
+    },
+    "egfr_mutation_status": {
+      "extracted_values": {
+        "Mutant": 5,
+        "Wild-type": 19,
+        "nan": 6
+      },
+      "oracle_category": "Unknown",
+      "rows": 30
+    },
+    "histology_type": {
+      "extracted_values": {
+        "Large-cell carcinoma": 19,
+        "Non-small cell lung cancer": 3,
+        "nan": 1
+      },
+      "oracle_category": "Other",
+      "rows": 23
+    }
+  }
+}

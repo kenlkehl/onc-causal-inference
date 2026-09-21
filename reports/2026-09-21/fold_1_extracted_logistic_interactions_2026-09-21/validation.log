@@ -1,0 +1,6 @@
+All 260 CV predictions/losses, 20 inner encoders, and four selected penalties verified.
+{"cohort": "all_800", "penalty": "elastic_net", "maximum_prediction_error": 2.220446049250313e-16, "effects_independently_reconstructed_from_coefficients": true, "both_test_set_metrics_verified": true}
+{"cohort": "all_800", "penalty": "ridge", "maximum_prediction_error": 5.551115123125783e-16, "effects_independently_reconstructed_from_coefficients": true, "both_test_set_metrics_verified": true}
+{"cohort": "eligible_720", "penalty": "elastic_net", "maximum_prediction_error": 2.220446049250313e-16, "effects_independently_reconstructed_from_coefficients": true, "both_test_set_metrics_verified": true}
+{"cohort": "eligible_720", "penalty": "ridge", "maximum_prediction_error": 4.440892098500626e-16, "effects_independently_reconstructed_from_coefficients": true, "both_test_set_metrics_verified": true}
+All CV decisions, four logistic models, scores, and frozen forest references verified.

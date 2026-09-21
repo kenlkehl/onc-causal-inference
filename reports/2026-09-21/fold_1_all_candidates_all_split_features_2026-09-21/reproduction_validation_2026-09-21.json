@@ -1,0 +1,23 @@
+{
+  "completed_at": "2026-09-21T14:05:19+00:00",
+  "results": [
+    {
+      "baseline_prediction_interval_max_abs_error": 0.0,
+      "original_fingerprint_exact_match": true,
+      "replay_seconds": 0.2998181402217597,
+      "seed": 120042
+    },
+    {
+      "baseline_prediction_interval_max_abs_error": 0.0,
+      "original_fingerprint_exact_match": true,
+      "replay_seconds": 0.34102525003254414,
+      "seed": 1120042
+    },
+    {
+      "baseline_prediction_interval_max_abs_error": 0.0,
+      "original_fingerprint_exact_match": true,
+      "replay_seconds": 0.3251921811606735,
+      "seed": 2120042
+    }
+  ]
+}

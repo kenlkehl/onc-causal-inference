@@ -1,0 +1,49 @@
+{
+  "all_source_and_artifact_hashes_verified": true,
+  "fits": [
+    {
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_independently_recomputed_on_both_test_sets": true,
+      "scenario": "all",
+      "seed": 1120042
+    },
+    {
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_independently_recomputed_on_both_test_sets": true,
+      "scenario": "all",
+      "seed": 120042
+    },
+    {
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_independently_recomputed_on_both_test_sets": true,
+      "scenario": "all",
+      "seed": 2120042
+    },
+    {
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_independently_recomputed_on_both_test_sets": true,
+      "scenario": "modifiers",
+      "seed": 1120042
+    },
+    {
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_independently_recomputed_on_both_test_sets": true,
+      "scenario": "modifiers",
+      "seed": 2120042
+    },
+    {
+      "maximum_prediction_and_interval_error": 0.0,
+      "metrics_independently_recomputed_on_both_test_sets": true,
+      "scenario": "modifiers",
+      "seed": 120042
+    }
+  ],
+  "full_test_predictions_and_intervals_per_forest": 200000,
+  "maximum_prediction_and_interval_error": 0.0,
+  "nuisance_clones_checked": 10,
+  "out_of_fold_nuisance_predictions_independently_reproduced": 800000,
+  "previous_splits_preserved": true,
+  "saved_forests_reloaded": 6,
+  "validated_at": "2026-09-21T20:03:54+00:00",
+  "validation_script_sha256": "52d645f654d52823edf9f93b89c3394a8eaf4e38b761bce0bf5fae4aa9e0a598"
+}

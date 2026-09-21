@@ -1,0 +1,15 @@
+      model training_cohort     test_set  selected_C  correlation     rmse     bias  prediction_sd
+elastic_net         all_800     full_200    0.100000     0.506599 0.172816 0.058324       0.108306
+elastic_net         all_800 eligible_180    0.100000     0.497732 0.180539 0.061467       0.110610
+      ridge         all_800     full_200    0.003162     0.268838 0.211207 0.106807       0.070191
+      ridge         all_800 eligible_180    0.003162     0.272369 0.218002 0.109527       0.070131
+elastic_net    eligible_720     full_200    0.100000     0.530122 0.171749 0.063441       0.106172
+elastic_net    eligible_720 eligible_180    0.100000     0.520196 0.179459 0.066216       0.109066
+      ridge    eligible_720     full_200    0.003162     0.292164 0.208026 0.103314       0.070708
+      ridge    eligible_720 eligible_180    0.003162     0.302482 0.214043 0.105458       0.069590
+                    model  correlation     rmse   r_loss  prediction_sd
+              elastic_net     0.520196 0.179459 0.188961       0.109066
+                    ridge     0.302482 0.214043 0.187874       0.069590
+forest_all_split_features     0.336391 0.188257 0.189796       0.033074
+              forest_sqrt     0.184093 0.194097 0.190295       0.024980
+{"updated_at": "2026-09-21T20:42:56+00:00", "phase": "evaluated", "new_models": 4}

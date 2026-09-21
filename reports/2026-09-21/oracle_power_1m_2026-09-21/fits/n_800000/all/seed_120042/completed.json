@@ -1,0 +1,8 @@
+{
+  "completed_at": "2026-09-21T19:51:23+00:00",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/fits/n_800000/all/seed_120042/fit_audit.json": "1ce1001648ae3a8277c0aa16b376b528f16e121a4fa1366e8f95798e0ea63353",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/oracle_power_1m_2026-09-21/fits/n_800000/all/seed_120042/predictions.parquet": "63296d1b92ad9eceb6a83b54cdda545df41da1f6ed89a562c0be390d87341ff6",
+    "/tmp/oci_oracle_power_1m_2026-09-21_o2_aun8d/models/all/seed_120042.joblib": "c8d53f2dcb8b4434d8cbce1139d5d496ce5b7ed72881dbada6c6dd64338458c9"
+  }
+}

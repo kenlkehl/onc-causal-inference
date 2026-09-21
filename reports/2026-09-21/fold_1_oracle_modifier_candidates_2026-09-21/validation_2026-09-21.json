@@ -1,0 +1,21 @@
+{
+  "artifact_hashes": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/evaluation_2026-09-21.json": "28422a8d641f6877f18063e12fa7c2ad4efb819f3171659c2c4958a10fbcd1c3",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/fold_1_oracle_modifier_candidates_report_2026-09-21.md": "51f16ada0c5f57810482bc0223370e4d57401c9e3d506d9d7ec5fe14cccb3018",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/metrics_by_seed_2026-09-21.csv": "d608002c78f741bfc9a633c2bf3ff14171d375c13ad6705ce83382c110098c89",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_oracle_modifier_candidates_2026-09-21/predictions_with_oracle_2026-09-21.csv": "f14bc779672026e476e9033a8c880d94f88fd9ea18756458c44b1970e3b2cafa"
+  },
+  "evaluated_fits": 21,
+  "frozen_new_artifacts_verified": 12,
+  "heldout_rows_each": 180,
+  "input_files_verified": 471,
+  "new_fits": 6,
+  "oracle_identities_used_for_candidate_selection": true,
+  "oracle_values_excluded_from_predictors_and_responses": true,
+  "original_full_design_and_subset_columns_exact": true,
+  "report_links_verified": 7,
+  "report_validated_at": "2026-09-21T14:19:09.629279+00:00",
+  "saved_fitting_metrics_recomputed": true,
+  "shared_rows_nuisances_and_observed_values_exact": true,
+  "validated_at": "2026-09-21T14:16:41+00:00"
+}

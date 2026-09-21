@@ -1,0 +1,177 @@
+{
+  "mean_validation_log_loss": 0.5834775795825399,
+  "path": [
+    {
+      "C": 0.0001,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.6579113358292038,
+        0.6620612498756269,
+        0.6619579639003822,
+        0.6612664947672781,
+        0.659600863146017
+      ],
+      "mean_validation_log_loss": 0.6605595815037016,
+      "se_validation_log_loss": 0.0007950645769579033
+    },
+    {
+      "C": 0.00031622776601683794,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.6309272835062018,
+        0.634952128306393,
+        0.6359355137330941,
+        0.6385161087629998,
+        0.6356362205865935
+      ],
+      "mean_validation_log_loss": 0.6351934509790563,
+      "se_validation_log_loss": 0.0012256667235483031
+    },
+    {
+      "C": 0.001,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.5963953148960458,
+        0.6009780281869456,
+        0.6055816867984399,
+        0.6103580143800126,
+        0.6096870358063539
+      ],
+      "mean_validation_log_loss": 0.6046000160135596,
+      "se_validation_log_loss": 0.002649829327844679
+    },
+    {
+      "C": 0.0031622776601683794,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.5678281221332844,
+        0.5779025941789669,
+        0.582905784950381,
+        0.5901229350635155,
+        0.5986284615865519
+      ],
+      "mean_validation_log_loss": 0.5834775795825399,
+      "se_validation_log_loss": 0.005244153433946726
+    },
+    {
+      "C": 0.01,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.5664720305743097,
+        0.5884421749920175,
+        0.5881001196551572,
+        0.5995990681756759,
+        0.6209311559399473
+      ],
+      "mean_validation_log_loss": 0.5927089098674215,
+      "se_validation_log_loss": 0.008865069835173253
+    },
+    {
+      "C": 0.03162277660168379,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.6170993632501912,
+        0.6540949219641148,
+        0.6463339290474367,
+        0.6627371607116366,
+        0.6951746663140447
+      ],
+      "mean_validation_log_loss": 0.6550880082574848,
+      "se_validation_log_loss": 0.01262182031266184
+    },
+    {
+      "C": 0.1,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.7462183094154435,
+        0.7954086063710933,
+        0.7885284970532814,
+        0.8096460838533815,
+        0.8522556403322038
+      ],
+      "mean_validation_log_loss": 0.7984114274050806,
+      "se_validation_log_loss": 0.017111732208098595
+    },
+    {
+      "C": 0.31622776601683794,
+      "all_folds_converged": true,
+      "fold_losses": [
+        0.9608135647510243,
+        1.0252062435142675,
+        1.0326371121675364,
+        1.055845035072927,
+        1.113284822955895
+      ],
+      "mean_validation_log_loss": 1.0375573556923299,
+      "se_validation_log_loss": 0.024632759418813596
+    },
+    {
+      "C": 1.0,
+      "all_folds_converged": true,
+      "fold_losses": [
+        1.2452905709596604,
+        1.3347105401878447,
+        1.3562095262827882,
+        1.3805503800372692,
+        1.4570258547167665
+      ],
+      "mean_validation_log_loss": 1.354757374436866,
+      "se_validation_log_loss": 0.03428635775973537
+    },
+    {
+      "C": 3.1622776601683795,
+      "all_folds_converged": true,
+      "fold_losses": [
+        1.5743864769798817,
+        1.6944000129654184,
+        1.7371932611548837,
+        1.7613270089984465,
+        1.8532663765162891
+      ],
+      "mean_validation_log_loss": 1.7241146273229842,
+      "se_validation_log_loss": 0.045572724103428955
+    },
+    {
+      "C": 10.0,
+      "all_folds_converged": true,
+      "fold_losses": [
+        1.9283313842855494,
+        2.0886758774606764,
+        2.1482359801702513,
+        2.169509519757046,
+        2.2820788678514408
+      ],
+      "mean_validation_log_loss": 2.123366325904993,
+      "se_validation_log_loss": 0.05795663062972697
+    },
+    {
+      "C": 31.622776601683793,
+      "all_folds_converged": true,
+      "fold_losses": [
+        2.29566395327259,
+        2.516695313877584,
+        2.5762381430284567,
+        2.5945795574120307,
+        2.7408244002962996
+      ],
+      "mean_validation_log_loss": 2.5448002735773922,
+      "se_validation_log_loss": 0.07237077098019849
+    },
+    {
+      "C": 100.0,
+      "all_folds_converged": true,
+      "fold_losses": [
+        2.2961924416605894,
+        2.516807907860439,
+        2.5811851797940215,
+        2.9429913542095107,
+        2.7408244002962996
+      ],
+      "mean_validation_log_loss": 2.615600256764172,
+      "se_validation_log_loss": 0.10858906364911727
+    }
+  ],
+  "selected_C": 0.0031622776601683794,
+  "selected_on_grid_boundary": false,
+  "selection_rule": "Minimum mean observed-outcome validation log loss among C values converged in all five folds; ties use smaller C."
+}

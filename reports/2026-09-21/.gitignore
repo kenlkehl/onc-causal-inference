@@ -1,0 +1,6 @@
+# Reproducible local experiment arrays and model bundles. Reports, scripts,
+# metrics, coefficient tables, audit records, and source hashes are versioned.
+*.joblib
+*.parquet
+*.pkl
+*.npz

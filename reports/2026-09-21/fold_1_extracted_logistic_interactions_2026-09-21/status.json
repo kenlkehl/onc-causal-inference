@@ -1,0 +1,14 @@
+{
+  "phase": "completed",
+  "updated_at": "2026-09-21T20:57:06+00:00",
+  "new_models": 4,
+  "independently_validated_models": 4,
+  "frozen_artifacts_verified": 80,
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/fold_1_extracted_logistic_report_2026-09-21.md",
+  "artifacts": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/fold_1_extracted_logistic_report_2026-09-21.md": "2336252404431d44fa939beebd9cc83be0c5048cef91da9226a549b2dee2bfbf",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/variable_selection_audit_2026-09-21.json": "708c4c53fa33adba1400114c10035254e7bcc6c5d35d316eb443b1612f0802b9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/oracle_variable_selection_2026-09-21.csv": "26127ec55191300915806aa913b09d8926518c4cd05f914ff39c34fbe16d5350",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/independent_validation_2026-09-21.json": "36d5716bdbd02f9b9129696c42fcbb32de609e79aa28bc10b222cbf10cb00a06"
+  }
+}

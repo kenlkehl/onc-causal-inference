@@ -1,0 +1,180 @@
+{
+  "all_source_and_artifact_hashes_verified": true,
+  "fits": [
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 10,
+      "minimum_effect_patients_per_leaf": 10.0,
+      "recomputed_metrics": {
+        "bias": -0.029877249023563545,
+        "correlation": 0.6737123348863429,
+        "mae": 0.10922266817884661,
+        "prediction_sd": 0.10764723380447369,
+        "r_loss": 0.16815561371410034,
+        "rmse": 0.14343243036633882
+      },
+      "seed": 120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 20,
+      "minimum_effect_patients_per_leaf": 20.0,
+      "recomputed_metrics": {
+        "bias": -0.03322752428225958,
+        "correlation": 0.6803313898627594,
+        "mae": 0.11379550829770682,
+        "prediction_sd": 0.08367250867983275,
+        "r_loss": 0.16865882082168512,
+        "rmse": 0.1485418419770338
+      },
+      "seed": 120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 40,
+      "minimum_effect_patients_per_leaf": 40.0,
+      "recomputed_metrics": {
+        "bias": -0.0341810636924849,
+        "correlation": 0.6849820980479602,
+        "mae": 0.11844380042794793,
+        "prediction_sd": 0.06678302544336838,
+        "r_loss": 0.1690874831575919,
+        "rmse": 0.1542501679611105
+      },
+      "seed": 120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 80,
+      "minimum_effect_patients_per_leaf": 80.0,
+      "recomputed_metrics": {
+        "bias": -0.03507508865289757,
+        "correlation": 0.6779231408122557,
+        "mae": 0.12735359952119218,
+        "prediction_sd": 0.046090091356271276,
+        "r_loss": 0.1699391780550033,
+        "rmse": 0.1642356750049493
+      },
+      "seed": 120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 10,
+      "minimum_effect_patients_per_leaf": 10.0,
+      "recomputed_metrics": {
+        "bias": -0.030141235891445448,
+        "correlation": 0.653595303962455,
+        "mae": 0.11182016963382044,
+        "prediction_sd": 0.10871071561238299,
+        "r_loss": 0.1681791800715005,
+        "rmse": 0.14619133770650816
+      },
+      "seed": 1120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 20,
+      "minimum_effect_patients_per_leaf": 20.0,
+      "recomputed_metrics": {
+        "bias": -0.030397492274336062,
+        "correlation": 0.6681360503634686,
+        "mae": 0.11286313720832503,
+        "prediction_sd": 0.08766238628138512,
+        "r_loss": 0.16821792329971472,
+        "rmse": 0.14815303856961995
+      },
+      "seed": 1120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 40,
+      "minimum_effect_patients_per_leaf": 40.0,
+      "recomputed_metrics": {
+        "bias": -0.032451093057811284,
+        "correlation": 0.6637499690627331,
+        "mae": 0.11662507153171753,
+        "prediction_sd": 0.07214403606538208,
+        "r_loss": 0.1686537050495743,
+        "rmse": 0.15367991644851955
+      },
+      "seed": 1120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 80,
+      "minimum_effect_patients_per_leaf": 80.0,
+      "recomputed_metrics": {
+        "bias": -0.03365037361211722,
+        "correlation": 0.6798849436702774,
+        "mae": 0.12652227609126535,
+        "prediction_sd": 0.04741394112481168,
+        "r_loss": 0.16979060022034992,
+        "rmse": 0.163176773894559
+      },
+      "seed": 1120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 10,
+      "minimum_effect_patients_per_leaf": 10.0,
+      "recomputed_metrics": {
+        "bias": -0.03488327516608802,
+        "correlation": 0.6715107017016366,
+        "mae": 0.11206793316426573,
+        "prediction_sd": 0.10261194075620485,
+        "r_loss": 0.16813804757816606,
+        "rmse": 0.14559991433655922
+      },
+      "seed": 2120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 20,
+      "minimum_effect_patients_per_leaf": 20.0,
+      "recomputed_metrics": {
+        "bias": -0.035526312256642274,
+        "correlation": 0.663990194522493,
+        "mae": 0.11435834944543602,
+        "prediction_sd": 0.08303830438386482,
+        "r_loss": 0.16818582396074683,
+        "rmse": 0.15096260491510166
+      },
+      "seed": 2120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 40,
+      "minimum_effect_patients_per_leaf": 40.0,
+      "recomputed_metrics": {
+        "bias": -0.03638975628506065,
+        "correlation": 0.6573172219562782,
+        "mae": 0.12064619355466419,
+        "prediction_sd": 0.06624514183328435,
+        "r_loss": 0.16898935936977005,
+        "rmse": 0.15717941879255734
+      },
+      "seed": 2120042
+    },
+    {
+      "max_reloaded_prediction_error": 0.0,
+      "min_samples_leaf": 80,
+      "minimum_effect_patients_per_leaf": 80.0,
+      "recomputed_metrics": {
+        "bias": -0.03672513121664352,
+        "correlation": 0.6683880113121987,
+        "mae": 0.12812455988834973,
+        "prediction_sd": 0.045909783946731356,
+        "r_loss": 0.17009096080978728,
+        "rmse": 0.16518438496636334
+      },
+      "seed": 2120042
+    }
+  ],
+  "max_reloaded_prediction_error": 0.0,
+  "models_reloaded_and_metrics_recomputed": 12,
+  "nuisance_predictions_match_original_fitted_models": true,
+  "observed_treatment_and_outcome_match_dataset": true,
+  "only_minimum_leaf_size_changed": true,
+  "validated_at": "2026-09-21T17:55:43+00:00",
+  "validation_script_sha256": "f11b18d598bfcd7dcf43cd731ba3055c4c9ec95cf8fa3586e53a3445da1073db"
+}

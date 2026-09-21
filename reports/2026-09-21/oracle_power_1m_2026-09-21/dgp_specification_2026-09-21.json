@@ -1,0 +1,284 @@
+{
+  "features": [
+    {
+      "description": "Patient age at initiation of chemotherapy, measured in years",
+      "name": "age",
+      "roles": [
+        "confounder"
+      ],
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "Male",
+        "Female",
+        "Other"
+      ],
+      "description": "Self\u2011identified sex of the patient",
+      "name": "sex",
+      "roles": [
+        "confounder"
+      ],
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3"
+      ],
+      "description": "Eastern Cooperative Oncology Group performance status score at baseline",
+      "name": "ecog_performance_status",
+      "roles": [
+        "confounder"
+      ],
+      "type": "categorical"
+    },
+    {
+      "description": "Estimated creatinine clearance (ml/min) calculated by the Cockcroft\u2011Gault formula",
+      "name": "creatinine_clearance",
+      "roles": [
+        "confounder"
+      ],
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "None",
+        "Adjuvant",
+        "First\u2011line",
+        "Multiple"
+      ],
+      "description": "History of platinum\u2011based chemotherapy before the current regimen",
+      "name": "prior_platinum_therapy",
+      "roles": [
+        "confounder"
+      ],
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "Squamous",
+        "Adenocarcinoma",
+        "Large cell",
+        "Other"
+      ],
+      "description": "Pathologic histology of the non\u2011small cell lung cancer",
+      "name": "histology_type",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "categorical"
+    },
+    {
+      "categories": [
+        "Positive",
+        "Negative",
+        "Unknown"
+      ],
+      "description": "Presence of activating EGFR mutation as determined by molecular testing",
+      "name": "egfr_mutation_status",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "categorical"
+    },
+    {
+      "description": "Baseline neutrophil\u2011to\u2011lymphocyte ratio from the pre\u2011treatment complete blood count",
+      "name": "baseline_nlr",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "continuous"
+    },
+    {
+      "categories": [
+        "Yes",
+        "No",
+        "Unknown"
+      ],
+      "description": "Presence of radiologically confirmed brain metastases at baseline",
+      "name": "brain_metastases_status",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "categorical"
+    },
+    {
+      "description": "Hemoglobin concentration (g/dL) measured within 14 days before chemotherapy start",
+      "name": "baseline_hemoglobin",
+      "roles": [
+        "effect_modifier"
+      ],
+      "type": "continuous"
+    }
+  ],
+  "outcome_equation": {
+    "coefficients": {
+      "age": -1.0122282947997492,
+      "creatinine_clearance": 0.3374094315999164,
+      "ecog_performance_status_1": -1.3496377263996655,
+      "ecog_performance_status_2": -2.699275452799331,
+      "ecog_performance_status_3": -4.048913179198997,
+      "prior_platinum_therapy_Adjuvant": -0.3374094315999164,
+      "prior_platinum_therapy_Multiple": -1.3496377263996655,
+      "sex_Female": -0.1687047157999582,
+      "sex_Other": 0.0
+    },
+    "interactions": [
+      {
+        "coefficient": -0.04498792421332219,
+        "terms": [
+          "age",
+          "creatinine_clearance"
+        ]
+      }
+    ],
+    "intercept": 2.4327635207746243,
+    "original_intercept": -1.1,
+    "treatment_coefficient": 0.2,
+    "treatment_interactions": [
+      {
+        "coefficient": -0.28220898125536326,
+        "term": "histology_type_Adenocarcinoma"
+      },
+      {
+        "coefficient": 1.0138350529314692,
+        "term": "histology_type_Large cell"
+      },
+      {
+        "coefficient": 0.5218462936080686,
+        "term": "histology_type_Other"
+      },
+      {
+        "coefficient": 0.22192202050287638,
+        "term": "egfr_mutation_status_Negative"
+      },
+      {
+        "coefficient": -0.7737503667285599,
+        "term": "egfr_mutation_status_Unknown"
+      },
+      {
+        "coefficient": -0.7738046224041232,
+        "term": "baseline_nlr"
+      },
+      {
+        "coefficient": -0.9940450482201069,
+        "term": "brain_metastases_status_No"
+      },
+      {
+        "coefficient": 0.8236752347424601,
+        "term": "brain_metastases_status_Unknown"
+      },
+      {
+        "coefficient": 0.22744772425663304,
+        "term": "baseline_hemoglobin"
+      }
+    ]
+  },
+  "sampling_options": {
+    "enforce_positivity": false,
+    "max_treatment_rate_per_stratum": 0.9,
+    "min_treatment_rate_per_stratum": 0.1,
+    "outcome_noise_std": 1.0,
+    "outcome_type": "binary"
+  },
+  "summary_statistics": {
+    "age": {
+      "mean": 66.0,
+      "std": 11.0,
+      "type": "continuous"
+    },
+    "baseline_hemoglobin": {
+      "mean": 13.2,
+      "std": 1.4,
+      "type": "continuous"
+    },
+    "baseline_nlr": {
+      "mean": 4.5,
+      "std": 2.5,
+      "type": "continuous"
+    },
+    "brain_metastases_status": {
+      "proportions": {
+        "No": 0.7,
+        "Unknown": 0.05,
+        "Yes": 0.25
+      },
+      "type": "categorical"
+    },
+    "creatinine_clearance": {
+      "mean": 80.0,
+      "std": 25.0,
+      "type": "continuous"
+    },
+    "ecog_performance_status": {
+      "proportions": {
+        "0": 0.15,
+        "1": 0.35,
+        "2": 0.35,
+        "3": 0.15
+      },
+      "type": "categorical"
+    },
+    "egfr_mutation_status": {
+      "proportions": {
+        "Negative": 0.7,
+        "Positive": 0.15,
+        "Unknown": 0.15
+      },
+      "type": "categorical"
+    },
+    "histology_type": {
+      "proportions": {
+        "Adenocarcinoma": 0.55,
+        "Large cell": 0.05,
+        "Other": 0.1,
+        "Squamous": 0.3
+      },
+      "type": "categorical"
+    },
+    "prior_platinum_therapy": {
+      "proportions": {
+        "Adjuvant": 0.25,
+        "First-line": 0.35,
+        "Multiple": 0.1,
+        "None": 0.3
+      },
+      "type": "categorical"
+    },
+    "sex": {
+      "proportions": {
+        "Female": 0.44,
+        "Male": 0.55,
+        "Other": 0.01
+      },
+      "type": "categorical"
+    }
+  },
+  "treatment_equation": {
+    "coefficients": {
+      "age": -1.390803366004274,
+      "creatinine_clearance": 1.0817359513366573,
+      "ecog_performance_status_1": -0.6799483122687562,
+      "ecog_performance_status_2": -1.6998707806718902,
+      "ecog_performance_status_3": -2.410725834407408,
+      "prior_platinum_therapy_Adjuvant": 0.5563213464017095,
+      "prior_platinum_therapy_Multiple": -0.865388761069326,
+      "sex_Female": 0.3708808976011397,
+      "sex_Other": 0.0
+    },
+    "interactions": [
+      {
+        "coefficient": 0.0721157300891105,
+        "terms": [
+          "age",
+          "creatinine_clearance"
+        ]
+      }
+    ],
+    "intercept": 0.9114398915132103,
+    "original_intercept": -0.3
+  }
+}
