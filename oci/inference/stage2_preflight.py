@@ -45,6 +45,12 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
                 "Stage 2 selection mode changed; use guarded --stage2-reselect "
                 "for a completed run or preserve the partial Stage 2 tree first"
             )
+        if requested == "multi_model":
+            from .stage2_elastic_net_selection import statistical_selection_config_from_mapping
+
+            saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))
+            if saved_policy.public_dict() != config.stage2.statistical_selection.public_dict():
+                raise RuntimeError("Stage 2 multi-model policy changed; use guarded --stage2-reselect")
     for path in root.glob("outer_*/selection/elastic_net_selection.json"):
         authority = _object(path).get("selection_authority", "llm_roles")
         if authority != requested:

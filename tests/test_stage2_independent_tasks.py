@@ -110,6 +110,7 @@ def test_default_config_does_not_change_legacy_fingerprint():
         "min_propensity",
         "max_propensity",
         "selection_mode",
+        "multi_model",
         "nuisance_selection_frequency",
         "modifier_selection_frequency",
         "nuisance_forest_trees",

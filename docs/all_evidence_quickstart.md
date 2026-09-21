@@ -1,5 +1,10 @@
 # All-evidence quickstart
 
+For Stage 2 selection across multiple model families and repeated subsets, use
+`example_configs/research_all_evidence_multi_model.json` and read the
+[multi-model design and configuration guide](stage2_multi_model.md). This is an
+explicit mode; the existing example and omitted-selector behavior are unchanged.
+
 1. Copy the example config:
 
    ```bash

@@ -1201,6 +1201,11 @@ class PlainHandoffStage2Config:
                 "Stage2RoleAdjudicationConfig object"
             )
         self.role_adjudication.validate()
+        if (
+            self.statistical_selection.selection_mode == "multi_model"
+            and not self.role_adjudication.enabled
+        ):
+            raise ValueError("multi_model selection requires role_adjudication.enabled=true")
         if self.estimation_trees < 10:
             raise ValueError("stage2.estimation_trees must be at least 10")
         validate_propensity_bounds(self.min_propensity, self.max_propensity)

@@ -1,0 +1,26 @@
+{
+  "date": "2026-09-21",
+  "checkpoint_commit": "de37fff",
+  "full_suite_passed": 797,
+  "full_suite_seconds": 149.84,
+  "production_benchmark_run": false,
+  "live_llm_run": false,
+  "source_sha256": {
+    "oci/inference/stage2_multi_model_config.py": "d3f52e7dc996910306069521ea0d11e4b05ff7224050d4f1b88f68f1d62b8869",
+    "oci/inference/stage2_multi_model_adjudication.py": "28f4f61a65a0e6601a43d17dd5189a02c7dc09a46697d74046e25f1285c3c94a",
+    "oci/inference/stage2_multi_model_selection.py": "b63fe64642c2e7449d047330407b4f196dd39aa7563d699697864b50fbf794da",
+    "oci/inference/plain_handoff_stage2.py": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a",
+    "oci/inference/plain_handoff_stage2_analysis.py": "8ed0272a9066917b68cac35eaa5f7be597b356202f7991c7044acd5bb76149d1",
+    "oci/inference/stage2_elastic_net_selection.py": "279abd82a8e688113ac31eb100369b1e1e8e8a7e7a0d434b8d33828e94945ece",
+    "oci/inference/stage2_role_adjudication.py": "53ea81964a4507bf35fdffb9552396167133cc2069601b34f939ba4125fa018c",
+    "oci/inference/stage2_preflight.py": "4ac59e038fc9e75807c437fbda4e7a86cda03ceb058d68d6b8476b95b9b54f92",
+    "tests/test_stage2_multi_model.py": "45304c0bf89aa816d58e9fa4e8493f0a6efa4dca05565c0c6997121c19aad4b9",
+    "docs/stage2_multi_model.md": "0a9259b55e1ee7e9eea3024d7c5650d3dd9dbc075dd223b56c8903c420138006",
+    "example_configs/research_all_evidence_multi_model.json": "a99865c0fdd5ae52fbcce5d8f197d4d066d22f490d5ef1d3af3f27da0bcd79b1"
+  },
+  "distributions": {
+    "onc_causal_inference-0.1.0-py3-none-any.whl": "58f7242eb19f826af88e860d3763f17dec808018b362593a6a979bdc5ea96585",
+    "onc_causal_inference-0.1.0.tar.gz": "e4438aba2d531581ec575107094ded6d061e6ec29e7a0eb43f192d98e2919ba6"
+  },
+  "wheel_modules_match_working_source": true
+}

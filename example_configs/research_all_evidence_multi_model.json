@@ -1,0 +1,131 @@
+{
+  "dataset": "../synthetic_data/example_synthetic_datasets/one_confounder_one_effect_modifier_nsclc_with_structured/dataset.parquet",
+  "output_dir": "../artifacts/research_all_evidence_multi_model",
+  "columns": {
+    "unit_id": "patient_id",
+    "text": "clinical_text",
+    "treatment": "treatment_indicator",
+    "outcome": "outcome_indicator"
+  },
+  "science": {
+    "clinical_question": "Identify text-derived confounders and treatment-effect modifiers.",
+    "outcome_type": "binary",
+    "outer_folds": 5,
+    "inner_folds": 5,
+    "seed": 42,
+    "stage1": {},
+    "neural_queries": {}
+  },
+  "models": {
+    "htr": "prajjwal1/bert-tiny",
+    "embeddings": "Qwen/Qwen3-Embedding-8B"
+  },
+  "stage2": {
+    "endpoint": "http://127.0.0.1:8000/v1",
+    "model": "",
+    "api_key": "EMPTY",
+    "workers": 32,
+    "extraction_llm": {
+      "endpoint": "http://127.0.0.1:8001/v1",
+      "model": "",
+      "api_key": "EMPTY",
+      "workers": 32
+    },
+    "max_tokens": 100000,
+    "extraction_max_tokens": 4096,
+    "extraction_reasoning_max_tokens": 32768,
+    "extraction_stream": true,
+    "extraction_deferred_retry_passes": 1,
+    "max_response_repairs": 10,
+    "thinking_after_response_repairs": 5,
+    "repetition_penalty": null,
+    "interpretation_reasoning_effort": "high",
+    "extraction_reasoning_effort": "none",
+    "operationalization_max_prompt_chars": 640000,
+    "consolidation_batch_size": 20,
+    "consolidation_alphabetical_rounds": 5,
+    "consolidation_max_rounds": 55,
+    "extraction_max_prompt_chars": 640000,
+    "extraction_feature_batch_size": 10,
+    "extraction_chunk_size_tokens": 50000,
+    "extraction_context_window_tokens": 131072,
+    "extraction_context_margin_tokens": 1024,
+    "max_review_rounds": 2,
+    "ontology_refinement_min_failure_patients": 3,
+    "max_ontology_refinement_rounds": 2,
+    "input_temporal_scope": "pre_index_treatment",
+    "selection_consolidation": {
+      "enabled": true,
+      "neighbor_count": 10,
+      "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+      "embedding_device": "cpu",
+      "max_latents_per_cluster": 2,
+      "minimum_pairwise_complete_rows": 10,
+      "minimum_pairwise_association": 0.85,
+      "categorical_rare_level_min_count": 5,
+      "latent_min_coverage": 0.05,
+      "protect_explicit_features": true,
+      "max_prompt_chars": 100000
+    },
+    "statistical_selection": {
+      "l1_ratio": 0.8,
+      "nuisance_selection_rule": "any_inner_fold_union",
+      "modifier_selection_rule": "any_inner_fold_union",
+      "internal_cv_folds": 3,
+      "regularization_grid_size": 16,
+      "optimization_tolerance": 1e-06,
+      "one_standard_error_rule": true,
+      "nuisance_prediction_one_standard_error_rule": false,
+      "modifier_one_standard_error_rule": false,
+      "univariable_confounder_p_value_threshold": 0.05,
+      "univariable_confounder_q_value_threshold": 0.1,
+      "modifier_top_n_per_inner_fold": 10,
+      "modifier_ridge_alpha": 10.0,
+      "modifier_continuous_winsor_quantile": 0.005,
+      "selection_mode": "multi_model",
+      "multi_model": {
+        "schema_version": "stage2_multi_model_selection_v1",
+        "repeats": 3,
+        "row_fraction": 0.8,
+        "l1_ratios": [
+          0.2,
+          0.8,
+          1.0
+        ],
+        "regularization_grid_size": 8,
+        "forest_trees": 200,
+        "forest_min_samples_leaf": 10,
+        "feature_subset_size": 32,
+        "permutation_repeats": 3,
+        "nominal_p_threshold": 0.05,
+        "q_threshold": 0.1,
+        "max_prompt_chars": 100000
+      }
+    },
+    "role_adjudication": {
+      "enabled": true,
+      "max_description_chars": 1200,
+      "max_measurement_definition_chars": 1600,
+      "max_categories_per_feature": 40,
+      "max_candidates_per_request": 20
+    },
+    "estimation_trees": 200,
+    "propensity_clip": 0.02,
+    "explicit_features": []
+  },
+  "run": {
+    "devices": [
+      "cuda:0"
+    ],
+    "workers": 8,
+    "components": [
+      "embedding_cache",
+      "tfidf",
+      "text_models",
+      "neural_queries",
+      "handoff"
+    ],
+    "log_level": "INFO",
+    "mode": "full"
+  }
+}

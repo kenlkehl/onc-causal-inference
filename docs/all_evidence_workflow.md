@@ -1048,6 +1048,12 @@ consolidation request.
 
 ### Numerical evidence and selection modes
 
+For the opt-in `multi_model` mode, see [Stage 2 selection from multiple
+models](stage2_multi_model.md). It combines repeated penalized models,
+univariable screens, R-learners, and predictive/causal forests with cross-candidate
+LLM theme review and final role adjudication. The following describes the
+existing `llm_roles` and `independent_tasks` numerical components.
+
 Final selection is written to the historically named
 `selection/elastic_net_selection.json`; its standalone numerical component is
 also written to `selection/statistical_evidence.json`. Every inner-training partition fits a
@@ -1097,6 +1103,7 @@ minimum-CV-loss choices.
 | --- | --- | --- |
 | `llm_roles` (default when omitted) | Final adjudicated roles; if adjudication is disabled, the provisional nuisance union and candidate-wise top-N modifier union | Reconciles all aggregate evidence and assigns confounder, effect modifier, both, or neither |
 | `independent_tasks` | Separate treatment, outcome, and joint-R-loss effect supports; a nonzero group in any inner fold suffices for its task | Optional advisory annotations cannot add, remove, or reroute features |
+| `multi_model` | Final roles from seven evidence families across training resamples and forest feature subsets; no individual screen is binding | Required theme reconciliation across candidates, then evidence-cited role decisions |
 
 In `llm_roles`, the primary LLM receives bounded slices of one allowlisted
 aggregate role-evidence artifact and assigns final roles. A slice contains at most

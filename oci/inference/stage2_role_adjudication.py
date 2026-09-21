@@ -602,6 +602,13 @@ def adjudicate_stage2_roles(
     policy.validate()
     if not policy.enabled:
         raise ValueError("adjudicate_stage2_roles requires role adjudication to be enabled")
+    if (statistical_report.get("policy") or {}).get("selection_mode") == "multi_model":
+        from .stage2_multi_model_adjudication import adjudicate_multi_model_roles
+
+        return adjudicate_multi_model_roles(
+            definitions=definitions, statistical_report=statistical_report,
+            request_json=request_json, output_dir=output_dir, policy=policy,
+        )
     from .stage2_taskwise_policy import independent_tasks_enabled
 
     if independent_tasks_enabled(statistical_report):

@@ -9929,7 +9929,11 @@ def run_fold_analysis(
         "outcome_type": outcome_type,
         "selection_consolidation_policy": consolidation_policy.scientific_dict(),
         "selection_consolidation_llm_model": str(getattr(config, "model", "")),
-        "statistical_component_schema_version": ELASTIC_NET_COMPONENT_SCHEMA_VERSION,
+        "statistical_component_schema_version": (
+            statistical_policy.multi_model.public_dict()["schema_version"]
+            if statistical_policy.selection_mode == "multi_model"
+            else ELASTIC_NET_COMPONENT_SCHEMA_VERSION
+        ),
         "statistical_selection_policy": statistical_policy.public_dict(),
         "role_adjudication_policy": config.role_adjudication.public_dict(),
         "role_adjudication_llm_model": str(getattr(config, "model", "")),
@@ -10052,6 +10056,10 @@ def run_fold_analysis(
                 "outcome_type": outcome_type,
                 "seed": seed,
                 "policy": statistical_policy,
+                **(
+                    {"checkpoint_dir": selection_dir / "multi_model"}
+                    if statistical_policy.selection_mode == "multi_model" else {}
+                ),
             }
         )
         _write_json(
@@ -10064,6 +10072,8 @@ def run_fold_analysis(
         if nuisance_rows:
             _write_frame(selection_dir / "nuisance_predictions.csv", pd.DataFrame(nuisance_rows))
         if consolidated_definitions and config.role_adjudication.enabled:
+            if statistical_policy.selection_mode == "multi_model":
+                elastic_net_report["adjudication_model_identity"] = str(getattr(config, "model", ""))
             selected, role_adjudication_report, _role_evidence = (
                 adjudicate_stage2_roles(
                     definitions=consolidated_definitions,
@@ -10095,7 +10105,9 @@ def run_fold_analysis(
             **elastic_net_report,
             "schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
             "elastic_net_component_schema_version": ELASTIC_NET_COMPONENT_SCHEMA_VERSION,
-            "statistical_component_schema_version": ELASTIC_NET_COMPONENT_SCHEMA_VERSION,
+            "statistical_component_schema_version": elastic_net_report.get(
+                "schema_version", ELASTIC_NET_COMPONENT_SCHEMA_VERSION
+            ),
             "statistical_provisional_decisions": elastic_net_report.get(
                 "decisions", []
             ),
@@ -10286,6 +10298,8 @@ def run_fold_analysis(
             "ontology_refinement_rounds": ontology_refinement_rounds,
             "selection_artifact": str(selection_dir / "elastic_net_selection.json"),
             "screening_model_family": (
+                "multi_model_evidence_with_llm_theme_adjudication"
+                if statistical_policy.selection_mode == "multi_model" else
                 "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
             ),
             "final_model_family": "causal_forest_dml",
@@ -10322,6 +10336,8 @@ def run_fold_analysis(
         "review_convergence": review_convergence,
         "ontology_refinement_rounds": ontology_refinement_rounds,
         "screening_model_family": (
+            "multi_model_evidence_with_llm_theme_adjudication"
+            if statistical_policy.selection_mode == "multi_model" else
             "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
         ),
         "selection": selection_report,

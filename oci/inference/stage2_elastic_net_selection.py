@@ -18,7 +18,8 @@ from __future__ import annotations
 import copy
 import logging
 import math
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -40,6 +41,7 @@ from .stage2_statistical_selection import (
     _encode_feature as _encode_univariable_feature,
     _rank_safe_columns as _univariable_rank_safe_columns,
 )
+from .stage2_multi_model_config import Stage2MultiModelConfig, multi_model_config_from_mapping
 
 LOGGER = logging.getLogger(__name__)
 
@@ -91,12 +93,20 @@ class Stage2ElasticNetSelectionConfig:
     modifier_min_positive_fold_fraction: float = 0.4
     # Opt-in task selection; omit the legacy value from checkpoint policy JSON.
     selection_mode: str = "llm_roles"
+    multi_model: Stage2MultiModelConfig = field(default_factory=Stage2MultiModelConfig)
 
     def validate(self) -> None:
         validate_propensity_bounds(self.min_propensity, self.max_propensity)
-        if not isinstance(self.selection_mode, str) or self.selection_mode not in {"llm_roles", "independent_tasks"}:
-            raise ValueError("stage2.statistical_selection.selection_mode must be "
-                             "llm_roles or independent_tasks")
+        if not isinstance(self.selection_mode, str) or self.selection_mode not in {
+            "llm_roles", "independent_tasks", "multi_model"
+        }:
+            raise ValueError(
+                "stage2.statistical_selection.selection_mode must be "
+                "llm_roles, independent_tasks, or multi_model"
+            )
+        if not isinstance(self.multi_model, Stage2MultiModelConfig):
+            raise ValueError("multi_model must be a Stage2MultiModelConfig object")
+        self.multi_model.validate()
         for name in ("nuisance_selection_rule", "modifier_selection_rule"):
             if getattr(self, name) != "any_inner_fold_union":
                 raise ValueError(
@@ -215,6 +225,10 @@ class Stage2ElasticNetSelectionConfig:
                 result.pop(name)
         if self.selection_mode == "llm_roles":
             result.pop("selection_mode")
+        if self.selection_mode != "multi_model":
+            result.pop("multi_model")
+        else:
+            result["multi_model"] = self.multi_model.public_dict()
         for retired in (
             "nuisance_selection_frequency",
             "modifier_selection_frequency",
@@ -240,6 +254,8 @@ def statistical_selection_config_from_mapping(
         raise ValueError(
             "stage2.statistical_selection contains unsupported fields: " f"{unknown}"
         )
+    if "multi_model" in raw:
+        raw["multi_model"] = multi_model_config_from_mapping(raw["multi_model"])
     config = Stage2ElasticNetSelectionConfig(**raw)
     config.validate()
     return config
@@ -1832,10 +1848,20 @@ def select_stage2_features_elastic_net(
     outcome_type: str,
     seed: int,
     policy: Stage2ElasticNetSelectionConfig,
+    checkpoint_dir: Path | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[Any]]:
     """Select nuisance inputs and effect modifiers inside one outer fold."""
 
     policy.validate()
+    if policy.selection_mode == "multi_model":
+        from .stage2_multi_model_selection import select_stage2_features_multi_model
+
+        return select_stage2_features_multi_model(
+            dataset=dataset, extracted_fit=extracted_fit, definitions=definitions,
+            inner_splits=inner_splits, treatment_column=treatment_column,
+            outcome_column=outcome_column, outcome_type=outcome_type,
+            seed=seed, policy=policy, checkpoint_dir=checkpoint_dir,
+        )
     original = [copy.deepcopy(dict(feature)) for feature in definitions]
     if not original:
         report = {
