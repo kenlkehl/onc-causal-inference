@@ -1,0 +1,284 @@
+{
+  "at": "2026-09-22T21:40:06.141434+00:00",
+  "user_requested_interim_oracle_role_comparison": true,
+  "basis": "Previously published oracle-to-candidate lineage; current saved rankings only. No patient-level oracle values or held-out effects read. Running selection/fits unchanged.",
+  "lineage_source": "reports/2026-09-21/fold_1_multi_model_consolidation_2026-09-21/oracle_recovery_2026-09-21.json",
+  "lineage_sha256": "32d6c5bdcc0b387c88e5fdda945c53c3674132963a3cc511647b3086f737488a",
+  "selected_count_from_completed_cv": 12,
+  "final_selection_frozen": false,
+  "inner_fold_recovery": [
+    {
+      "fold": "fold_001",
+      "direct_oracle_modifiers_in_top12": [
+        "NLR"
+      ],
+      "prespecified_proxies_in_top12": []
+    },
+    {
+      "fold": "fold_002",
+      "direct_oracle_modifiers_in_top12": [
+        "NLR"
+      ],
+      "prespecified_proxies_in_top12": [
+        {
+          "name": "estimated_glomerular_filtration_rate",
+          "related_oracle_variable": "creatinine clearance",
+          "rank": 1
+        }
+      ]
+    },
+    {
+      "fold": "fold_003",
+      "direct_oracle_modifiers_in_top12": [
+        "NLR"
+      ],
+      "prespecified_proxies_in_top12": []
+    },
+    {
+      "fold": "fold_004",
+      "direct_oracle_modifiers_in_top12": [
+        "NLR"
+      ],
+      "prespecified_proxies_in_top12": [
+        {
+          "name": "brain_lesion_count",
+          "related_oracle_variable": "brain metastasis presence",
+          "rank": 5
+        }
+      ]
+    },
+    {
+      "fold": "fold_005",
+      "direct_oracle_modifiers_in_top12": [
+        "NLR"
+      ],
+      "prespecified_proxies_in_top12": []
+    }
+  ],
+  "full_training_replay": {
+    "at": "2026-09-22T21:38:29.286552+00:00",
+    "cache_requests_replayed": 171,
+    "pending_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_nested_modifier_count_2026-09-22/modifier_count/05afd1c966d563d410d3/full_training_ranking/requests/a21652f10877239c7dd7/response.json",
+    "final_ranking_complete": false,
+    "writes_to_live_checkpoints": false,
+    "new_llm_calls": 0,
+    "current_merge_prefix": [
+      {
+        "feature_id": "outer_001_feature_228",
+        "name": "neutrophil_to_lymphocyte_ratio"
+      },
+      {
+        "feature_id": "outer_001_feature_176",
+        "name": "ki67_proliferation_index"
+      },
+      {
+        "feature_id": "outer_001_feature_085",
+        "name": "confusion_present"
+      },
+      {
+        "feature_id": "outer_001_feature_103",
+        "name": "dizziness_present"
+      },
+      {
+        "feature_id": "outer_001_feature_212",
+        "name": "medication_pemetrexed"
+      },
+      {
+        "feature_id": "outer_001_feature_330",
+        "name": "ttf1_expression"
+      },
+      {
+        "feature_id": "outer_001_feature_108",
+        "name": "dyspnea_severity"
+      },
+      {
+        "feature_id": "outer_001_feature_022",
+        "name": "anxiety_present"
+      },
+      {
+        "feature_id": "outer_001_feature_124",
+        "name": "esophagitis"
+      },
+      {
+        "feature_id": "outer_001_feature_057",
+        "name": "calvarium_lytic_sclerotic_lesions"
+      },
+      {
+        "feature_id": "outer_001_feature_194",
+        "name": "lung_disease_diagnosis"
+      },
+      {
+        "feature_id": "outer_001_feature_006",
+        "name": "adjuvant_chemotherapy_administered"
+      },
+      {
+        "feature_id": "outer_001_feature_183",
+        "name": "lesion_size"
+      },
+      {
+        "feature_id": "outer_001_feature_065",
+        "name": "cea_level"
+      },
+      {
+        "feature_id": "outer_001_feature_314",
+        "name": "t_stage"
+      },
+      {
+        "feature_id": "outer_001_feature_037",
+        "name": "blood_urea_nitrogen"
+      },
+      {
+        "feature_id": "outer_001_feature_312",
+        "name": "surgical_procedure"
+      },
+      {
+        "feature_id": "outer_001_feature_049",
+        "name": "brain_lesion_count"
+      },
+      {
+        "feature_id": "outer_001_feature_165",
+        "name": "imaging_finding_right_lower_lobe_mass"
+      },
+      {
+        "feature_id": "outer_001_feature_295",
+        "name": "serum_albumin"
+      },
+      {
+        "feature_id": "outer_001_feature_122",
+        "name": "epidural_hemorrhage"
+      },
+      {
+        "feature_id": "outer_001_feature_224",
+        "name": "napsin_a_expression"
+      },
+      {
+        "feature_id": "outer_001_feature_214",
+        "name": "met_amplification_status"
+      },
+      {
+        "feature_id": "outer_001_feature_204",
+        "name": "medication_cisplatin"
+      },
+      {
+        "feature_id": "outer_001_feature_113",
+        "name": "emphysema"
+      },
+      {
+        "feature_id": "outer_001_feature_087",
+        "name": "copd_presence"
+      },
+      {
+        "feature_id": "outer_001_feature_243",
+        "name": "p40_expression"
+      },
+      {
+        "feature_id": "outer_001_feature_017",
+        "name": "ambulation_status"
+      },
+      {
+        "feature_id": "outer_001_feature_076",
+        "name": "ck5_6_expression"
+      },
+      {
+        "feature_id": "outer_001_feature_001",
+        "name": "absolute_lymphocyte_count"
+      },
+      {
+        "feature_id": "outer_001_feature_170",
+        "name": "inhaler_usage_dosage"
+      },
+      {
+        "feature_id": "outer_001_feature_303",
+        "name": "skeletal_compression_fracture"
+      },
+      {
+        "feature_id": "outer_001_feature_254",
+        "name": "pi3k_pathway_activation"
+      },
+      {
+        "feature_id": "outer_001_feature_272",
+        "name": "psychiatric_symptom_presence"
+      },
+      {
+        "feature_id": "outer_001_feature_267",
+        "name": "prior_platinum_chemotherapy"
+      }
+    ],
+    "left_remaining": 47,
+    "right_remaining": 46,
+    "level_input_lists": 3,
+    "level_list_lengths": [
+      64,
+      64,
+      21
+    ]
+  },
+  "carried_candidate_ids": [
+    "outer_001_feature_332",
+    "outer_001_feature_333",
+    "outer_001_feature_334",
+    "outer_001_feature_335",
+    "outer_001_feature_336",
+    "outer_001_feature_337",
+    "outer_001_feature_338",
+    "outer_001_feature_339",
+    "outer_001_feature_340",
+    "outer_001_feature_341",
+    "outer_001_feature_342",
+    "outer_001_feature_343",
+    "outer_001_feature_344",
+    "outer_001_feature_345",
+    "outer_001_feature_346",
+    "outer_001_feature_347",
+    "outer_001_feature_348",
+    "outer_001_feature_349",
+    "outer_001_feature_350",
+    "outer_001_feature_351",
+    "outer_001_feature_352"
+  ],
+  "direct_match_upper_bound_in_final_top12": 1,
+  "oracle_modifier_comparison": [
+    {
+      "oracle_variable": "histology",
+      "candidate_ids": [
+        "outer_001_feature_192"
+      ],
+      "current_penultimate_merge_rank": null,
+      "possible_in_final_top12": false
+    },
+    {
+      "oracle_variable": "EGFR status",
+      "candidate_ids": [
+        "outer_001_feature_032",
+        "outer_001_feature_111"
+      ],
+      "current_penultimate_merge_rank": null,
+      "possible_in_final_top12": false
+    },
+    {
+      "oracle_variable": "NLR",
+      "candidate_ids": [
+        "outer_001_feature_228"
+      ],
+      "current_penultimate_merge_rank": 1,
+      "possible_in_final_top12": true
+    },
+    {
+      "oracle_variable": "brain metastasis presence",
+      "candidate_ids": [
+        "outer_001_feature_052"
+      ],
+      "current_penultimate_merge_rank": null,
+      "possible_in_final_top12": false
+    },
+    {
+      "oracle_variable": "hemoglobin",
+      "candidate_ids": [
+        "outer_001_feature_155"
+      ],
+      "current_penultimate_merge_rank": null,
+      "possible_in_final_top12": false
+    }
+  ],
+  "bound_reason": "The first 35 entries of the penultimate merge are already emitted; the final merge preserves their order. The separate 21-candidate carried list contains no direct oracle modifiers."
+}

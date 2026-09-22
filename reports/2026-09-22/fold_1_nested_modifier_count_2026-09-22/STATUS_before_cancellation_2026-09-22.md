@@ -1,0 +1,34 @@
+# Fold 1 nested modifier selection — 2026-09-22
+
+Updated: 2026-09-22T21:48:07.234183+00:00
+
+**In progress — building the full-training LLM ranking.**
+
+The table of inner folds covers modifier-count validation. Final feature selection, model fitting, and evaluation are separate stages below.
+
+| Experiment stage | Status |
+| --- | --- |
+| Numerical evidence | 6/6 jobs complete |
+| Inner-fold LLM rankings | 5/5 complete |
+| Modifier-count validation | 120/120 count/seed fits complete |
+| Full-training LLM ranking | In progress: 352/352 candidates initially reviewed; 139 merge requests accepted |
+| Final selected features frozen | Pending |
+| Fixed-residual forest fits | 0/3 complete |
+| Native production forest fits | 0/3 complete |
+| Held-out evaluation and final report | Pending |
+
+| Count-validation fold | Candidates initially reviewed | LLM requests accepted | Ranking complete | Count/seed fits |
+| --- | ---: | ---: | --- | ---: |
+| fold_001 | 352/352 | 148 | Yes | 24/24 |
+| fold_002 | 352/352 | 153 | Yes | 24/24 |
+| fold_003 | 352/352 | 151 | Yes | 24/24 |
+| fold_004 | 352/352 | 148 | Yes | 24/24 |
+| fold_005 | 352/352 | 149 | Yes | 24/24 |
+
+The original 189 confounders are retained. Modifier budgets are 0, 4, 8, 12, 16, 24, 32, and 64, with minimum mean nested R-loss as the selection rule.
+
+After count validation, the pipeline builds the full-training ranking, freezes selection, fits three native and three fixed-residual forests, then evaluates oracle recovery and held-out ITE performance.
+
+[Protocol](PROTOCOL_2026-09-22.md)
+
+**Final report: not created yet.** It will be generated after final model fitting and held-out evaluation finish.

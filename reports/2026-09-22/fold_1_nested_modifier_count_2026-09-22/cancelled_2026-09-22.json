@@ -1,0 +1,29 @@
+{
+  "at": "2026-09-22T21:48:41.710708+00:00",
+  "phase": "cancelled",
+  "reason": "User stopped this attempt and requested propensity-restricted modifier screening plus final architecture selection.",
+  "stopped_processes": [
+    {
+      "pid": 1161519,
+      "process_group": 1161519,
+      "signal": "SIGTERM"
+    },
+    {
+      "pid": 1169906,
+      "process_group": 1169906,
+      "signal": "SIGTERM"
+    }
+  ],
+  "previous_supervisor_state": {
+    "at": "2026-09-22T18:52:07.731370+00:00",
+    "child_pid": 1161593,
+    "completed_stages": [],
+    "monitor_pid": 1161592,
+    "phase": "selection",
+    "reason": "Prior selection, completion, and progress processes were absent; resume verified checkpoints without changing scientific settings.",
+    "started_at": "2026-09-22T18:52:07.693469+00:00",
+    "supervisor_pid": 1161519,
+    "supervisor_source_sha256": "ff4d29cef554915892bc0a6596004c4432cc2e5de23ca56d7824b067177e92d6"
+  },
+  "completed_checkpoints_preserved": true
+}
