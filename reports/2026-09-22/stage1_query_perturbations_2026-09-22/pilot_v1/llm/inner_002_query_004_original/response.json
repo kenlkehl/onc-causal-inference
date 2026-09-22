@@ -1,0 +1,8 @@
+{
+  "candidates": [],
+  "limitations": [
+    "No clinical data was present in the retrieval evidence.",
+    "The evidence consists of non-informative control characters or empty strings."
+  ],
+  "summary": "The provided evidence contains no clinical text or usable information, consisting entirely of non-semantic control characters or empty strings."
+}

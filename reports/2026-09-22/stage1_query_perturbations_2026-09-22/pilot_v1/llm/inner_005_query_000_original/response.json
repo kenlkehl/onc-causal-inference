@@ -1,0 +1,65 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row938_chunk17",
+          "quote": "Current performance status remains ECOG 2."
+        },
+        {
+          "evidence_id": "inner5_row355_chunk13",
+          "quote": "Performance status remains ECOG 1"
+        },
+        {
+          "evidence_id": "inner5_row918_chunk30",
+          "quote": "excellent performance status (ECOG 0)"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, ranging from fully active to significantly disabled.",
+      "extraction_instruction": "Identify the numeric value associated with 'ECOG' or 'performance status' in the oncology progress notes.",
+      "measurement_definition": "Standard Eastern Cooperative Oncology Group (ECOG) scale; evidence includes 0 (fully active), 1 (ambulatory, capable of self-care), and 2 (capable of self-care but unable to work).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific threshold between ECOG 1 and 2 may be subject to provider interpretation across different notes.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row938_chunk17",
+          "quote": "Stage IV squamous NSCLC (KRAS G12C, TP53 R273C, STK11 loss; PD\u2011L1 TPS 10%)"
+        },
+        {
+          "evidence_id": "inner5_row791_chunk16",
+          "quote": "TP53 p.R175H mutation, CDKN2A loss; PD\u2011L1 TPS 12 %"
+        }
+      ],
+      "description": "The Tumor Proportion Score (TPS) for Programmed Death-Ligand 1 (PD-L1), representing the percentage of tumor cells with membrane staining.",
+      "extraction_instruction": "Locate 'PD-L1 TPS' and extract the numerical percentage value from the molecular profile or pathology report.",
+      "measurement_definition": "Percentage (%) of PD-L1 positive tumor cells.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 TPS",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific IHC assay used for PD-L1 measurement is not specified in the provided evidence.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small sample size of patients in the provided evidence.",
+    "Molecular profiling (PD-L1) is not documented for all patients.",
+    "ECOG status is recorded at multiple timepoints, which may introduce temporal variance."
+  ],
+  "summary": "The evidence supports the identification of baseline clinical variables for patients with stage IV squamous non-small cell lung cancer (NSCLC) and brain metastases, specifically functional performance status (ECOG) and PD-L1 expression levels."
+}

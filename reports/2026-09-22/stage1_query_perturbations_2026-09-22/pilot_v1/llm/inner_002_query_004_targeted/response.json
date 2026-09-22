@@ -1,0 +1,57 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row56_chunk13",
+          "quote": "KRAS G12C, TP53 R273C, STK11 loss, PD\u2011L1 TPS 10 %"
+        },
+        {
+          "evidence_id": "inner2_row203_chunk4",
+          "quote": "PD\u2011L1 expression of 20 %"
+        }
+      ],
+      "description": "The percentage of tumor cells showing membrane staining for PD-L1, used to guide immunotherapy and targeted therapy decisions.",
+      "extraction_instruction": "Extract the numerical percentage associated with 'PD-L1 TPS' or 'PD-L1 expression'.",
+      "measurement_definition": "Percentage (%) of tumor cells expressing PD-L1.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific IHC assay used for measurement is not consistently specified across all entries.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row203_chunk4",
+          "quote": "MET Amplification (Copy Number 5)"
+        },
+        {
+          "evidence_id": "inner2_row26_chunk3",
+          "quote": "4.3\u2011fold increase (relative to diploid)"
+        }
+      ],
+      "description": "The increase in the number of copies of the MET gene in tumor cells, which may render the tumor susceptible to MET inhibitors.",
+      "extraction_instruction": "Extract the numerical value associated with 'MET Amplification' (copy number) or 'MET copy-number gain' (fold-increase).",
+      "measurement_definition": "Measured as either the absolute copy number or the fold-increase relative to diploid.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "MET Gene Amplification",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence provides both absolute copy number and fold-increase, which may require standardization for combined analysis.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small sample of patient records provided.",
+    "Inconsistent reporting units for MET amplification (copy number vs. fold-increase)."
+  ],
+  "summary": "The evidence identifies several baseline molecular and clinical variables in patients with advanced non-small cell lung cancer (NSCLC), including PD-L1 expression levels, MET gene amplification status, and ECOG performance status."
+}

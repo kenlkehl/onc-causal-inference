@@ -1,0 +1,56 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row837_chunk0",
+          "quote": "PD\u2011L1 (22C3) | Tumor proportion score 20 % (\u22651 % positive)"
+        },
+        {
+          "evidence_id": "inner5_row18_chunk1",
+          "quote": "PD\u2011L1 (22C3) Tumor Proportion Score | Immunohistochemistry | 10 %"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing partial or complete membrane staining for PD-L1, typically assessed via immunohistochemistry.",
+      "extraction_instruction": "Extract the percentage value associated with 'PD-L1', 'TPS', or 'Tumor proportion score'.",
+      "measurement_definition": "Tumor proportion score (TPS) expressed as a percentage of positive tumor cells.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific antibody clone used (e.g., 22C3) is mentioned in some reports but not all, which can affect comparability.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row837_chunk0",
+          "quote": "Ki\u201167 | Approximately 70 % of tumor nuclei positive | High"
+        },
+        {
+          "evidence_id": "inner5_row221_chunk0",
+          "quote": "Ki\u201167 (MIB\u20111) | Approximately 30% of tumor nuclei | Proliferative index"
+        }
+      ],
+      "description": "An estimate of the growth fraction of a cell population, measured by the percentage of tumor nuclei positive for the Ki-67 antigen.",
+      "extraction_instruction": "Extract the percentage of tumor nuclei reported as positive for Ki-67 or MIB-1.",
+      "measurement_definition": "The percentage of tumor nuclei positive for Ki-67/MIB-1 by immunohistochemistry.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Ki-67 Proliferative Index",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The reporting is provided as approximations (e.g., 'Approximately 70 %'), which may introduce slight measurement variance.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Limited sample size across the provided excerpts.",
+    "Inconsistent reporting of PD-L1 clones across all patients.",
+    "Ki-67 values are reported as approximations rather than precise counts."
+  ],
+  "summary": "The provided evidence describes patients with squamous cell carcinoma of the lung, with documented variability in immunohistochemical markers such as PD-L1 expression and Ki-67 proliferation index, as well as differences in ECOG performance status and tumor staging."
+}

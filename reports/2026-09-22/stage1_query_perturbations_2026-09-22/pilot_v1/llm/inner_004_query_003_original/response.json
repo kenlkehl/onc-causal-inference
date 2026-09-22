@@ -1,0 +1,47 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row540_chunk16",
+          "quote": "Reviewed that STK11 loss may attenuate response to immunotherapy"
+        }
+      ],
+      "description": "Loss of the STK11 tumor suppressor gene in the lung adenocarcinoma specimen.",
+      "extraction_instruction": "Identify mentions of 'STK11 loss' (positive) or 'STK11 wild-type' (negative).",
+      "measurement_definition": "Presence or absence of STK11 loss as determined by comprehensive genomic profiling of the resected tumor specimen.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 loss",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether 'loss' is consistently defined as biallelic inactivation or include single-allele loss.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row540_chunk16",
+          "quote": "possibility of enrollment in a clinical trial targeting KRAS G12C (e.g., sotorasib)"
+        }
+      ],
+      "description": "Presence of the G12C missense mutation in the KRAS gene.",
+      "extraction_instruction": "Identify mentions of 'KRAS G12C' as a mutation or variant present in the tumor.",
+      "measurement_definition": "Identification of the KRAS G12C mutation via molecular profiling of the tumor.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "KRAS G12C mutation",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific assay used for detection is not provided.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "The evidence is based on a small number of case excerpts, limiting the generalizability of the proposed variables.",
+    "Genomic data is not consistently reported across all patients in the provided text."
+  ],
+  "summary": "The evidence identifies specific molecular genomic alterations (STK11 loss and KRAS G12C mutations) as baseline clinical variables used to determine eligibility for targeted therapies and to predict response to immunotherapy in patients with non-small cell lung cancer (NSCLC)."
+}

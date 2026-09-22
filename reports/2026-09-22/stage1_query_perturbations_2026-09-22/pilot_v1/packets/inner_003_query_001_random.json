@@ -1,0 +1,158 @@
+{
+  "actual_distance": 0.19999989867210388,
+  "condition": "random",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.3479655385017395,
+      "evidence_id": "inner3_row473_chunk0",
+      "original_similarity": 0.35559141635894775,
+      "row_id": 473,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.3479655385017395,
+      "evidence_id": "inner3_row985_chunk0",
+      "original_similarity": 0.35559141635894775,
+      "row_id": 985,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 23,
+      "edited_similarity": 0.7873233556747437,
+      "evidence_id": "inner3_row988_chunk23",
+      "original_similarity": 0.8075848817825317,
+      "row_id": 988,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "or hematuria. - **Neurologic:** No focal deficits, no seizures. - **Skin:** No new rashes or lesions. - **Psychiatric:** Mood stable, occasional anxiety about disease progression. --- ### PAST MEDICAL HISTORY - Non\u2011small cell lung cancer, adenocarcinoma (stage IIA \u2192 now stage IV) - Hypertension (well controlled) - No prior thromboembolic events ### SURGICAL HISTORY - Right upper lobectomy with mediastinal lymph node dissection (2022) - SBRT to left lower\u2011lobe lesion (2024) ### MEDICATIONS - Lisinopril 10 mg daily - Multivitamin daily - No current chemotherapy or immunotherapy ### ALLERGIES - No known drug allergies (NKDA) ### SOCIAL HISTORY - Former smoker, 15\u2011pack\u2011year history, quit 5 years ago - Occasional alcohol, no illicit drug use - Lives with spouse, independent in ADLs ### FAMILY HISTORY - Mother: breast cancer (deceased) - Father: hypertension, alive --- ### PHYSICAL EXAMINATION | **Vital Signs** | | |---|---| | BP | 128/78 mmHg | | HR | 84 bpm, regular | | RR | 18/min | | Temp | 36.8 \u00b0C | | SpO\u2082 | 94 % on room air | **General:** Alert, oriented \u00d73, appears mildly fatigued, in no acute distress. **HEENT:** Normocephalic, atraumatic; mucous membranes moist. **Neck:** Supple, no lymphadenopathy. **Cardiovascular:** Regular rate and rhythm, no murmurs, rubs, or gallops. **Respiratory:** Decreased breath sounds at right upper field (post\u2011lobectomy); scattered fine crackles bilaterally, no wheezes. No use of accessory muscles. **Abdomen:** Soft, non\u2011tender, no hepatomegaly appreciated; liver edge not palpable. No palpable masses. **Extremities:** No edema, no cyanosis. **Neurologic:** Grossly intact, strength 5/5 in all extremities, sensation intact. **Skin:**"
+    },
+    {
+      "chunk_index": 26,
+      "edited_similarity": 0.5615830421447754,
+      "evidence_id": "inner3_row988_chunk26",
+      "original_similarity": 0.5711849331855774,
+      "row_id": 988,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "- Discuss advance care planning and palliative care referral if symptoms worsen. 5. **Follow\u2011up:** - Return to clinic in 2 weeks to review imaging results (brain MRI) and finalize systemic therapy plan. - Re\u2011image chest/abdomen in 6\u20138 weeks after therapy initiation to assess response. 6. **Documentation:** - Obtain informed consent for any targeted therapy or clinical trial enrollment. - Update oncology treatment plan in EMR and notify multidisciplinary tumor board. **Patient education:** Reviewed disease status, treatment options, potential benefits/risks, and importance of prompt reporting of new respiratory or abdominal symptoms. Patient expressed understanding and wishes to proceed with a therapy that offers the best chance for disease control while preserving quality of life. --- *Signature:* **Dr. [Oncologist Name], MD** Medical Oncology, [Institution] <new_note> **MRI BRAIN WITH AND WITHOUT CONTRAST** **CT CHEST AND ABDOMEN WITH CONTRAST** **Patient:** Linda Martinez **Sex:** Female **Age:** 62 years **Indication:** Baseline imaging prior to initiation of systemic therapy for metastatic non\u2011small cell lung cancer (adenocarcinoma, KRAS\u2011mutated). Assessment for intracranial disease and evaluation of known thoraco\u2011abdominal metastatic sites. **Technique:** - **MRI Brain:** Multiplanar, multisequence study performed on a 1.5 T scanner. Sequences included T1\u2011pre\u2011contrast, T2, FLAIR, diffusion\u2011weighted imaging (DWI), and T1\u2011post\u2011gadolinium (0.1 mmol/kg) in axial, coronal, and sagittal planes. - **CT Chest/Abdomen:** Helical acquisition after intravenous administration of 100 mL non\u2011ionic iodinated contrast (350 mg I/mL) with arterial and portal venous phase reconstructions. Slice thickness 1.25 mm, multiplanar reformats generated. **Comparison:** MRI brain performed 6 months prior; CT chest/abdomen performed 2 weeks earlier. --- ### Findings #### Brain (MRI) - **Parenchyma:** No focal"
+    },
+    {
+      "chunk_index": 22,
+      "edited_similarity": 0.7405662536621094,
+      "evidence_id": "inner3_row863_chunk22",
+      "original_similarity": 0.7533990144729614,
+      "row_id": 863,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "chest pain, palpitations, or edema. - **Gastrointestinal:** Normal appetite, no nausea, vomiting, or abdominal pain. - **Genitourinary:** No dysuria or hematuria. - **Neurologic:** No new seizures, weakness, or focal deficits. Baseline seizure disorder controlled on levetiracetam. - **Musculoskeletal:** No bone pain. - **Skin:** No new rashes or lesions. - **Psychiatric:** Mood stable; occasional anxiety related to cancer diagnosis. --- ### Past Medical History - Non\u2011small cell lung cancer, adenocarcinoma (stage IIA \u2192 stage IV) - Seizure disorder, well\u2011controlled on levetiracetam - Hypertension (controlled) \u2013 *medication not listed in prior records* - Osteopenia \u2013 *managed with calcium/vitamin D* ### Past Surgical History - Left upper\u2011lobectomy with mediastinal lymph node dissection (age 94) ### Oncology Treatment History - Adjuvant cis + vinorelbine (4 cycles, completed age 95) - Stereotactic radiosurgery to right frontal brain metastasis (single 20 Gy fraction, age 97) - No systemic therapy since completion of adjuvant chemotherapy ### Medications - Levetiracetam 500 mg PO BID - Lisinopril 10 mg PO daily - Calcium carbonate 600 mg PO BID - Vitamin D3 1000 IU PO daily ### Allergies - No known drug allergies (NKDA) ### Family History - Non\u2011contributory for malignancy ### Social History - Retired; lives at home with spouse; former smoker (\u224830 pack\u2011year history, quit at age 70); denies alcohol or illicit drug use. --- ### Physical Examination | System | Findings | |--------|----------| | **General** | Alert, oriented \u00d73, NAD, appears his stated age | | **Vital Signs** | BP 132/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96% on"
+    },
+    {
+      "chunk_index": 16,
+      "edited_similarity": 0.4305509328842163,
+      "evidence_id": "inner3_row863_chunk16",
+      "original_similarity": 0.44886359572410583,
+      "row_id": 863,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "### Genomic Findings | Gene | Alteration | Type | Allele Frequency* | Classification | |------|------------|------|-------------------|----------------| | **KRAS** | c.34G>T (p.G12C) | Missense SNV | 28 % | Likely driver | | **TP53** | c.818G>T (p.R273C) | Missense SNV | 22 % | Likely driver | | **STK11** | c.1234_1235del (p.F412fs) | Frameshift indel | 25 % | Likely loss\u2011of\u2011function | | **EGFR** | No pathogenic variant detected in exons 18\u201121 | N/A | \u2013 | Wild\u2011type (coverage adequate) | | **ALK** | No rearrangement detected (fusion panel) | N/A | \u2013 | Negative | | **ROS1** | No rearrangement detected (fusion panel) | N/A | \u2013 | Negative | | **MET** | No amplification (copy\u2011number) | N/A | \u2013 | Negative | | **PD-L1** | Not assessed by NGS (IHC required) | N/A | \u2013 | \u2013 | | **Tumor Mutational Burden (TMB)** | 7.8 mut/Mb | \u2013 | \u2013 | Low\u2011intermediate | | **Microsatellite Instability (MSI)** | Stable | \u2013 | \u2013 | MSI\u2011stable | \\*Allele frequency calculated relative to total reads at the locus. ### Interpretation / Clinical Significance 1. **KRAS G12C** \u2013 A well\u2011characterized oncogenic driver in lung adenocarcinoma. KRAS G12C\u2013specific inhibitors (e.g., sotorasib, adagrasib) have demonstrated activity in this molecular subset. Presence of this alteration suggests eligibility for KRAS\u2011targeted therapy, pending clinical assessment and regulatory availability. 2. **TP53 R273C** \u2013 A hotspot missense mutation associated with loss of tumor\u2011suppressor function. Frequently co\u2011occurs with KRAS alterations and may influence response to certain chemotherapies and immunotherapy. 3. **STK11 loss\u2011of\u2011function** \u2013 Frameshift mutation leading"
+    },
+    {
+      "chunk_index": 19,
+      "edited_similarity": 0.4722520112991333,
+      "evidence_id": "inner3_row863_chunk19",
+      "original_similarity": 0.4767714738845825,
+      "row_id": 863,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Hospital Admission Record Timepoint: At age 97 Reason for Admission: seizure management Principal Diagnosis: G40.909 - Epilepsy, unspecified, not intractable, without status epilepticus Length of Stay: 3 days Discharge Disposition: home with antiepileptic medication <new_note> Encounter Record Timepoint: At age 97 Encounter Type: outpatient neurology follow-up Diagnosis Codes: - G40.909: Epilepsy, unspecified, not intractable, without status epilepticus Procedure Codes: - 99214: Established patient visit, moderate complexity <new_note> Laboratory Results Timepoint: At age 96 Complete Blood Count (CBC): WBC: 8.2 k/uL [Reference: 3.7-10.5] - Normal Hgb: 12.5 g/dL [Reference: 12.0-16.0] - Normal Plt: 190 k/uL [Reference: 150-400] - Normal ANC: 5.0 k/uL [Reference: 1.5-8.0] - Normal Comprehensive Metabolic Panel (CMP): Cr: 0.9 mg/dL [Reference: 0.6-1.2] - Normal <new_note> Laboratory Results Timepoint: At age 98 Laboratory Results: CBC - WBC: 6.9 k/uL - Normal Hgb: 11.8 g/dL [Reference: 12.0-16.0] - LOW Plt: 180 k/uL [Reference: 150-400] - Normal ANC: 3.2 k/uL [Reference: 1.5-8.0] - Normal CMP - Cr: 1.0 mg/dL - Normal Tumor markers - CEA: 4.2 ng/mL - HIGH <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 98 Instrument: EORTC QLQ-C30 Physical Function: 55/100 Role Function: 45/100 Emotional Function: 60/100 Cognitive Function: 70/100 Social Function: 50/100 Fatigue: 70/100 Nausea: 30/100 Pain: 40/100 Dyspnea: 35/100 Insomnia: 45/100 Appetite Loss: 50/100 Constipation: 20/100 Diarrhea: 15/100 Financial Difficulties: 40/100 Global Health: 45/100 Instrument: PRO-CTCAE Fatigue - Severity: 2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Pain - Severity: 1/4 (Mild) Neuropathy - Severity: 0/4 (None) Shortness of Breath - Severity: 2/4 (Moderate) <new_note> **Oncology Progress Note** **Patient:** Harold J. Thompson, M, 98\u2011year\u2011old"
+    },
+    {
+      "chunk_index": 29,
+      "edited_similarity": 0.8087777495384216,
+      "evidence_id": "inner3_row259_chunk29",
+      "original_similarity": 0.8294620513916016,
+      "row_id": 259,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "dry cough, no hemoptysis. - **Cardiovascular:** No chest pain, palpitations, or edema. - **Gastrointestinal:** Normal appetite, no nausea/vomiting, no dysphagia. - **Genitourinary:** No dysuria or hematuria. - **Neurologic:** Peripheral neuropathy (grade 1), no headaches or focal deficits. - **Musculoskeletal:** No bone pain. - **Skin:** No rashes or new lesions. - **Psychiatric:** Mood stable, no anxiety or depression reported. ### Past Medical History - **Malignant neoplasm:** Stage IV KRAS G12C mutant, TP53 R273H, STK11 loss, CDKN2A deletion adenocarcinoma of the right lower lobe (diagnosed 12 months ago). - **Hypertension:** Controlled with lisinopril. - **Hyperlipidemia:** On atorvastatin. - **No prior surgeries.** ### Social History - Former smoker, 20\u2011pack\u2011year history, quit 2 years ago. - Occasional alcohol (1\u20112 glasses wine/week). - Lives with spouse, works part\u2011time as a graphic designer. - No illicit drug use. ### Family History - Mother: Breast cancer (diagnosed at 62). - Father: Hypertension, deceased from myocardial infarction at 68. - No known familial lung cancer syndromes. ### Allergies - No known drug allergies (NKDA). ### Medications - Lisinopril 10 mg PO daily - Atorvastatin 20 mg PO nightly - Vitamin D 2000 IU PO daily - PRN ondansetron 4 mg PO for nausea ### Physical Examination - **Vitals:** BP 122/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 95% on room air. - **General:** Alert, oriented, in no acute distress. - **HEENT:** Normocephalic, atraumatic, mucous membranes moist. - **Neck:** No lymphadenopathy. - **Cardiovascular:** Regular rate and rhythm, no murmurs. - **Respiratory:** Decreased breath sounds at right lower lung field, mild dullness to"
+    },
+    {
+      "chunk_index": 32,
+      "edited_similarity": 0.47135117650032043,
+      "evidence_id": "inner3_row259_chunk32",
+      "original_similarity": 0.4821721911430359,
+      "row_id": 259,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "reduce inflammatory component of effusion (if not contraindicated). 3. **Laboratory Monitoring** - CBC, CMP, and renal panel within 7 days prior to next treatment cycle. - Consider prophylactic G\u2011CSF (filgrastim) given prior neutropenia. 4. **Symptom Management** - Continue ondansetron PRN for nausea. - Initiate gabapentin 300 mg PO nightly for neuropathic symptoms, titrate as needed. - Encourage pulmonary rehabilitation exercises to improve dyspnea. 5. **Clinical Trial Exploration** - Review eligibility for KRAS G12C\u2011targeted inhibitor trials (e.g., sotorasib, adagrasib) given molecular profile; discuss with research coordinator. 6. **Follow\u2011up** - Return visit in 2 weeks to review thoracentesis results, lab work, and finalize chemotherapy selection. - Schedule repeat chest CT in 6 weeks after initiation of next line to assess response. 7. **Patient Education** - Reviewed signs of infection, neutropenic precautions, and when to seek urgent care. - Provided written material on managing pleural effusion symptoms and neuropathy. **Signature:** Dr. [Oncologist Name], MD Medical Oncology, [Institution]"
+    },
+    {
+      "chunk_index": 3,
+      "edited_similarity": 0.7304186820983887,
+      "evidence_id": "inner3_row646_chunk3",
+      "original_similarity": 0.7453058362007141,
+      "row_id": 646,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "No new medications have been started since the last visit. --- ### Review of Systems (pertinent) - **Constitutional:** No fever, chills, fatigue, or weight change. - **Respiratory:** No cough, dyspnea, wheezing, or pleuritic pain. - **Cardiovascular:** No chest pain, palpitations, or edema. - **Gastrointestinal:** No nausea, vomiting, dysphagia, or abdominal pain. - **Neurologic:** No headaches, visual changes, or focal deficits. - **Skin:** No new rashes or lesions. *All other systems reviewed and negative.* --- ### Past Medical History - Large\u2011cell carcinoma of the left lung, stage IIA \u2013 status post\u2011surgery and adjuvant chemotherapy (see above). - No other chronic medical conditions reported. ### Past Surgical History - VATS left lower lobectomy with mediastinal lymph node dissection (date of surgery: *[to be inserted]*). ### Family History - Non\u2011contributory for malignancy. ### Social History - Lives at home with spouse. - Retired. - No current tobacco use; smoking history not documented. - No alcohol or illicit drug use. ### Allergies - No known drug allergies (NKDA). ### Medications - No chronic medications at this time. - Occasionally uses acetaminophen for mild aches. --- ### Physical Examination | **Vital Signs** | | |---|---| | Blood Pressure | 118/72 mmHg | | Heart Rate | 72 bpm | | Respiratory Rate | 14 /min | | Temperature | 36.7 \u00b0C (98.1 \u00b0F) | | Oxygen Saturation | 98 % on room air | **General:** Well\u2011appearing, in no acute distress. **HEENT:** Normocephalic, atraumatic. No lymphadenopathy. **Neck:** No jugular venous distention, thyroid non\u2011enlarged. **Cardiovascular:** Regular rate and rhythm, no murmurs, rubs, or"
+    },
+    {
+      "chunk_index": 16,
+      "edited_similarity": 0.6584135293960571,
+      "evidence_id": "inner3_row646_chunk16",
+      "original_similarity": 0.6761623024940491,
+      "row_id": 646,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "weakness, numbness, or seizures. - **Musculoskeletal:** No bone pain. - **Psychiatric:** Mood stable; occasional anxiety about disease progression. **Patient\u2011Reported Outcomes (EORTC QLQ\u2011C30, PRO\u2011CTCAE):** - Physical Function 70, Role Function 55, Emotional Function 60, Cognitive Function 65, Social Function 50. - Fatigue 45, Nausea 20, Pain 30, Dyspnea 40, Insomnia 35, Appetite Loss 25, Global Health 55. - PRO\u2011CTCAE (severity 0\u20114): Nausea 2, Fatigue 3, Pain 2, Shortness of Breath 2. --- ### OBJECTIVE **Vital Signs:** - BP 128/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96% on room air, Height 162 cm, Weight 68 kg, BMI 26 kg/m\u00b2. **Performance Status:** ECOG 1 (restricted in physically strenuous activity but ambulatory and capable of self\u2011care). **Physical Examination:** - **General:** Alert, oriented, in no acute distress. - **HEENT:** Normocephalic, atraumatic; pupils equal, reactive; mucous membranes moist. - **Neck:** Supple, no lymphadenopathy. - **Cardiovascular:** Regular rate and rhythm, no murmurs, rubs, or gallops. - **Respiratory:** Decreased breath sounds over right upper lung field; no crackles or wheezes. No use of accessory muscles. - **Abdomen:** Soft, non\u2011tender, no hepatosplenomegaly. - **Extremities:** No edema, pulses 2+ bilaterally. - **Neurologic:** Cranial nerves II\u2011XII intact; strength 5/5 in all extremities; sensation intact; gait steady. No focal deficits. **Laboratory Data (most recent, obtained 3 days ago):** - **CBC:** WBC 9.9 \u00d710\u00b3/\u00b5L (\u2191), Neutrophils 9.9 \u00d710\u00b3/\u00b5L, Lymphocytes 2.0 \u00d710\u00b3/\u00b5L (NLR = 4.95, high), Hgb 14.2 g/dL, Platelets 210 \u00d710\u00b3/\u00b5L. - **CMP:** Creatinine 1.2 mg/dL (high\u2011normal), eGFR (Cockcroft\u2011Gault) 52.8 mL/min, BUN 14 mg/dL, Na 140 mEq/L, K 4.2 mEq/L, AST 32 U/L, ALT 28"
+    },
+    {
+      "chunk_index": 5,
+      "edited_similarity": 0.5842885375022888,
+      "evidence_id": "inner3_row646_chunk5",
+      "original_similarity": 0.5940390229225159,
+      "row_id": 646,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "IV Contrast (post\u2011operative surveillance, performed 4 weeks ago):** - Post\u2011operative changes in the left lower lobe with expected surgical staple line and mild atelectasis. - No residual soft\u2011tissue mass. - No mediastinal or hilar lymphadenopathy. - No pleural effusion or pneumothorax. **Impression:** No radiographic evidence of residual or recurrent disease. --- ### Assessment 1. **Large\u2011cell carcinoma of the left lung, stage IIA \u2013 status post\u2011left lower lobectomy, mediastinal lymph node dissection, and adjuvant cisplatin/vinorelbine.** - Currently disease\u2011free on imaging. - ECOG performance status 0. 2. **Post\u2011operative status:** Healing incision, no complications. 3. **Laboratory studies:** Within normal limits; no cytopenias or renal/hepatic dysfunction. --- ### Plan 1. **Surveillance:** - Continue routine imaging per NCCN guidelines: contrast\u2011enhanced CT chest every 6 months for the next 2 years, then annually thereafter. - Repeat CBC and CMP at each surveillance visit. 2. **No further systemic therapy** required at this time given complete resection, negative margins, node\u2011negative disease, and absence of residual disease on imaging. 3. **Vaccinations:** Ensure up\u2011to\u2011date influenza and pneumococcal vaccinations. 4. **Lifestyle counseling:** - Encourage regular aerobic activity as tolerated. - Discuss smoking cessation resources if applicable. 5. **Follow\u2011up:** Schedule return visit in 3 months for clinical assessment and laboratory review. 6. **Patient education:** Reviewed signs and symptoms that would warrant earlier evaluation (new cough, dyspnea, chest pain, unexplained weight loss, neurologic changes). Patient verbalized understanding and expressed confidence in the current plan. **Signature:** ___________________________ **Provider:** Oncology Attending (MD) --- <new_note> Encounter Record Timepoint: At age 73 Encounter Type: outpatient oncology visit Diagnosis Codes: - C34.90: Malignant neoplasm"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 3,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_003_query_001_random",
+  "patient_outcomes_in_prompt": false,
+  "query": 1,
+  "query_id": "effect_query_002"
+}

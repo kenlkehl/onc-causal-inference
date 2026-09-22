@@ -1,0 +1,6 @@
+__pycache__/
+*.log
+pilot_v1/inputs/
+pilot_v1/folds/*/*.npz
+pilot_v1/llm/*/request_events.jsonl
+pilot_v1/llm_runtime/

@@ -1,0 +1,1142 @@
+[
+  {
+    "control": -1,
+    "distance": 0.0,
+    "kind": "original",
+    "query": 0,
+    "radius": 0.0,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": -1,
+    "distance": 0.0,
+    "kind": "original",
+    "query": 1,
+    "radius": 0.0,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": -1,
+    "distance": 0.0,
+    "kind": "original",
+    "query": 2,
+    "radius": 0.0,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": -1,
+    "distance": 0.0,
+    "kind": "original",
+    "query": 3,
+    "radius": 0.0,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": -1,
+    "distance": 0.0,
+    "kind": "original",
+    "query": 4,
+    "radius": 0.0,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": -1,
+    "distance": 0.015941090881824493,
+    "kind": "targeted",
+    "query": 0,
+    "radius": 0.02,
+    "restart": 0,
+    "training_criterion": 0.028378769755363464,
+    "training_sd_ratio": 0.9583770036697388
+  },
+  {
+    "control": 0,
+    "distance": 0.015941090881824493,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.02,
+    "seed": 20360942,
+    "training_sd_ratio": 1.0009596347808838
+  },
+  {
+    "control": 1,
+    "distance": 0.015941090881824493,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.02,
+    "seed": 20360943,
+    "training_sd_ratio": 0.9997513890266418
+  },
+  {
+    "control": 2,
+    "distance": 0.015941090881824493,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.02,
+    "seed": 20360944,
+    "training_sd_ratio": 1.000240683555603
+  },
+  {
+    "control": 3,
+    "distance": 0.015941090881824493,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.02,
+    "seed": 20360945,
+    "training_sd_ratio": 0.9985173940658569
+  },
+  {
+    "control": 4,
+    "distance": 0.015941090881824493,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.02,
+    "seed": 20360946,
+    "training_sd_ratio": 1.0004838705062866
+  },
+  {
+    "control": -1,
+    "distance": 0.05000070109963417,
+    "kind": "targeted",
+    "query": 0,
+    "radius": 0.05,
+    "restart": 0,
+    "training_criterion": 0.02437913790345192,
+    "training_sd_ratio": 0.8697700500488281
+  },
+  {
+    "control": 0,
+    "distance": 0.05000070109963417,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.05,
+    "seed": 20360972,
+    "training_sd_ratio": 0.9961867928504944
+  },
+  {
+    "control": 1,
+    "distance": 0.05000070109963417,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.05,
+    "seed": 20360973,
+    "training_sd_ratio": 0.9957977533340454
+  },
+  {
+    "control": 2,
+    "distance": 0.05000070109963417,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.05,
+    "seed": 20360974,
+    "training_sd_ratio": 0.9996312260627747
+  },
+  {
+    "control": 3,
+    "distance": 0.05000070109963417,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.05,
+    "seed": 20360975,
+    "training_sd_ratio": 1.0009626150131226
+  },
+  {
+    "control": 4,
+    "distance": 0.05000070109963417,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.05,
+    "seed": 20360976,
+    "training_sd_ratio": 0.9991168975830078
+  },
+  {
+    "control": -1,
+    "distance": 0.10000008344650269,
+    "kind": "targeted",
+    "query": 0,
+    "radius": 0.1,
+    "restart": 1,
+    "training_criterion": 0.019017569720745087,
+    "training_sd_ratio": 0.7662156224250793
+  },
+  {
+    "control": 0,
+    "distance": 0.10000008344650269,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.1,
+    "seed": 20361022,
+    "training_sd_ratio": 0.9958396553993225
+  },
+  {
+    "control": 1,
+    "distance": 0.10000008344650269,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.1,
+    "seed": 20361023,
+    "training_sd_ratio": 0.9973992705345154
+  },
+  {
+    "control": 2,
+    "distance": 0.10000008344650269,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.1,
+    "seed": 20361024,
+    "training_sd_ratio": 0.983058512210846
+  },
+  {
+    "control": 3,
+    "distance": 0.10000008344650269,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.1,
+    "seed": 20361025,
+    "training_sd_ratio": 1.0010924339294434
+  },
+  {
+    "control": 4,
+    "distance": 0.10000008344650269,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.1,
+    "seed": 20361026,
+    "training_sd_ratio": 0.9907593727111816
+  },
+  {
+    "control": -1,
+    "distance": 0.1999998837709427,
+    "kind": "targeted",
+    "query": 0,
+    "radius": 0.2,
+    "restart": 1,
+    "training_criterion": 0.0105168167501688,
+    "training_sd_ratio": 0.6145901679992676
+  },
+  {
+    "control": 0,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.2,
+    "seed": 20361122,
+    "training_sd_ratio": 0.9681875109672546
+  },
+  {
+    "control": 1,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.2,
+    "seed": 20361123,
+    "training_sd_ratio": 0.9783570170402527
+  },
+  {
+    "control": 2,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.2,
+    "seed": 20361124,
+    "training_sd_ratio": 0.9599067568778992
+  },
+  {
+    "control": 3,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.2,
+    "seed": 20361125,
+    "training_sd_ratio": 0.9639486074447632
+  },
+  {
+    "control": 4,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 0,
+    "radius": 0.2,
+    "seed": 20361126,
+    "training_sd_ratio": 0.9667462706565857
+  },
+  {
+    "control": -1,
+    "distance": 8.81936088603652e-08,
+    "kind": "targeted",
+    "query": 1,
+    "radius": 0.02,
+    "restart": 0,
+    "training_criterion": 0.0002782150695566088,
+    "training_sd_ratio": 0.9999999403953552
+  },
+  {
+    "control": 0,
+    "distance": 8.81936088603652e-08,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.02,
+    "seed": 20361942,
+    "training_sd_ratio": 0.9999999403953552
+  },
+  {
+    "control": 1,
+    "distance": 8.81936088603652e-08,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.02,
+    "seed": 20361943,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": 2,
+    "distance": 8.81936088603652e-08,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.02,
+    "seed": 20361944,
+    "training_sd_ratio": 1.0000001192092896
+  },
+  {
+    "control": 3,
+    "distance": 8.81936088603652e-08,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.02,
+    "seed": 20361945,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": 4,
+    "distance": 8.81936088603652e-08,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.02,
+    "seed": 20361946,
+    "training_sd_ratio": 0.9999999403953552
+  },
+  {
+    "control": -1,
+    "distance": 0.006879467982798815,
+    "kind": "targeted",
+    "query": 1,
+    "radius": 0.05,
+    "restart": 0,
+    "training_criterion": 0.00024759149528108537,
+    "training_sd_ratio": 0.9993270039558411
+  },
+  {
+    "control": 0,
+    "distance": 0.006879467982798815,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.05,
+    "seed": 20361972,
+    "training_sd_ratio": 0.9997922778129578
+  },
+  {
+    "control": 1,
+    "distance": 0.006879467982798815,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.05,
+    "seed": 20361973,
+    "training_sd_ratio": 0.9999993443489075
+  },
+  {
+    "control": 2,
+    "distance": 0.006879467982798815,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.05,
+    "seed": 20361974,
+    "training_sd_ratio": 0.9998325109481812
+  },
+  {
+    "control": 3,
+    "distance": 0.006879467982798815,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.05,
+    "seed": 20361975,
+    "training_sd_ratio": 1.0005561113357544
+  },
+  {
+    "control": 4,
+    "distance": 0.006879467982798815,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.05,
+    "seed": 20361976,
+    "training_sd_ratio": 0.9997931718826294
+  },
+  {
+    "control": -1,
+    "distance": 0.01896810159087181,
+    "kind": "targeted",
+    "query": 1,
+    "radius": 0.1,
+    "restart": 0,
+    "training_criterion": 0.000177454057848081,
+    "training_sd_ratio": 0.9992161989212036
+  },
+  {
+    "control": 0,
+    "distance": 0.01896810159087181,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.1,
+    "seed": 20362022,
+    "training_sd_ratio": 0.999062180519104
+  },
+  {
+    "control": 1,
+    "distance": 0.01896810159087181,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.1,
+    "seed": 20362023,
+    "training_sd_ratio": 1.0001306533813477
+  },
+  {
+    "control": 2,
+    "distance": 0.01896810159087181,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.1,
+    "seed": 20362024,
+    "training_sd_ratio": 0.9997281432151794
+  },
+  {
+    "control": 3,
+    "distance": 0.01896810159087181,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.1,
+    "seed": 20362025,
+    "training_sd_ratio": 1.000510811805725
+  },
+  {
+    "control": 4,
+    "distance": 0.01896810159087181,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.1,
+    "seed": 20362026,
+    "training_sd_ratio": 0.999677836894989
+  },
+  {
+    "control": -1,
+    "distance": 0.0360177680850029,
+    "kind": "targeted",
+    "query": 1,
+    "radius": 0.2,
+    "restart": 0,
+    "training_criterion": 8.348140545422211e-05,
+    "training_sd_ratio": 1.0005348920822144
+  },
+  {
+    "control": 0,
+    "distance": 0.0360177680850029,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.2,
+    "seed": 20362122,
+    "training_sd_ratio": 1.000088095664978
+  },
+  {
+    "control": 1,
+    "distance": 0.0360177680850029,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.2,
+    "seed": 20362123,
+    "training_sd_ratio": 0.9995519518852234
+  },
+  {
+    "control": 2,
+    "distance": 0.0360177680850029,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.2,
+    "seed": 20362124,
+    "training_sd_ratio": 0.9989187121391296
+  },
+  {
+    "control": 3,
+    "distance": 0.0360177680850029,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.2,
+    "seed": 20362125,
+    "training_sd_ratio": 0.999294102191925
+  },
+  {
+    "control": 4,
+    "distance": 0.0360177680850029,
+    "kind": "random",
+    "query": 1,
+    "radius": 0.2,
+    "seed": 20362126,
+    "training_sd_ratio": 0.9991108179092407
+  },
+  {
+    "control": -1,
+    "distance": 0.01999818906188011,
+    "kind": "targeted",
+    "query": 2,
+    "radius": 0.02,
+    "restart": 0,
+    "training_criterion": 0.027032766491174698,
+    "training_sd_ratio": 0.9605056643486023
+  },
+  {
+    "control": 0,
+    "distance": 0.01999818906188011,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.02,
+    "seed": 20362942,
+    "training_sd_ratio": 1.0002827644348145
+  },
+  {
+    "control": 1,
+    "distance": 0.01999818906188011,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.02,
+    "seed": 20362943,
+    "training_sd_ratio": 0.9992443323135376
+  },
+  {
+    "control": 2,
+    "distance": 0.01999818906188011,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.02,
+    "seed": 20362944,
+    "training_sd_ratio": 0.9999710321426392
+  },
+  {
+    "control": 3,
+    "distance": 0.01999818906188011,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.02,
+    "seed": 20362945,
+    "training_sd_ratio": 1.0010234117507935
+  },
+  {
+    "control": 4,
+    "distance": 0.01999818906188011,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.02,
+    "seed": 20362946,
+    "training_sd_ratio": 0.9994847178459167
+  },
+  {
+    "control": -1,
+    "distance": 0.05000070855021477,
+    "kind": "targeted",
+    "query": 2,
+    "radius": 0.05,
+    "restart": 0,
+    "training_criterion": 0.022556111216545105,
+    "training_sd_ratio": 0.9083112478256226
+  },
+  {
+    "control": 0,
+    "distance": 0.05000070855021477,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.05,
+    "seed": 20362972,
+    "training_sd_ratio": 0.9983304142951965
+  },
+  {
+    "control": 1,
+    "distance": 0.05000070855021477,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.05,
+    "seed": 20362973,
+    "training_sd_ratio": 1.0042202472686768
+  },
+  {
+    "control": 2,
+    "distance": 0.05000070855021477,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.05,
+    "seed": 20362974,
+    "training_sd_ratio": 0.998752772808075
+  },
+  {
+    "control": 3,
+    "distance": 0.05000070855021477,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.05,
+    "seed": 20362975,
+    "training_sd_ratio": 1.000658392906189
+  },
+  {
+    "control": 4,
+    "distance": 0.05000070855021477,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.05,
+    "seed": 20362976,
+    "training_sd_ratio": 1.0007045269012451
+  },
+  {
+    "control": -1,
+    "distance": 0.10000009089708328,
+    "kind": "targeted",
+    "query": 2,
+    "radius": 0.1,
+    "restart": 2,
+    "training_criterion": 0.016509713605046272,
+    "training_sd_ratio": 0.834941565990448
+  },
+  {
+    "control": 0,
+    "distance": 0.10000009089708328,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.1,
+    "seed": 20363022,
+    "training_sd_ratio": 0.9868219494819641
+  },
+  {
+    "control": 1,
+    "distance": 0.10000009089708328,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.1,
+    "seed": 20363023,
+    "training_sd_ratio": 0.9959204196929932
+  },
+  {
+    "control": 2,
+    "distance": 0.10000009089708328,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.1,
+    "seed": 20363024,
+    "training_sd_ratio": 0.993018627166748
+  },
+  {
+    "control": 3,
+    "distance": 0.10000009089708328,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.1,
+    "seed": 20363025,
+    "training_sd_ratio": 0.9897037744522095
+  },
+  {
+    "control": 4,
+    "distance": 0.10000009089708328,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.1,
+    "seed": 20363026,
+    "training_sd_ratio": 0.9963986277580261
+  },
+  {
+    "control": -1,
+    "distance": 0.1999998837709427,
+    "kind": "targeted",
+    "query": 2,
+    "radius": 0.2,
+    "restart": 1,
+    "training_criterion": 0.007306662388145924,
+    "training_sd_ratio": 0.7203097939491272
+  },
+  {
+    "control": 0,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.2,
+    "seed": 20363122,
+    "training_sd_ratio": 0.9766592979431152
+  },
+  {
+    "control": 1,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.2,
+    "seed": 20363123,
+    "training_sd_ratio": 0.9819836020469666
+  },
+  {
+    "control": 2,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.2,
+    "seed": 20363124,
+    "training_sd_ratio": 0.983353853225708
+  },
+  {
+    "control": 3,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.2,
+    "seed": 20363125,
+    "training_sd_ratio": 0.9696075916290283
+  },
+  {
+    "control": 4,
+    "distance": 0.1999998837709427,
+    "kind": "random",
+    "query": 2,
+    "radius": 0.2,
+    "seed": 20363126,
+    "training_sd_ratio": 0.9693755507469177
+  },
+  {
+    "control": -1,
+    "distance": 0.00908417347818613,
+    "kind": "targeted",
+    "query": 3,
+    "radius": 0.02,
+    "restart": 0,
+    "training_criterion": 0.01925000734627247,
+    "training_sd_ratio": 0.9844447374343872
+  },
+  {
+    "control": 0,
+    "distance": 0.00908417347818613,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.02,
+    "seed": 20363942,
+    "training_sd_ratio": 0.9997190833091736
+  },
+  {
+    "control": 1,
+    "distance": 0.00908417347818613,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.02,
+    "seed": 20363943,
+    "training_sd_ratio": 0.9996087551116943
+  },
+  {
+    "control": 2,
+    "distance": 0.00908417347818613,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.02,
+    "seed": 20363944,
+    "training_sd_ratio": 1.0001475811004639
+  },
+  {
+    "control": 3,
+    "distance": 0.00908417347818613,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.02,
+    "seed": 20363945,
+    "training_sd_ratio": 1.000217080116272
+  },
+  {
+    "control": 4,
+    "distance": 0.00908417347818613,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.02,
+    "seed": 20363946,
+    "training_sd_ratio": 1.0006763935089111
+  },
+  {
+    "control": -1,
+    "distance": 0.0464043952524662,
+    "kind": "targeted",
+    "query": 3,
+    "radius": 0.05,
+    "restart": 0,
+    "training_criterion": 0.017497088760137558,
+    "training_sd_ratio": 0.9101431965827942
+  },
+  {
+    "control": 0,
+    "distance": 0.0464043952524662,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.05,
+    "seed": 20363972,
+    "training_sd_ratio": 1.0022939443588257
+  },
+  {
+    "control": 1,
+    "distance": 0.0464043952524662,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.05,
+    "seed": 20363973,
+    "training_sd_ratio": 1.0012736320495605
+  },
+  {
+    "control": 2,
+    "distance": 0.0464043952524662,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.05,
+    "seed": 20363974,
+    "training_sd_ratio": 1.0011050701141357
+  },
+  {
+    "control": 3,
+    "distance": 0.0464043952524662,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.05,
+    "seed": 20363975,
+    "training_sd_ratio": 0.9963136911392212
+  },
+  {
+    "control": 4,
+    "distance": 0.0464043952524662,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.05,
+    "seed": 20363976,
+    "training_sd_ratio": 1.0018856525421143
+  },
+  {
+    "control": -1,
+    "distance": 0.10000007599592209,
+    "kind": "targeted",
+    "query": 3,
+    "radius": 0.1,
+    "restart": 0,
+    "training_criterion": 0.014205618761479855,
+    "training_sd_ratio": 0.8210278749465942
+  },
+  {
+    "control": 0,
+    "distance": 0.10000007599592209,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.1,
+    "seed": 20364022,
+    "training_sd_ratio": 0.9938637018203735
+  },
+  {
+    "control": 1,
+    "distance": 0.10000007599592209,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.1,
+    "seed": 20364023,
+    "training_sd_ratio": 0.986374020576477
+  },
+  {
+    "control": 2,
+    "distance": 0.10000007599592209,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.1,
+    "seed": 20364024,
+    "training_sd_ratio": 0.9992515444755554
+  },
+  {
+    "control": 3,
+    "distance": 0.10000007599592209,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.1,
+    "seed": 20364025,
+    "training_sd_ratio": 0.9893875122070312
+  },
+  {
+    "control": 4,
+    "distance": 0.10000007599592209,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.1,
+    "seed": 20364026,
+    "training_sd_ratio": 1.003431797027588
+  },
+  {
+    "control": -1,
+    "distance": 0.19999992847442627,
+    "kind": "targeted",
+    "query": 3,
+    "radius": 0.2,
+    "restart": 1,
+    "training_criterion": 0.009012393653392792,
+    "training_sd_ratio": 0.6834612488746643
+  },
+  {
+    "control": 0,
+    "distance": 0.19999992847442627,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.2,
+    "seed": 20364122,
+    "training_sd_ratio": 0.9740536212921143
+  },
+  {
+    "control": 1,
+    "distance": 0.19999992847442627,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.2,
+    "seed": 20364123,
+    "training_sd_ratio": 0.9965885877609253
+  },
+  {
+    "control": 2,
+    "distance": 0.19999992847442627,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.2,
+    "seed": 20364124,
+    "training_sd_ratio": 0.9743367433547974
+  },
+  {
+    "control": 3,
+    "distance": 0.19999992847442627,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.2,
+    "seed": 20364125,
+    "training_sd_ratio": 0.9848799705505371
+  },
+  {
+    "control": 4,
+    "distance": 0.19999992847442627,
+    "kind": "random",
+    "query": 3,
+    "radius": 0.2,
+    "seed": 20364126,
+    "training_sd_ratio": 0.9678934812545776
+  },
+  {
+    "control": -1,
+    "distance": 1.1715167858028508e-07,
+    "kind": "targeted",
+    "query": 4,
+    "radius": 0.02,
+    "restart": 0,
+    "training_criterion": 0.0012430258793756366,
+    "training_sd_ratio": 1.000000238418579
+  },
+  {
+    "control": 0,
+    "distance": 1.1715167858028508e-07,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.02,
+    "seed": 20364942,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": 1,
+    "distance": 1.1715167858028508e-07,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.02,
+    "seed": 20364943,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": 2,
+    "distance": 1.1715167858028508e-07,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.02,
+    "seed": 20364944,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": 3,
+    "distance": 1.1715167858028508e-07,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.02,
+    "seed": 20364945,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": 4,
+    "distance": 1.1715167858028508e-07,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.02,
+    "seed": 20364946,
+    "training_sd_ratio": 1.0
+  },
+  {
+    "control": -1,
+    "distance": 0.009275438264012337,
+    "kind": "targeted",
+    "query": 4,
+    "radius": 0.05,
+    "restart": 1,
+    "training_criterion": 0.001182430423796177,
+    "training_sd_ratio": 1.001313328742981
+  },
+  {
+    "control": 0,
+    "distance": 0.009275438264012337,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.05,
+    "seed": 20364972,
+    "training_sd_ratio": 1.0000404119491577
+  },
+  {
+    "control": 1,
+    "distance": 0.009275438264012337,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.05,
+    "seed": 20364973,
+    "training_sd_ratio": 0.9998475313186646
+  },
+  {
+    "control": 2,
+    "distance": 0.009275438264012337,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.05,
+    "seed": 20364974,
+    "training_sd_ratio": 0.9997943043708801
+  },
+  {
+    "control": 3,
+    "distance": 0.009275438264012337,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.05,
+    "seed": 20364975,
+    "training_sd_ratio": 0.9998452067375183
+  },
+  {
+    "control": 4,
+    "distance": 0.009275438264012337,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.05,
+    "seed": 20364976,
+    "training_sd_ratio": 0.9996842741966248
+  },
+  {
+    "control": -1,
+    "distance": 0.03054363653063774,
+    "kind": "targeted",
+    "query": 4,
+    "radius": 0.1,
+    "restart": 1,
+    "training_criterion": 0.0010183172998949885,
+    "training_sd_ratio": 1.004913091659546
+  },
+  {
+    "control": 0,
+    "distance": 0.03054363653063774,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.1,
+    "seed": 20365022,
+    "training_sd_ratio": 1.0008907318115234
+  },
+  {
+    "control": 1,
+    "distance": 0.03054363653063774,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.1,
+    "seed": 20365023,
+    "training_sd_ratio": 1.0003137588500977
+  },
+  {
+    "control": 2,
+    "distance": 0.03054363653063774,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.1,
+    "seed": 20365024,
+    "training_sd_ratio": 0.9998870491981506
+  },
+  {
+    "control": 3,
+    "distance": 0.03054363653063774,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.1,
+    "seed": 20365025,
+    "training_sd_ratio": 1.0002737045288086
+  },
+  {
+    "control": 4,
+    "distance": 0.03054363653063774,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.1,
+    "seed": 20365026,
+    "training_sd_ratio": 0.9993911385536194
+  },
+  {
+    "control": -1,
+    "distance": 0.07936312258243561,
+    "kind": "targeted",
+    "query": 4,
+    "radius": 0.2,
+    "restart": 0,
+    "training_criterion": 0.0006607299437746406,
+    "training_sd_ratio": 1.0149978399276733
+  },
+  {
+    "control": 0,
+    "distance": 0.07936312258243561,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.2,
+    "seed": 20365122,
+    "training_sd_ratio": 0.9987364411354065
+  },
+  {
+    "control": 1,
+    "distance": 0.07936312258243561,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.2,
+    "seed": 20365123,
+    "training_sd_ratio": 0.9950658679008484
+  },
+  {
+    "control": 2,
+    "distance": 0.07936312258243561,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.2,
+    "seed": 20365124,
+    "training_sd_ratio": 0.9961457252502441
+  },
+  {
+    "control": 3,
+    "distance": 0.07936312258243561,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.2,
+    "seed": 20365125,
+    "training_sd_ratio": 0.9964413642883301
+  },
+  {
+    "control": 4,
+    "distance": 0.07936312258243561,
+    "kind": "random",
+    "query": 4,
+    "radius": 0.2,
+    "seed": 20365126,
+    "training_sd_ratio": 0.9979850053787231
+  }
+]

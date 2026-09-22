@@ -1,0 +1,51 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row935_chunk4",
+          "quote": "Loss of the CDKN2A tumor\u2011suppressor locus (p16INK4a) is observed in a subset of lung adenocarcinomas"
+        },
+        {
+          "evidence_id": "inner4_row217_chunk11",
+          "quote": "Homozygous deletion | \u2013 | \u2013 | \u2013 | Copy\u2011number loss (copy number = 0)"
+        }
+      ],
+      "description": "Presence or absence of homozygous loss or deletion of the CDKN2A tumor-suppressor locus (p16INK4a).",
+      "extraction_instruction": "Search for 'CDKN2A' in molecular pathology reports and identify if 'homozygous loss' or 'homozygous deletion' is present.",
+      "measurement_definition": "Positive if the report specifies 'homozygous loss' or 'homozygous deletion' (e.g., copy number = 0). Negative if no such loss is documented or if the locus is identified as intact.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "CDKN2A status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is unclear whether heterozygous loss is clinically relevant or should be categorized separately from homozygous loss.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row767_chunk11",
+          "quote": "Low\u2011intermediate TMB (8 mut/Mb) and MSS"
+        }
+      ],
+      "description": "The total number of somatic mutations per megabase of genomic sequence in the tumor.",
+      "extraction_instruction": "Extract the numeric value associated with TMB (mut/Mb) from the molecular profile section of the report.",
+      "measurement_definition": "Numeric value expressed in mutations per megabase (mut/Mb).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Tumor Mutational Burden (TMB)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence provides a categorical interpretation ('Low-intermediate') alongside the numeric value; it is uncertain if the numeric value or the category is the primary driver of clinical decision-making.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of provided clinical excerpts.",
+    "Variable reporting standards for molecular markers (e.g., some use VAF, others use copy number)."
+  ],
+  "summary": "The evidence identifies several baseline genomic and clinical variables in patients with non-small cell lung cancer (NSCLC), specifically highlighting CDKN2A status and Tumor Mutational Burden (TMB) as potential modifiers of disease biology, prognosis, and therapeutic response."
+}

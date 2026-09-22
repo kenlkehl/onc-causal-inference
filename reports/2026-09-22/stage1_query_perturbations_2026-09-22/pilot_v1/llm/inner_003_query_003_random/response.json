@@ -1,0 +1,71 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "wild-type",
+        "mutant"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row316_chunk19",
+          "quote": "right lower\u2011lobe adenocarcinoma with EGFR exon 19 deletion"
+        },
+        {
+          "evidence_id": "inner3_row88_chunk5",
+          "quote": "squamous NSCLC, EGFR wild\u2011type"
+        },
+        {
+          "evidence_id": "inner3_row52_chunk20",
+          "quote": "No activating EGFR alteration."
+        }
+      ],
+      "description": "The status of the epidermal growth factor receptor (EGFR) gene regarding the presence of activating mutations.",
+      "extraction_instruction": "Assign 'mutant' if the text mentions 'EGFR exon 19 deletion' or other activating mutations; assign 'wild-type' if 'EGFR wild-type' is explicitly stated.",
+      "measurement_definition": "Categorized as 'mutant' if an activating mutation (e.g., exon 19 deletion) is identified; 'wild-type' if no activating mutation is detected via molecular testing.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR Mutation Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain whether the specific site of mutation (e.g., exon 19 vs exon 21) provides distinct clinical utility over a binary mutant/wild-type classification.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [
+        "adenocarcinoma",
+        "squamous cell carcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row316_chunk19",
+          "quote": "right lower\u2011lobe adenocarcinoma"
+        },
+        {
+          "evidence_id": "inner3_row88_chunk5",
+          "quote": "squamous cell carcinoma of the right upper lobe"
+        },
+        {
+          "evidence_id": "inner3_row52_chunk20",
+          "quote": "squamous cell carcinoma of the lung, consistent with prior histology"
+        }
+      ],
+      "description": "The histological classification of the non-small cell lung cancer (NSCLC) based on pathology.",
+      "extraction_instruction": "Identify the histology specified in the pathology or diagnosis section; assign 'adenocarcinoma' or 'squamous cell carcinoma'.",
+      "measurement_definition": "Determined via pathology report microscopic description and immunohistochemistry (IHC) markers.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Tumor Histology",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify how cases of mixed histology or poorly differentiated tumors would be categorized.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small number of patients provided in the evidence.",
+    "Limited diversity in PD-L1 expression values (all cited cases reported 10%), preventing its use as a meaningful continuous variable."
+  ],
+  "summary": "The provided evidence supports the identification of baseline genomic and histological markers in non-small cell lung cancer (NSCLC), specifically EGFR mutation status and tumor histology, which are consistently documented across the patient cases."
+}

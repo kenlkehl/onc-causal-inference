@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "Cisplatin/Pemetrexed",
+        "Cisplatin/Vinorelbine"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row729_chunk11",
+          "quote": "completed adjuvant cisplatin\u2011pemetrexed (Alimta) chemotherapy in 4 cycles"
+        },
+        {
+          "evidence_id": "inner5_row598_chunk16",
+          "quote": "followed by four cycles of adjuvant cisplatin + vinorelbine"
+        }
+      ],
+      "description": "The specific drug combination used for adjuvant chemotherapy following surgical resection of the lung adenocarcinoma.",
+      "extraction_instruction": "Identify the chemotherapy drugs administered after surgery in the 'History of Present Illness' or 'Assessment' sections.",
+      "measurement_definition": "The combination of chemotherapy agents documented in the medical history or assessment; categories include Cisplatin/Pemetrexed (including Alimta) and Cisplatin/Vinorelbine.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "adjuvant_chemotherapy_regimen",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "It is uncertain if some patients received other platinum-based combinations not explicitly listed in these excerpts.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row729_chunk7",
+          "quote": "Currently no radiographic or clinical evidence of disease. ECOG PS 0."
+        },
+        {
+          "evidence_id": "inner5_row99_chunk5",
+          "quote": "Post\u2011operative fatigue, ECOG PS 2."
+        },
+        {
+          "evidence_id": "inner5_row788_chunk5",
+          "quote": "ECOG performance status 1."
+        }
+      ],
+      "description": "The Eastern Cooperative Oncology Group (ECOG) performance status, which assesses the level of functioning of cancer patients.",
+      "extraction_instruction": "Search for 'ECOG' or 'performance status' followed by a numeric value in the assessment or physical examination sections.",
+      "measurement_definition": "The numeric ECOG PS score as explicitly stated in the clinical notes (e.g., 'ECOG PS 0', 'ECOG 1', 'ECOG PS 2').",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ecog_performance_status",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Performance status may fluctuate over time (e.g., from 2 to 1 as seen in one patient), making the 'baseline' timing for the modifier ambiguous.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Limited number of patients provided in the evidence chunks.",
+    "Molecular markers (e.g., EGFR, KRAS) are inconsistently documented across patients, preventing their use as reliable candidates."
+  ],
+  "summary": "The provided evidence identifies baseline clinical variables in patients with resected stage II/III adenocarcinoma of the lung, specifically focusing on the choice of adjuvant chemotherapy regimen and functional status (ECOG PS) during the surveillance period."
+}

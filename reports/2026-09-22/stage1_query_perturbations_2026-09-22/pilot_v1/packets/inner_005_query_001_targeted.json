@@ -1,0 +1,208 @@
+{
+  "actual_distance": 0.1999998837709427,
+  "condition": "targeted",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 24,
+      "edited_similarity": 0.7859147787094116,
+      "evidence_id": "inner5_row367_chunk24",
+      "original_similarity": 0.8062587380409241,
+      "row_id": 367,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "Concern for disease recurrence/progression. **Technique:** The patient fasted \u22656 hours prior to injection. Serum glucose level measured at 92 mg/dL. Approximately 370 MBq (10 mCi) of 18F\u2011FDG was administered intravenously. After a 60\u2011minute uptake period, a combined PET/CT acquisition was performed from the skull base to the mid\u2011thigh. Low\u2011dose CT was obtained for attenuation correction and anatomic localization; diagnostic quality CT images of the chest were also acquired with intravenous contrast per protocol. Images were reconstructed in axial, coronal, and sagittal planes and reviewed on a dedicated workstation. Standardized uptake values (SUVmax) were recorded for all focal lesions. **Findings** **Chest \u2013 Pulmonary Parenchyma** - Right upper lobe: Post\u2011surgical changes with fibrosis and volume loss; no residual or new FDG\u2011avid mass. - Left lower lobe: A new 2.5 cm (axial) solid nodule in the posterior basal segment demonstrates intense FDG uptake (SUVmax = 9.8), markedly higher than background lung parenchyma. No calcification noted. - No additional pulmonary nodules identified. No pleural effusion or thickening. **Mediastinum/Hilum** - A 1.2 cm lymph node in the subcarinal region is FDG\u2011avid (SUVmax = 6.5). No other enlarged mediastinal or hilar nodes are seen. **Liver** - Multiple subcentimeter lesions (ranging from 0.6 cm to 1.0 cm) in the right hepatic lobe exhibit mildly increased FDG activity (SUVmax \u2248 4.2\u20135.0). No dominant hepatic mass identified. **Abdomen & Pelvis** - No FDG\u2011avid lesions in the spleen, adrenal glands, pancreas, or kidneys. - No evidence of bowel wall thickening or abnormal mesenteric uptake. **Bone** - No focal FDG\u2011avid osseous lesions. Diffuse physiologic marrow uptake is"
+    },
+    {
+      "chunk_index": 31,
+      "edited_similarity": 0.5201830863952637,
+      "evidence_id": "inner5_row367_chunk31",
+      "original_similarity": 0.4717629551887512,
+      "row_id": 367,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "and are generally considered palliative. * Discuss quality\u2011of\u2011life considerations, infusion schedule, and patient preference regarding clinic visits. 3. **Targeted Therapy Consideration** * Offer information on third\u2011generation EGFR TKIs (e.g., osimertinib) as an alternative, including their oral administration, CNS penetration, and side\u2011effect profile. Patient wishes to defer at this visit; revisit after brain MRI results. 4. **Supportive Care** * Continue albuterol PRN for dyspnea; consider low\u2011dose prednisone 10 mg PO daily if dyspnea worsens. * Provide anti\u2011emetic prophylaxis (ondansetron 8 mg PO q8h PRN) if chemotherapy is initiated. * Encourage moderate activity as tolerated; refer to pulmonary rehabilitation if dyspnea limits daily activities. * Nutritional counseling to maintain weight; monitor albumin and weight at each visit. 5. **Follow\u2011up** * Return visit in 2 weeks to review brain MRI results, repeat labs, and finalize systemic therapy decision. * Telephone check\u2011in in 1 week to assess for any new symptoms (e.g., neurologic changes, worsening dyspnea). 6. **Clinical Trial Screening** * Review eligibility for any open trials targeting EGFR\u2011mutant metastatic NSCLC (e.g., combination EGFR TKI + anti\u2011angiogenic agents). Provide patient with trial information packet if interested. 7. **Documentation** * All discussions, patient preferences, and consent for future treatment plans documented in the electronic medical record. **Signature:** Dr. [Oncologist Name], MD Medical Oncology, [Institution] Date: (to be entered) <new_note> Encounter Record Timepoint: At age 57 Encounter Type: outpatient oncology visit Diagnosis Codes: - C34.90: Malignant neoplasm of unspecified part of unspecified bronchus or lung - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99214: Established patient visit, moderate complexity - 96413:"
+    },
+    {
+      "chunk_index": 7,
+      "edited_similarity": 0.743915855884552,
+      "evidence_id": "inner5_row551_chunk7",
+      "original_similarity": 0.6905443668365479,
+      "row_id": 551,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "patient\u2019s overall clinical picture.* <new_note> **Radiology Report** **Patient:** Evelyn Martinez **Age/Sex:** 71\u2011year\u2011old Female **Exam Date:** [Date omitted] **Study Performed:** - Contrast\u2011enhanced computed tomography (CT) of the chest, abdomen, and pelvis. - Magnetic resonance imaging (MRI) of the brain with and without gadolinium contrast. **Clinical History / Indication:** Known diagnosis of stage IV non\u2011small cell lung cancer, adenocarcinoma of the left lower lobe (KRAS G12C, TP53 R273C, STK11 loss; EGFR wild\u2011type). Staging work\u2011up prior to initiation of systemic therapy. **Technique:** CT images obtained from the lung apices through the pelvis after intravenous administration of iodinated contrast (120 mL, rate 3 mL/s). Axial images reconstructed in lung, mediastinal, and abdominal windows with multiplanar reformats. Brain MRI performed on a 3\u2011Tesla scanner; T1\u2011weighted, T2\u2011weighted, FLAIR, diffusion\u2011weighted, and post\u2011gadolinium T1\u2011weighted sequences obtained in axial, coronal, and sagittal planes. **Findings** **Chest (CT):** - **Left Lower Lobe:** A 4.5 cm (axial) irregular, partially spiculated mass arising from the posterior basal segment of the left lower lobe. The lesion demonstrates heterogeneous attenuation with central low\u2011density areas suggestive of necrosis. No definite invasion of the pleura or chest wall. - **Airways:** No endobronchial obstruction. - **Mediastinum:** Bulky mediastinal lymphadenopathy with a conglomerate of enlarged nodes measuring up to 2.8 cm in the subcarinal (station 7) and right paratracheal (station 4R) regions, consistent with N3 disease. No evidence of vascular encasement. - **Pleura:** No pleural effusion or thickening. - **Lungs:** No additional pulmonary nodules or masses. No pneumothorax. - **Osseous Structures (visualized):** No lytic or sclerotic lesions in the ribs, vertebrae, or scapulae. **Abdomen and"
+    },
+    {
+      "chunk_index": 11,
+      "edited_similarity": 0.522273600101471,
+      "evidence_id": "inner5_row551_chunk11",
+      "original_similarity": 0.49154597520828247,
+      "row_id": 551,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "- Father: deceased from myocardial infarction at age 80. - No known family history of lung cancer or other hereditary cancers. ### Social History - Former smoker: 20\u2011pack\u2011year history, quit 20 years ago. - Occasional alcohol use (1\u20132 glasses wine per week). - Lives with husband; independent in ADLs. ### Allergies - No known drug allergies (NKDA). ### Medications - Lisinopril 10 mg daily - Atorvastatin 20 mg nightly - Acetaminophen 500 mg PRN for headache --- ### Physical Examination | System | Findings | |--------|----------| | **General** | Alert, oriented, in mild discomfort from headache; appears stated age. | | **Vital Signs** | BP 128/76 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96% on room air. | | **HEENT** | Normocephalic, atraumatic; mild frontal tenderness, no papilledema. | | **Neck** | Supple, no cervical lymphadenopathy. | | **Cardiovascular** | Regular rate and rhythm, no murmurs. | | **Respiratory** | Decreased breath sounds over left lower lung field; no crackles or wheezes. | | **Abdomen** | Soft, non\u2011tender, no hepatosplenomegaly. | | **Extremities** | No edema, pulses 2+ bilaterally. | | **Neurologic** | Cranial nerves II\u2011XII intact; no focal deficits; gait steady. | | **Skin** | No rashes or lesions. | --- ### Laboratory Data (most recent, obtained prior to visit) - **CBC:** WBC 5.5 k/\u00b5L, Neutrophils 2.0 k/\u00b5L, Lymphocytes 3.1 k/\u00b5L (NLR 0.65), Hgb 13.9 g/dL, Plt 210 k/\u00b5L. - **CMP:** Creatinine 0.90 mg/dL, BUN 14 mg/dL, Na 140 mEq/L, K 4.2 mEq/L, AST 28 U/L, ALT 22 U/L, Albumin 4.0 g/dL."
+    },
+    {
+      "chunk_index": 9,
+      "edited_similarity": 0.6406396627426147,
+      "evidence_id": "inner5_row551_chunk9",
+      "original_similarity": 0.5770535469055176,
+      "row_id": 551,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "imaging shows no restricted diffusion within the lesions. **Impression** 1. Left lower lobe pulmonary mass measuring 4.5 cm, consistent with known primary adenocarcinoma of the lung. 2. Bulky mediastinal lymphadenopathy (subcarinal and right paratracheal) consistent with N3 disease. 3. No intra\u2011abdominal metastatic disease identified on contrast\u2011enhanced CT of the abdomen and pelvis. 4. Three intracranial enhancing lesions (right frontal, left cerebellar, left occipital) with surrounding edema, compatible with metastatic disease. No additional intracranial abnormalities. **Signature:** [Radiologist\u2019s Name], MD Board\u2011Certified Radiologist, Fellowship in Thoracic and Neuro\u2011Imaging [Institution] <new_note> **Oncology Consultation Note \u2013 Initial Visit** **Patient:** Evelyn Martinez, 71\u2011year\u2011old female **MRN:** (redacted) **Visit Type:** New patient, high complexity --- ### Chief Complaint New oncology consultation for recently diagnosed stage IV non\u2011small cell lung cancer (adenocarcinoma) with brain metastases. --- ### History of Present Illness Ms. Martinez was diagnosed 2 weeks ago after a work\u2011up for a persistent non\u2011productive cough and intermittent mild headaches. A contrast\u2011enhanced CT of the chest/abdomen/pelvis demonstrated a 4.5 cm left lower lobe mass with bulky mediastinal lymphadenopathy (N3). Brain MRI identified three enhancing lesions (right frontal, left cerebellar, occipital) consistent with metastatic disease. She reports mild, intermittent headaches over the past month, described as pressure\u2011like, lasting 15\u201330 minutes, partially relieved with acetaminophen. No nausea, vomiting, visual changes, seizures, or focal neurological deficits. She denies dyspnea at rest, hemoptysis, weight loss, or fevers. She remains ambulatory and performs most activities of daily living, though she notes increased fatigue (grade 1) compared with baseline. No prior systemic therapy for lung cancer; she has not received any"
+    },
+    {
+      "chunk_index": 32,
+      "edited_similarity": 0.7619152069091797,
+      "evidence_id": "inner5_row158_chunk32",
+      "original_similarity": 0.729499340057373,
+      "row_id": 158,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "masses, or infiltrates. - **Left Lung:** No focal lesions. **Bilateral Pulmonary Nodules** - Multiple subcentimeter nodules (\u2264 5 mm) in both upper lobes are unchanged in size and attenuation compared with prior imaging. No new nodules identified. **Mediastinum & Hilar Structures** - **Right Paratracheal (Station 4R):** Lymph node measuring **1.5 cm** (short axis), unchanged. - **Subcarinal (Station 7):** Lymph node measuring **1.3 cm**, unchanged. - No other mediastinal or hilar lymphadenopathy beyond the known nodes. **Pleura & Chest Wall** - No pleural effusion, thickening, or pneumothorax. - No chest wall invasion or rib lesions. **Upper Abdomen (included on lower chest slices)** - No hepatic, adrenal, or renal lesions identified. No abdominal lymphadenopathy. **Vascular Structures** - Pulmonary arteries are patent; no evidence of acute pulmonary embolism. **Cardiac & Pericardial** - Heart size within normal limits. No pericardial effusion. **Osseous Structures** - Visualized thoracic vertebrae and ribs show no destructive lesions. **Impression** 1. Known right upper lobe mass now measuring **4.7 cm**, representing a slight decrease from prior measurement (5.1 cm). 2. Mediastinal lymph nodes (stations 4R and 7) unchanged in size. 3. Bilateral subcentimeter pulmonary nodules stable. 4. No new pulmonary, mediastinal, pleural, or osseous metastatic lesions identified. **Overall Assessment:** Findings are consistent with stable disease with a modest reduction in the primary tumor size compared with the prior study. No interval development of new metastatic disease. **Signature:** Dr. [Radiologist Name], MD Board\u2011Certified Radiologist \u2013 Thoracic Imaging [Institution Name] --- *This report is intended for the ordering physician and should be interpreted in the context of the"
+    },
+    {
+      "chunk_index": 27,
+      "edited_similarity": 0.48163992166519165,
+      "evidence_id": "inner5_row158_chunk27",
+      "original_similarity": 0.462727427482605,
+      "row_id": 158,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "On Day 12 he was admitted for febrile neutropenia (temperature 38.4 \u00b0C, ANC 0.6 k/\u00b5L). He received broad\u2011spectrum antibiotics, filgrastim, and supportive care; discharged after 3 days with ANC 0.6 k/\u00b5L and stable hemoglobin. - **Recovery:** ANC recovered to >1.0 k/\u00b5L by Day 20. He remained afebrile and reported resolution of systemic symptoms. - **Cycle 2:** Per protocol, the second cycle was delayed by one week and the chemotherapy dose reduced by 20 % due to the prior neutropenic event. He received the reduced\u2011dose infusion on schedule (Day 1 of Cycle 2). He tolerated the infusion well, with no new acute toxicities. - **Current Status (6 weeks after therapy start):** He reports mild fatigue (worsening from baseline) and occasional nausea that is controlled with ondansetron PRN. No cough, hemoptysis, dyspnea at rest, or new neurologic symptoms. **Review of Systems (pertinent):** - Constitutional: Fatigue 2/4, no fever, no weight loss reported. - Respiratory: Mild dyspnea on exertion (2/4), no cough or sputum. - Gastrointestinal: Nausea 1/4, no vomiting, appetite stable. - Hematologic: No bruising or bleeding. - Neurologic: No headaches, dizziness, or focal deficits. - Others: Negative. --- ### OBJECTIVE **Vital Signs:** BP 122/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96 % on room air. **Physical Examination:** - **General:** Alert, oriented, in no acute distress. - **HEENT:** Normocephalic, mucous membranes moist. - **Neck:** No cervical adenopathy. - **Cardiovascular:** Regular rate and rhythm, no murmurs. - **Respiratory:** Decreased breath sounds over right upper field, no wheezes or rales. No use of accessory muscles. -"
+    },
+    {
+      "chunk_index": 4,
+      "edited_similarity": 0.6854695677757263,
+      "evidence_id": "inner5_row158_chunk4",
+      "original_similarity": 0.627845048904419,
+      "row_id": 158,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "a palliative radiation consult will be arranged to assess need for SBRT or other local control measures. 3. **Supportive Care** \u2013 - Initiate baseline anti\u2011emetic prophylaxis plan (e.g., ondansetron PRN). - Counsel on smoking cessation reinforcement (already quit). - Provide educational material on symptom monitoring (fever, dyspnea, new neurologic symptoms). 4. **Follow\u2011up** \u2013 Schedule return visit within 7\u201110 days to review baseline labs and finalize treatment plan. Subsequent visits will be coordinated with infusion center for chemotherapy administration. 5. **Documentation & Coding** \u2013 - ICD\u201110: C34.90 (malignant neoplasm of unspecified part of unspecified bronchus or lung). - Z08 (encounter for follow\u2011up after cancer treatment) \u2013 to be used for future visits. - CPT: 99213 (established patient, low complexity) for today\u2019s visit. 6. **Patient Questions/Concerns** \u2013 Addressed concerns about treatment side effects, prognosis, and logistics of therapy. Patient verbalized understanding and wishes to proceed with discussed plan after reviewing lab results. **Signature:** _______________________________________ **Date:** _______________________ (to be entered by EMR) <new_note> **Radiology Report** **Patient:** James Patel **Age:** 66 **Sex:** Male **Study:** - Contrast\u2011enhanced computed tomography (CT) of the chest, axial acquisition, 1.25 mm slice thickness, intravenous iodinated contrast administered (100 mL, 350 mg I/mL) with arterial and venous phase imaging. - Magnetic resonance imaging (MRI) of the brain, axial T1, T2, FLAIR, diffusion\u2011weighted, and post\u2011gadolinium T1 sequences, 3 mm slice thickness. **Clinical Indication:** Evaluation of newly identified pulmonary mass and assessment for metastatic disease (suspected non\u2011small cell lung carcinoma). **Comparison:** No prior thoracic imaging available for comparison. --- ### Findings #### Chest \u2013 CT **Lungs:** - A"
+    },
+    {
+      "chunk_index": 3,
+      "edited_similarity": 0.7659667134284973,
+      "evidence_id": "inner5_row988_chunk3",
+      "original_similarity": 0.773892879486084,
+      "row_id": 988,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "after administration of 100 mL of non\u2011ionic iodinated contrast (iodine concentration 350 mg/mL) injected at 3 mL/sec. Images obtained from the lung apices through the adrenal glands with 1.25\u2011mm collimation, reconstructed in axial, coronal, and sagittal planes with lung and mediastinal window settings. No motion artifacts noted. **Comparison:** None available for direct comparison; prior postoperative chest radiograph reviewed for reference. **Findings** **Lungs:** - Right upper lobe: Post\u2011surgical changes including surgical staple line, volume loss, and pleural thickening consistent with prior lobectomy. No residual soft\u2011tissue mass or enhancing lesion identified. - Remaining right lung fields: No new pulmonary nodules, masses, or consolidations. No ground\u2011glass opacities. No cavitary lesions. - Left lung: No focal pulmonary nodules or masses. No areas of consolidation or infiltrate. - No pleural effusion or pneumothorax. **Mediastinum and Hila:** - Central mediastinal structures within normal limits. - No enlarged mediastinal, hilar, or interlobar lymph nodes (short axis \u2264 8 mm). - Cardiac silhouette and great vessels unremarkable. **Upper Abdomen (included in scan range):** - Visualized portions of the liver, adrenal glands, and upper kidneys appear normal in size and attenuation; no focal lesions identified. - No retroperitoneal lymphadenopathy. **Osseous Structures:** - Visualized thoracic vertebrae, ribs, and scapulae show no lytic or sclerotic lesions. No fractures or destructive changes. **Impression** 1. Post\u2011operative changes consistent with prior right upper lobectomy and mediastinal lymph node dissection. 2. No residual or recurrent tumor identified in the surgical bed. 3. No new pulmonary nodules, masses, or mediastinal adenopathy. 4. No pleural effusion or other acute thoracic abnormality. 5. Overall"
+    },
+    {
+      "chunk_index": 10,
+      "edited_similarity": 0.7459484934806824,
+      "evidence_id": "inner5_row988_chunk10",
+      "original_similarity": 0.7687796950340271,
+      "row_id": 988,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "[Reference: 12.0-16.0] - Normal Comprehensive Metabolic Panel (CMP): Cr: 0.95 mg/dL [Reference: 0.6-1.2] - Normal <new_note> **PET/CT REPORT** **Patient:** Linda Martinez **Sex/Age:** Female, 58 years (currently 61 years) **Study:** Whole\u2011body 18F\u2011FDG PET/CT with intravenous contrast **Indication:** Surveillance imaging following right upper lobectomy and adjuvant platinum\u2011based chemotherapy for stage IIA (T2aN0M0) adenocarcinoma of the right upper lobe. --- ### Technique - Patient fasted \u22656 hours; blood glucose 92 mg/dL at time of injection. - 370 MBq (10 mCi) of 18F\u2011FDG administered intravenously. - Uptake period of 60 minutes, followed by low\u2011dose CT for attenuation correction and anatomic localization. - Diagnostic contrast\u2011enhanced CT of the chest performed (IV iodinated contrast, 100 mL). - Images reviewed on axial, coronal, and sagittal reconstructions; maximum intensity projection (MIP) images generated. --- ### Findings **Lungs** - **Left lower lobe:** A 2.5 cm (axial) solid pulmonary nodule in the posterior basal segment demonstrates intense FDG uptake (SUVmax 5.8). The lesion is mildly spiculated on the CT component. No cavitation or calcification. - **Right lung:** Post\u2011operative changes from prior right upper lobectomy with mediastinal lymph node dissection are unchanged. No residual mass or new nodules identified. - No additional pulmonary nodules or consolidations. No pleural effusion or thickening. **Mediastinum / Hilar Nodes** - **Subcarinal node:** 1.2 cm short\u2011axis node with mild FDG avidity (SUVmax 3.2). - **Right hilar node:** 0.8 cm, low\u2011grade uptake (SUVmax 2.0). - No other FDG\u2011avid mediastinal or hilar lymph nodes. **Upper Abdomen** - Liver, adrenal glands, spleen, and pancreas demonstrate physiologic FDG distribution without focal hypermetabolism. No hepatic lesions identified."
+    },
+    {
+      "chunk_index": 26,
+      "edited_similarity": 0.6508609056472778,
+      "evidence_id": "inner5_row988_chunk26",
+      "original_similarity": 0.5996517539024353,
+      "row_id": 988,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "- Discuss advance care planning and palliative care referral if symptoms worsen. 5. **Follow\u2011up:** - Return to clinic in 2 weeks to review imaging results (brain MRI) and finalize systemic therapy plan. - Re\u2011image chest/abdomen in 6\u20138 weeks after therapy initiation to assess response. 6. **Documentation:** - Obtain informed consent for any targeted therapy or clinical trial enrollment. - Update oncology treatment plan in EMR and notify multidisciplinary tumor board. **Patient education:** Reviewed disease status, treatment options, potential benefits/risks, and importance of prompt reporting of new respiratory or abdominal symptoms. Patient expressed understanding and wishes to proceed with a therapy that offers the best chance for disease control while preserving quality of life. --- *Signature:* **Dr. [Oncologist Name], MD** Medical Oncology, [Institution] <new_note> **MRI BRAIN WITH AND WITHOUT CONTRAST** **CT CHEST AND ABDOMEN WITH CONTRAST** **Patient:** Linda Martinez **Sex:** Female **Age:** 62 years **Indication:** Baseline imaging prior to initiation of systemic therapy for metastatic non\u2011small cell lung cancer (adenocarcinoma, KRAS\u2011mutated). Assessment for intracranial disease and evaluation of known thoraco\u2011abdominal metastatic sites. **Technique:** - **MRI Brain:** Multiplanar, multisequence study performed on a 1.5 T scanner. Sequences included T1\u2011pre\u2011contrast, T2, FLAIR, diffusion\u2011weighted imaging (DWI), and T1\u2011post\u2011gadolinium (0.1 mmol/kg) in axial, coronal, and sagittal planes. - **CT Chest/Abdomen:** Helical acquisition after intravenous administration of 100 mL non\u2011ionic iodinated contrast (350 mg I/mL) with arterial and portal venous phase reconstructions. Slice thickness 1.25 mm, multiplanar reformats generated. **Comparison:** MRI brain performed 6 months prior; CT chest/abdomen performed 2 weeks earlier. --- ### Findings #### Brain (MRI) - **Parenchyma:** No focal"
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.7733456492424011,
+      "evidence_id": "inner5_row951_chunk28",
+      "original_similarity": 0.7384687662124634,
+      "row_id": 951,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "Staging assessment after two cycles of systemic therapy for stage IV large\u2011cell carcinoma of the right lower lobe (EGFR exon 19 deletion) with known treated brain metastases. Evaluation for interval change in thoracic disease and for new intra\u2011abdominal or pelvic metastatic sites. **Technique:** - Multidetector CT of the chest, abdomen, and pelvis performed after intravenous administration of 100 mL non\u2011ionic iodinated contrast (iodine concentration 350 mg/mL) using a power injector at 3 mL/s, followed by a 30\u2011second delay for the chest and a 70\u2011second portal\u2011venous phase for the abdomen/pelvis. - Axial images obtained with 1.25\u2011mm slice thickness; multiplanar reconstructions (coronal and sagittal) generated for all stations. - No significant motion artifact. **Findings** **Chest** - **Right lower lobe:** A partially spiculated soft\u2011tissue mass measuring 5.1 \u00d7 4.8 \u00d7 4.5 cm (axial dimensions) is noted in the posterior basal segment. The attenuation pattern is heterogeneous with areas of necrosis; there is no appreciable change compared with prior study. - **Mediastinum:** Right hilar and right paratracheal (station 4R) lymph nodes remain enlarged, measuring up to 1.8 cm in short axis. No new mediastinal or supraclavicular lymphadenopathy. - **Pleura:** No pleural effusion or thickening. - **Lungs:** No additional pulmonary nodules or consolidations. No evidence of bronchial obstruction. **Upper Abdomen** - **Liver:** Normal size and attenuation; no focal lesions. - **Gallbladder/Biliary tree:** Unremarkable. - **Pancreas:** Normal contour and enhancement. - **Spleen:** Normal. - **Adrenal glands:** Both adrenal glands are normal in size and attenuation; no adrenal metastases. **Lower Abdomen / Pelvis** - **Kidneys:** Normal size and enhancement; no renal masses. -"
+    },
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.4877781569957733,
+      "evidence_id": "inner5_row951_chunk2",
+      "original_similarity": 0.46281251311302185,
+      "row_id": 951,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "alterations, selected fusions). - DNA input: \u2265 50 ng from formalin\u2011fixed, paraffin\u2011embedded (FFPE) tissue. - Sequencing: Illumina NovaSeq 6000, paired\u2011end 150 bp reads; mean unique coverage \u2248 800\u00d7. - Analytical sensitivity: \u2265 5 % mutant allele frequency for SNVs/indels; \u2265 3\u2011fold copy\u2011number change for amplifications; \u2265 10 % for homozygous deletions. --- ### GENOMIC FINDINGS | Gene | Alteration (HGVS) | Protein change | Variant type | Allele Frequency* | Copy number | Clinical classification | |------|-------------------|----------------|--------------|-------------------|-------------|--------------------------| | **EGFR** | c.2235_2249del15 | p.E746_A750del | In\u2011frame deletion (exon 19) | 28 % | \u2013 | **Actionable \u2013 Predictive** | | **TP53** | c.818G>T | p.R273C | Missense SNV | 35 % | \u2013 | **Prognostic** | | **CDKN2A** | \u2013 | \u2013 | Homozygous deletion | \u2013 | 0 copies | **Potential therapeutic relevance** | | **MET** | \u2013 | \u2013 | Low\u2011level amplification | \u2013 | 4 copies (\u2248 2\u2011fold gain) | **Potential resistance mechanism** | | **KRAS** | \u2013 | \u2013 | Wild\u2011type | \u2013 | \u2013 | \u2013 | | **ALK** | \u2013 | \u2013 | No rearrangement detected (FISH/NGS) | \u2013 | \u2013 | \u2013 | | **ROS1** | \u2013 | \u2013 | No rearrangement detected | \u2013 | \u2013 | \u2013 | | **BRAF** | \u2013 | \u2013 | Wild\u2011type | \u2013 | \u2013 | \u2013 | | **ERBB2** | \u2013 | \u2013 | Wild\u2011type | \u2013 | \u2013 | \u2013 | | **PIK3CA** | \u2013 | \u2013 | Wild\u2011type | \u2013 | \u2013 | \u2013 | | **STK11** | \u2013 |"
+    },
+    {
+      "chunk_index": 12,
+      "edited_similarity": 0.6515889763832092,
+      "evidence_id": "inner5_row951_chunk12",
+      "original_similarity": 0.5855878591537476,
+      "row_id": 951,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "frontal lobe). No new FDG\u2011avid lesions are identified compared with prior imaging. ### Impression 1. **Primary right lower lobe lung mass** \u2013 FDG\u2011avid (SUVmax 12.5), consistent with known large\u2011cell carcinoma. 2. **Mediastinal nodal disease** \u2013 FDG\u2011avid right paratracheal (station 4R) and subcarinal (station 7) nodes, compatible with metastatic involvement. 3. **Intracranial metastases** \u2013 Two FDG\u2011avid lesions in the left cerebellum (0.9 cm) and right frontal lobe (0.7 cm), correlating with known brain metastases. 4. **No additional FDG\u2011avid metastatic disease** identified in the thorax, abdomen, pelvis, bone, or soft tissues. Overall disease burden remains consistent with stage IV (M1b) non\u2011small cell lung cancer. Findings should be correlated with clinical status and other imaging studies for comprehensive management planning. <new_note> Laboratory Results Timepoint: At age 68 Laboratory Results: hemoglobin: 13.08 g/dL [Reference: 12.0-16.0] - Normal CMP - creatinine: 0.9 mg/dL - Normal AST: 22 U/L [Reference: 10-40] - Normal ALT: 18 U/L [Reference: 7-56] - Normal albumin: 4.0 g/dL [Reference: 3.5-5.0] - Normal <new_note> **Oncology Progress Note** **Patient:** Evelyn Martinez **MRN:** ******* **DOB:** ****** **Provider:** Dr. __________, MD \u2013 Medical Oncology **Visit Type:** Initial Oncology Consultation --- ### Chief Complaint Newly diagnosed stage IV non\u2011small cell lung cancer with brain metastases; patient seeks aggressive treatment. --- ### History of Present Illness Evelyn Martinez is a 68\u2011year\u2011old woman who was referred to medical oncology after a recent work\u2011up for a right lower\u2011lobe pulmonary mass. - **Timeline:** Approximately 3 weeks ago she underwent a CT\u2011guided core needle biopsy of a 5.2 cm right lower\u2011lobe lesion. Pathology demonstrated poorly differentiated large\u2011cell"
+    },
+    {
+      "chunk_index": 13,
+      "edited_similarity": 0.7914947271347046,
+      "evidence_id": "inner5_row767_chunk13",
+      "original_similarity": 0.7932963371276855,
+      "row_id": 767,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "identified pulmonary lesion. **TECHNIQUE:** Patient fasted \u22656 hours; blood glucose 92 mg/dL prior to injection. Approximately 370 MBq (10 mCi) of 18F\u2011FDG was administered intravenously. After a 60\u2011minute uptake period, low\u2011dose CT of the chest, abdomen, and pelvis was obtained for attenuation correction and anatomic correlation, followed by PET acquisition from skull base to mid\u2011thigh. Additional dedicated brain MRI without contrast was performed and coregistered to the PET dataset to assess for intracranial disease. **FINDINGS** **Thorax** - **Right lower lobe:** A 5.2 \u00d7 4.8 \u00d7 4.5 cm mass in the posterior segment demonstrates intense FDG avidity (SUVmax 12.0). Central low\u2011attenuation area compatible with necrosis is noted. - **Mediastinum/Hilum:** Multiple enlarged lymph nodes (right paratracheal, subcarinal, right hilar) show moderate FDG uptake (SUVmax 6\u20138). No abnormal uptake in the left mediastinum. - **Post\u2011surgical changes:** Right upper lobe resection bed and staple line demonstrate expected postoperative changes without abnormal FDG activity. No residual or new lesions in the left lung. - **Pleura:** No pleural effusion or FDG\u2011avid pleural thickening. **Abdomen** - **Liver:** Three hepatic lesions (largest 2.3 cm) are FDG\u2011avid (SUVmax 9.0). Lesions are hypodense on CT, consistent with metastatic disease. - **Adrenal glands, spleen, kidneys, pancreas:** Normal size and physiologic FDG distribution; no focal uptake. - **Bowel:** No abnormal focal uptake. **Skeletal Survey** - No focal osseous lesions with increased FDG activity. Diffuse physiologic marrow uptake is noted. **Brain** - FDG PET component shows normal physiologic cerebral uptake. Dedicated brain MRI demonstrates no enhancing lesions, restricted diffusion, or abnormal T2/FLAIR signal suggestive of metastasis. **OTHER** - No"
+    },
+    {
+      "chunk_index": 5,
+      "edited_similarity": 0.6949138641357422,
+      "evidence_id": "inner5_row767_chunk5",
+      "original_similarity": 0.7082532048225403,
+      "row_id": 767,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "stage IA adenocarcinoma of the right upper lobe, with completion of adjuvant platinum\u2011based chemotherapy (cisplatin + vinorelbine). Current ECOG performance status 1; patient reports feeling well. **Technique:** Helical CT of the chest obtained without intravenous contrast. Axial images were reconstructed in 1.25\u2011mm slices and reviewed in lung, mediastinal, and bone windows. Sagittal and coronal reformats were generated for anatomic correlation. **Comparison:** Prior postoperative chest CT (post\u2011lobectomy, 6 months earlier). --- ### Findings **Lungs** - Right upper lobe: Surgical changes consistent with lobectomy. Staple line and resection margin are intact; no residual soft\u2011tissue mass or focal consolidation is identified. - Remaining right lung (middle and lower lobes) and left lung: No new pulmonary nodules, masses, or areas of consolidation. No ground\u2011glass opacities. - No evidence of bronchial obstruction or post\u2011obstructive changes. **Mediastinum & Hila** - Central airways are patent. - Hilar and mediastinal lymph nodes are within normal size limits; no abnormal enlargement or necrosis. **Pleura** - No pleural effusion or thickening. No pneumothorax. **Chest Wall & Upper Abdomen** - No focal osseous lesions identified in the visualized ribs, vertebrae, or scapulae. - No abnormal soft\u2011tissue masses in the chest wall. - Upper abdomen (liver, adrenal glands, spleen) appears unremarkable on limited field of view. **Other** - No suspicious calcifications or vascular abnormalities. --- ### Impression 1. Post\u2011operative changes of right upper lobectomy with intact staple line; no residual or recurrent tumor identified. 2. No new pulmonary nodules, masses, or mediastinal lymphadenopathy. 3. No pleural effusion or chest wall abnormality. **Conclusion:** Surveillance CT demonstrates no radiographic evidence"
+    },
+    {
+      "chunk_index": 18,
+      "edited_similarity": 0.584526777267456,
+      "evidence_id": "inner5_row767_chunk18",
+      "original_similarity": 0.5312951803207397,
+      "row_id": 767,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "**Cardiovascular** | RRR, no murmurs | | **Respiratory** | Decreased breath sounds at right lower lung field; mild wheeze; no rales | | **Abdomen** | Soft, non\u2011tender; liver span normal; no masses | | **Extremities** | No edema; peripheral pulses intact | | **Neurologic** | Grossly intact; CN II\u2011XII intact | | **Skin** | No rashes or lesions | ### Laboratory Data (baseline, 78 y) - **CBC:** WBC 9.2 k/\u00b5L, Neut 6.9 k/\u00b5L, Lymph 1.69 k/\u00b5L, Hgb 12.84 g/dL, Platelets 210 k/\u00b5L - **CMP:** Creatinine 0.8 mg/dL (eGFR \u2248 150 mL/min), AST 32 U/L, ALT 28 U/L, Albumin 4.0 g/dL - **Other:** LDH 210 U/L (within normal limits) ### Imaging Studies (reviewed) - **Chest CT (contrast):** 5.2 cm right lower lobe mass, mediastinal nodes (stations 4R/7), no pleural effusion. - **PET/CT:** Hypermetabolic primary (SUVmax 12), mediastinal nodes (SUVmax 8), hepatic lesions (SUVmax 9); no extra\u2011pulmonary uptake elsewhere. - **Brain MRI:** No intracranial metastases. ### Assessment 1. **Stage IV KRAS\u2011mutant adenocarcinoma of the lung** (cT2a N2 M1) \u2013 symptomatic (cough, weight loss). 2. ECOG performance status 1, adequate organ function. 3. Molecular profile: KRAS G12C, TP53 R273C, STK11 loss, KEAP1 L341V, TMB 8 mut/Mb; PD\u2011L1 status pending. 4. No prior systemic therapy for metastatic disease. ### Plan / Discussion of Treatment Options 1. **Systemic Therapy Options** - **Platinum\u2011based doublet chemotherapy** (e.g., carboplatin + pemetrexed) \u2013 standard first\u2011line for KRAS\u2011mutant NSCLC without actionable PD\u2011L1 expression. - **Immunotherapy** (PD\u20111/PD\u2011L1 inhibitor) \u2013 consider as monotherapy if PD\u2011L1 \u2265 50 % or in combination with chemotherapy; PD\u2011L1 testing will be ordered"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 5,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_005_query_001_targeted",
+  "patient_outcomes_in_prompt": false,
+  "query": 1,
+  "query_id": "effect_query_002"
+}

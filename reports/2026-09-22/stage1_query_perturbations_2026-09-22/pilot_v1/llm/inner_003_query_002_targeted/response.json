@@ -1,0 +1,76 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row329_chunk30",
+          "quote": "ECOG performance status 1"
+        },
+        {
+          "evidence_id": "inner3_row329_chunk3",
+          "quote": "ECOG performance status 0"
+        },
+        {
+          "evidence_id": "inner3_row367_chunk44",
+          "quote": "**Performance status:** ECOG 2, stable compared with prior visits"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients and their ability to perform activities of daily living.",
+      "extraction_instruction": "Identify the numerical ECOG score reported in the assessment, physical examination, or subjective sections of the clinical note.",
+      "measurement_definition": "Standard ECOG performance status where 0 represents fully active, 1 represents restricted in physically strenuous activity, and 2 represents ambulatory and capable of all self-care but unable to carry out any work activities.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify the exact timepoint of the assessment relative to the start of new therapy for all patients.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [
+        "Never smoker",
+        "Former smoker",
+        "Current smoker"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row329_chunk3",
+          "quote": "Former smoker, 10 pack\u2011year history, quit 8 years ago"
+        },
+        {
+          "evidence_id": "inner3_row367_chunk14",
+          "quote": "Reinforce never\u2011smoker status"
+        },
+        {
+          "evidence_id": "inner3_row314_chunk29",
+          "quote": "Never smoker (denies any tobacco use)"
+        }
+      ],
+      "description": "The patient's historical and current usage of tobacco products.",
+      "extraction_instruction": "Review the Social History or Assessment sections for mentions of tobacco use, smoking status, or pack-year history.",
+      "measurement_definition": "Categorized as 'Never smoker' if the patient denies any history of tobacco use; 'Former smoker' if the patient reports a history of tobacco use but has ceased; 'Current smoker' if the patient is presently using tobacco.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Smoking History",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some reports provide pack-year quantitative data while others only provide a categorical status.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "The evidence is limited to a small number of patient records.",
+    "Smoking history is documented inconsistently, blending categorical status with quantitative pack-years."
+  ],
+  "summary": "The provided clinical evidence identifies functional status (ECOG Performance Status) and tobacco exposure history as measurable baseline clinical variables for patients with EGFR-mutated non-small cell lung cancer (NSCLC)."
+}

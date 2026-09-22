@@ -1,0 +1,56 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row608_chunk14",
+          "quote": "PD\u2011L1 IHC 5 % tumor cell staining"
+        },
+        {
+          "evidence_id": "inner5_row266_chunk0",
+          "quote": "Tumor proportion score 10 % (low expression)"
+        }
+      ],
+      "description": "The percentage of tumor cells expressing PD-L1 as determined by immunohistochemistry, used to predict response to immunotherapy.",
+      "extraction_instruction": "Extract the numeric percentage associated with PD-L1 IHC staining or Tumor Proportion Score (TPS).",
+      "measurement_definition": "Tumor Proportion Score (TPS) expressed as a numeric percentage (%).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Expression (TPS)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Uncertain if a consistent antibody clone (e.g., 22C3) was used for all measurements.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row608_chunk14",
+          "quote": "STK11 loss, CDKN2A deletion"
+        },
+        {
+          "evidence_id": "inner5_row543_chunk5",
+          "quote": "This aligns with the STK11 loss phenotype"
+        }
+      ],
+      "description": "The presence or absence of STK11 loss in the tumor molecular profile.",
+      "extraction_instruction": "Identify the presence of 'STK11 loss' within the genomic or molecular profiling section.",
+      "measurement_definition": "Positive if 'STK11 loss' is explicitly documented; negative if documented as wild-type or explicitly without loss. Absence of mention is not a negative result.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific method used to determine 'loss' (e.g., copy number variation versus biallelic mutation) is not specified.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Small number of patient records provided for evidence discovery.",
+    "Limited detail on the specific laboratory assays used to define STK11 loss."
+  ],
+  "summary": "The evidence identifies PD-L1 expression (TPS) and STK11 status as baseline molecular characteristics in patients with non-small cell lung carcinoma (NSCLC), with STK11 loss specifically associated with resistance to single-agent checkpoint inhibitors."
+}

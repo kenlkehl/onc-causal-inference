@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "Squamous cell carcinoma",
+        "Adenocarcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row124_chunk28",
+          "quote": "known diagnosis of stage IIIB (T4N2M0) squamous cell carcinoma of the left upper lobe"
+        },
+        {
+          "evidence_id": "inner2_row672_chunk0",
+          "quote": "Supports squamous differentiation"
+        },
+        {
+          "evidence_id": "inner2_row671_chunk20",
+          "quote": "known stage IV non\u2011small cell lung cancer, adenocarcinoma (KRAS G12C\u2011mutated, STK11\u2011loss, PD\u2011L1 10 %)"
+        }
+      ],
+      "description": "The histological classification of the primary non-small cell lung cancer tumor.",
+      "extraction_instruction": "Identify the tumor histological subtype from the pathology report or clinical history (e.g., 'squamous cell carcinoma' or 'adenocarcinoma').",
+      "measurement_definition": "Histological subtype as determined by pathology report or clinical diagnosis, with identified levels including 'Squamous cell carcinoma' and 'Adenocarcinoma'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Lung Cancer Histology",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "It is uncertain if other NSCLC histological subtypes (e.g., large cell carcinoma) are present in the wider dataset.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row124_chunk33",
+          "quote": "Hb 12.3 g/dL (low\u2011normal)"
+        },
+        {
+          "evidence_id": "inner2_row672_chunk14",
+          "quote": "Hgb: 14.45 g/dL [Reference: 12.0-16.0]"
+        },
+        {
+          "evidence_id": "inner2_row671_chunk27",
+          "quote": "Hemoglobin | 10.5 g/dL | 12.0\u201116.0"
+        }
+      ],
+      "description": "Baseline concentration of hemoglobin in the blood.",
+      "extraction_instruction": "Extract the numeric value for hemoglobin, often listed as 'Hb' or 'Hgb', from the laboratory results section.",
+      "measurement_definition": "Hemoglobin level measured in grams per deciliter (g/dL).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Hemoglobin",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "The exact timing of the blood draw relative to the start of systemic therapy is not consistently specified.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of unique patients provided in the evidence snippets.",
+    "Laboratory values are drawn from different timepoints across the patients."
+  ],
+  "summary": "The provided evidence contains baseline clinical data for patients with non-small cell lung cancer (NSCLC), specifically identifying histological subtypes (squamous cell carcinoma vs. adenocarcinoma) and baseline hematological markers such as hemoglobin levels."
+}

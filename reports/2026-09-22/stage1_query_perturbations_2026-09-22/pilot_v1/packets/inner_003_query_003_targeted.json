@@ -1,0 +1,258 @@
+{
+  "actual_distance": 0.1999998837709427,
+  "condition": "targeted",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.7489564418792725,
+      "evidence_id": "inner3_row367_chunk14",
+      "original_similarity": 0.7833054661750793,
+      "row_id": 367,
+      "selection_reasons": [
+        "original_peak"
+      ],
+      "text": "2+ bilaterally | | Neurologic | Cranial nerves II\u2011XII intact, strength 5/5 throughout, sensation intact | | Skin | No rashes or lesions | ### Laboratory Data (drawn today) - **CBC:** WBC 7.5 k/\u00b5L (norm), Hgb 13.8 g/dL, Plt 260 k/\u00b5L, ANC 4.2 k/\u00b5L, Lymphocytes 1.4 k/\u00b5L (NLR 2.68). - **CMP:** Creatinine 0.9 mg/dL, BUN 14 mg/dL, Na 140 mEq/L, K 4.2 mEq/L, AST 28 U/L, ALT 22 U/L, Albumin 3.9 g/dL. Calculated CrCl (Cockcroft\u2011Gault) 66.9 mL/min. All values within normal limits. ### Imaging No imaging performed at this visit. The most recent postoperative imaging (CT chest, performed **X** weeks ago) demonstrated postoperative changes without residual mass, no new pulmonary nodules, and no mediastinal lymphadenopathy. No evidence of disease at that time. ### Assessment 1. **Stage IIA EGFR\u2011mutated NSCLC, status post right upper lobectomy with negative margins and adjuvant cisplatin/pemetrexed \u2013 currently disease\u2011free.** 2. **ECOG performance status 2** \u2013 stable. 3. **Surveillance phase** \u2013 no clinical or radiographic evidence of recurrence to date. ### Plan 1. **Surveillance Imaging** \u2013 Schedule contrast\u2011enhanced chest CT in 6 months per NCCN guidelines for resected EGFR\u2011mutated NSCLC; earlier imaging if new symptoms develop. 2. **Laboratory Monitoring** \u2013 Repeat CBC and CMP at next visit to monitor for late chemotherapy effects and baseline organ function. 3. **Symptom Management** \u2013 Encourage gradual aerobic conditioning (e.g., walking program) to improve exertional dyspnea; refer to pulmonary rehabilitation if dyspnea worsens. 4. **Smoking Cessation/Prevention** \u2013 Reinforce never\u2011smoker status; provide counseling on avoidance of secondhand smoke and occupational exposures. 5. **Vaccinations** \u2013 Ensure up\u2011to\u2011date influenza and"
+    },
+    {
+      "chunk_index": 15,
+      "edited_similarity": 0.7595261931419373,
+      "evidence_id": "inner3_row367_chunk15",
+      "original_similarity": 0.7818939089775085,
+      "row_id": 367,
+      "selection_reasons": [
+        "edited_peak"
+      ],
+      "text": "\u2013 Repeat CBC and CMP at next visit to monitor for late chemotherapy effects and baseline organ function. 3. **Symptom Management** \u2013 Encourage gradual aerobic conditioning (e.g., walking program) to improve exertional dyspnea; refer to pulmonary rehabilitation if dyspnea worsens. 4. **Smoking Cessation/Prevention** \u2013 Reinforce never\u2011smoker status; provide counseling on avoidance of secondhand smoke and occupational exposures. 5. **Vaccinations** \u2013 Ensure up\u2011to\u2011date influenza and COVID\u201119 vaccinations; consider pneumococcal vaccine per age\u2011based recommendations. 6. **Follow\u2011up** \u2013 Return to clinic in 3 months for routine assessment, sooner if new respiratory or systemic symptoms arise. 7. **Patient Education** \u2013 Discuss signs of recurrence (new cough, hemoptysis, unexplained weight loss, neurologic changes) and advise prompt reporting. 8. **Documentation** \u2013 Continue to record ECOG status and PRO measures at each visit to track functional trends. **Signature:** _____________________________ **Provider:** Dr. *** (MD, Oncology) --- <new_note> Encounter Record Timepoint: At age 56 Encounter Type: routine surveillance visit Diagnosis Codes: - Z08: Encounter for follow-up after cancer treatment - C34.90: Malignant neoplasm of unspecified part of unspecified bronchus or lung Procedure Codes: - 99213: Established patient visit, low complexity <new_note> **CT Chest \u2013 Contrast Enhanced (Post\u2011operative Surveillance)** **Patient:** 56\u2011year\u2011old female **MRN:** 000123456 **Referring Physician:** Dr. A. Oncologist **Clinical Indication:** Routine surveillance following right upper lobectomy with mediastinal lymph node dissection for EGFR exon 19\u2011deleted adenocarcinoma (stage IIA). Current ECOG performance status 2. **Technique:** Multidetector CT of the chest performed after intravenous administration of non\u2011ionic iodinated contrast (100 mL at 3 mL/sec). Images obtained in the arterial and portal\u2011venous phases with 1.25\u2011mm slice thickness; multiplanar"
+    },
+    {
+      "chunk_index": 8,
+      "edited_similarity": 0.6890870332717896,
+      "evidence_id": "inner3_row367_chunk8",
+      "original_similarity": 0.7281880378723145,
+      "row_id": 367,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "No edema, pulses 2+ bilaterally. **Skin:** Warm, dry, no rashes. **Neurologic:** Grossly intact, strength 5/5 in all extremities, sensation intact, gait steady. ### Laboratory Data (drawn today) - **CBC:** WBC 6.9 k/\u00b5L, Hgb 13.6 g/dL, Hct 41%, Plt 265 k/\u00b5L, ANC 4.0 k/\u00b5L, Lymphocytes 1.5 k/\u00b5L. - **CMP:** Na 140 mEq/L, K 4.2 mEq/L, Cl 102 mEq/L, CO\u2082 25 mmol/L, BUN 13 mg/dL, Cr 0.9 mg/dL, Glucose 92 mg/dL, AST 26 U/L, ALT 22 U/L, ALP 78 U/L, Total bilirubin 0.6 mg/dL, Albumin 3.9 g/dL. - **Calculated Creatinine Clearance (Cockcroft\u2011Gault):** ~68 mL/min (acceptable for most chemotherapeutic agents). ### Imaging (reviewed) - **Post\u2011operative chest X\u2011ray (day 1 post\u2011op):** No pneumothorax, appropriate lung expansion, mediastinum midline, surgical clips noted. No new infiltrates. ### Assessment 1. **Post\u2011operative status, right upper lobectomy for EGFR\u2011mutated adenocarcinoma, stage IIA.** Surgical margins negative, nodes negative, no residual disease on pathology. Recovery uncomplicated; incision healing well. ECOG performance status remains 2, limited by recent surgery and mild dyspnea on exertion. 2. **Hypertension, controlled.** 3. **Pain, post\u2011surgical, mild.** ### Plan 1. **Wound Care & Recovery** - Continue acetaminophen for baseline pain; oxycodone PRN for breakthrough pain. - Keep incision clean and dry; change dressing as needed. - Encourage incentive spirometry, deep breathing exercises, and ambulation to prevent atelectasis. - Schedule a follow\u2011up chest X\u2011ray in 4 weeks to assess lung re\u2011expansion and rule out early complications. 2. **Adjuvant Therapy Discussion** - Review pathology and molecular results with patient. Emphasize that EGFR exon 19 deletion may confer sensitivity to EGFR\u2011directed agents in the adjuvant setting, but"
+    },
+    {
+      "chunk_index": 42,
+      "edited_similarity": 0.6187413930892944,
+      "evidence_id": "inner3_row367_chunk42",
+      "original_similarity": 0.5778617858886719,
+      "row_id": 367,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "- SpO\u2082: 96 % on room air - Height: 165 cm; Weight: 68 kg; BMI: 25 kg/m\u00b2 --- ### PHYSICAL EXAMINATION - **General:** Alert, oriented \u00d73, in no acute distress. - **HEENT:** Normocephalic, atraumatic; pupils equal, reactive; oropharynx clear. - **Neck:** Supple, no lymphadenopathy. - **Cardiovascular:** Regular rate and rhythm, no murmurs, rubs, or gallops. - **Respiratory:** Clear to auscultation bilaterally; no wheezes, rales, or rhonchi. - **Abdomen:** Soft, non\u2011tender, no hepatosplenomegaly; bowel sounds present. - **Extremities:** No edema, cyanosis, or clubbing. - **Neurologic:** Cranial nerves II\u2013XII intact; strength 5/5 in all extremities; sensation intact; gait steady; no focal deficits. - **Skin:** No rashes or lesions. --- ### LABORATORY DATA (Most recent, drawn 2 days ago) | Test | Result | Reference | |------|--------|-----------| | **CBC** | WBC 5.5 k/\u00b5L | 4.0\u201110.5 | | | Hgb 14.0 g/dL | 12.0\u201116.0 | | | Plt 230 k/\u00b5L | 150\u2011400 | | | ANC 2.8 k/\u00b5L | 1.5\u20118.0 | | | Lymphocytes 1.05 k/\u00b5L | 1.0\u20113.5 | | **CMP** | Creatinine 0.9 mg/dL | 0.6\u20111.2 | | | BUN 13 mg/dL | 7\u201120 | | | Na 139 mEq/L | 135\u2011145 | | | K 4.1 mEq/L | 3.5\u20115.0 | | | Albumin 3.8 g/dL | 3.5\u20115.0 | | **Tumor Markers** | CEA 3.5 ng/mL (\u2191) | \u2264 2.5 | | | LDH 210 U/L (\u2191) | 100\u2011190 | | | CA 19\u20119 5 U/mL (normal) | \u2264 37 | *Calculated creatinine clearance (Cockcroft\u2011Gault): 66.9 mL/min (acceptable for current chemotherapy).* --- ### IMAGING - **Brain MRI (non\u2011contrast, 1"
+    },
+    {
+      "chunk_index": 11,
+      "edited_similarity": 0.7625064849853516,
+      "evidence_id": "inner3_row329_chunk11",
+      "original_similarity": 0.7920956611633301,
+      "row_id": 329,
+      "selection_reasons": [
+        "original_peak"
+      ],
+      "text": "Should tissue be obtained (e.g., CT\u2011guided biopsy) based on imaging findings, request comprehensive NGS panel (including EGFR, KRAS, ALK, ROS1, BRAF, MET, RET, NTRK) to guide potential targeted therapy. 3. **Symptom Management** - Counsel patient on humidified air, saline gargles, and avoidance of irritants for cough. - If cough persists >2 weeks or worsens, consider trial of short\u2011acting bronchodilator (albuterol inhaler) and obtain sputum cytology. 4. **Follow\u2011up** - Review CT results at next oncology visit (approximately 2 weeks). - Routine surveillance schedule: clinical visit and imaging every 6 months for the next 2 years, then annually per NCCN guidelines. 5. **Preventive Care** - Continue annual influenza vaccination; discuss pneumococcal vaccination per CDC recommendations. - Reinforce healthy lifestyle: balanced diet, regular low\u2011impact exercise, maintain blood pressure and lipid control. 6. **Documentation** - Updated problem list and medication reconciliation completed. - Patient education handout on post\u2011operative lung health provided. **Signature:** [Oncologist Name, MD] Medical Oncology, [Institution] --- <new_note> **Radiology Report \u2013 PET/CT Whole Body** **Patient:** Eleanor Martinez \u2013 Female, 60 y (currently 64 y) **MRN:** ___________ **Date of Examination:** _______________________ **Referring Physician:** _______________________ --- ### Clinical History - Right upper lobectomy with mediastinal lymph node dissection performed for stage IIA (T2aN1M0) adenocarcinoma of the right upper lobe. - Completed adjuvant platinum\u2011based chemotherapy (cisplatin + vinorelbine). - Post\u2011operative surveillance imaging at age 62 demonstrated no residual disease. - Current presentation for routine surveillance; patient reports mild cough. ### Examination Technique - Whole\u2011body PET/CT performed after intravenous administration of 10 mCi (370 MBq) ^18F\u2011FDG. - Patient fasted \u22656 h; blood"
+    },
+    {
+      "chunk_index": 31,
+      "edited_similarity": 0.7914168238639832,
+      "evidence_id": "inner3_row329_chunk31",
+      "original_similarity": 0.7918366193771362,
+      "row_id": 329,
+      "selection_reasons": [
+        "edited_peak"
+      ],
+      "text": "- Repeat contrast\u2011enhanced CT of chest/abdomen/pelvis in 6 weeks to assess response after initiation of next\u2011line therapy. - Consider brain MRI with contrast if new neurologic symptoms arise. 6. **Supportive Care** - Encourage continued activity within tolerance; refer to pulmonary rehabilitation if dyspnea worsens. - Nutritional counseling to maintain weight. - Review advance care planning and palliative care resources. 7. **Follow\u2011up Appointments** - Return visit in 2 weeks to finalize treatment plan and review baseline labs. - Contact the clinic sooner if new symptoms develop (e.g., worsening cough, fever, neurologic changes). **Signature:** ___________________________ **Date:** (to be entered by EMR) <new_note> Encounter Record Timepoint: At age 66 Encounter Type: multidisciplinary tumor board discussion Diagnosis Codes: - C34.90: Malignant neoplasm of unspecified part of unspecified bronchus or lung Procedure Codes: - 99215: Established patient visit, high complexity <new_note> **Radiology Report** **Patient:** Eleanor Martinez **Sex/Age:** Female, 66 years (DOB: 60 years at initial diagnosis) **MRN:** [Redacted] **Exam:** CT Chest with Intravenous Contrast **Clinical Indication:** Surveillance imaging for known metastatic non\u2011small cell lung adenocarcinoma (EGFR exon 19 deletion). Evaluation of previously identified hepatic lesion and assessment for disease progression. **Technique:** Multidetector CT of the chest performed after intravenous administration of iodinated contrast (120 mL, rate 3 mL/sec). Axial images obtained from the lung apices through the upper abdomen, including the adrenal glands, with multiplanar reconstructions in coronal and sagittal planes. Standard lung and soft\u2011tissue window settings applied. **Findings** **Lungs and Airways** - Right upper lobe demonstrates postoperative changes consistent with prior lobectomy (surgical staple line, volume loss, pleural thickening). No"
+    },
+    {
+      "chunk_index": 3,
+      "edited_similarity": 0.7380267381668091,
+      "evidence_id": "inner3_row329_chunk3",
+      "original_similarity": 0.7833713293075562,
+      "row_id": 329,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "Hgb 13.5 g/dL, Hct 40.2 %, Plt 255 k/\u00b5L \u2013 within normal limits - **CMP:** Na 138 mmol/L, K 4.2 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 14 mg/dL, Cr 0.8 mg/dL (eGFR > 90 mL/min/1.73 m\u00b2), AST 22 U/L, ALT 18 U/L, ALP 78 U/L, Total bilirubin 0.6 mg/dL \u2013 unremarkable ### Imaging **CT Chest with IV Contrast (performed 2 weeks prior):** - Post\u2011operative changes in the right upper lobe with expected surgical resection cavity. - No residual soft\u2011tissue mass or nodularity. - Mediastinal and hilar lymph node stations are within normal size criteria; no suspicious enlargement. - No pleural effusion or new pulmonary infiltrates. **Impression:** No radiographic evidence of residual or recurrent disease. Findings consistent with postoperative status post\u2011lobectomy. ### Assessment 1. **Stage IIA (T2aN1M0) right upper lobe adenocarcinoma \u2013 status post right upper lobectomy and adjuvant cisplatin\u2011vinorelbine, currently disease\u2011free.** ECOG performance status 0. 2. Hypertension, well controlled on lisinopril. 3. Hyperlipidemia, on atorvastatin. 4. Former smoker, 10 pack\u2011year history, quit 8 years ago. ### Plan 1. **Surveillance:** - Continue routine imaging surveillance per NCCN guidelines: chest CT with contrast every 6 months for the next 2 years, then annually thereafter. - Discuss timing of next CT (approximately 6 months from today). 2. **Laboratory Monitoring:** - Repeat CBC/CMP in 6 months or sooner if clinically indicated. 3. **Molecular Testing:** - Recommend EGFR, ALK, ROS1, and PD\u2011L1 testing on the original surgical specimen (if not already performed) to inform potential future therapeutic options, should recurrence occur. 4. **Preventive Health:** - Encourage continued smoking abstinence;"
+    },
+    {
+      "chunk_index": 25,
+      "edited_similarity": 0.7320183515548706,
+      "evidence_id": "inner3_row329_chunk25",
+      "original_similarity": 0.7093920707702637,
+      "row_id": 329,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "definitive intracranial metastatic lesions identified on non\u2011contrast MRI. - Mild chronic microvascular ischemic changes consistent with age. - Given the lack of contrast, small metastatic foci cannot be completely excluded. If clinical suspicion for brain metastasis remains high, a contrast\u2011enhanced MRI of the brain is recommended for more sensitive evaluation. <new_note> Hospital Admission Record Timepoint: At age 66 Reason for Admission: symptomatic pleural effusion requiring thoracentesis Principal Diagnosis: J94.1 - Pleural effusion, not elsewhere classified Length of Stay: 2 days Discharge Disposition: home <new_note> Laboratory Results Timepoint: At age 66 Complete Blood Count (CBC): WBC: 5.8 k/uL [Reference: 3.7-10.5] - Normal ANC: 3.5 k/uL [Reference: 1.5-8.0] - Normal lymphocytes: 0.8 k/uL - LOW Comprehensive Metabolic Panel (CMP): Cr: 0.7 mg/dL [Reference: 0.6-1.2] - Normal <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 66 Instrument: EORTC QLQ-C30 Physical Function: 70/100 Role Function: 55/100 Emotional Function: 60/100 Cognitive Function: 65/100 Social Function: 60/100 Fatigue: 45/100 Nausea: 15/100 Pain: 30/100 Dyspnea: 40/100 Insomnia: 30/100 Appetite Loss: 20/100 Constipation: 10/100 Diarrhea: 15/100 Financial Difficulties: 25/100 Global Health: 55/100 Instrument: PRO-CTCAE Fatigue - Severity: 2/4 (Moderate) Dyspnea - Severity: 1/4 (Mild) Pain - Severity: 1/4 (Mild) <new_note> **Oncology Follow\u2011up Visit \u2013 Clinical Progress Note** **Patient:** Eleanor Martinez **Age:** 60 **Sex:** Female **Visit Type:** Established patient, follow\u2011up after systemic therapy **Provider:** Oncology Service --- ### 1. Chief Complaint - Follow\u2011up for metastatic non\u2011small cell lung cancer (NSCLC) and review of recent imaging and laboratory studies. ### 2. History of Present Illness (HPI) Eleanor is a 60\u2011year\u2011old woman with a history of right upper\u2011lobe"
+    },
+    {
+      "chunk_index": 16,
+      "edited_similarity": 0.7548671960830688,
+      "evidence_id": "inner3_row488_chunk16",
+      "original_similarity": 0.7877352833747864,
+      "row_id": 488,
+      "selection_reasons": [
+        "original_peak"
+      ],
+      "text": "pulmonary nodules or pleural effusion. - No evidence of metastatic disease in the visualized lung fields. **Brain MRI (baseline, performed 12 mo ago):** No intracranial lesions; unchanged. Impression: No radiographic evidence of disease recurrence or new primary lesion. --- ### Assessment 1. **Stage IIA (T2aN0M0) EGFR\u2011mutated adenocarcinoma of the right upper lobe \u2013 status post right upper lobectomy with negative margins and mediastinal nodes, completed adjuvant cis/pem.** Currently **no evidence of disease (NED)** on imaging and asymptomatic. ECOG 0. 2. Hypertension \u2013 controlled on lisinopril. 3. Hyperlipidemia \u2013 controlled on atorvastatin. --- ### Plan 1. **Surveillance Strategy** - Continue routine imaging per NCCN guidelines: contrast\u2011enhanced chest CT every 6 months for the next 2 years, then annually thereafter. - Annual brain MRI for the next 2 years given prior EGFR\u2011mutated disease, then as clinically indicated. - Repeat laboratory panel (CBC, CMP, LDH, CEA) at each surveillance visit. 2. **Health Maintenance** - Reinforce smoking\u2011cessation counseling (if applicable) and avoidance of secondhand smoke. - Recommend annual influenza vaccination and COVID\u201119 booster per CDC recommendations. - Encourage regular exercise and balanced diet to maintain performance status. 3. **Medication Review** - Continue current antihypertensive and lipid\u2011lowering therapy. - No new prescriptions required at this time. 4. **Patient Education & Follow\u2011up** - Discuss signs and symptoms that should prompt earlier evaluation (new cough, dyspnea, hemoptysis, unexplained weight loss, neurologic changes). - Schedule next oncology follow\u2011up in 6 months for surveillance imaging and clinical assessment. 5. **Documentation** - Update electronic health record with current ECOG 0 and NED status. - Ensure pathology"
+    },
+    {
+      "chunk_index": 17,
+      "edited_similarity": 0.7638603448867798,
+      "evidence_id": "inner3_row488_chunk17",
+      "original_similarity": 0.7664576768875122,
+      "row_id": 488,
+      "selection_reasons": [
+        "edited_peak"
+      ],
+      "text": "therapy. - No new prescriptions required at this time. 4. **Patient Education & Follow\u2011up** - Discuss signs and symptoms that should prompt earlier evaluation (new cough, dyspnea, hemoptysis, unexplained weight loss, neurologic changes). - Schedule next oncology follow\u2011up in 6 months for surveillance imaging and clinical assessment. 5. **Documentation** - Update electronic health record with current ECOG 0 and NED status. - Ensure pathology and molecular reports are attached for future reference if recurrence occurs. **Signature:** ___________________________ **Provider:** Dr. [Oncologist Name], MD \u2013 Medical Oncology **Facility:** [Institution Name] --- <new_note> Encounter Record Timepoint: At age 70 Encounter Type: routine follow-up oncology visit Diagnosis Codes: - Z08: Encounter for follow-up after cancer treatment Procedure Codes: - 99213: Established patient visit, low complexity <new_note> **Imaging Report** **Patient:** Johnathan Miller **Age:** 70 **Sex:** Male **Referring Physician:** Oncology Service **Exam Date:** *[Date omitted]* **Study Performed:** - Contrast\u2011enhanced computed tomography (CT) of the chest, axial images with coronal and sagittal reconstructions. Intravenous iodinated contrast administered (120 mL at 3 mL/s). - Contrast\u2011enhanced magnetic resonance imaging (MRI) of the brain, including T1\u2011pre\u2011 and post\u2011contrast, T2, FLAIR, and diffusion sequences. Gadolinium\u2011based contrast administered (0.1 mmol/kg). **Technique:** CT images obtained from the thoracic inlet through the upper abdomen during a single breath\u2011hold. Images reviewed on a PACS workstation with standard lung and mediastinal window settings. MRI brain performed with 3\u2011mm slice thickness; post\u2011contrast images obtained 2 minutes after gadolinium injection. **Findings** **Chest \u2013 CT** - **Lungs:** - A new, 2.5 cm (maximal axial dimension) spiculated nodule is identified in the posterior basal segment of"
+    },
+    {
+      "chunk_index": 13,
+      "edited_similarity": 0.7180275321006775,
+      "evidence_id": "inner3_row488_chunk13",
+      "original_similarity": 0.7590799331665039,
+      "row_id": 488,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "69\u2011year\u2011old male who underwent a right upper lobectomy with mediastinal lymph node dissection 12 months ago for stage IIA (T2aN0M0) adenocarcinoma of the right upper lobe. Molecular profiling at the time of diagnosis demonstrated an activating EGFR exon 19 deletion. He subsequently completed four cycles of adjuvant platinum\u2011based chemotherapy (cis plus pem) without dose reductions or significant toxicities. Recovery from surgery was uncomplicated; he returned to baseline activity levels within 6 weeks and has remained asymptomatic since. He presents today for his scheduled surveillance visit. He reports no new cough, dyspnea, chest pain, weight change, fatigue, or neurologic symptoms. He denies fevers, night sweats, or constitutional complaints. He feels \u201cback to normal\u201d and reports an ECOG performance status of 0. No new medications have been started since his last visit. --- ### Review of Systems *Constitutional:* No fever, chills, night sweats, or weight loss. *HEENT:* No headache, visual changes, or sinus symptoms. *Respiratory:* No cough, dyspnea, wheezing, or hemoptysis. *Cardiovascular:* No chest pain, palpitations, or edema. *Gastrointestinal:* No nausea, vomiting, abdominal pain, or change in bowel habits. *Genitourinary:* No dysuria or hematuria. *Neurologic:* No weakness, numbness, or seizures. *Skin:* No rashes or new lesions. *Psychiatric:* No anxiety or depression noted. --- ### Past Medical History - Stage IIA (T2aN0M0) right upper lobe adenocarcinoma, EGFR exon 19 deletion (diagnosed 12 mo ago) - Right upper lobectomy with mediastinal lymph node dissection (pathology: negative margins, N0) - Adjuvant chemotherapy: cis + pem (4 cycles, completed) - Hypertension (well\u2011controlled) - Hyperlipidemia ### Past Surgical History - Right upper lobectomy"
+    },
+    {
+      "chunk_index": 46,
+      "edited_similarity": 0.6643062829971313,
+      "evidence_id": "inner3_row488_chunk46",
+      "original_similarity": 0.6322384476661682,
+      "row_id": 488,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "screening. **Signature:** ___________________________ **Provider:** MD, Oncology \u2013 Thoracic Division <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 71 Instrument: PRO-CTCAE Fatigue - Severity: 2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Pain - Severity: 1/4 (Mild) Dyspnea - Severity: 2/4 (Moderate) <new_note> Encounter Record Timepoint: At age 71 Encounter Type: outpatient oncology visit Diagnosis Codes: - C34.90: Malignant neoplasm of lung - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99215: Established patient visit, high complexity - 96413: Chemotherapy IV infusion, first hour"
+    },
+    {
+      "chunk_index": 7,
+      "edited_similarity": 0.744040846824646,
+      "evidence_id": "inner3_row844_chunk7",
+      "original_similarity": 0.783183753490448,
+      "row_id": 844,
+      "selection_reasons": [
+        "original_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "| **Extremities** | No edema, pulses 2+ bilaterally | | **Skin** | No rashes or lesions | | **Neurologic** | Grossly intact; strength 5/5 in all extremities, sensation intact | --- ### Laboratory Data (drawn today) - **CBC:** WBC 6.4 k/\u00b5L (norm), Hgb 13.5 g/dL, Plt 215 k/\u00b5L. - **CMP:** Na 138 mmol/L, K 4.2 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 16 mg/dL, Cr 0.9 mg/dL (eGFR 78 mL/min/1.73 m\u00b2), AST 22 U/L, ALT 25 U/L, ALP 78 U/L, total bilirubin 0.8 mg/dL. - **Tumor Markers:** CEA 6.8 ng/mL (slightly elevated but stable from prior). All values are within acceptable limits for his age and renal function. --- ### Imaging **CT Chest with Contrast (performed 2 weeks ago):** - Post\u2011surgical changes in the right upper lobe with no residual mass. - No new pulmonary nodules. - Mediastinal and hilar lymph nodes within normal size limits; no lymphadenopathy. - No pleural effusion or chest wall invasion. **Impression:** No radiographic evidence of recurrent or new disease; findings consistent with postoperative changes. Disease status: **stable / no evidence of disease**. --- ### Assessment 1. **Stage IIA EGFR\u2011mutant NSCLC, status post right upper lobectomy and adjuvant cisplatin/vinorelbine, currently disease\u2011free.** 2. **Hypertension, well controlled.** 3. **Hyperlipidemia, well controlled.** 4. **Former smoker, abstinent for 2 years.** Overall performance status remains ECOG 1. The patient is asymptomatic with stable imaging and laboratory parameters. --- ### Plan 1. **Surveillance:** - Continue routine imaging surveillance with contrast\u2011enhanced CT chest every 6 months for the next 2 years, then annually if stable. - Repeat"
+    },
+    {
+      "chunk_index": 4,
+      "edited_similarity": 0.750986635684967,
+      "evidence_id": "inner3_row844_chunk4",
+      "original_similarity": 0.7774887084960938,
+      "row_id": 844,
+      "selection_reasons": [
+        "edited_peak"
+      ],
+      "text": "and upper spleen are within normal limits. No focal hepatic lesions or adrenal enlargement. **Cardiovascular & Esophagus** - Heart size normal; no pericardial effusion. - Esophagus unremarkable. **Impression** 1. Post\u2011operative changes in the right upper lobe consistent with prior lobectomy; no residual or recurrent tumor identified. 2. No new pulmonary nodules or masses. 3. No mediastinal or hilar lymphadenopathy. 4. No pleural effusion or other thoracic abnormality. Overall, the study demonstrates stable post\u2011surgical appearance without radiographic evidence of disease recurrence. <new_note> **Oncology Progress Note** **Patient:** James Whitaker **MRN:** ******* **Age:** 68 **Sex:** Male **Visit Type:** Established Oncology Follow\u2011up (moderate complexity) --- ### Chief Complaint Routine oncology follow\u2011up; patient reports feeling well with no new symptoms. --- ### History of Present Illness James is a 68\u2011year\u2011old man who is currently 2 years post\u2011right upper lobectomy for stage IIA (T2aN0M0) EGFR exon 19\u2011deleted adenocarcinoma of the right upper lobe. He completed four cycles of adjuvant cisplatin/vinorelbine chemotherapy without dose reductions. He experienced grade 2 nausea during adjuvant therapy, which was successfully managed with ondansetron, and a brief episode of febrile neutropenia after the second cycle requiring a 3\u2011day hospitalization; he recovered fully. Since his last oncology visit 6 months ago, he has been asymptomatic. He denies cough, dyspnea, chest pain, hemoptysis, fever, weight loss, night sweats, fatigue, headache, neurologic deficits, or any gastrointestinal complaints. He reports adherence to his home medications and has not initiated any new therapies. --- ### Past Medical History - **Non\u2011small cell lung cancer (adenocarcinoma), EGFR exon 19 deletion** \u2013 status post right upper"
+    },
+    {
+      "chunk_index": 22,
+      "edited_similarity": 0.6950373649597168,
+      "evidence_id": "inner3_row844_chunk22",
+      "original_similarity": 0.6533921957015991,
+      "row_id": 844,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "each cycle of systemic therapy. - Repeat brain MRI 6\u20138 weeks post\u2011SRS to assess response. - Chest CT every 8\u201312 weeks to evaluate systemic disease. - Re\u2011check CEA and LDH at each imaging interval. 5. **Follow\u2011up:** - Return to clinic in 2 weeks for renal labs and to confirm SRS scheduling. - Post\u2011SRS follow\u2011up visit within 1 week after completion to assess neurologic status and initiate systemic therapy. **Discussion with patient:** Reviewed the nature of his disease progression, the rationale for SRS to control brain lesions, and the plan to start an EGFR\u2011targeted oral agent with attention to his renal function. Patient expressed understanding and agreed with the proposed approach. **Signature:** Dr. _______________________ Medical Oncologist \u2013 Thoracic Oncology [Institution] <new_note> Encounter Record Timepoint: At age 71 Encounter Type: outpatient oncology visit ( Diagnosis Codes: - Z51.0: Radiation therapy Procedure Codes: - 77385: IMRT delivery <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 71 Instrument: PRO-CTCAE Headache - Severity: 2/4 (Moderate) Fatigue - Severity: 2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Instrument: EORTC QLQ-C30 Physical Function: 70/100 Role Function: 60/100 Emotional Function: 55/100 Cognitive Function: 65/100 Social Function: 58/100 Fatigue: 45/100 Nausea: 15/100 Pain: 30/100 Global Health: 55/100 <new_note> Encounter Record Timepoint: At age 72 Encounter Type: oncology infusion visit Diagnosis Codes: - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99215: Established patient visit, high complexity - 96413: Chemotherapy IV infusion, first hour <new_note> **Progress Note \u2013 Oncology Follow\u2011up** **Patient:** James Whitaker **Age:** 72 **Sex:** Male **MRN:** \u2588\u2588\u2588\u2588\u2588\u2588\u2588 --- ### Chief Complaint Follow\u2011up after stereotactic radiosurgery (SRS)"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.7299726605415344,
+      "evidence_id": "inner3_row871_chunk14",
+      "original_similarity": 0.6927472352981567,
+      "row_id": 871,
+      "selection_reasons": [
+        "original_peak"
+      ],
+      "text": "210 k/uL [Reference: 150-400] - Normal ANC: 4.5 k/uL [Reference: 1.5-8.0] - Normal Comprehensive Metabolic Panel (CMP): Cr: 0.9 mg/dL [Reference: 0.6-1.2] - Normal BUN: 14 mg/dL [Reference: 7-20] - Normal Albumin: 3.9 g/dL [Reference: 3.5-5.0] - Normal <new_note> **Oncology Follow\u2011Up Visit \u2013 Restaging Assessment** **Patient:** Linda Martinez, 55\u2011year\u2011old female (currently age 56) **MRN:** ******* **Visit Type:** Established patient, moderate complexity --- ### Chief Complaint - \u201cI\u2019m here for my follow\u2011up after chemotherapy and to review the scan results.\u201d ### History of Present Illness (HPI) Linda is a 56\u2011year\u2011old woman with stage IV squamous cell carcinoma of the right lower lobe (T3N2M1) diagnosed 1 year ago. She has completed **four cycles** of first\u2011line platinum\u2011based doublet chemotherapy (cisplatin 75 mg/m\u00b2 IV day 1 + gemcitabine 1,250 mg/m\u00b2 IV days 1 and 8, q3 weeks). - **Cycle 1\u20132:** tolerated well; after cycle 2 she experienced grade 2 nausea/vomiting, managed with ondansetron 8 mg PO q8 h PRN and dexamethasone 4 mg PO daily for 3 days. Symptoms resolved by the start of cycle 3. - **Cycle 3\u20134:** no significant nausea, vomiting, or other acute toxicities. She reports mild fatigue (2/10) and occasional dry mouth but denies dyspnea, cough, chest pain, neurologic changes, or new gastrointestinal symptoms. She denies any new medications, recent infections, or changes in functional status. She remains active in daily living, walks her dog daily, and works part\u2011time as a librarian. ### Review of Systems (ROS) | System | Positive | Negative | |--------|----------|----------| | Constitutional | Fatigue (mild) | Fever, chills, weight loss |"
+    },
+    {
+      "chunk_index": 32,
+      "edited_similarity": 0.75001460313797,
+      "evidence_id": "inner3_row871_chunk32",
+      "original_similarity": 0.6854989528656006,
+      "row_id": 871,
+      "selection_reasons": [
+        "edited_peak"
+      ],
+      "text": "functional reserve. 3. **Renal function** \u2013 CrCl 66 mL/min, acceptable for most cytotoxic agents. 4. **Molecular profile** \u2013 KRAS G12C, TP53 R273C, CDKN2A loss; PD\u2011L1 TPS 10% (not high enough for single\u2011agent immunotherapy per current guidelines). ### 12. Plan / Recommendations - **Systemic therapy:** Initiate a non\u2011platinum cytotoxic chemotherapy regimen (agent withheld per discussion) appropriate for KRAS\u2011mutated squamous NSCLC, given prior platinum exposure and preserved organ function. - **Supportive care:** Continue anti\u2011emetic prophylaxis (ondansetron PRN) and consider neuropathy monitoring. - **Laboratory monitoring:** CBC, CMP prior to each cycle; hold treatment for ANC <1.0 k/\u00b5L or platelets <100 k/\u00b5L. - **Imaging follow\u2011up:** Restaging CT of chest/abdomen/pelvis after 2 cycles to assess response; brain MRI as clinically indicated. - **Clinical trial consideration:** Review eligibility for KRAS G12C\u2011targeted inhibitor trials; discuss with patient if interested. - **Palliative care:** Continue symptom management; refer to palliative care for fatigue and dyspnea counseling. - **Patient education:** Discuss expected toxicities (myelosuppression, neuropathy, nausea) and emphasize prompt reporting of fevers or new neurologic symptoms. **Next appointment:** Oncology clinic visit in 3 weeks for treatment initiation and baseline assessment. --- **Prepared by:** Oncology Multidisciplinary Tumor Board (attending medical oncologist, radiation oncologist, pulmonologist, radiologist, pathologist, palliative care specialist) **Signature:** _______________________ **Date:** _______________________ (Date to be inserted by EMR) <new_note> **Computed Tomography (CT) of the Chest, Abdomen, and Pelvis** **Patient:** Linda Martinez, 55\u2011year\u2011old female (age 60 at time of exam) **Clinical Indication:** Restaging evaluation of known stage IV squamous cell carcinoma of the right lower lobe lung with hepatic metastases, performed after systemic therapy. **Technique:** - Multidetector"
+    },
+    {
+      "chunk_index": 10,
+      "edited_similarity": 0.5255908370018005,
+      "evidence_id": "inner3_row871_chunk10",
+      "original_similarity": 0.5172130465507507,
+      "row_id": 871,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "| Depression | --- ### 4. Past Medical History | Condition | Details | |-----------|---------| | Hypertension | None reported | | Diabetes mellitus | None | | Cardiovascular disease | None | | Chronic lung disease | None | | Prior malignancies | None | | Other | No known chronic illnesses | --- ### 5. Social History - **Tobacco:** Former smoker, 30 pack\u2011years, quit 5 years ago. - **Alcohol:** Social drinker, 1\u20132 drinks/week. - **Illicit drugs:** Denies use. - **Living situation:** Lives with spouse, independent. - **Employment:** Administrative assistant, currently on medical leave. - **Support system:** Husband and two adult children. --- ### 6. Family History - Mother: Alive, hypertension. - Father: Deceased (MI at 68). - Siblings: No known cancer. - No family history of lung, breast, colorectal, or other hereditary cancers. --- ### 7. Allergies - No known drug allergies (NKDA). --- ### 8. Medications - No chronic prescription medications. - Occasional over\u2011the\u2011counter acetaminophen for mild aches. --- ### 9. Physical Examination | Parameter | Findings | |-----------|----------| | **General** | Alert, oriented, NAD, in no acute distress. | | **Vital Signs** | BP 122/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96% on room air. | | **HEENT** | Normocephalic, atraumatic, mucous membranes moist. | | **Neck** | No cervical adenopathy. | | **Lungs** | Decreased breath sounds at right lower lung field; no wheezes or crackles. | | **Cardiovascular** | Regular rate and rhythm, no murmurs, rubs, or gallops. | | **Abdomen** | Soft, non\u2011tender, no hepatosplenomegaly,"
+    },
+    {
+      "chunk_index": 23,
+      "edited_similarity": 0.7103223204612732,
+      "evidence_id": "inner3_row871_chunk23",
+      "original_similarity": 0.6341369152069092,
+      "row_id": 871,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "with unchanged mediastinal nodes. Hepatic lesions have increased in size (largest now 2.3 cm, up from 1.8 cm). New sclerotic lesions noted in lumbar vertebral body (L2) and right iliac crest, consistent with osseous metastases. No new intra\u2011abdominal disease. - **MRI Brain (post\u2011SRS):** Treated right posterior, left frontal, and cerebellar metastases show decreased enhancement and no new lesions. No evidence of edema or mass effect. **Patient\u2011Reported Outcomes (EORTC QLQ\u2011C30, age 58):** - Physical Function 80, Role Function 70, Emotional Function 65, Cognitive Function 75, Social Function 70 - Fatigue 30, Nausea 10, Pain 20, Dyspnea 25, Insomnia 20, Appetite Loss 15, Constipation 10, Diarrhea 5, Financial Difficulties 20, Global Health 70 **PRO\u2011CTCAE (grade severity, past 7 days):** - Nausea 1, Fatigue 2, Pain 1, Neuropathy 0 --- ### ASSESSMENT 1. **Stage IV NSCLC, squamous, KRAS G12C\u2011mutated** \u2013 Radiographic progression of hepatic disease and new osseous metastases despite prior platinum\u2011based regimens. Brain disease remains controlled after stereotactic radiosurgery. 2. **Performance status:** ECOG 1, functional independence preserved. 3. **Treatment\u2011related toxicities:** Resolved neutropenia; no current grade \u22652 toxicities. 4. **Bone health:** New bone mets; currently on denosumab. 5. **Supportive care needs:** Mild fatigue and dyspnea; stable nutrition; psychosocial concerns modest (financial difficulty score 20). --- ### PLAN **A. Systemic Therapy Options** - Discuss FDA\u2011approved KRAS G12C inhibitor (sotorasib) as a targeted option given the confirmed KRAS G12C mutation and progression after at least one prior systemic therapy. Review eligibility, potential benefits, and side\u2011effect profile (e.g., hepatotoxicity, diarrhea). - Consider enrollment in a clinical trial evaluating KRAS G12C inhibitors in"
+    },
+    {
+      "chunk_index": 4,
+      "edited_similarity": 0.7794921398162842,
+      "evidence_id": "inner3_row52_chunk4",
+      "original_similarity": 0.794274091720581,
+      "row_id": 52,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "fibrosis and staple line. 3. No mediastinal or hilar lymphadenopathy. 4. No pleural effusion, pulmonary embolus, or new osseous lesions. 5. Incidental small thyroid nodules, stable. **Recommendation:** Continue routine surveillance per treating oncologist\u2019s protocol. --- **Radiologist:** ______________________ **Signature:** ______________________ **Accession #:** ______________________ <new_note> **Oncology Progress Note** **Patient:** Robert Miller **MRN:** ******* **DOB:** ****** **Age:** 70 y **Sex:** Male **Date:** *[to be added]* --- ### 1. Chief Complaint Routine oncology follow\u2011up. No new complaints. ### 2. History of Present Illness Robert is a 70\u2011year\u2011old male who was diagnosed at age 68 with stage IIA (T2aN0M0) right upper\u2011lobe squamous cell carcinoma of the lung. He underwent a right upper lobectomy with mediastinal lymph node dissection, followed by four cycles of adjuvant Platinol + vinorelbine. His postoperative course was complicated by grade 1 peripheral neuropathy (mild fingertip tingling) after the second cycle and a brief admission for febrile neutropenia after the third cycle, which resolved with inpatient antibiotics and outpatient growth\u2011factor support. He completed adjuvant therapy 4 months ago and has been on surveillance. A contrast\u2011enhanced CT chest performed at this visit (see Imaging section) demonstrated postoperative changes without residual tumor or mediastinal adenopathy. He reports feeling well, denies cough, dyspnea, chest pain, fevers, weight loss, or new neurologic symptoms. His performance status remains ECOG 0. ### 3. Review of Systems (pertinent negatives) - **General:** No fatigue, fever, chills, night sweats, or weight change. - **HEENT:** No headache, visual changes, or sore throat. - **Respiratory:** No cough, dyspnea, wheeze, or hemoptysis. - **Cardiovascular:** No chest pain, palpitations, or edema."
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.7578409910202026,
+      "evidence_id": "inner3_row52_chunk14",
+      "original_similarity": 0.7853718996047974,
+      "row_id": 52,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "hilar lymphadenopathy, no new pulmonary nodules. - **Impression:** No radiographic evidence of recurrent or new disease. ### Assessment 1. **Status post right upper lobectomy for stage IIA squamous NSCLC \u2013 currently disease\u2011free.** 2. **Grade 1 peripheral neuropathy, stable.** 3. **Hypertension, well controlled.** 4. **Hyperlipidemia, stable.** ### Plan 1. **Surveillance:** - Continue chest CT with contrast every 6 months for the next 2 years, then annually per NCCN guidelines for resected stage II NSCLC. - Repeat CBC and CMP concurrently with imaging. 2. **Peripheral neuropathy:** - Observe; no pharmacologic intervention required at this time. - Counsel on avoidance of neurotoxic agents and encourage regular gentle exercise. 3. **Preventive health:** - Annual influenza vaccine; pneumococcal vaccination (PCV13 \u2192 PPSV23) if not already administered. - Continue smoking\u2011cessation reinforcement; offer referral to cessation program if needed. - Discuss age\u2011appropriate cancer screenings (colonoscopy, prostate PSA per shared decision\u2011making). 4. **Medication review:** - Continue current antihypertensive and lipid\u2011lowering therapy. - Review medication list at next visit for potential drug\u2011drug interactions. 5. **Follow\u2011up:** - Return to clinic in 6 months for routine surveillance or sooner if new symptoms develop (e.g., cough, dyspnea, neurologic changes). - Provide patient with contact information for urgent concerns (fever, new respiratory symptoms). **Signature:** ________________________ **Provider:** Dr. ______________________ (Board\u2011certified Medical Oncologist) <new_note> **PET/CT REPORT** **Patient:** Robert Miller **Sex:** Male **Age:** 75 years **MRN:** 001-234567 **Referring Physician:** Dr. [Oncologist] **Clinical History / Indication:** - History of right upper lobe squamous cell carcinoma (stage IIA) status\u2011post right upper lobectomy and adjuvant cis\u2011vinorelbine completed 7 years ago. - Recent presentation with worsening"
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.6595385074615479,
+      "evidence_id": "inner3_row52_chunk28",
+      "original_similarity": 0.5900578498840332,
+      "row_id": 52,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "5.2 cm right lower lobe mass, mediastinal stations 4R and 7, and osteolytic lesions in T8 vertebral body. No hypermetabolic disease elsewhere. - **Brain MRI (with/without contrast):** No radiographically evident metastases. - **NGS (CT\u2011guided biopsy of right lower lobe mass):** KRAS G12C (AF 32 %), TP53 R273C (AF 45 %), FGFR1 amplification (CN 6), CDKN2A loss, EGFR wild\u2011type, ALK rearrangement negative. PD\u2011L1 tumor proportion score 10 %. ### 12. Assessment 1. **Recurrent/metastatic squamous non\u2011small cell lung cancer** \u2013 stage IV (T3N2M1c) with right lower lobe primary, mediastinal nodal disease, and thoracic spine bone metastasis. 2. **Molecular profile:** KRAS G12C\u2011mutated, TP53 mutant, FGFR1 amplification, CDKN2A loss, PD\u2011L1 10 %. 3. **Performance status:** ECOG 1 (ambulatory, capable of self\u2011care). 4. **Baseline anemia** (Hgb \u2248 10 g/dL) and mild renal impairment (CrCl \u2248 84 mL/min). 5. **Prior treatment\u2011related toxicities:** Grade 1 peripheral neuropathy, prior febrile neutropenia (resolved). ### 13. Plan / Recommendations | Item | Details | |------|---------| | **Systemic therapy discussion** | Reviewed standard cytotoxic options for KRAS\u2011mutated squamous NSCLC, focusing on vinorelbine versus gemcitabine. Emphasized efficacy data, dosing schedules, and toxicity profiles. Highlighted that vinorelbine may be associated with neuropathy (relevant given baseline grade 1) and myelosuppression, while gemcitabine carries risk of myelosuppression and transaminitis but less neuropathy. Discussed that both agents are renally cleared to a modest degree; dose adjustments may be needed given CrCl ~84 mL/min (generally acceptable). Patient expressed desire for a regimen with manageable toxicity, particularly concerned about worsening anemia and neuropathy. | | **Supportive care** | \u2022 Continue iron supplementation; consider transfusion"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 3,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_003_query_003_targeted",
+  "patient_outcomes_in_prompt": false,
+  "query": 3,
+  "query_id": "effect_query_004"
+}

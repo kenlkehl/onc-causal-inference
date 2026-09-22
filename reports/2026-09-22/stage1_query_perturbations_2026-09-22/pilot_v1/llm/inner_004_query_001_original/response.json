@@ -1,0 +1,71 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row98_chunk13",
+          "quote": "**Performance status:** ECOG 2."
+        },
+        {
+          "evidence_id": "inner4_row223_chunk18",
+          "quote": "**Excellent functional status** (ECOG 0)"
+        },
+        {
+          "evidence_id": "inner4_row135_chunk12",
+          "quote": "**Performance status:** ECOG 3, limited functional reserve."
+        }
+      ],
+      "description": "A standardized scale used to assess a patient's functional status and ability to perform activities of daily living.",
+      "extraction_instruction": "Extract the numeric ECOG score mentioned in the performance status or assessment section.",
+      "measurement_definition": "Numeric score from 0 (fully active) to 5 (dead), typically documented in the Performance Status or Assessment sections.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "While numeric values are provided, the specific clinical criteria used to assign the score (e.g., whether 'ECOG 2' is based on a specific assessment tool) are not detailed.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row98_chunk13",
+          "quote": "PD\u2011L1 TPS 10 %; EGFR wild\u2011type"
+        },
+        {
+          "evidence_id": "inner4_row233_chunk18",
+          "quote": "PD\u2011L1 20% expression"
+        },
+        {
+          "evidence_id": "inner4_row871_chunk12",
+          "quote": "role of immunotherapy (PD\u20111/PD\u2011L1 inhibitors) given PD\u2011L1 TPS 10%"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing partial or complete membrane staining for PD-L1, used to guide immunotherapy selection.",
+      "extraction_instruction": "Extract the numerical percentage associated with 'PD-L1 TPS' or 'PD-L1 expression' from the molecular profile section.",
+      "measurement_definition": "A percentage value representing the proportion of tumor cells expressing PD-L1.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific assay or staining protocol used to determine the TPS is not mentioned.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Limited number of unique patients provided in the excerpts.",
+    "PD-L1 expression is reported as a percentage in some cases but only qualitatively in others."
+  ],
+  "summary": "The evidence identifies functional status (ECOG) and biomarker expression (PD-L1 TPS) as key baseline clinical variables used to differentiate treatment strategies (e.g., single-agent vs. combination therapy) in patients with KRAS G12C-mutated NSCLC."
+}

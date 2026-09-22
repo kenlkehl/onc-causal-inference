@@ -1,0 +1,60 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row958_chunk4",
+          "quote": "Homozygous deletion of STK11 (also known as LKB1) is linked to an immunologically \u201ccold\u201d tumor microenvironment and may attenuate response to immune checkpoint blockade."
+        },
+        {
+          "evidence_id": "inner1_row311_chunk1",
+          "quote": "Loss\u2011of\u2011function alteration (frameshift)"
+        }
+      ],
+      "description": "Presence or absence of a loss-of-function alteration or homozygous deletion of the STK11 (LKB1) gene.",
+      "extraction_instruction": "Identify whether STK11 is described as having a 'homozygous deletion' or 'loss-of-function alteration'.",
+      "measurement_definition": "Positive if a homozygous deletion or loss-of-function alteration (e.g., frameshift) is detected via next-generation sequencing; negative if the gene is wild-type or no such loss is detected.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 alteration status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether 'loss-of-function' and 'homozygous deletion' should be collapsed into a single binary variable or stratified by mutation type.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row958_chunk0",
+          "quote": "PD\u2011L1 (22C3) | Tumor Proportion Score 10 %"
+        },
+        {
+          "evidence_id": "inner1_row733_chunk0",
+          "quote": "PD\u2011L1 (22C3, TPS) | 10 % (tumor proportion score)"
+        },
+        {
+          "evidence_id": "inner1_row962_chunk0",
+          "quote": "PD\u2011L1 (22C3, TPS) | 5 % (tumor proportion score)"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing partial or complete membrane staining for PD-L1 using the 22C3 assay.",
+      "extraction_instruction": "Extract the percentage value associated with 'PD-L1 (22C3)' or 'Tumor Proportion Score'.",
+      "measurement_definition": "The numerical percentage value of the Tumor Proportion Score (TPS) as determined by immunohistochemistry (IHC) using the 22C3 clone.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The data is presented as discrete percentages; it is uncertain if clinical thresholds (e.g., <1%, 1-49%, >=50%) are more relevant than the continuous value.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small sample size of patients across the provided excerpts.",
+    "Varying platforms for NGS and IHC may introduce inter-assay variability.",
+    "Lack of data on smoking history, which is clinically associated with the identified KRAS/STK11/TP53 profile."
+  ],
+  "summary": "The evidence identifies baseline genomic alterations and immunohistochemical markers in patients with lung adenocarcinoma, specifically highlighting the presence of STK11 loss and PD-L1 expression levels as factors that may influence the tumor microenvironment and therapeutic response."
+}

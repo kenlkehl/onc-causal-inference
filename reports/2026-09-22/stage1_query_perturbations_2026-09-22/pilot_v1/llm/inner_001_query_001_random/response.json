@@ -1,0 +1,75 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row485_chunk46",
+          "quote": "**General:** Alert, oriented, NAD, ECOG 1"
+        },
+        {
+          "evidence_id": "inner1_row672_chunk27",
+          "quote": "**ECOG performance status 3** \u2013 limited functional reserve but able to tolerate non\u2011platinum chemotherapy"
+        },
+        {
+          "evidence_id": "inner1_row951_chunk17",
+          "quote": "**ECOG performance status 0** \u2013 fully active"
+        }
+      ],
+      "description": "A scale used to assess how a patient's disease affects their daily living abilities.",
+      "extraction_instruction": "Identify the numeric value associated with 'ECOG' or 'ECOG performance status'.",
+      "measurement_definition": "The Eastern Cooperative Oncology Group (ECOG) scale, where 0 indicates fully active and 4 indicates completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the status was assessed at the time of diagnosis or at the specific time of the oncology visit is not always explicitly stated.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row485_chunk7",
+          "quote": "No radiographic evidence of intracranial metastatic disease."
+        },
+        {
+          "evidence_id": "inner1_row672_chunk27",
+          "quote": "brain metastases present (treated right frontal lesion, untreated left cerebellar lesion)"
+        },
+        {
+          "evidence_id": "inner1_row951_chunk11",
+          "quote": "two enhancing lesions in the left cerebellum and right frontal lobe"
+        },
+        {
+          "evidence_id": "inner1_row184_chunk21",
+          "quote": "Brain MRI negative for intracranial metastases."
+        }
+      ],
+      "description": "The presence or absence of metastatic cancer cells in the brain as determined by radiographic imaging.",
+      "extraction_instruction": "Review 'Brain MRI' or 'Impression' sections for the presence of intracranial lesions or a statement of no metastatic disease.",
+      "measurement_definition": "Positive if brain MRI or PET/CT identifies enhancing lesions, metastatic foci, or 'brain metastases present'; negative if imaging reports 'no radiographic evidence of intracranial metastatic disease' or 'Brain MRI negative for intracranial metastases'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Presence of Brain Metastases",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The timing of the MRI relative to other baseline assessments may vary between patients.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "The evidence consists of fragmented clinical notes, which may omit complementary baseline data.",
+    "The number of patients represented in the evidence is small, limiting the diversity of the observed variable ranges."
+  ],
+  "summary": "The provided evidence supports the identification of baseline patient characteristics in non-small cell lung cancer (NSCLC) cases, specifically regarding functional status (ECOG performance status) and the presence of intracranial metastatic disease."
+}

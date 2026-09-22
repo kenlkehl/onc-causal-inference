@@ -1,0 +1,64 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row837_chunk30",
+          "quote": "**Calculated CrCl (Cockcroft\u2011Gault)** | 55 mL/min"
+        },
+        {
+          "evidence_id": "inner2_row522_chunk13",
+          "quote": "renal impairment should be considered when selecting immunotherapy regimens"
+        }
+      ],
+      "description": "A measure of renal function used to determine the safety and dosing of systemic therapies and immunotherapy regimens.",
+      "extraction_instruction": "Extract the numeric value associated with 'Calculated CrCl (Cockcroft-Gault)'.",
+      "measurement_definition": "Calculated renal clearance of creatinine in mL/min, specifically using the Cockcroft-Gault formula.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Creatinine Clearance (CrCl)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain if other methods of calculating CrCl (e.g., MDRD or CKD-EPI) are used across all patients.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "Squamous cell carcinoma",
+        "Adenocarcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row522_chunk5",
+          "quote": "consistent with primary non\u2011small cell lung carcinoma"
+        },
+        {
+          "evidence_id": "inner2_row837_chunk1",
+          "quote": "**Poorly differentiated squamous cell carcinoma, right upper lobe lung**"
+        },
+        {
+          "evidence_id": "inner2_row675_chunk0",
+          "quote": "**Primary Lung Adenocarcinoma**, right lower lobe"
+        }
+      ],
+      "description": "The histopathologic classification of the primary lung tumor, which influences the choice of chemotherapy and targeted agents.",
+      "extraction_instruction": "Identify the primary tumor histology mentioned in the pathology or diagnosis section of the report.",
+      "measurement_definition": "The histological diagnosis based on microscopic evaluation and immunohistochemical markers (e.g., p40, CK5/6, TTF-1, Napsin A).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Lung Cancer Histology",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some reports describe the tumor as 'non-small cell lung carcinoma' generally before specifying histology; consistency in the level of granularity may vary.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Limited number of unique patients provided in the evidence snippets.",
+    "Some variables (like PD-L1 or TMB) were noted but not selected as primary candidates due to a preference for foundational clinical variables like renal function and histology."
+  ],
+  "summary": "The evidence suggests several baseline clinical variables that may influence treatment selection or response in non-small cell lung cancer (NSCLC), including renal function (CrCl), tumor histology (squamous vs. adenocarcinoma), and PD-L1 expression levels."
+}

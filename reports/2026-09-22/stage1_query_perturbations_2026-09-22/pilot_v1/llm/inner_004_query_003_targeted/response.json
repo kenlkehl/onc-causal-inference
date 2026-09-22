@@ -1,0 +1,75 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row608_chunk20",
+          "quote": "renal function normal (creatinine clearance \u2248125 mL/min)"
+        },
+        {
+          "evidence_id": "inner4_row522_chunk43",
+          "quote": "(CrCl 31 mL/min) \u2013 precludes cisplatin; limits use of carboplatin dose intensity."
+        },
+        {
+          "evidence_id": "inner4_row551_chunk24",
+          "quote": "Calculated CrCl | 78 mL/min"
+        }
+      ],
+      "description": "The calculated rate at which the kidneys clear creatinine from the blood, used as a proxy for renal function to determine chemotherapy eligibility and dosing.",
+      "extraction_instruction": "Extract the numeric value of the calculated creatinine clearance (CrCl) or eGFR in mL/min.",
+      "measurement_definition": "Calculated CrCl measured in mL/min.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Creatinine Clearance (CrCl)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the calculation method (e.g., Cockcroft-Gault vs. MDRD/CKD-EPI) is consistent across different reports.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row951_chunk31",
+          "quote": "Her ECOG performance status remains 0."
+        },
+        {
+          "evidence_id": "inner4_row551_chunk24",
+          "quote": "ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner4_row608_chunk18",
+          "quote": "ECOG 1, functional and tolerating current supportive measures."
+        },
+        {
+          "evidence_id": "inner4_row672_chunk11",
+          "quote": "ECOG 3 (capable of limited self\u2011care; confined to bed >50 % of waking hours)"
+        }
+      ],
+      "description": "A scale used by clinicians to assess how a patient's disease affects their daily living abilities, which informs treatment intensity.",
+      "extraction_instruction": "Extract the ECOG score (0-4) as documented in the assessment or performance status section.",
+      "measurement_definition": "ECOG scale where 0 is fully active, and 4 is completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Inter-observer variability in assigning ECOG scores in clinical notes.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "The evidence is limited to a small set of patient clinical notes and reports.",
+    "Renal function is reported using both CrCl and eGFR interchangeably in some contexts, which may introduce measurement variance."
+  ],
+  "summary": "The provided evidence identifies renal function (via creatinine clearance) and functional status (via ECOG performance status) as key baseline clinical variables that influence the selection and dosing of systemic therapies in patients with non-small cell lung cancer (NSCLC)."
+}

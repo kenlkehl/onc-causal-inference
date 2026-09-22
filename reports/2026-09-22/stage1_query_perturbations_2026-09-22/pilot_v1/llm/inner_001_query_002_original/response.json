@@ -1,0 +1,65 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row269_chunk30",
+          "quote": "demonstrates intense FDG uptake (SUVmax \u2248 8.5)"
+        },
+        {
+          "evidence_id": "inner1_row100_chunk27",
+          "quote": "demonstrates intense FDG uptake (maximum standardized uptake value, SUVmax = 12.0)"
+        },
+        {
+          "evidence_id": "inner1_row440_chunk15",
+          "quote": "demonstrates intense FDG uptake with a maximum standardized uptake value (SUVmax) of 8.4"
+        }
+      ],
+      "description": "The maximum standardized uptake value (SUVmax) of the primary or recurrent pulmonary nodule/mass, representing its metabolic activity on FDG-PET/CT.",
+      "extraction_instruction": "Extract the SUVmax value associated with the pulmonary nodule or mass (e.g., 'SUVmax \u2248 8.5' or 'SUVmax = 12.0').",
+      "measurement_definition": "Numeric SUVmax value as reported in the PET/CT findings for the pulmonary lesion.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "pulmonary_lesion_suvmax",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Variability in SUVmax may be influenced by the uptake time and glucose levels, though these are generally standardized across the reports.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row269_chunk30",
+          "quote": "New lytic lesions with intense FDG avidity identified in the body of T5 (SUVmax \u2248 6.8) and the posterior element of T7 (SUVmax \u2248 6.4)"
+        },
+        {
+          "evidence_id": "inner1_row269_chunk14",
+          "quote": "No focal FDG\u2011avid osseous lesions identified throughout the visualized axial and appendicular skeleton. No evidence of metastatic bone disease."
+        },
+        {
+          "evidence_id": "inner1_row440_chunk15",
+          "quote": "Multiple focal FDG\u2011avid lesions identified: - T4 vertebral body (SUVmax 6.1) - T6 vertebral body (SUVmax 5.8) - T8 vertebral body (SUVmax 6.3) - T10 vertebral body (SUVmax 5.5)"
+        }
+      ],
+      "description": "Presence of metastatic disease in the skeletal system, characterized by lytic, sclerotic, or FDG-avid lesions in the vertebrae, ribs, or pelvis.",
+      "extraction_instruction": "Assign positive if findings describe 'lytic lesions', 'osteoblastic lesions', or 'FDG-avid osseous lesions' in the skeleton. Assign negative if reports state 'No focal FDG\u2011avid osseous lesions' or 'No evidence of metastatic bone disease'.",
+      "measurement_definition": "Positive if the report identifies any focal osseous lesions suggestive of metastasis; negative if the report explicitly states no focal osseous lesions or no evidence of metastatic bone disease.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "osseous_metastasis",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Whether mild FDG uptake in the absence of CT-defined lytic/sclerotic changes is consistently interpreted as metastasis across all reports.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "The evidence is restricted to radiology reports, which may lack full clinical context regarding the timing of the baseline measurements relative to therapy.",
+    "Small sample size of patients in the provided excerpts may not represent the full heterogeneity of NSCLC presentations."
+  ],
+  "summary": "The evidence identifies key imaging features in patients with recurrent or progressive non-small cell lung cancer (NSCLC), specifically highlighting the metabolic activity of pulmonary nodules and the presence of skeletal metastases as primary clinical distinctions."
+}

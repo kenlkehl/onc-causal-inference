@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-22T18:52:04.318095+00:00",
+  "pid": 1161519,
+  "script": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_nested_modifier_count_2026-09-22/resume_2026-09-22.py",
+  "detached_session": true,
+  "stdin": "DEVNULL",
+  "output_log": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_nested_modifier_count_2026-09-22/recovery_supervisor.log"
+}

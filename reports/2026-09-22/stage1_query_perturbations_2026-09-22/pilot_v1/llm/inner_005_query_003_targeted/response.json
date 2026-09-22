@@ -1,0 +1,79 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row767_chunk4",
+          "quote": "Current ECOG performance status 1"
+        },
+        {
+          "evidence_id": "inner5_row367_chunk14",
+          "quote": "ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner5_row672_chunk26",
+          "quote": "ECOG performance status 3"
+        },
+        {
+          "evidence_id": "inner5_row329_chunk3",
+          "quote": "ECOG performance status 0"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, ranging from fully active to completely disabled.",
+      "extraction_instruction": "Extract the integer value associated with 'ECOG performance status' or 'ECOG'.",
+      "measurement_definition": "The numerical ECOG score (0-4) as documented in the clinical notes or assessment sections.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact timepoint of assessment (e.g., at baseline vs. during surveillance) may vary between notes.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [
+        "Never-smoker",
+        "Former smoker",
+        "Current smoker"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row367_chunk14",
+          "quote": "Reinforce never\u2011smoker status"
+        },
+        {
+          "evidence_id": "inner5_row672_chunk25",
+          "quote": "Former smoker, 30\u2011pack\u2011year history, quit 5 years ago"
+        },
+        {
+          "evidence_id": "inner5_row329_chunk3",
+          "quote": "Former smoker, 10 pack\u2011year history, quit 8 years ago"
+        }
+      ],
+      "description": "The patient's history of tobacco use.",
+      "extraction_instruction": "Identify terms such as 'never-smoker', 'former smoker', 'quit', or 'smoking abstinence' to categorize the patient.",
+      "measurement_definition": "'Never-smoker' if explicitly stated or described as no tobacco exposure; 'Former smoker' if history of smoking is noted but the patient has quit; 'Current smoker' if currently using tobacco.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Smoking Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some patients are described as 'abstinent' or 'smoking-free' without explicitly clarifying if they were former or never smokers.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small sample size of unique patients across the provided snippets.",
+    "Some variables (like ECOG) are captured at multiple timepoints, creating potential ambiguity regarding the 'baseline' value."
+  ],
+  "summary": "The provided evidence supports the identification of baseline patient characteristics in NSCLC, specifically functional status (ECOG) and tobacco exposure history, which are consistently documented across various clinical encounters."
+}

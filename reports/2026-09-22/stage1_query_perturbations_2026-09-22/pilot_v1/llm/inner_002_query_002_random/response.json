@@ -1,0 +1,63 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "Squamous cell carcinoma",
+        "Adenocarcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row124_chunk8",
+          "quote": "**Primary lung squamous cell carcinoma**, moderately differentiated, left upper lobe"
+        },
+        {
+          "evidence_id": "inner2_row706_chunk0",
+          "quote": "Consistent with adenocarcinoma"
+        },
+        {
+          "evidence_id": "inner2_row671_chunk0",
+          "quote": "1. **Primary lung adenocarcinoma**,"
+        }
+      ],
+      "description": "The histological classification of the lung primary tumor.",
+      "extraction_instruction": "Identify the diagnosis in the pathology report; assign 'Squamous cell carcinoma' if the diagnosis is squamous cell carcinoma and 'Adenocarcinoma' if the diagnosis is adenocarcinoma.",
+      "measurement_definition": "Determined by microscopic evaluation and immunohistochemistry (IHC) markers; squamous cell carcinoma is characterized by p40 positivity and TTF-1 negativity, while adenocarcinoma is characterized by TTF-1 and Napsin A positivity and p40 negativity.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "NSCLC Histologic Subtype",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "None; the distinction is clearly defined by pathology reports.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row706_chunk0",
+          "quote": "20 % (tumor proportion score)"
+        },
+        {
+          "evidence_id": "inner2_row671_chunk0",
+          "quote": "**PD\u2011L1 (IHC, TPS):** 10 %"
+        }
+      ],
+      "description": "The Tumor Proportion Score (TPS) of PD-L1 expression in the tumor cells.",
+      "extraction_instruction": "Extract the numerical percentage value associated with PD-L1 Tumor Proportion Score (TPS).",
+      "measurement_definition": "Percentage of viable tumor cells showing partial or complete membrane staining for PD-L1 as determined by immunohistochemistry (e.g., using the 22C3 clone).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Expression (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact IHC clone used may vary across patients (e.g., 22C3 mentioned for one patient).",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small sample size of patients provided in the evidence.",
+    "Lack of variability in ECOG performance status (mostly ECOG 2) makes it a poor candidate for this discovery task."
+  ],
+  "summary": "The evidence identifies distinct histological subtypes of non-small cell lung cancer (NSCLC), specifically squamous cell carcinoma and adenocarcinoma, and provides quantitative measurements of PD-L1 expression (TPS)."
+}

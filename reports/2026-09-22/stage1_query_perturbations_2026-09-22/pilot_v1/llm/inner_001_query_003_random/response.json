@@ -1,0 +1,63 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "Adenocarcinoma",
+        "Squamous cell carcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row329_chunk3",
+          "quote": "Stage IIA (T2aN1M0) right upper lobe adenocarcinoma"
+        },
+        {
+          "evidence_id": "inner1_row794_chunk10",
+          "quote": "stage IIA (T2aN1M0) non\u2011small cell lung cancer, squamous cell carcinoma of the right upper lobe"
+        },
+        {
+          "evidence_id": "inner1_row653_chunk15",
+          "quote": "Known left upper\u2011lobe non\u2011small cell lung carcinoma, squamous histology"
+        }
+      ],
+      "description": "The histological classification of the lung tumor.",
+      "extraction_instruction": "Identify and extract the histological subtype mentioned (e.g., 'adenocarcinoma' or 'squamous cell carcinoma').",
+      "measurement_definition": "Pathological examination of the tumor specimen to identify the cell type.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Tumor Histology",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "There is conflicting evidence regarding the histology for the patient named Eleanor Martinez across different records, making it unclear if these represent different patients or reporting errors.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row794_chunk6",
+          "quote": "TMB of 8 mut/Mb falls within the low\u2011to\u2011intermediate range"
+        },
+        {
+          "evidence_id": "inner1_row672_chunk4",
+          "quote": "An intermediate TMB (\u2248 12 mut/Mb)"
+        }
+      ],
+      "description": "The total number of mutations per megabase of genomic DNA in the tumor.",
+      "extraction_instruction": "Extract the numerical value associated with TMB in mut/Mb.",
+      "measurement_definition": "Measured in mutations per megabase (mut/Mb).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Tumor Mutational Burden (TMB)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain whether the specific numerical value or the qualitative range (e.g., 'intermediate') is the primary intended measurement for clinical decision-making.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The evidence contains contradictory histological descriptions for the same patient name, suggesting data quality issues or multiple patients with the same name.",
+    "The sample size of patients provided in the retrieval evidence is extremely small, limiting the diversity of variable values."
+  ],
+  "summary": "The evidence identifies baseline clinical variables related to non-small cell lung cancer (NSCLC) pathology, specifically histological subtypes (adenocarcinoma vs. squamous cell carcinoma) and molecular characteristics such as Tumor Mutational Burden (TMB)."
+}

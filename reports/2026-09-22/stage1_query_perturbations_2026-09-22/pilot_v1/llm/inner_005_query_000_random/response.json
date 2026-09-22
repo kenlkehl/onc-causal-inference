@@ -1,0 +1,70 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row794_chunk22",
+          "quote": "reports an ECOG performance status of 0"
+        },
+        {
+          "evidence_id": "inner5_row873_chunk39",
+          "quote": "baseline ECOG 2"
+        },
+        {
+          "evidence_id": "inner5_row672_chunk17",
+          "quote": "ECOG 3 (limited self\u2011care, confined to bed >50% of waking hours)"
+        },
+        {
+          "evidence_id": "inner5_row837_chunk13",
+          "quote": "ECOG performance status remains 1"
+        }
+      ],
+      "description": "A standardized scale used to assess the functional status of cancer patients.",
+      "extraction_instruction": "Extract the numeric value associated with 'ECOG performance status' or 'ECOG'.",
+      "measurement_definition": "The Eastern Cooperative Oncology Group (ECOG) scale, where 0 represents fully active and 4 represents completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain if the reported status is baseline or at the time of a specific follow-up encounter across different notes.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row794_chunk1",
+          "quote": "Tumor proportion score 10 %"
+        },
+        {
+          "evidence_id": "inner5_row837_chunk0",
+          "quote": "Tumor proportion score 20 %"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing partial or complete membrane staining for PD-L1 using the 22C3 assay.",
+      "extraction_instruction": "Locate 'PD-L1 (22C3)' in pathology reports and extract the numerical percentage associated with the 'Tumor proportion score'.",
+      "measurement_definition": "Percentage (%) of tumor cells positive for PD-L1 expression.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify if these scores were calculated from the primary tumor or metastatic sites in all cases.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of patients represented in the snippets.",
+    "Heterogeneity in the timing of the documented ECOG status (baseline vs. progress notes)."
+  ],
+  "summary": "The evidence contains baseline clinical and pathological data for patients with non-small cell lung cancer (NSCLC), including functional performance status and PD-L1 expression levels."
+}

@@ -1,0 +1,56 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row367_chunk2",
+          "quote": "Associated with poorer prognosis and may attenuate response durability to EGFR\u2011TKI therapy."
+        },
+        {
+          "evidence_id": "inner3_row512_chunk5",
+          "quote": "Co\u2011mutation in TP53 is associated with a higher likelihood of early progression"
+        }
+      ],
+      "description": "Presence of the p.R273C missense mutation in the TP53 gene.",
+      "extraction_instruction": "Identify the TP53 entry in the genomic findings table and check for the p.R273C protein change.",
+      "measurement_definition": "Positive if NGS reports the TP53 p.R273C mutation; negative if TP53 is wild-type or no such mutation is documented.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "TP53 p.R273C mutation",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the effect modification is specific to the p.R273C variant or applicable to all TP53 mutations is not fully clarified, although p.R273C is the only one mentioned.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row512_chunk5",
+          "quote": "MET amplification may limit durability of EGFR\u2011TKI response."
+        },
+        {
+          "evidence_id": "inner3_row314_chunk8",
+          "quote": "May confer primary or acquired resistance to EGFR TKIs"
+        }
+      ],
+      "description": "Increase in MET gene copy number detected via NGS.",
+      "extraction_instruction": "Review the genomic findings table for 'MET' and look for 'copy-number gain' or 'amplification'.",
+      "measurement_definition": "Positive if NGS reports MET copy-number gain or amplification (e.g., copy number \u2265 6); negative if MET is wild-type or no gain is reported.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "MET amplification",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific copy number threshold for 'amplification' varies slightly across reports (e.g., mentioned as \u2265 6 in one case), though the binary status of 'gain' is consistent.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "The evidence consists of clinical reports mentioning general associations rather than a dataset of patient outcomes.",
+    "The sample size of provided clinical excerpts is small.",
+    "The distinction between primary and acquired resistance for MET amplification is mentioned but not quantified."
+  ],
+  "summary": "The evidence identifies several co-occurring genomic alterations in patients with EGFR exon 19-deleted lung adenocarcinoma, specifically noting that TP53 mutations and MET amplification are associated with attenuated response durability or resistance to EGFR-TKI therapy."
+}

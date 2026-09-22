@@ -1,0 +1,57 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row192_chunk19",
+          "quote": "A 2.5 cm spiculated soft\u2011tissue nodule in the posterior segment"
+        },
+        {
+          "evidence_id": "inner5_row251_chunk19",
+          "quote": "5.2 cm (long axis) irregular mass in the posterior segment of the right lower lobe"
+        }
+      ],
+      "description": "The maximum axial or long-axis dimension of the primary or most dominant recurrent pulmonary nodule or mass.",
+      "extraction_instruction": "Extract the numeric value associated with the largest pulmonary nodule or mass, specifically looking for phrases mentioning 'maximal axial dimension', 'long axis', or 'cm'.",
+      "measurement_definition": "The largest diameter measured in centimeters (cm) as reported in the imaging findings.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "pulmonary_lesion_max_diameter",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the measurement refers to the original primary tumor or a new recurrent lesion may vary across patients.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row100_chunk27",
+          "quote": "A 1.2 cm hypodense lesion in segment IV demonstrates focal FDG uptake (SUVmax = 9.0), consistent with metastatic involvement"
+        },
+        {
+          "evidence_id": "inner5_row192_chunk19",
+          "quote": "Liver, spleen, pancreas, kidneys, and bowel appear unremarkable; no abnormal FDG uptake"
+        }
+      ],
+      "description": "Presence of metastatic disease in the liver as identified by CT or PET/CT imaging.",
+      "extraction_instruction": "Review the 'Abdomen' or 'Liver' section of the radiology reports for a determination of metastatic status.",
+      "measurement_definition": "Positive if the report identifies one or more lesions in the liver as 'consistent with metastatic disease' or 'metastatic involvement'. Negative if the liver is described as 'unremarkable', 'homogeneous attenuation, no focal lesions', or 'no evidence of hepatic metastasis'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "hepatic_metastasis_status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Uncertainty exists regarding the threshold for calling a small hypoattenuating lesion 'metastatic' versus 'indeterminate' without biopsy confirmation.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "The evidence is limited to imaging reports, which may not reflect the most current clinical stage at the time of treatment.",
+    "Variable definitions are based on radiological interpretation and may vary slightly in precision between different scanners or radiologists."
+  ],
+  "summary": "The evidence consists of oncology imaging reports (CT, PET/CT, MRI) for patients with non-small cell lung adenocarcinoma. Common baseline clinical variables include the size and metabolic activity of pulmonary lesions, and the presence of distant metastases in the liver, bones, or lymph nodes."
+}

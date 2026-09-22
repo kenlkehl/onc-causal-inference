@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row99_chunk5",
+          "quote": "EGFR exon\u201119 deletion positive"
+        },
+        {
+          "evidence_id": "inner3_row4_chunk20",
+          "quote": "harboring an activating EGFR exon 19 deletion"
+        }
+      ],
+      "description": "Presence or absence of an activating EGFR exon-19 deletion in the tumor tissue.",
+      "extraction_instruction": "Search the 'Clinical History' or 'Assessment' sections for mentions of 'EGFR' and 'exon-19'.",
+      "measurement_definition": "Positive if the patient is documented to have an 'EGFR exon-19 deletion' or 'activating EGFR exon 19 deletion'; negative if the mutation is explicitly absent or not mentioned.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR exon-19 mutation status",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "It is unclear if other EGFR mutations (outside exon-19) are present and should be included in a broader EGFR-positive category.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row243_chunk12",
+          "quote": "ECOG 1, asymptomatic aside from mild dry cough"
+        },
+        {
+          "evidence_id": "inner3_row99_chunk5",
+          "quote": "Post\u2011operative fatigue, ECOG PS 2"
+        },
+        {
+          "evidence_id": "inner3_row311_chunk13",
+          "quote": "ECOG performance status remains 2"
+        }
+      ],
+      "description": "A standardized scale used to assess the functional status of cancer patients, where higher numbers indicate greater disability.",
+      "extraction_instruction": "Identify the numerical value following 'ECOG' or 'performance status' within the physical examination or assessment sections.",
+      "measurement_definition": "The integer value (0-4) reported as 'ECOG' or 'ECOG PS' in the clinical notes.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "The specific timepoint of the assessment (e.g., at diagnosis vs. post-surgery) is not consistently specified for all patients.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small number of patients provided in the evidence.",
+    "Inconsistent timing of performance status assessments across patient records.",
+    "Molecular profiling is only reported for a subset of patients."
+  ],
+  "summary": "The provided evidence describes baseline clinical characteristics of patients with lung adenocarcinoma, supporting the extraction of molecular driver status (EGFR exon-19 deletion) and functional status (ECOG performance status) as measurable variables."
+}

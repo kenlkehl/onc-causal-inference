@@ -1,0 +1,34 @@
+{
+  "activation_reproduction_max_abs_error": {
+    "fit": 1.7285346984863281e-06,
+    "validation": 1.3709068298339844e-06
+  },
+  "history": [
+    {
+      "best_mean_objective": 0.015790218487381935,
+      "epoch": 0
+    },
+    {
+      "best_mean_objective": 0.011065875180065632,
+      "epoch": 10
+    },
+    {
+      "best_mean_objective": 0.011056661605834961,
+      "epoch": 20
+    },
+    {
+      "best_mean_objective": 0.011040771380066872,
+      "epoch": 30
+    },
+    {
+      "best_mean_objective": 0.011030674912035465,
+      "epoch": 40
+    },
+    {
+      "best_mean_objective": 0.011028931476175785,
+      "epoch": 50
+    }
+  ],
+  "nuisance_policy": "frozen_exact_inner_tfidf_context_oof_and_external_predictions",
+  "tau0": 0.03511864384433921
+}

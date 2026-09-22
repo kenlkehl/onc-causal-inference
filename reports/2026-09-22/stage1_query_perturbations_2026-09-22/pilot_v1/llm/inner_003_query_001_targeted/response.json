@@ -1,0 +1,76 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row329_chunk3",
+          "quote": "ECOG performance status 0"
+        },
+        {
+          "evidence_id": "inner3_row367_chunk19",
+          "quote": "ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner3_row766_chunk18",
+          "quote": "ECOG performance status 3"
+        }
+      ],
+      "description": "The Eastern Cooperative Oncology Group (ECOG) scale used to assess how a patient's disease affects their daily living abilities.",
+      "extraction_instruction": "Identify the ECOG performance status value documented in the assessment or clinical progress notes.",
+      "measurement_definition": "A categorical scale from 0 (fully active) to 5 (dead), where 0 represents a patient who is fully active, 2 represents an ambulatory patient capable of all self-care but unable to carry out any work activities, and 3 represents a patient with limited self-care and is confined to a bed or chair more than 50% of waking hours.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG performance status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify if the reported status is always the baseline or if it fluctuates during follow-up.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row329_chunk28",
+          "quote": "Former light smoker (5 pack\u2011years, quit >10 years ago)"
+        },
+        {
+          "evidence_id": "inner3_row488_chunk21",
+          "quote": "Former smoker, 30\u2011pack\u2011year history, quit 5 years ago"
+        },
+        {
+          "evidence_id": "inner3_row766_chunk17",
+          "quote": "Former smoker (10 pack\u2011years, quit 5 years ago)"
+        },
+        {
+          "evidence_id": "inner3_row367_chunk27",
+          "quote": "Never smoker; no history of illicit drug use"
+        }
+      ],
+      "description": "A quantitative measure of a patient's lifetime exposure to tobacco smoke.",
+      "extraction_instruction": "Extract the number of pack-years documented in the Social History section. If described as 'never smoker', value is 0.",
+      "measurement_definition": "Calculated as the number of cigarettes smoked per day divided by 20 (to get packs), multiplied by the number of years smoked. Value is expressed in pack-years.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Smoking history (pack-years)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some records list only pack-years without clarifying the exact duration of smoking or duration of abstinence.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The sample size is small, consisting of a limited number of patient records.",
+    "Smoking history is reported inconsistently (some as 'never', others as specific pack-years).",
+    "The evidence is limited to thoracic oncology patients, potentially introducing selection bias."
+  ],
+  "summary": "The provided evidence identifies variations in baseline functional status and smoking history among patients with non-small cell lung cancer (NSCLC), spanning different histological types (adenocarcinoma and squamous cell carcinoma) and disease stages (Stage IIA to Stage IV)."
+}

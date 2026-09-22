@@ -1,0 +1,501 @@
+{
+  "base_commit": "45a0605675b5abaea6112661760097609a93ec74",
+  "branch": "research/stage1-query-perturbations",
+  "contexts": [
+    {
+      "context": "outer_001_full",
+      "files_sha256": {
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_full/queries.npz": "bc3a9d179078cc89dc67492fc9c7696c36dc6703df70703d867f652f7f5c7742",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_full/query_records.json": "77db4bdb99be3a481ea4811a58e4271472f2308ce9a7ee9d53faaa386e698ad2",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_full/scores.parquet": "b898049dd0ac62cf5595a039ef19044f2965c44ca72e22ee91a7d85ae699b687"
+      },
+      "fit_rows": 800,
+      "query_norms": {
+        "effect": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "outcome": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "treatment": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "saved_split_matches": true,
+      "shapes": {
+        "effect_heldout_activations": [
+          200,
+          5
+        ],
+        "effect_queries": [
+          5,
+          4096
+        ],
+        "effect_train_activations": [
+          800,
+          5
+        ],
+        "fit_row_ids": [
+          800
+        ],
+        "outcome_heldout_activations": [
+          200,
+          5
+        ],
+        "outcome_queries": [
+          5,
+          4096
+        ],
+        "outcome_train_activations": [
+          800,
+          5
+        ],
+        "treatment_heldout_activations": [
+          200,
+          5
+        ],
+        "treatment_queries": [
+          5,
+          4096
+        ],
+        "treatment_train_activations": [
+          800,
+          5
+        ]
+      },
+      "validation_rows": 200
+    },
+    {
+      "context": "outer_001_inner_001",
+      "files_sha256": {
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_001/queries.npz": "2aa64441c869c41b83c56c0f586b75b7d95ccc4b790ada604f2a89d47aa9645f",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_001/query_records.json": "21b10b28d42f40c05dad524e8bd257baf70e1c7254dbe792b20d8c909854ac8a",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_001/scores.parquet": "2bef7ccce0794d5ae17c5afab1e161a5f87fd63757266d82ea2e4bafed523535"
+      },
+      "fit_rows": 640,
+      "query_norms": {
+        "effect": [
+          1.0,
+          0.9999999403953552,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "outcome": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "treatment": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "saved_split_matches": true,
+      "shapes": {
+        "effect_heldout_activations": [
+          160,
+          5
+        ],
+        "effect_queries": [
+          5,
+          4096
+        ],
+        "effect_train_activations": [
+          640,
+          5
+        ],
+        "fit_row_ids": [
+          640
+        ],
+        "outcome_heldout_activations": [
+          160,
+          5
+        ],
+        "outcome_queries": [
+          5,
+          4096
+        ],
+        "outcome_train_activations": [
+          640,
+          5
+        ],
+        "treatment_heldout_activations": [
+          160,
+          5
+        ],
+        "treatment_queries": [
+          5,
+          4096
+        ],
+        "treatment_train_activations": [
+          640,
+          5
+        ]
+      },
+      "validation_rows": 160
+    },
+    {
+      "context": "outer_001_inner_002",
+      "files_sha256": {
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_002/queries.npz": "cc0c565d1e09c0b8376376fe812a709adab817ff17d1953da6b9dbfc3e739b23",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_002/query_records.json": "973cf2534560ca05e875edcaeec2963fc2b4b423067b160228a8622f83fc4017",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_002/scores.parquet": "5a0ad649c67d0ba8296385eedc8f7e31e975e2c0163b11f66f560c9130bba333"
+      },
+      "fit_rows": 640,
+      "query_norms": {
+        "effect": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "outcome": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "treatment": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "saved_split_matches": true,
+      "shapes": {
+        "effect_heldout_activations": [
+          160,
+          5
+        ],
+        "effect_queries": [
+          5,
+          4096
+        ],
+        "effect_train_activations": [
+          640,
+          5
+        ],
+        "fit_row_ids": [
+          640
+        ],
+        "outcome_heldout_activations": [
+          160,
+          5
+        ],
+        "outcome_queries": [
+          5,
+          4096
+        ],
+        "outcome_train_activations": [
+          640,
+          5
+        ],
+        "treatment_heldout_activations": [
+          160,
+          5
+        ],
+        "treatment_queries": [
+          5,
+          4096
+        ],
+        "treatment_train_activations": [
+          640,
+          5
+        ]
+      },
+      "validation_rows": 160
+    },
+    {
+      "context": "outer_001_inner_003",
+      "files_sha256": {
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_003/queries.npz": "38f040bce801e42f13011812e87b595ff1789c5c1e5cf3175f03d446fb59cec9",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_003/query_records.json": "42f109481b02e805ee1da329044d787c2496b77d2428430caf3338c48838e31d",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_003/scores.parquet": "c66a0263cd1b0250e03638e1984b84e8a27b1653c58e6aafe2ca457f11bb34f6"
+      },
+      "fit_rows": 640,
+      "query_norms": {
+        "effect": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "outcome": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "treatment": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "saved_split_matches": true,
+      "shapes": {
+        "effect_heldout_activations": [
+          160,
+          5
+        ],
+        "effect_queries": [
+          5,
+          4096
+        ],
+        "effect_train_activations": [
+          640,
+          5
+        ],
+        "fit_row_ids": [
+          640
+        ],
+        "outcome_heldout_activations": [
+          160,
+          5
+        ],
+        "outcome_queries": [
+          5,
+          4096
+        ],
+        "outcome_train_activations": [
+          640,
+          5
+        ],
+        "treatment_heldout_activations": [
+          160,
+          5
+        ],
+        "treatment_queries": [
+          5,
+          4096
+        ],
+        "treatment_train_activations": [
+          640,
+          5
+        ]
+      },
+      "validation_rows": 160
+    },
+    {
+      "context": "outer_001_inner_004",
+      "files_sha256": {
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_004/queries.npz": "c5bf1aba9d9b2363177714b2ba7fbc4c0085bba2ec7c9909c772888db194959b",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_004/query_records.json": "3875c29c01cd5203a91fc329b1dfc4b9c14131cb2ece3cd6fe65c22af65d7a3e",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_004/scores.parquet": "9762ceff739464a190b35510ea77ee77054910a0dd24135e0f5fd80ad16da7a0"
+      },
+      "fit_rows": 640,
+      "query_norms": {
+        "effect": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "outcome": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "treatment": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "saved_split_matches": true,
+      "shapes": {
+        "effect_heldout_activations": [
+          160,
+          5
+        ],
+        "effect_queries": [
+          5,
+          4096
+        ],
+        "effect_train_activations": [
+          640,
+          5
+        ],
+        "fit_row_ids": [
+          640
+        ],
+        "outcome_heldout_activations": [
+          160,
+          5
+        ],
+        "outcome_queries": [
+          5,
+          4096
+        ],
+        "outcome_train_activations": [
+          640,
+          5
+        ],
+        "treatment_heldout_activations": [
+          160,
+          5
+        ],
+        "treatment_queries": [
+          5,
+          4096
+        ],
+        "treatment_train_activations": [
+          640,
+          5
+        ]
+      },
+      "validation_rows": 160
+    },
+    {
+      "context": "outer_001_inner_005",
+      "files_sha256": {
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_005/queries.npz": "2a20f27e7469245bb5c70a54f10313a35fcf51d7af331453e1ac9a85cfceaa14",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_005/query_records.json": "200e9ec365569ff4374294876465b9be8d85ab873d46056a181ad1781bbd92c0",
+        "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/neural_queries/outer_001_inner_005/scores.parquet": "b58f226d9974dba155da9ddf52ef25da284b45ba0824ebe937502a61e47aec82"
+      },
+      "fit_rows": 640,
+      "query_norms": {
+        "effect": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "outcome": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        "treatment": [
+          1.0,
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "saved_split_matches": true,
+      "shapes": {
+        "effect_heldout_activations": [
+          160,
+          5
+        ],
+        "effect_queries": [
+          5,
+          4096
+        ],
+        "effect_train_activations": [
+          640,
+          5
+        ],
+        "fit_row_ids": [
+          640
+        ],
+        "outcome_heldout_activations": [
+          160,
+          5
+        ],
+        "outcome_queries": [
+          5,
+          4096
+        ],
+        "outcome_train_activations": [
+          640,
+          5
+        ],
+        "treatment_heldout_activations": [
+          160,
+          5
+        ],
+        "treatment_queries": [
+          5,
+          4096
+        ],
+        "treatment_train_activations": [
+          640,
+          5
+        ]
+      },
+      "validation_rows": 160
+    }
+  ],
+  "created_at": "2026-09-22T14:19:18.665589+00:00",
+  "embedding_cache_metadata": [
+    {
+      "hidden_size": 4096,
+      "metadata_keys": [
+        "sentence_model_name",
+        "hidden_size",
+        "num_samples",
+        "total_chunks",
+        "chunk_counts",
+        "chunk_size_words",
+        "chunk_overlap_words",
+        "max_chunks",
+        "chunk_selection",
+        "normalize_embeddings",
+        "max_seq_length",
+        "effective_max_seq_length",
+        "chunking_mode",
+        "actual_max_len",
+        "storage_format",
+        "dataset_path",
+        "cache_hash",
+        "chunking_policy_version",
+        "semantic_truncation_allowed",
+        "created_at",
+        "dtype",
+        "precompute_batch_size"
+      ],
+      "num_samples": 1000,
+      "path": "artifacts/research_all_evidence/five_conf_five_mod_nsclc_full/components/embedding_cache/cache/cecnn_chunk_embeddings_e8d02eb07649/metadata.json",
+      "sha256": "28dd636368c618a27dac80e1722f29e94f6d83fdda8c3638a52c22ae6b33e5e5"
+    }
+  ],
+  "limitations": [
+    "No numerical reproduction of saved activations yet.",
+    "No full embedding/text fingerprint audit yet.",
+    "No nuisance predictions loaded or provenance validated yet."
+  ],
+  "no_perturbation_fits_or_llm_calls": true,
+  "outcomes_and_oracle_values_not_loaded": true,
+  "split_path": "reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/split.json",
+  "split_sha256": "0dc3925822f6e75f1453ca3a52008b70dfb789cb15dd11f5d21d30d526a7bf0f",
+  "stage2_frozen_sources_checked": 15,
+  "stage2_frozen_sources_unchanged": true,
+  "status": "design_and_read_only_inventory_only"
+}

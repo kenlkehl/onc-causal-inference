@@ -1,0 +1,64 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row863_chunk16",
+          "quote": "**KRAS** | c.34G>T (p.G12C) | Missense SNV | 28 % | Likely driver"
+        },
+        {
+          "evidence_id": "inner3_row259_chunk29",
+          "quote": "Stage IV KRAS G12C mutant, TP53 R273H, STK11 loss, CDKN2A deletion adenocarcinoma"
+        },
+        {
+          "evidence_id": "inner3_row988_chunk26",
+          "quote": "metastatic non\u2011small cell lung cancer (adenocarcinoma, KRAS\u2011mutated)"
+        }
+      ],
+      "description": "Presence of the KRAS G12C (p.G12C/c.34G>T) mutation in the tumor.",
+      "extraction_instruction": "Search genomic findings tables or pathology summaries for 'KRAS', 'G12C', 'p.G12C', or 'c.34G>T'.",
+      "measurement_definition": "Positive if the genomic report explicitly identifies the KRAS G12C (p.G12C or c.34G>T) mutation; Negative if the report explicitly states the KRAS gene is wild-type or no mutation was detected. Absence of a genomic report does not constitute a negative measurement.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "KRAS G12C Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether 'KRAS-mutated' in general clinical notes always refers specifically to G12C without genomic confirmation.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row988_chunk23",
+          "quote": "Former smoker, 15\u2011pack\u2011year history, quit 5 years ago"
+        },
+        {
+          "evidence_id": "inner3_row863_chunk22",
+          "quote": "former smoker (\u224830 pack\u2011year history, quit at age 70)"
+        },
+        {
+          "evidence_id": "inner3_row259_chunk29",
+          "quote": "Former smoker, 20\u2011pack\u2011year history, quit 2 years ago"
+        }
+      ],
+      "description": "The total lifetime exposure to tobacco expressed in pack-years.",
+      "extraction_instruction": "Extract the numeric value associated with 'pack-year history' or 'pack-year history' from the social history section.",
+      "measurement_definition": "Numeric value of pack-years (calculated as packs smoked per day multiplied by years of smoking).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Cumulative Smoking History",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Precision of the reported values (e.g., approximate symbols like '\u2248' used in some records).",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The sample size of provided excerpts is small, limiting the diversity of genomic profiles available for discovery.",
+    "Some smoking history data are reported as approximations."
+  ],
+  "summary": "The provided evidence identifies several baseline clinical characteristics in patients with non-small cell lung cancer (NSCLC), most notably specific genomic drivers (KRAS G12C), cumulative tobacco exposure (pack-years), and functional status (ECOG)."
+}

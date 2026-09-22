@@ -1,0 +1,59 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row439_chunk9",
+          "quote": "**Tumor Mutational Burden (7 mut/Mb)** \u2013 This value falls in the low\u2011to\u2011intermediate range, suggesting limited likelihood of robust benefit from single\u2011agent PD\u20111/PD\u2011L1 checkpoint blockade"
+        }
+      ],
+      "description": "The number of mutations per megabase (mut/Mb) in the tumor genome.",
+      "extraction_instruction": "Extract the numerical value associated with 'Tumor Mutational Burden' in mut/Mb.",
+      "measurement_definition": "Numeric value in mutations per megabase (mut/Mb).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Tumor Mutational Burden",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence provides a single data point, leaving the distribution across the cohort uncertain.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row88_chunk10",
+          "quote": "She reports that her performance status has declined from ECOG 0 (baseline) to ECOG 1 due to the dyspnea."
+        },
+        {
+          "evidence_id": "inner5_row837_chunk27",
+          "quote": "Given his preserved functional status (ECOG 1), adequate organ function (CrCl \u224855 mL/min)"
+        }
+      ],
+      "description": "A scale used to assess the functional status and degree of disability of cancer patients.",
+      "extraction_instruction": "Extract the numeric value following 'ECOG' or identified as the patient's 'performance status'.",
+      "measurement_definition": "An integer value from 0 to 4, where 0 indicates fully active and 4 indicates completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain if the reported status consistently refers to baseline or the most recent assessment prior to treatment.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small sample size of patients in the provided excerpts.",
+    "Genomic data is only available for a small subset of patients.",
+    "Temporal variation in ECOG status reporting may introduce bias."
+  ],
+  "summary": "The retrieval evidence identifies baseline clinical and genomic variables in patients with non-small cell lung cancer (NSCLC), including tumor mutational burden (TMB), performance status (ECOG), and specific genetic mutations (e.g., KRAS G12C, STK11 loss). TMB is specifically highlighted as an indicator of the potential benefit from PD-1/PD-L1 checkpoint blockade."
+}

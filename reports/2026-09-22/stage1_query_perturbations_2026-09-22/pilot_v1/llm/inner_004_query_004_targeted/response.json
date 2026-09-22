@@ -1,0 +1,66 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row951_chunk16",
+          "quote": "ECOG performance status 0"
+        },
+        {
+          "evidence_id": "inner4_row56_chunk25",
+          "quote": "stable disease on imaging, ECOG 2"
+        },
+        {
+          "evidence_id": "inner4_row201_chunk79",
+          "quote": "pending assessment of tolerability given ECOG 3"
+        }
+      ],
+      "description": "A scale used to assess a patient's functional status and ability to perform activities of daily living, ranging from 0 (fully active) to 4 (completely disabled).",
+      "extraction_instruction": "Identify the numeric ECOG score associated with the patient's baseline status (e.g., 'ECOG 0', 'ECOG performance status 2').",
+      "measurement_definition": "The ECOG score documented in the assessment or physical examination section of the clinical record.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the score is recorded at a single baseline point or fluctuates across visits before treatment initiation.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row56_chunk25",
+          "quote": "Lymphocytes 0.60 k/\u00b5L (NLR \u2248 7.5)"
+        },
+        {
+          "evidence_id": "inner4_row266_chunk9",
+          "quote": "Lymphocytes 1.3 k/\u00b5L (low), NLR 5.56 (high)"
+        }
+      ],
+      "description": "A systemic inflammatory marker calculated as the ratio of the absolute neutrophil count to the absolute lymphocyte count from a complete blood count (CBC).",
+      "extraction_instruction": "Extract the numeric value labeled as 'NLR' from the laboratory data section.",
+      "measurement_definition": "The numerical value of the NLR as explicitly stated or calculated from absolute neutrophil and lymphocyte counts.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Neutrophil-to-Lymphocyte Ratio (NLR)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The precision of the 'approximate' value provided in some records (e.g., '\u2248 7.5').",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of patients with explicitly calculated NLR values.",
+    "ECOG scores are reported as discrete integers, but clinical interpretation of 'performance status' may vary slightly between providers."
+  ],
+  "summary": "The evidence identifies baseline clinical distinctions in performance status and systemic inflammatory markers (NLR) across patients with Stage IV non-small cell lung cancer (NSCLC), highlighting variation in functional capacity and hematologic profiles."
+}

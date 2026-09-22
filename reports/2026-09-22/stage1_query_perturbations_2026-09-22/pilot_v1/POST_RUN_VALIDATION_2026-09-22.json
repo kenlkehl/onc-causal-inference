@@ -1,0 +1,14 @@
+{
+  "all_freezes_precede_first_validation_scoring": true,
+  "at": "2026-09-22T15:48:31.227437+00:00",
+  "focused_tests_passed": 6,
+  "frozen_probe_prediction_vectors_independently_reproduced": 36,
+  "llm_responses_and_literal_citations_verified": 75,
+  "numerical_folds_verified": 5,
+  "outer_test_patients_used": 0,
+  "plot_visually_reviewed": true,
+  "report_sha256": "dfbc09277e636dac4eea0cb70f78e5f51073ca148d6d3aaaa8660d3b00d137be",
+  "reproduced_predictions_max_abs_error": 0.0,
+  "stage2_sources_changed": [],
+  "stage2_sources_verified": 15
+}

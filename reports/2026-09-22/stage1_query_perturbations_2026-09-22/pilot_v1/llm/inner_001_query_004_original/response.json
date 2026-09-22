@@ -1,0 +1,7 @@
+{
+  "candidates": [],
+  "limitations": [
+    "The evidence chunks contain no legible clinical data or textual information."
+  ],
+  "summary": "The provided retrieval evidence contains no usable clinical text, consisting entirely of empty strings or non-textual characters. Consequently, no baseline clinical variables could be identified."
+}

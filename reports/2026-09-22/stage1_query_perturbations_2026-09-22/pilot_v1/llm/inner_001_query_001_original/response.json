@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row203_chunk7",
+          "quote": "Right lower lobe pulmonary mass (5.2 cm)"
+        },
+        {
+          "evidence_id": "inner1_row105_chunk6",
+          "quote": "Right lower lobe pulmonary mass (5.1 cm)"
+        },
+        {
+          "evidence_id": "inner1_row704_chunk2",
+          "quote": "A solitary, irregular, partially spiculated mass measuring **4.5 cm (maximal axial dimension)**"
+        }
+      ],
+      "description": "The maximal diameter of the primary lung tumor as measured on baseline imaging.",
+      "extraction_instruction": "Extract the maximum diameter (in cm) of the primary lung lesion from the baseline CT scan findings or impression section.",
+      "measurement_definition": "The greatest axial dimension of the primary lung mass, typically measured in centimeters (cm) using CT imaging.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Primary Tumor Size",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Variation in measurement axis (axial vs. craniocaudal) may occur across different reports.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "Adenocarcinoma",
+        "Squamous cell carcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row203_chunk7",
+          "quote": "imaging characteristics typical of primary non\u2011small cell lung carcinoma, squamous type"
+        },
+        {
+          "evidence_id": "inner1_row359_chunk3",
+          "quote": "diagnostic of adenocarcinoma, NSCLC"
+        },
+        {
+          "evidence_id": "inner1_row105_chunk30",
+          "quote": "IV non\u2011small cell lung cancer (adenocarcinoma, right lower lobe)"
+        }
+      ],
+      "description": "The histological classification of the primary non-small cell lung carcinoma.",
+      "extraction_instruction": "Identify the histological subtype (e.g., adenocarcinoma or squamous cell carcinoma) from the pathology report or the radiology 'Impression' section.",
+      "measurement_definition": "The cell type of the malignancy as determined by biopsy pathology or radiology-based histological characteristics.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "NSCLC Histology",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some reports rely on 'imaging characteristics typical of' rather than definitive pathological confirmation.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small number of unique patients represented in the provided text.",
+    "Reliance on radiology impressions for histology in some instances rather than definitive pathology reports."
+  ],
+  "summary": "The provided evidence supports the identification of primary tumor size and histological subtype as measurable baseline clinical variables in patients with stage IV non-small cell lung cancer (NSCLC)."
+}

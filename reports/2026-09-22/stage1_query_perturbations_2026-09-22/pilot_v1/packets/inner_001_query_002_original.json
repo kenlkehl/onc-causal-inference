@@ -1,0 +1,278 @@
+{
+  "actual_distance": 0.0,
+  "condition": "original",
+  "distance_budget": 0,
+  "evidence": [
+    {
+      "chunk_index": 30,
+      "edited_similarity": 0.8147833347320557,
+      "evidence_id": "inner1_row269_chunk30",
+      "original_similarity": 0.8147833347320557,
+      "row_id": 269,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "\u00d7 2.8 cm in the posterior basal segment demonstrates intense FDG uptake (SUVmax \u2248 8.5). This represents interval enlargement from the prior 2.3\u2011cm nodule (SUVmax \u2248 7.2) noted on the PET/CT performed 12 months earlier. No cavitation or calcification is identified. - **Mediastinum:** Persistent FDG\u2011avid right hilar and subcarinal lymph nodes (largest node 1.6 cm, SUVmax \u2248 5.3). No significant change in size compared with prior study. - **Right upper lobe:** Post\u2011surgical changes with postoperative fibrosis and staple line; no residual mass or abnormal FDG activity. - **Pleura:** No pleural effusion or thickening. - **Chest wall:** No abnormal soft\u2011tissue FDG uptake. **Skeleton** - **Thoracic vertebrae:** New lytic lesions with intense FDG avidity identified in the body of T5 (SUVmax \u2248 6.8) and the posterior element of T7 (SUVmax \u2248 6.4). No associated fracture is seen on CT. No additional osseous lesions identified in the cervical or lumbar spine, ribs, or pelvis. **Abdomen & Pelvis** - Liver, spleen, adrenal glands, pancreas, and kidneys demonstrate normal size and homogeneous attenuation with physiologic FDG activity. No focal FDG\u2011avid lesions identified. - No intra\u2011abdominal lymphadenopathy or free fluid. **Brain MRI** - No enhancing intra\u2011axial mass lesions. - No diffusion restriction or abnormal T2/FLAIR signal. - Ventricular size and sulci are age\u2011appropriate. No evidence of metastatic disease. **Impression** 1. Increase in size and metabolic activity of the left lower\u2011lobe pulmonary nodule, consistent with progression of known NSCLC. 2. New FDG\u2011avid lytic lesions in the thoracic vertebrae (T5, T7) suggest osseous metastatic involvement. 3. Persistent FDG\u2011avid mediastinal (right hilar and subcarinal) lymph"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.7925177812576294,
+      "evidence_id": "inner1_row269_chunk14",
+      "original_similarity": 0.7925177812576294,
+      "row_id": 269,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "- **Right lung:** Post\u2011surgical changes consistent with prior right upper lobectomy and mediastinal lymph node dissection. No residual or recurrent soft\u2011tissue mass identified. No new pulmonary nodules elsewhere. - **Pleura:** No pleural effusion or thickening. No FDG\u2011avid pleural disease. **MEDIASTINUM AND HILAR STRUCTURES** - **Ipsilateral (right) mediastinal nodes:** Several enlarged right hilar and mediastinal lymph nodes (stations 4R, 7) measuring up to 1.2 cm, demonstrating FDG avidity with **SUVmax 7.2**, concordant with the left lower lobe lesion. - **Contralateral (left) mediastinal nodes:** No abnormal FDG uptake. **HEART, THYMUS, AND GREAT VESSELS** - Normal physiologic myocardial uptake. No abnormal FDG activity in the thymus or pericardium. **UPPER ABDOMEN** - **Liver:** Homogeneous attenuation; no focal FDG\u2011avid lesions. - **Spleen:** Normal size and physiologic uptake. - **Adrenal glands:** Both adrenal glands appear normal in size; no abnormal FDG uptake. - **Kidneys, pancreas, bowel:** No abnormal FDG\u2011avid lesions. **BONES** - No focal FDG\u2011avid osseous lesions identified throughout the visualized axial and appendicular skeleton. No evidence of metastatic bone disease. **HEAD (CT component only; no dedicated MRI)** - No abnormal intracranial FDG uptake; limited evaluation due to low\u2011dose CT. No obvious mass effect or calvarial lesions. **OTHER FINDINGS** - No hypermetabolic lymphadenopathy in the cervical, supraclavicular, or axillary regions. - No abnormal FDG uptake in the thyroid, breast tissue, or soft\u2011tissue structures of the neck and upper chest. **IMPRESSION** 1. New **2.3 cm FDG\u2011avid nodule** in the left lower lobe (SUVmax 7.2) not present on prior imaging, concerning for metastatic disease. 2. FDG\u2011avid right hilar and mediastinal lymph nodes (SUVmax 7.2)"
+    },
+    {
+      "chunk_index": 31,
+      "edited_similarity": 0.7490094900131226,
+      "evidence_id": "inner1_row269_chunk31",
+      "original_similarity": 0.7490094900131226,
+      "row_id": 269,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "- No diffusion restriction or abnormal T2/FLAIR signal. - Ventricular size and sulci are age\u2011appropriate. No evidence of metastatic disease. **Impression** 1. Increase in size and metabolic activity of the left lower\u2011lobe pulmonary nodule, consistent with progression of known NSCLC. 2. New FDG\u2011avid lytic lesions in the thoracic vertebrae (T5, T7) suggest osseous metastatic involvement. 3. Persistent FDG\u2011avid mediastinal (right hilar and subcarinal) lymph nodes. 4. No intracranial metastatic disease on brain MRI. 5. No additional distant metastatic foci identified in the abdomen or pelvis. **Conclusion:** Imaging findings are compatible with progressive metastatic disease involving the lung, mediastinal nodes, and thoracic spine. Clinical correlation is recommended."
+    },
+    {
+      "chunk_index": 29,
+      "edited_similarity": 0.7288441061973572,
+      "evidence_id": "inner1_row269_chunk29",
+      "original_similarity": 0.7288441061973572,
+      "row_id": 269,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "wishes to continue active treatment while maintaining quality of life. **G. Follow\u2011up** - Schedule return visit in 2 weeks to finalize treatment plan and obtain baseline imaging/ labs. - Contact clinic sooner if new symptoms (e.g., worsening dyspnea, bone pain, neurologic changes) arise. **Signature:** [Electronic Signature] \u2013 Medical Oncology Attending --- <new_note> **Imaging Modality:** 18F\u2011Fluorodeoxyglucose Positron Emission Tomography / Computed Tomography (FDG\u2011PET/CT) of the chest, abdomen, pelvis with dedicated brain magnetic resonance imaging (MRI) **Patient:** James Whitaker, 77\u2011year\u2011old male **Clinical Indication:** Surveillance for known non\u2011small cell lung cancer (adenocarcinoma, KRAS\u2011mutated) following prior right upper lobectomy, adjuvant chemotherapy, and mediastinal radiation. Concern for disease progression based on recent imaging. **Technique:** - Patient fasted \u22656 hours; blood glucose measured at 92 mg/dL prior to injection. - 370 MBq (10 mCi) of 18F\u2011FDG administered intravenously. - Uptake time: 60 minutes. - Low\u2011dose CT performed for attenuation correction (120 kVp, 30 mA). - Diagnostic contrast\u2011enhanced CT of the thorax, abdomen, and pelvis obtained (IV iodinated contrast, 100 mL, portal\u2011venous phase). - Brain MRI performed with T1 pre\u2011 and post\u2011gadolinium, T2, FLAIR, and diffusion\u2011weighted sequences. **Findings** **Thorax** - **Left lower lobe:** A solitary pulmonary nodule measuring 3.1 \u00d7 2.8 cm in the posterior basal segment demonstrates intense FDG uptake (SUVmax \u2248 8.5). This represents interval enlargement from the prior 2.3\u2011cm nodule (SUVmax \u2248 7.2) noted on the PET/CT performed 12 months earlier. No cavitation or calcification is identified. - **Mediastinum:** Persistent FDG\u2011avid right hilar and subcarinal lymph nodes (largest node 1.6 cm, SUVmax \u2248 5.3). No significant change in size compared"
+    },
+    {
+      "chunk_index": 21,
+      "edited_similarity": 0.76031494140625,
+      "evidence_id": "inner1_row430_chunk21",
+      "original_similarity": 0.76031494140625,
+      "row_id": 430,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "included.* <new_note> **CT Chest/Abdomen/Pelvis \u2013 Contrast Enhanced** **Patient:** John M. Carter, 62\u2011year\u2011old male **MRN:** (redacted) **Date of Service:** (to be added) **Referring Physician:** (redacted) **Clinical Indication:** Surveillance imaging following right upper lobectomy and adjuvant chemotherapy for stage IIIA non\u2011small cell lung cancer (adenocarcinoma). **Technique:** Multiphase, contrast\u2011enhanced CT of the chest, abdomen, and pelvis was performed following intravenous administration of 100 mL of non\u2011ionic iodinated contrast (iodine concentration 350 mg/mL) at a rate of 3 mL/sec. Axial images were obtained from the thoracic inlet through the symphysis pubis with 1.25\u2011mm collimation and reconstructed in axial, coronal, and sagittal planes. Lung windows (width 1500, level \u2013600) and soft\u2011tissue windows (width 400, level 40) were reviewed. **Findings** **Chest** - **Lungs:** There is a new, solid, 2.3 cm (maximal axial dimension) nodule in the posterior segment of the left lower lobe. The nodule is spiculated at its margins and demonstrates heterogeneous enhancement. No calcification is identified. No additional pulmonary nodules are seen. - **Surgical changes:** Post\u2011operative changes consistent with prior right upper lobectomy are present. The surgical staple line is intact, and there is no evidence of residual or recurrent tumor in the right upper lobe resection bed. - **Mediastinum/Hilum:** No enlarged mediastinal or hilar lymph nodes (short axis < 1 cm). No new soft\u2011tissue masses. - **Pleura:** No pleural effusion or thickening. No pneumothorax. **Upper Abdomen** - **Liver:** Normal size and attenuation. No focal hepatic lesions. - **Gallbladder/Biliary Tree:** Unremarkable. - **Pancreas/Spleen/Adrenals:** The right adrenal gland contains a 1.5 cm, well\u2011circumscribed, mildly enhancing lesion. The left adrenal gland is"
+    },
+    {
+      "chunk_index": 5,
+      "edited_similarity": 0.7600572109222412,
+      "evidence_id": "inner1_row430_chunk5",
+      "original_similarity": 0.7600572109222412,
+      "row_id": 430,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "paratracheal (station 4R): 1.8 cm node, FDG avid (SUVmax \u2248 6.9). - Subcarinal (station 7): 1.5 cm node, FDG avid (SUVmax \u2248 6.2). - No additional FDG\u2011avid hilar nodes. - No pleural effusion or pleural thickening. **Chest Wall / Upper Abdomen** - No abnormal FDG uptake in the chest wall, breast tissue, or upper abdominal viscera. **Abdomen / Pelvis** - Liver, spleen, pancreas, adrenal glands, kidneys, and gastrointestinal tract demonstrate physiologic FDG distribution without focal hypermetabolism. - No FDG\u2011avid lymphadenopathy in the para\u2011aortic, mesenteric, or pelvic regions. **Bone** - No focal osseous FDG uptake beyond physiologic marrow activity. **Incidental Findings** - Mild, symmetric FDG uptake in the thyroid gland (SUVmax \u2248 2.1) consistent with physiologic activity. - Small bilateral renal cysts (simple, <1 cm) without FDG avidity. ### IMPRESSION 1. **Primary Lesion:** FDG\u2011avid right\u2011upper\u2011lobe mass (3.6 cm) compatible with known adenocarcinoma of the lung. 2. **Nodal Involvement:** FDG\u2011avid mediastinal lymph nodes at stations 4R and 7, consistent with N2 disease. 3. **No Distant Metastasis:** Whole\u2011body PET/CT shows no hypermetabolic foci suggestive of metastatic disease in the thorax, abdomen, pelvis, or skeleton. **Overall staging impression:** Findings are in keeping with a locally advanced (clinical stage IIIA, T2b N2 M0) non\u2011small cell lung cancer. Correlation with clinical and pathological data is recommended for definitive staging. --- **Prepared by:** [Attending Radiologist, MD] Board\u2011Certified Radiology, Nuclear Medicine **Signature:** _______________________ *Report generated electronically; no further signatures required.* <new_note> **MRI BRAIN WITH AND WITHOUT CONTRAST** **Patient:** John M. Carter **Age:** 60 **Sex:** Male **Clinical Indication:** Staging work\u2011up for newly diagnosed right upper"
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.7339463233947754,
+      "evidence_id": "inner1_row430_chunk28",
+      "original_similarity": 0.7339463233947754,
+      "row_id": 430,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "(iodine concentration 350 mg/mL) using a bolus\u2011tracking technique. Axial images obtained at 1.25\u2011mm collimation with multiplanar reconstructions in coronal and sagittal planes. No motion artifacts noted. --- ### FINDINGS **Lungs** - Right upper lobe: Residual soft\u2011tissue attenuation measuring 2.0 \u00d7 1.8 cm, unchanged from prior study. No spiculated margins or cavitation. - Remaining lung parenchyma: No new pulmonary nodules, masses, or consolidations. No ground\u2011glass opacities. - No pleural effusion or thickening. **Mediastinum & Hila** - No interval change in size of previously noted mediastinal lymph nodes (stations 4R and 7). All nodes \u2264 1 cm in short axis. - No new mediastinal or hilar lymphadenopathy. **Upper Abdomen** - Liver: Homogeneous attenuation, no focal lesions. - Gallbladder, pancreas, spleen: Unremarkable. - Right adrenal gland: 1.5\u2011cm lesion unchanged from prior imaging, low attenuation, no interval growth. - Left adrenal gland: Normal. **Retroperitoneum & Pelvis** - No enlarged lymph nodes. - No free fluid or organomegaly. **Osseous Structures** - **L3 vertebral body:** New focal lytic lesion measuring 1.2 \u00d7 1.0 cm involving the central trabecular bone with cortical breach; no associated soft\u2011tissue mass. No pathologic fracture or vertebral collapse. - Remaining visualized vertebrae and sacrum: No additional lytic or sclerotic lesions. - Ribs, scapulae, pelvis: No acute fractures or metastatic lesions identified. **Other** - No evidence of bowel obstruction or intra\u2011abdominal mass. - No abnormal vascular calcifications. --- ### IMPRESSION 1. **Thoracic disease:** Stable pulmonary findings with unchanged right upper lobe residual mass and mediastinal nodes. No new intrathoracic metastases. 2. **Osseous:** New lytic lesion in the L3 vertebral"
+    },
+    {
+      "chunk_index": 4,
+      "edited_similarity": 0.7276631593704224,
+      "evidence_id": "inner1_row430_chunk4",
+      "original_similarity": 0.7276631593704224,
+      "row_id": 430,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "%. --- **Pathologist:** Dr. A. L. Rivera, MD **Signature:** _______________________ **Report generated on:** *[Date omitted per instruction]* <new_note> **PET/CT REPORT** **Patient:** John M. Carter **Age:** 60 **Sex:** Male **Study:** Whole\u2011body 18F\u2011Fluorodeoxyglucose (FDG) PET/CT for oncologic staging **Date of Service:** *[Date omitted]* --- ### INDICATION Known right\u2011upper\u2011lobe lung mass with histologically confirmed adenocarcinoma (TTF\u20111+, CK7+). Staging work\u2011up prior to definitive therapy. ### TECHNIQUE - Patient fasted \u22656 hours; blood glucose measured at 92 mg/dL prior to injection. - 370 MBq (10 mCi) of 18F\u2011FDG administered intravenously. - Uptake period: 60 minutes in a quiet, dimly lit room. - Imaging performed from skull base to mid\u2011thigh using a combined PET/CT scanner. - Low\u2011dose CT acquired for attenuation correction, followed by a diagnostic contrast\u2011enhanced CT of the thorax, abdomen, and pelvis (IV iodinated contrast, 100 mL at 3 mL/s). - PET emission data reconstructed with standard OSEM algorithm; images reviewed on axial, coronal, and sagittal planes with fused PET/CT overlays. ### FINDINGS **Lungs / Mediastinum** - **Right Upper Lobe:** A 3.6 cm spiculated mass in the posterior segment demonstrates intense FDG avidity (SUVmax \u2248 12.4). No cavitation or calcification. - **Mediastinal Lymph Nodes:** - Right paratracheal (station 4R): 1.8 cm node, FDG avid (SUVmax \u2248 6.9). - Subcarinal (station 7): 1.5 cm node, FDG avid (SUVmax \u2248 6.2). - No additional FDG\u2011avid hilar nodes. - No pleural effusion or pleural thickening. **Chest Wall / Upper Abdomen** - No abnormal FDG uptake in the chest wall, breast tissue, or upper abdominal viscera. **Abdomen / Pelvis** - Liver, spleen, pancreas, adrenal"
+    },
+    {
+      "chunk_index": 27,
+      "edited_similarity": 0.8113256096839905,
+      "evidence_id": "inner1_row100_chunk27",
+      "original_similarity": 0.8113256096839905,
+      "row_id": 100,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "dedicated workstation. **Findings** **Thorax** - **Left lower lobe:** A 2.5 cm (axial) soft\u2011tissue mass in the posterior basal segment demonstrates intense FDG uptake (maximum standardized uptake value, SUVmax = 12.0). No appreciable change in size compared with prior CT. - **Right lung:** Post\u2011surgical changes in the right upper lobe with no residual FDG\u2011avid lesion. No new pulmonary nodules. - **Mediastinum:** Enlarged subcarinal (station 7) and right lower paratracheal (station 4R) lymph nodes measuring up to 1.6 cm with moderate FDG avidity (SUVmax = 8.0). No other mediastinal or hilar nodes demonstrate abnormal uptake. - **Pleura:** No evidence of pleural effusion or FDG\u2011avid pleural thickening. **Abdomen** - **Liver:** A 1.2 cm hypodense lesion in segment IV demonstrates focal FDG uptake (SUVmax = 9.0), consistent with metastatic involvement. No additional hepatic lesions identified. - **Spleen, adrenal glands, pancreas, kidneys, and bowel:** Normal size and metabolic activity. No focal FDG avidity. **Osseous Structures** - Visualized skeletal structures (vertebrae, ribs, pelvis) show physiologic FDG distribution without focal lesions suggestive of osseous metastasis. **Brain** - Low\u2011dose CT of the head shows no acute intracranial abnormality. No focal FDG uptake abnormality identified within the cerebral parenchyma. **Incidental Findings** - Mild centrilobular emphysema throughout both lungs. - No significant lymphadenopathy in the neck. - No abdominal wall or pelvic masses. **Impression** 1. FDG\u2011avid left lower lobe mass (SUVmax 12) consistent with recurrent non\u2011small cell lung carcinoma. 2. Metabolically active mediastinal lymphadenopathy (SUVmax 8) compatible with nodal disease. 3. FDG\u2011avid hepatic lesion (SUVmax 9) compatible with metastatic disease. 4. No new osseous or cerebral"
+    },
+    {
+      "chunk_index": 15,
+      "edited_similarity": 0.774325966835022,
+      "evidence_id": "inner1_row100_chunk15",
+      "original_similarity": 0.774325966835022,
+      "row_id": 100,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "approximately **2.5 cm (axial)** in greatest dimension is identified in the posterior basal segment. The lesion demonstrates heterogeneous enhancement. No cavitation. - **Right lung:** Post\u2011surgical changes consistent with right upper lobectomy; surgical staple line and postoperative fibrosis noted. No residual mass. No new nodules. - **Airways:** Patent trachea and main bronchi. No endobronchial lesion. **Mediastinum & Hila** - **Ipsilateral (left) mediastinal/hilar nodes:** Enlarged lymph nodes noted in the left hilar region and subcarinal station, measuring up to **1.8 cm** in short axis, with mild central necrosis and moderate contrast enhancement. - **Contralateral (right) nodes:** No significant enlargement. **Pleura** - No pleural effusion or thickening. No pneumothorax. **Upper Abdomen (included on limited field)** - **Liver:** A **1.2 cm hypodense lesion** in segment IV (left hepatic lobe) with peripheral enhancement on the arterial phase, compatible with a metastatic deposit. No additional hepatic lesions identified. - **Spleen, adrenal glands, kidneys:** Within normal limits. **Osseous Structures** - No focal lytic or sclerotic lesions identified in visualized thoracic vertebrae, ribs, or scapulae. **Brain MRI (correlative)** - Recent brain MRI performed concurrently shows no intracranial metastases. **Impression** 1. New 2.5 cm left lower lobe pulmonary mass with associated ipsilateral mediastinal/hilar lymphadenopathy \u2013 concerning for recurrent/metastatic non\u2011small cell lung carcinoma. 2. 1.2 cm hypodense lesion in hepatic segment IV \u2013 suspicious for metastatic disease. 3. No pleural effusion, pneumothorax, or new osseous lesions. 4. Brain MRI negative for metastases. **Conclusion:** Imaging demonstrates progression of disease with new pulmonary, mediastinal, and hepatic lesions. Correlation with clinical and pathologic data is recommended. <new_note> { \"clinical_note\":"
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.704532265663147,
+      "evidence_id": "inner1_row100_chunk28",
+      "original_similarity": 0.704532265663147,
+      "row_id": 100,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "- Mild centrilobular emphysema throughout both lungs. - No significant lymphadenopathy in the neck. - No abdominal wall or pelvic masses. **Impression** 1. FDG\u2011avid left lower lobe mass (SUVmax 12) consistent with recurrent non\u2011small cell lung carcinoma. 2. Metabolically active mediastinal lymphadenopathy (SUVmax 8) compatible with nodal disease. 3. FDG\u2011avid hepatic lesion (SUVmax 9) compatible with metastatic disease. 4. No new osseous or cerebral metastatic foci identified. Overall imaging appearance is compatible with progressive disease involving the lung, mediastinum, and liver. <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit** **Patient:** John Miller **MRN:** ******* **DOB:** ******* **Age:** 86 **Sex:** Male **Date/Time:** *[to be entered]* **Provider:** Dr. __________, MD \u2013 Medical Oncology --- ### Chief Complaint \u201cFollow\u2011up for my lung cancer. I\u2019d like to know what the next steps are.\u201d --- ### History of Present Illness John Miller is an 86\u2011year\u2011old man with a history of stage IIIA (T2aN2M0) right upper\u2011lobe adenocarcinoma of the lung, status post right upper lobectomy with mediastinal lymph node dissection (2 months after initial diagnosis) and four cycles of adjuvant cisplatin\u2011vinorelbine (completed 1 month post\u2011operatively). He has been on surveillance for the past 12 months. At his surveillance PET/CT performed 3 months ago, new disease was identified: a 2.5 cm left lower\u2011lobe pulmonary mass with ipsilateral mediastinal lymphadenopathy and a 1.2 cm hypodense lesion in segment IV of the liver. FDG avidity was high (SUV 12 in lung, SUV 8 in mediastinum, SUV 9 in liver). Brain MRI remains negative. He was subsequently hospitalized for a symptomatic malignant pleural effusion, which was successfully"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.697556734085083,
+      "evidence_id": "inner1_row100_chunk14",
+      "original_similarity": 0.697556734085083,
+      "row_id": 100,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "5/100 Pain: 10/100 Dyspnea: 15/100 Insomnia: 10/100 Appetite Loss: 5/100 Constipation: 5/100 Diarrhea: 5/100 Financial Difficulties: 10/100 Global Health Status: 80/100 Instrument: PRO-CTCAE Fatigue - Severity: 1/4 (Mild) Nausea - Severity: 0/4 (None) Pain - Severity: 0/4 (None) Dyspnea - Severity: 0/4 (None) <new_note> **CT CHEST WITH CONTRAST \u2013 RADIOLOGY REPORT** **Patient:** John Miller **MRN:** 001-842-001 **Sex/Age:** Male / 84 years **Referring Physician:** Oncology Service **Clinical History:** - History of right upper lobectomy with mediastinal lymph node dissection for stage IIIA (T2aN2M0) adenocarcinoma of the right upper lobe (diagnosed 2 years ago). - Post\u2011operative adjuvant cisplatin/vinorelbine completed. - Surveillance imaging 12 months ago showed no residual pulmonary mass or mediastinal adenopathy. - Current concern for disease recurrence based on new symptoms (mild cough, occasional dyspnea). **Technique:** - Helical multidetector CT of the chest performed after intravenous administration of 100 mL non\u2011ionic iodinated contrast (iodine concentration 350 mg/mL). - Axial images obtained at 1 mm collimation with multiplanar reconstructions in lung and mediastinal windows. - No motion artifacts. **Comparison:** - Prior contrast\u2011enhanced chest CT performed 12 months earlier (post\u2011operative surveillance). **Findings** **Lungs** - **Left lower lobe:** A new, partially spiculated soft\u2011tissue mass measuring approximately **2.5 cm (axial)** in greatest dimension is identified in the posterior basal segment. The lesion demonstrates heterogeneous enhancement. No cavitation. - **Right lung:** Post\u2011surgical changes consistent with right upper lobectomy; surgical staple line and postoperative fibrosis noted. No residual mass. No new nodules. - **Airways:** Patent trachea and main bronchi. No endobronchial lesion. **Mediastinum & Hila** - **Ipsilateral (left) mediastinal/hilar nodes:** Enlarged lymph"
+    },
+    {
+      "chunk_index": 19,
+      "edited_similarity": 0.7951844930648804,
+      "evidence_id": "inner1_row76_chunk19",
+      "original_similarity": 0.7951844930648804,
+      "row_id": 76,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "adrenal glands with 1\u2011mm thin\u2011section reconstructions; coronal and sagittal reformats generated. - **PET/CT:** 10 mCi 18F\u2011FDG injected intravenously; uptake time \u224860 min. Low\u2011dose CT performed for attenuation correction and anatomic correlation. Images reviewed from skull base to mid\u2011thigh. - **Brain MRI:** Standard protocol including T1\u2011pre\u2011contrast, T1\u2011post\u2011gadolinium, T2, FLAIR, DWI, and susceptibility sequences. **Findings:** **Chest \u2013 CT:** - **Left lower lobe:** A solitary, partially spiculated nodule in the posterior basal segment measuring **1.8 cm (AP) \u00d7 1.6 cm (transverse) \u00d7 1.5 cm (craniocaudal)**. No cavitation, calcification, or fat density. - **Right lung:** Post\u2011surgical changes consistent with prior right upper\u2011lobe lobectomy; no residual mass or new nodules. - **Mediastinum:** Enlarged subcarinal lymph node measuring **1.5 cm (short axis) \u00d7 1.2 cm**, with homogeneous soft\u2011tissue attenuation. No other mediastinal or hilar nodes exceed normal size criteria. - **Pleura:** No effusion or thickening. - **Chest wall/diaphragm:** No invasion. - **Osseous structures:** No lytic or sclerotic lesions identified. **PET/CT:** - **Left lower\u2011lobe nodule:** Intense FDG uptake with **SUVmax 7.2**, corresponding to the CT\u2011identified nodule. - **Subcarinal lymph node:** FDG\u2011avid with **SUVmax 7.2**, matching the enlarged node on CT. - **Rest of thorax and abdomen:** No abnormal FDG avidity in the right lung, remaining mediastinum, bilateral adrenal glands, liver, spleen, kidneys, or pelvis. - **Skeleton:** No focal abnormal uptake. - **Physiologic uptake:** Normal distribution in brain, myocardium, urinary tract, and gastrointestinal tract. **Brain \u2013 MRI:** - No enhancing intra\u2011axial lesions. - No diffusion\u2011restricted foci. - No leptomeningeal or dural enhancement. - Ventricular system and sulci unremarkable. **Impression:** 1. **Recurrent/metastatic NSCLC** \u2013 FDG\u2011avid"
+    },
+    {
+      "chunk_index": 34,
+      "edited_similarity": 0.7655655145645142,
+      "evidence_id": "inner1_row76_chunk34",
+      "original_similarity": 0.7655655145645142,
+      "row_id": 76,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "mediastinal lymph node dissection. - KRAS G12C, TP53 R273C, STK11 loss; EGFR wild\u2011type; no ALK/ROS1 rearrangements. - Completed adjuvant cisplatin\u2011vinorelbine (4 cycles). - Disease recurrence with left lower lobe nodule and subcarinal node; treated with pembrolizumab (PD\u2011L1 TPS 60%). - Subsequent progression with left lower lobe lesion enlargement and right adrenal metastasis. - Current indication: Restaging/assessment of known thoracic disease and adrenal lesion; evaluation for intracranial involvement. **Examination Technique:** - **CT Chest with Intravenous Contrast:** Multidetector CT of the chest performed after administration of 100 mL non\u2011ionic iodinated contrast (iodine concentration 350 mg/mL) using a power injector at 3 mL/s. Images obtained in the arterial phase (30 s) and portal venous phase (70 s) with 1\u2011mm axial reconstructions and multiplanar reformats. - **Brain MRI:** 1.5 T MRI of the brain with and without gadolinium contrast. Sequences included T1\u2011weighted, T2\u2011weighted, FLAIR, DWI, and post\u2011contrast T1\u2011weighted volumetric acquisition. **Findings:** **Chest (CT):** - **Left Lower Lobe:** A solitary, partially spiculated soft\u2011tissue mass measuring **3.1 cm (axial) \u00d7 2.8 cm (craniocaudal) \u00d7 2.5 cm (anteroposterior)** is present in the posterior basal segment. The lesion demonstrates heterogeneous enhancement, with no evidence of cavitation or calcification. Compared with the prior CT (3.0 cm), the size is essentially unchanged. - **Mediastinum/Hilum:** No new or enlarging mediastinal or hilar lymph nodes. The previously noted subcarinal node is stable in size (\u22481.0 cm short axis). - **Pleura:** No pleural effusion or thickening. No evidence of chest wall invasion. - **Pulmonary Parenchyma:** No additional pulmonary nodules, consolidations, or ground\u2011glass opacities. No bronchiectasis or emphysematous changes beyond"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.7329704761505127,
+      "evidence_id": "inner1_row76_chunk0",
+      "original_similarity": 0.7329704761505127,
+      "row_id": 76,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "**Radiology Report** **Patient:** John A. Miller **Age:** 66 **Sex:** Male **Exam(s):** - Whole\u2011body 18F\u2011FDG PET/CT (with intravenous contrast for CT component) - Brain MRI (contrast\u2011enhanced, axial T1, T2, FLAIR, DWI, and post\u2011gadolinium sequences) **Clinical Indication:** Staging work\u2011up for newly diagnosed right upper lobe lung mass; assessment for distant metastatic disease. **Technique:** - PET: Approximately 370 MBq (10 mCi) of 18F\u2011FDG administered intravenously. Imaging commenced 60 minutes post\u2011injection. Whole\u2011body acquisition from skull vertex to mid\u2011thigh performed. Attenuation correction performed using low\u2011dose CT. - CT: Diagnostic quality contrast\u2011enhanced CT of the chest, abdomen, and pelvis obtained (IV iodinated contrast, 100 mL, rate 3 mL/s). - MRI: Multiplanar, multisequence brain MRI performed after intravenous gadolinium (0.1 mmol/kg). **Findings** **Chest (PET/CT)** - **Right Upper Lobe:** A 4.5 cm (max axial dimension) spiculated mass in the posterior segment of the right upper lobe. The lesion demonstrates intense FDG uptake (SUVmax \u2248 12.3). No calcification noted. - **Mediastinum:** Ipsilateral mediastinal lymph nodes are enlarged and FDG\u2011avid: - Right paratracheal (station 4R) node measuring 1.8 cm, SUVmax \u2248 8.1. - Subcarinal (station 7) node measuring 2.0 cm, SUVmax \u2248 7.6. - **Contralateral Thorax:** No FDG\u2011avid lymphadenopathy in left mediastinum or hilar stations. No pleural effusion or chest wall invasion. - **Lungs:** No additional pulmonary nodules or masses identified. **Abdomen/Pelvis (PET/CT)** - Liver, spleen, adrenal glands, pancreas, and kidneys demonstrate physiologic FDG activity without focal hypermetabolism. No suspicious hepatic lesions or adrenal nodules. - No retroperitoneal or mesenteric lymphadenopathy. **Skeletal Survey (PET/CT)** - No focal osseous FDG uptake suggestive of metastatic disease. Visualized bone"
+    },
+    {
+      "chunk_index": 27,
+      "edited_similarity": 0.7271139621734619,
+      "evidence_id": "inner1_row76_chunk27",
+      "original_similarity": 0.7271139621734619,
+      "row_id": 76,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "node remains enlarged (short axis \u2248 1.5 cm) with mild FDG uptake (SUVmax \u2248 3.5), stable relative to prior exam. No additional FDG\u2011avid mediastinal or hilar nodes. - **Right lung and pleura:** No residual post\u2011surgical changes suggestive of recurrence; no pleural effusion or thickening. **Abdomen** - **Right adrenal gland:** A 1.2 cm nodule in the lateral limb demonstrating intense FDG uptake (SUVmax \u2248 9.4), markedly higher than background adrenal activity, consistent with metastatic involvement. - **Left adrenal gland:** Unremarkable. - **Liver, spleen, pancreas, kidneys, gastrointestinal tract, and osseous structures:** No abnormal FDG\u2011avid lesions identified. No evidence of metastatic disease elsewhere. **Pelvis** - No abnormal FDG uptake in the pelvic organs or skeletal structures. **Brain MRI** - No enhancing intra\u2011axial mass lesions. No abnormal diffusion restriction or FLAIR hyperintensity suggestive of metastatic disease. Ventricular size and sulci within normal limits for age. **Impression:** 1. Progressive metabolic activity of the known left lower\u2011lobe pulmonary nodule (\u2191SUV), indicating likely tumor progression despite prior immunotherapy. 2. New FDG\u2011avid right adrenal lesion consistent with metastatic disease. 3. Stable mediastinal subcarinal node. 4. No additional thoracic, abdominal, pelvic, or osseous metastases identified. 5. Brain MRI negative for intracranial metastasis. **Recommendations:** Correlation with clinical status and consideration of next\u2011line systemic therapy as per treating oncologist. (Therapeutic recommendations are beyond the scope of this imaging report.) <new_note> Hospital Admission Record Timepoint: At age 70 Reason for Admission: community-acquired pneumonia Principal Diagnosis: J18.9 - Pneumonia, unspecified organism Length of Stay: 5 days Discharge Disposition: home <new_note> Laboratory Results Timepoint: At age 70 Complete Blood Count"
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.7964651584625244,
+      "evidence_id": "inner1_row143_chunk28",
+      "original_similarity": 0.7964651584625244,
+      "row_id": 143,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "tumor site. The lesion demonstrates intense FDG uptake (SUVmax \u2248 7.2), exceeding mediastinal blood pool activity. No new cavitation or air\u2011fluid levels. - **Left lower lobe**: A solitary nodule measuring 2.5 \u00d7 2.2 cm is identified in the posterior basal segment. The nodule is FDG\u2011avid (SUVmax \u2248 6.8) and shows heterogeneous internal attenuation. No associated pleural effusion. - **Mediastinal lymph nodes**: - **Station 4R**: Node measuring 1.4 cm, SUVmax \u2248 5.5. - **Station 7 (subcarinal)**: Node measuring 1.6 cm, SUVmax \u2248 5.9. - **Station 10R (hilar)**: Node measuring 1.2 cm, SUVmax \u2248 4.8. All nodes are mildly to moderately FDG\u2011avid, consistent with possible metastatic involvement. - **Pleura**: No pleural thickening or effusion. **Osseous** - **Thoracic spine**: Multiple focal osteoblastic lesions are seen involving T5, T7, and T9 vertebral bodies. The lesions are low\u2011density on CT but demonstrate mild FDG uptake (SUVmax \u2248 3.2). No associated soft\u2011tissue mass or vertebral collapse. - **Remaining skeleton**: No additional focal osseous lesions identified. **Abdomen / Pelvis** - No abnormal FDG\u2011avid soft\u2011tissue masses or lymphadenopathy. Liver, spleen, adrenal glands, pancreas, and kidneys appear unremarkable. No ascites or bowel wall thickening. **Brain** - Concurrent contrast\u2011enhanced MRI of the brain shows no enhancing lesions, mass effect, or abnormal diffusion. No evidence of intracranial metastasis. --- ### Impression 1. **Residual right upper lobe mass** with high FDG uptake, compatible with residual or recurrent disease at the surgical site. 2. **Left lower lobe pulmonary nodule** (2.5 cm) demonstrating intense FDG avidity, highly suspicious for metastatic involvement. 3. **Mediastinal lymphadenopathy** (stations 4R, 7, 10R) with moderate"
+    },
+    {
+      "chunk_index": 20,
+      "edited_similarity": 0.7919906973838806,
+      "evidence_id": "inner1_row143_chunk20",
+      "original_similarity": 0.7919906973838806,
+      "row_id": 143,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "abdomen, and pelvis (multiphase). - MRI of the brain with and without gadolinium. **Clinical Indication:** Surveillance imaging following right upper lobectomy and mediastinal lymph node dissection for stage IIIA large\u2011cell non\u2011small cell lung cancer, completed adjuvant platinum\u2011based chemotherapy 12 months ago. **Technique:** - CT performed on a 64\u2011slice multidetector scanner. Intravenous iodinated contrast administered (120 mL, 350 mg I/mL) with arterial and portal\u2011venous phase acquisition. Images reconstructed in axial, coronal, and sagittal planes with 1\u2011mm slice thickness. - Brain MRI obtained on a 3\u2011T system; sequences included T1\u2011pre\u2011contrast, T1\u2011post\u2011contrast, T2\u2011FLAIR, DWI, and susceptibility\u2011weighted imaging. --- ### Findings #### Chest (CT) **Right hemithorax:** - Post\u2011operative changes consistent with prior right upper lobectomy. No residual mass or air\u2011fluid collection. Surgical staple line visualized. No pleural effusion or pneumothorax. **Left lung:** - **Left lower lobe:** A solitary, partially solid nodule measuring **2.5 cm (axial)** in the posterior basal segment. The lesion demonstrates mild heterogeneous enhancement (\u2248 30 HU increase on portal\u2011venous phase) and a central ground\u2011glass component. No calcifications or fat identified. - No additional pulmonary nodules in the left upper lobe or right lower lobe. **Mediastinum:** - **Station 4R (right lower paratracheal):** Lymph node measuring **1.8 cm** short\u2011axis. - **Station 7 (subcarinal):** Lymph node measuring **2.0 cm** short\u2011axis. - **Station 10R (right hilar):** Lymph node measuring **1.6 cm** short\u2011axis. - No necrotic centers; nodes are mildly hyperdense post\u2011contrast. **Upper abdomen:** - Liver, spleen, pancreas, adrenal glands, and kidneys demonstrate normal size, attenuation, and enhancement patterns. No focal lesions. - No intra\u2011abdominal lymphadenopathy beyond physiologic size. **Pelvis:** - No"
+    },
+    {
+      "chunk_index": 21,
+      "edited_similarity": 0.7234448194503784,
+      "evidence_id": "inner1_row143_chunk21",
+      "original_similarity": 0.7234448194503784,
+      "row_id": 143,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "measuring **1.8 cm** short\u2011axis. - **Station 7 (subcarinal):** Lymph node measuring **2.0 cm** short\u2011axis. - **Station 10R (right hilar):** Lymph node measuring **1.6 cm** short\u2011axis. - No necrotic centers; nodes are mildly hyperdense post\u2011contrast. **Upper abdomen:** - Liver, spleen, pancreas, adrenal glands, and kidneys demonstrate normal size, attenuation, and enhancement patterns. No focal lesions. - No intra\u2011abdominal lymphadenopathy beyond physiologic size. **Pelvis:** - No abnormal solid organ lesions. No pelvic lymphadenopathy. No free fluid or bowel wall thickening. **Osseous structures (CT portion):** - No lytic or sclerotic lesions identified in visualized thoracic vertebrae or ribs. #### Brain (MRI) - **Parenchyma:** No intra\u2011axial mass lesions, areas of restricted diffusion, or abnormal FLAIR signal. - **Meninges:** No enhancing leptomeningeal disease. - **Ventricular system and sulci:** Normal size and configuration. - **Cerebellum and brainstem:** Unremarkable. --- ### Impression 1. **New left lower lobe pulmonary nodule** measuring 2.5 cm with mixed solid/ground\u2011glass attenuation; radiographically suspicious for malignant etiology. 2. **Enlarged mediastinal lymph nodes** (stations 4R, 7, 10R) measuring up to 2.0 cm in short axis, concerning for nodal recurrence. 3. No evidence of residual or recurrent disease in the right hemithorax post\u2011lobectomy. 4. No intracranial metastatic disease on MRI. 5. No abnormal intra\u2011abdominal or pelvic findings. *Correlation with prior imaging studies and clinical context is recommended.* <new_note> **Oncology Progress Note** **Patient:** Eleanor Martinez, 66\u2011year\u2011old female --- ### Chief Complaint Follow\u2011up after surveillance imaging demonstrating new pulmonary lesions. ### History of Present Illness Ms. Martinez is a 66\u2011year\u2011old woman with a history of stage IIIA (T3N2M0) large\u2011cell non\u2011small cell lung cancer"
+    },
+    {
+      "chunk_index": 17,
+      "edited_similarity": 0.7087198495864868,
+      "evidence_id": "inner1_row143_chunk17",
+      "original_similarity": 0.7087198495864868,
+      "row_id": 143,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "membranes moist | | **Neck** | Supple, no lymphadenopathy | | **Cardiovascular** | RRR, no murmurs, rubs, or gallops | | **Respiratory** | Clear to auscultation bilaterally, no wheezes, rales, or rhonchi | | **Abdomen** | Soft, non\u2011tender, no hepatosplenomegaly | | **Extremities** | No edema, full range of motion | | **Skin** | No lesions, surgical scar well healed | | **Neurologic** | Alert, oriented x3, cranial nerves II\u2011XII intact, strength 5/5 all extremities, sensation intact | | **Functional Status** | ECOG 2 (ambulatory, capable of self\u2011care but unable to carry out work activities) | --- ### Laboratory Data (drawn today) | Test | Result | Reference | |------|--------|-----------| | **CBC** | WBC 7.4 k/\u00b5L, Neut 4.8 k/\u00b5L, Lymph 1.6 k/\u00b5L, Hgb 13.9 g/dL, Plt 242 k/\u00b5L | Normal | | **CMP** | Na 138 mmol/L, K 4.2 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 16 mg/dL, Creatinine 1.2 mg/dL (eGFR \u2248 62 mL/min), Glucose 92 mg/dL, AST 28 U/L, ALT 26 U/L, Alk Phos 78 U/L, Albumin 3.9 g/dL | Normal | | **LDH** | 180 U/L (NL) | | **C\u2011reactive protein** | 3 mg/L (NL) | --- ### Imaging **Chest CT (contrast\u2011enhanced, performed today)** \u2013 No residual mass in the right upper lobe resection bed. No new pulmonary nodules. Mediastinal and hilar lymph node stations are within normal size limits (< 1 cm short axis). No pleural effusion or pneumothorax. No evidence of metastatic disease in the visualized thorax. **Brain MRI (reviewed)** \u2013 No intracranial lesions. *Interpretation by radiology:* \u201cPost\u2011operative changes without"
+    },
+    {
+      "chunk_index": 15,
+      "edited_similarity": 0.7946511507034302,
+      "evidence_id": "inner1_row440_chunk15",
+      "original_similarity": 0.7946511507034302,
+      "row_id": 440,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "year prior) \u2013 no residual tumor after right lower lobectomy; no pulmonary nodules identified. **Findings:** **Pulmonary Parenchyma** - **Left Upper Lobe:** A solitary, spiculated soft\u2011tissue nodule measuring 2.5 \u00d7 2.3 cm in the posterior segment. The lesion demonstrates intense FDG uptake with a maximum standardized uptake value (SUVmax) of 8.4 (background lung SUVmean \u2248 0.9). No calcification noted. - **Right Lung:** Post\u2011surgical changes consistent with prior right lower lobectomy. No residual or recurrent mass; no new nodules. **Mediastinum & Hila** - No enlarged mediastinal or hilar lymph nodes (all short axis \u2264 8 mm). No FDG\u2011avid nodal foci (SUVmax \u2264 2.2). **Osseous Structures** - **Thoracic Spine:** Multiple focal FDG\u2011avid lesions identified: - T4 vertebral body (SUVmax 6.1) - T6 vertebral body (SUVmax 5.8) - T8 vertebral body (SUVmax 6.3) - T10 vertebral body (SUVmax 5.5) - Corresponding lytic changes on CT component. - No additional osseous lesions identified in the cervical spine, lumbar spine, pelvis, or ribs. **Abdomen & Pelvis** - No abnormal FDG uptake in liver, spleen, adrenal glands, kidneys, pancreas, gastrointestinal tract, or pelvic viscera. No suspicious lymphadenopathy. **Brain MRI** - No enhancing intracranial mass lesions. No abnormal diffusion restriction. No leptomeningeal enhancement. **Other Findings** - No pleural effusion or thickening. - No pericardial effusion. **Impression:** 1. New FDG\u2011avid left upper lobe pulmonary nodule (2.5 cm, SUVmax 8.4) concerning for recurrent/metastatic non\u2011small cell lung carcinoma. 2. FDG\u2011avid osseous lesions in the thoracic spine (T4, T6, T8, T10) consistent with metastatic disease. 3. No additional FDG\u2011avid disease in the mediastinum, abdomen, pelvis, or brain. **Overall"
+    },
+    {
+      "chunk_index": 7,
+      "edited_similarity": 0.7805175185203552,
+      "evidence_id": "inner1_row440_chunk7",
+      "original_similarity": 0.7805175185203552,
+      "row_id": 440,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "symptoms reported. **Technique:** - **CT:** Helical acquisition from lung apices through the proximal femora. Intravenous iodinated contrast administered (120 mL at 3 mL/s) with arterial and portal venous phase reconstructions. Thin\u2011section (1\u2011mm) axial images with multiplanar reformats. - **MRI Brain:** Axial T1, T2, FLAIR, diffusion\u2011weighted imaging, and post\u2011gadolinium T1\u2011weighted sequences obtained in the axial, coronal, and sagittal planes. **Findings:** **Chest (CT):** - Right hemithorax demonstrates postoperative changes consistent with a right lower lobectomy. The surgical staple line is intact, and there is mild postoperative scarring of the adjacent pleura. No residual soft\u2011tissue mass is identified at the resection site. - No pulmonary nodules or masses are seen in the remaining right lung or left lung. No ground\u2011glass opacities or consolidations. - Mediastinum: Central airways are patent. No enlarged mediastinal, hilar, or supraclavicular lymph nodes (short axis \u2264 8 mm). - Pleura: No pleural effusion or thickening. - Osseous structures: No lytic or sclerotic lesions identified in the visualized ribs, vertebrae, or scapulae. **Abdomen (CT):** - Liver: Homogeneous attenuation, no focal lesion. - Gallbladder, biliary tree, pancreas, spleen, adrenal glands: Unremarkable. - Kidneys: Normal size and attenuation; no calculi or masses. - Retroperitoneum: No lymphadenopathy. - Gastrointestinal tract: No wall thickening or obstruction. - No free fluid or ascites. **Pelvis (CT):** - No pelvic masses or lymphadenopathy. - Prostate and seminal vesicles appear within normal limits. - No osseous lesions identified in the pelvis or proximal femora. **Brain (MRI):** - Brain parenchyma demonstrates normal volume and signal characteristics. No areas of restricted diffusion. - No enhancing lesions"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.7232990264892578,
+      "evidence_id": "inner1_row440_chunk14",
+      "original_similarity": 0.7232990264892578,
+      "row_id": 440,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "recurrence and the need for further diagnostic testing. - Reviewed signs of infection (fever, chills) and instructed to seek care promptly if they develop. - Reviewed smoking cessation reinforcement; continue abstinence. 6. **Follow\u2011up** - Review imaging and pathology results in 2 weeks (or sooner if results return earlier). - Schedule return visit for results discussion and treatment planning. 7. **Documentation** - All orders placed in EMR; imaging studies to be performed at the affiliated radiology department. **Signature:** ___________________________ **Date:** ______________________________ --- <new_note> **Patient:** James Patel **Age/Sex:** 58\u2011year\u2011old Male **MRN:** ******* **Study:** Whole\u2011body FDG PET/CT (including dedicated brain MRI component) **Indication:** Surveillance for previously resected non\u2011small cell lung cancer; new non\u2011productive cough and mild dyspnea. **Technique:** - Patient fasted \u22656 hours; blood glucose prior to injection: 92 mg/dL. - 370 MBq (10 mCi) of \u00b9\u2078F\u2011FDG administered intravenously. - Uptake time: 60 minutes. - Low\u2011dose CT performed from skull vertex through mid\u2011thigh for attenuation correction and anatomic localization. - Diagnostic CT of the chest obtained with intravenous contrast (unless contraindicated). - Dedicated brain MRI (T1 pre\u2011 and post\u2011contrast, T2/FLAIR, diffusion) performed as part of the same session. **Comparison:** - Prior surveillance CT chest (1 year prior) \u2013 no residual tumor after right lower lobectomy; no pulmonary nodules identified. **Findings:** **Pulmonary Parenchyma** - **Left Upper Lobe:** A solitary, spiculated soft\u2011tissue nodule measuring 2.5 \u00d7 2.3 cm in the posterior segment. The lesion demonstrates intense FDG uptake with a maximum standardized uptake value (SUVmax) of 8.4 (background lung SUVmean \u2248 0.9). No calcification noted. - **Right Lung:** Post\u2011surgical changes consistent"
+    },
+    {
+      "chunk_index": 31,
+      "edited_similarity": 0.716687798500061,
+      "evidence_id": "inner1_row440_chunk31",
+      "original_similarity": 0.716687798500061,
+      "row_id": 440,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "significant motion artifact. **Findings** **Lungs** - **Left Upper Lobe:** A solitary, partially spiculated nodule measuring 2.5 cm (axial) in the anterior segment. Morphology unchanged from prior examination; no new solid component, cavitation, or surrounding ground\u2011glass opacity. No interval change in size or attenuation. - **Right Lung:** Post\u2011lobectomy changes consistent with prior right lower lobectomy. Surgical staples noted in the right lower lobe bronchial stump. Compensatory hyperinflation of the right middle and upper lobes with mild volume loss. No new pulmonary nodules, consolidations, or infiltrates. - **Airways:** Patent trachea and main bronchi. No endoluminal masses. - **Pleura:** No pleural effusion or thickening. No pneumothorax. **Mediastinum & Hila** - No mediastinal lymphadenopathy (short axis <1 cm). - No enlargement of hilar nodes. - Cardiac silhouette within normal limits; coronary calcifications unchanged. **Chest Wall & Upper Abdomen** - No focal chest wall mass or abnormal soft\u2011tissue density. - Visualized upper abdomen (liver, spleen, adrenal glands) unremarkable; no lesions identified. **Osseous Structures** - **Thoracic Spine:** Multiple previously documented lytic lesions involving T5, T7, and T9 vertebral bodies. Appear unchanged in size and morphology; no new fracture lines or cortical breach. - **Ribs and Sternum:** No new osseous lesions. - No evidence of metastatic disease in the clavicles, scapulae, or cervical spine. **Vascular Structures** - Pulmonary arteries patent without filling defects. No evidence of pulmonary embolism. - No aortic aneurysm or dissection. **Incidental Findings** - Small calcified granuloma in the left lower lobe, unchanged. - No hiatal hernia or esophageal abnormality. **Impression** 1. Left upper\u2011lobe pulmonary nodule measuring 2.5 cm remains"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 1,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_001_query_002_original",
+  "patient_outcomes_in_prompt": false,
+  "query": 2,
+  "query_id": "effect_query_003"
+}

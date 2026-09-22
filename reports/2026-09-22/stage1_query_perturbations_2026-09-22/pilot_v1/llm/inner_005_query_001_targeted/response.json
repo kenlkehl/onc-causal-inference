@@ -1,0 +1,60 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row367_chunk24",
+          "quote": "Standardized uptake values (SUVmax) were recorded for all focal lesions."
+        },
+        {
+          "evidence_id": "inner5_row988_chunk10",
+          "quote": "A 2.5 cm (axial) solid pulmonary nodule in the posterior basal segment demonstrates intense FDG uptake (SUVmax 5.8)."
+        },
+        {
+          "evidence_id": "inner5_row951_chunk12",
+          "quote": "**Primary right lower lobe lung mass** \u2013 FDG\u2011avid (SUVmax 12.5), consistent with known large\u2011cell carcinoma."
+        }
+      ],
+      "description": "The maximum standardized uptake value (SUVmax) of the primary pulmonary lesion measured during 18F-FDG PET/CT imaging.",
+      "extraction_instruction": "Locate the PET/CT findings section and extract the SUVmax value specifically associated with the primary pulmonary mass or solid nodule.",
+      "measurement_definition": "Numeric value of SUVmax for the primary lung mass or nodule, as recorded in PET/CT reports.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "primary_tumor_suvmax",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact timing of the PET scan relative to the start of systemic therapy may vary between patients.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row551_chunk9",
+          "quote": "Brain MRI identified three enhancing lesions (right frontal, left cerebellar, occipital) consistent with metastatic disease."
+        },
+        {
+          "evidence_id": "inner5_row767_chunk13",
+          "quote": "Dedicated brain MRI demonstrates no enhancing lesions, restricted diffusion, or abnormal T2/FLAIR signal suggestive of metastasis."
+        }
+      ],
+      "description": "Presence of metastatic disease within the brain at baseline assessment.",
+      "extraction_instruction": "Review Brain MRI or PET/CT reports for mentions of 'intracranial enhancing lesions' or 'brain metastases'. Mark as positive if present; mark as negative if the report states 'no enhancing lesions, restricted diffusion, or abnormal T2/FLAIR signal suggestive of metastasis'.",
+      "measurement_definition": "Positive if MRI or PET imaging identifies enhancing lesions or abnormal signals compatible with metastatic disease; negative if imaging explicitly demonstrates no enhancing lesions or metastases.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "brain_metastases_present",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether 'brain metastases' includes leptomeningeal disease or only parenchymal lesions is not specified.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Small number of distinct patients represented in the provided chunks.",
+    "Variable reporting styles across different radiology and oncology notes."
+  ],
+  "summary": "The provided clinical excerpts describe baseline characteristics of patients with non-small cell lung cancer (NSCLC), specifically detailing the metabolic activity of the primary pulmonary tumor as measured by SUVmax on PET/CT and the presence or absence of intracranial metastases as identified by brain MRI."
+}

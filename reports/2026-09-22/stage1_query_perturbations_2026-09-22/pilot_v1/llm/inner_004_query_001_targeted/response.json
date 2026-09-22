@@ -1,0 +1,70 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row951_chunk17",
+          "quote": "**ECOG performance status 0** \u2013 fully active"
+        },
+        {
+          "evidence_id": "inner4_row608_chunk14",
+          "quote": "ECOG performance status 1, good renal function"
+        },
+        {
+          "evidence_id": "inner4_row124_chunk19",
+          "quote": "ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner4_row957_chunk21",
+          "quote": "Current ECOG 3 may preclude aggressive regimens"
+        }
+      ],
+      "description": "A standardized scale used to assess the functional status and level of activity of cancer patients.",
+      "extraction_instruction": "Locate the value associated with 'ECOG performance status' or 'Performance status: ECOG'.",
+      "measurement_definition": "The numerical ECOG score (0-4) documented in the clinical assessment or pathology summary.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the score was determined by a physician's global assessment or a structured patient-reported tool is not specified.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row608_chunk18",
+          "quote": "KRAS G12C\u2011mutated, TP53\u2011mutated, STK11 loss, CDKN2A deletion"
+        },
+        {
+          "evidence_id": "inner4_row957_chunk20",
+          "quote": "KRAS G12C mutant, STK11 loss\u2011of\u2011function, TP53 R273H"
+        }
+      ],
+      "description": "The presence of loss-of-function mutations or homozygous deletions of the STK11 gene in tumor tissue.",
+      "extraction_instruction": "Review the NGS or molecular profile section for mentions of 'STK11 loss' or 'STK11 loss-of-function'.",
+      "measurement_definition": "Positive if 'STK11 loss' or 'STK11 loss-of-function' is documented in NGS or molecular profiling; negative if explicitly documented as wild-type; otherwise null.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Loss",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific method of detection (e.g., sequencing vs. IHC) is not provided.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Limited sample size across the provided excerpts.",
+    "Some molecular data is summarized and may lack specific mutation coordinates."
+  ],
+  "summary": "The evidence describes baseline characteristics of patients with advanced non-small cell lung cancer (NSCLC), highlighting variations in functional status (ECOG performance status) and molecular alterations, specifically STK11 loss, which are frequently noted as potential modifiers of immunotherapy response."
+}

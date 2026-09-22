@@ -1,0 +1,67 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row438_chunk1",
+          "quote": "Tumor proportion score **10 %**"
+        },
+        {
+          "evidence_id": "inner2_row733_chunk0",
+          "quote": "10 % (tumor proportion score)"
+        },
+        {
+          "evidence_id": "inner2_row962_chunk1",
+          "quote": "5 % (tumor proportion score)"
+        }
+      ],
+      "description": "The percentage of viable tumor cells exhibiting partial or complete membrane staining for PD-L1, typically measured using the 22C3 assay.",
+      "extraction_instruction": "Locate the PD-L1 (22C3) result and extract the numerical percentage associated with the 'Tumor proportion score' or 'TPS'.",
+      "measurement_definition": "Percentage (%) of tumor cells showing PD-L1 positivity.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is unclear if other clones besides 22C3 were used in all cases, though 22C3 is explicitly mentioned in several reports.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "Wild-type",
+        "Mutation detected"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row438_chunk6",
+          "quote": "EGFR wild\u2011type; aligns with prior testing on the original resection specimen."
+        },
+        {
+          "evidence_id": "inner2_row488_chunk1",
+          "quote": "Exon 19 deletion (p.E746_A750del)"
+        },
+        {
+          "evidence_id": "inner2_row629_chunk12",
+          "quote": "Wild\u2011type (no activating mutation detected)"
+        }
+      ],
+      "description": "The status of the epidermal growth factor receptor (EGFR) gene, specifically focusing on sensitizing mutations in exons 18-21.",
+      "extraction_instruction": "Review the 'Molecular Testing' or 'Molecular Studies' section for EGFR. Assign 'Wild-type' if 'wild-type' or 'no sensitizing mutations detected' is stated. Assign 'Mutation detected' if a specific mutation (e.g., 'Exon 19 deletion') is identified.",
+      "measurement_definition": "Binary classification based on PCR or NGS analysis: 'Wild-type' (no sensitizing mutations detected) or 'Mutation detected' (presence of activating mutations such as exon 19 deletion or L858R).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR Mutation Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence includes both PCR-based and NGS-based testing; it is uncertain if these methods yield perfectly concordant results across all patients.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Sample size is small, consisting of a few individual pathology reports.",
+    "Some molecular data is pending in certain reports, leading to missing values for some candidates."
+  ],
+  "summary": "The provided pathology and radiology reports for lung adenocarcinoma patients identify several measurable baseline variables, most notably PD-L1 expression levels and EGFR mutation status, which are standard predictors of therapeutic response in non-small cell lung cancer."
+}

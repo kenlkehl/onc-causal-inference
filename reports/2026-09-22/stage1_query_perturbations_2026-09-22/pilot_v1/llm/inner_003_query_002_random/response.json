@@ -1,0 +1,64 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row329_chunk30",
+          "quote": "ECOG performance status 1"
+        },
+        {
+          "evidence_id": "inner3_row161_chunk12",
+          "quote": "given ECOG 2 and comorbidity profile"
+        }
+      ],
+      "description": "A standardized scale used to assess the functional status and degree of impairment of cancer patients.",
+      "extraction_instruction": "Locate the 'Assessment' or 'Plan' sections and extract the digit associated with 'ECOG'.",
+      "measurement_definition": "The numeric grade (0-5) explicitly documented as 'ECOG' or 'ECOG performance status'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence only demonstrates values 1 and 2; the full range of the categorical scale is assumed based on standard clinical practice.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row871_chunk10",
+          "quote": "Former smoker, 30 pack\u2011years"
+        },
+        {
+          "evidence_id": "inner3_row161_chunk9",
+          "quote": "Former smoker: 20\u2011pack\u2011year history"
+        }
+      ],
+      "description": "The cumulative lifetime exposure to tobacco, calculated as the number of packs smoked per day multiplied by the number of years smoked.",
+      "extraction_instruction": "Search the 'Social History' section for the term 'pack-years' and extract the preceding numeric value.",
+      "measurement_definition": "The numeric value provided in 'pack-years'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Smoking History (Pack-Years)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain if the value is consistently reported for all patients or only for those categorized as 'former smokers'.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The evidence set is limited to a small number of patient records, restricting the observed range of variables.",
+    "Some baseline variables (like PD-L1) were mentioned but lacked consistent numeric formatting across the evidence for a robust continuous definition."
+  ],
+  "summary": "The evidence supports the identification of baseline functional status and tobacco exposure history as measurable clinical variables associated with the patients described in the retrieval set."
+}

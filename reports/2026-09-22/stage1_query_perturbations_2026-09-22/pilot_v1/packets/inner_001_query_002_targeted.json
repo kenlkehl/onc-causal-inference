@@ -1,0 +1,168 @@
+{
+  "actual_distance": 0.1999998837709427,
+  "condition": "targeted",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.6082584857940674,
+      "evidence_id": "inner1_row473_chunk0",
+      "original_similarity": 0.5414290428161621,
+      "row_id": 473,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.6082584857940674,
+      "evidence_id": "inner1_row902_chunk0",
+      "original_similarity": 0.5414290428161621,
+      "row_id": 902,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 5,
+      "edited_similarity": 0.6937713623046875,
+      "evidence_id": "inner1_row124_chunk5",
+      "original_similarity": 0.6910358667373657,
+      "row_id": 124,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "expedite referral to thoracic oncology for multidisciplinary evaluation. 7. **Patient Education** - Discuss the importance of timely diagnostic work\u2011up. - Review red\u2011flag symptoms (new hemoptysis, worsening dyspnea, fever) and advise to seek care promptly. **Signature:** Dr. [Pulmonology Attending] Pulmonary Medicine, [Institution] --- <new_note> **Radiology Report \u2013 Contrast\u2011Enhanced Chest CT** **Patient:** Eleanor Martinez **Age/Sex:** 60\u2011year\u2011old female **MRN:** ******* **Exam:** Multidetector CT of the chest with intravenous iodinated contrast. Axial images obtained from the thoracic inlet through the adrenal glands, with coronal and sagittal reconstructions. **Technique:** 100 mL of non\u2011ionic contrast administered at 3 mL/sec; arterial phase images captured at 30 seconds, venous phase at 70 seconds. Standard lung and mediastinal window settings applied. --- ### Findings **Lungs** - A 5.2 cm (maximal axial dimension) spiculated mass is identified in the posterior segment of the left upper lobe. The lesion is heterogeneous in attenuation with areas of low\u2011density necrosis. No cavitation is seen. - No additional pulmonary nodules are identified in either lung. **Mediastinum & Hilar Structures** - Ipsilateral (left\u2011sided) mediastinal lymph nodes are enlarged: subcarinal (station 7) and aortopulmonary (station 5) nodes measuring up to 1.8 cm in short\u2011axis diameter. - Contralateral mediastinal and bilateral hilar nodes are within normal limits (\u2264 1.0 cm). **Pleura** - No pleural effusion or pleural thickening is present. **Chest Wall & Diaphragm** - No invasion of the chest wall, ribs, or diaphragm is evident. **Upper Abdomen (included in scan range)** - Visualized portions of the liver, adrenal glands, and upper spleen are unremarkable. No focal lesions identified. **Osseous Structures** - No"
+    },
+    {
+      "chunk_index": 27,
+      "edited_similarity": 0.645176887512207,
+      "evidence_id": "inner1_row124_chunk27",
+      "original_similarity": 0.6568959951400757,
+      "row_id": 124,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "Segment VII, measuring 1.2 cm (maximal axial dimension). - Segment VI, measuring 0.9 cm (maximal axial dimension). - Both lesions demonstrate peripheral enhancement with central low attenuation, consistent with metastatic deposits. No evidence of capsular retraction or intra\u2011hepatic biliary dilatation. - No additional focal hepatic lesions identified. Liver parenchyma otherwise unremarkable; hepatic veins and portal vein patent. **Gallbladder & Biliary Tree:** - Gallbladder normal in size, without wall thickening or intraluminal stones. - Intra\u2011 and extra\u2011hepatic bile ducts not dilated. **Spleen:** - Normal size and attenuation; no focal lesions. **Pancreas:** - Unremarkable glandular morphology; no mass, ductal dilatation, or peripancreatic fluid. **Adrenal Glands:** - Both adrenal glands normal in size and attenuation; no focal lesions. **Kidneys & Urinary Tract:** - Kidneys normal in size, cortical thickness, and enhancement pattern. No calculi or hydronephrosis. - Urinary bladder distended, wall smooth, no intraluminal masses. **Gastrointestinal Tract:** - Stomach, small bowel, and colon demonstrate normal wall thickness and enhancement. No evidence of obstruction, perforation, or mass lesions. **Retroperitoneum & Lymph Nodes:** - No enlarged retroperitoneal or mesenteric lymph nodes (short axis >1 cm). - No para\u2011aortic or iliac nodal enlargement. **Vasculature:** - Aorta and major branches unremarkable; no aneurysm or dissection. - Portal and hepatic veins patent. **Osseous Structures:** - Visualized portions of the spine, pelvis, and ribs show no lytic or sclerotic lesions. **Other Findings:** - No free intraperitoneal fluid or ascites. - No evidence of peritoneal carcinomatosis. **Impression** 1. Two right hepatic lobe lesions (1.2 cm and 0.9 cm) with imaging characteristics typical for metastatic disease in"
+    },
+    {
+      "chunk_index": 20,
+      "edited_similarity": 0.517099142074585,
+      "evidence_id": "inner1_row124_chunk20",
+      "original_similarity": 0.47340452671051025,
+      "row_id": 124,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "cm, with minimal edema and no neurologic deficits. - Systemic disease is currently stable in the thorax; however, the presence of brain metastases upstages disease to stage IV, necessitating systemic therapy after local control. - ECOG 2 indicates the patient is ambulatory but limited in daily activities; she is a reasonable candidate for stereotactic radiosurgery (SRS) rather than whole\u2011brain radiation therapy (WBRT), given the limited lesion count and desire to preserve neurocognitive function. - No contraindications to SRS (e.g., lesions >3 cm, extensive edema). - Steroid prophylaxis (e.g., dexamethasone 4 mg PO BID) may be considered pre\u2011 and post\u2011procedure to reduce perilesional edema. **Recommendations:** 1. **Proceed with stereotactic radiosurgery** to each of the three brain lesions (total dose to be determined by radiation oncology, typical regimen 21 Gy in 3 fractions). 2. **Obtain baseline neurocognitive assessment** and repeat after SRS to monitor for potential late effects. 3. **Continue current palliative thoracic radiation** as planned; no changes required at this time. 4. **Plan systemic therapy** (non\u2011platinum doublet regimen) after completion of SRS and recovery, pending reassessment of performance status and organ function. 5. **Supportive care:** Initiate dexamethasone 4 mg PO BID for 3 days surrounding SRS; prescribe anti\u2011emetic prophylaxis (ondansetron 8 mg PO q8h PRN). 6. **Follow\u2011up:** Return to multidisciplinary clinic in 2 weeks for post\u2011SRS evaluation and to discuss systemic therapy initiation. ### 15. Plan Summary - **Radiation Oncology:** Schedule SRS simulation and treatment; provide prescription details. - **Medical Oncology:** Review systemic therapy options after SRS; ensure baseline labs are repeated prior to chemotherapy. - **Neurosurgery:**"
+    },
+    {
+      "chunk_index": 25,
+      "edited_similarity": 0.7251872420310974,
+      "evidence_id": "inner1_row971_chunk25",
+      "original_similarity": 0.758326530456543,
+      "row_id": 971,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "right lower\u2011lobe adenocarcinoma of the lung, status post right lower lobectomy with mediastinal lymph node dissection (age 68). - Prior metastatic disease identified in segment VII of the liver (2.5 cm) and left iliac bone (age 70). - Current evaluation prior to initiation of systemic therapy. **Technique:** *CT Chest/Abdomen/Pelvis* \u2013 Multidetector CT performed after intravenous administration of 100 mL non\u2011ionic iodinated contrast (iodine concentration 350 mg/mL) using a biphasic protocol (arterial phase at 30 s, portal venous phase at 70 s). Slice thickness 1.25 mm with multiplanar reconstructions. *Brain MRI* \u2013 1.5 T scanner, axial T1\u2011weighted, T2\u2011weighted, FLAIR, diffusion\u2011weighted, and susceptibility sequences obtained. Post\u2011contrast T1\u2011weighted images acquired in axial, coronal, and sagittal planes after administration of 0.1 mmol/kg gadobutrol. **Findings:** **Chest (CT)** - Post\u2011surgical changes in the right lower lobe with expected staple line and fibrosis. - No new pulmonary nodules or masses. - No mediastinal or hilar lymphadenopathy (short axis < 1 cm). - No pleural effusion or pneumothorax. - Cardiac size and great vessels within normal limits. **Upper Abdomen (CT)** - Liver: A 2.5 cm lesion in segment VII demonstrates stable size and attenuation compared with prior examination; no arterial hyperenhancement or washout suggestive of progression. No additional hepatic lesions identified. - Gallbladder, pancreas, spleen, and adrenal glands unremarkable. - No intra\u2011abdominal free fluid. **Pelvis (CT)** - Osseous: A lytic lesion involving the left iliac bone demonstrates unchanged morphology and size relative to prior imaging; no cortical breach or pathologic fracture. No additional osseous lesions identified throughout the visualized skeleton. - No pelvic lymphadenopathy."
+    },
+    {
+      "chunk_index": 12,
+      "edited_similarity": 0.7117919325828552,
+      "evidence_id": "inner1_row971_chunk12",
+      "original_similarity": 0.7490918636322021,
+      "row_id": 971,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "--- ### Findings **Head (CT component):** No abnormal FDG avidity within the brain parenchyma. No intracranial mass lesions identified. (A dedicated brain MRI performed contemporaneously was negative for metastatic disease.) **Thorax:** - **Lungs:** Post\u2011surgical changes in the right lower lobe with surgical staple lines and mild scarring. No residual or new FDG\u2011avid pulmonary nodules or masses. - **Mediastinum/Hilum:** No abnormal FDG uptake in mediastinal or hilar lymph nodes. Surgical changes in the bronchial stump without increased metabolic activity. - **Pleura/Chest Wall:** No pleural effusion or abnormal FDG uptake. **Upper Abdomen:** - **Liver:** A 2.5 cm lesion in segment VII demonstrates intense FDG uptake (SUVmax \u2248 9.4) consistent with metastatic disease. No additional hepatic lesions identified. - **Gallbladder/Biliary Tree:** Unremarkable. - **Spleen:** Normal size and physiologic FDG distribution. **Lower Abdomen & Pelvis:** - **Bone:** Focal intense FDG uptake in the left iliac bone (SUVmax \u2248 7.1) corresponding to a lytic lesion on CT, highly suggestive of metastatic involvement. No other skeletal sites show abnormal uptake. - **Retroperitoneum:** No abnormal lymphadenopathy or masses. - **Kidneys/Adrenals:** Normal physiologic uptake. **Other Structures:** No abnormal FDG\u2011avid soft\u2011tissue masses identified in the neck, abdomen, or pelvis. --- ### Impression 1. **New metastatic disease**: - FDG\u2011avid lesion in the left iliac bone (SUVmax \u2248 7) compatible with osseous metastasis. - FDG\u2011avid 2.5 cm hepatic lesion in segment VII (SUVmax \u2248 9) consistent with liver metastasis. 2. **Stable thoracic findings**: Post\u2011operative changes in the right lower lobe with no evidence of residual or recurrent pulmonary tumor; mediastinal and hilar nodes unchanged. 3. **No intracranial"
+    },
+    {
+      "chunk_index": 31,
+      "edited_similarity": 0.41380947828292847,
+      "evidence_id": "inner1_row971_chunk31",
+      "original_similarity": 0.37574535608291626,
+      "row_id": 971,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "CMP, and coagulation panel on the day of infusion; hold therapy for ANC <1.5 k/\u00b5L or platelets <100 k/\u00b5L. 3. **Supportive Care** - Continue gabapentin 300 mg TID for neuropathy. - Acetaminophen PRN for bone pain; consider escalation to short\u2011acting opioid if pain worsens. - Counsel on hydration, nutrition, and activity as tolerated. 4. **Anti\u2011emetic Prophylaxis** \u2013 Prescribe a 5\u2011HT3 antagonist (ondansetron) and dexamethasone per institutional protocol for the first cycle. 5. **Monitoring** \u2013 CBC on day 7 post\u2011infusion to assess for delayed neutropenia; educate patient on signs of infection. 6. **Follow\u2011up** \u2013 Return visit 2 weeks after first chemotherapy cycle for toxicity assessment and repeat imaging as per schedule. 7. **Clinical Trials** \u2013 Discuss eligibility for KRAS G12C\u2013targeted inhibitor trials; provide referral to research coordinator. The patient verbalized understanding of the treatment plan, potential side effects, and the importance of prompt reporting of fever, severe neuropathy, or worsening pain. He agreed to proceed with the outlined plan and will schedule the pre\u2011treatment visit within the next few days. **Signature:** _______________________________ **Provider:** (Oncologist, MD) <new_note> Encounter Record Timepoint: At age 70 Encounter Type: emergency department visit Diagnosis Codes: - M54.5: Low back pain - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99285: Emergency department visit, high complexity - 96372: Therapeutic injection, subcutaneous or intramuscular <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 69 Instrument: EORTC QLQ-C30 Physical Function: 70/100 Role Function: 65/100 Emotional Function: 75/100 Cognitive Function: 80/100 Social Function: 70/100 Fatigue: 30/100 Nausea: 10/100 Pain: 20/100 Dyspnea: 25/100 Insomnia: 20/100 Appetite Loss: 15/100 Global Health:"
+    },
+    {
+      "chunk_index": 23,
+      "edited_similarity": 0.7188790440559387,
+      "evidence_id": "inner1_row522_chunk23",
+      "original_similarity": 0.7331187725067139,
+      "row_id": 522,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "- Patient fasted \u22656 hours; serum glucose prior to injection: 92 mg/dL. - 370 MBq (10 mCi) of 18F\u2011FDG administered intravenously. - Uptake period: 60 minutes in a quiet, dimly lit room. - Low\u2011dose CT performed for attenuation correction (120 kVp, 30 mA). - Diagnostic contrast\u2011enhanced CT obtained from skull base to mid\u2011thigh (120 kVp, 200 mA, 1 mm slices) following IV administration of 100 mL non\u2011ionic iodinated contrast at 3 mL/s. - PET emission data acquired in 3\u2011minute per bed position; images reconstructed with iterative algorithm. **Findings:** **Head/Neck** - No abnormal FDG uptake in the brain parenchyma. - No hypermetabolic cervical lymph nodes. **Thorax** *Lungs* - Right hilar mass measuring 5.2 cm (axial) with intense FDG avidity (SUVmax 12.0). Margins remain irregular; no appreciable decrease in size compared with prior CT. - No new pulmonary nodules or consolidations. *Mediastinum* - Right paratracheal (station 4R) and subcarinal (station 7) lymph nodes enlarged (short axis 1.8 cm and 1.5 cm, respectively) and FDG\u2011avid (SUVmax 8.0). No interval change from prior imaging. *Pleura/Chest Wall* - Right sixth rib lesion previously treated with SBRT now demonstrates low\u2011grade FDG uptake (SUVmax 2.5) consistent with post\u2011radiation changes; no residual high\u2011grade activity. No pleural effusion. **Upper Abdomen** *Adrenal Glands* - Left adrenal nodule 1.5 cm with mild FDG uptake (SUVmax 5.0), unchanged from prior study, compatible with known metastatic deposit. *Liver, Spleen, Pancreas, Kidneys* - No focal FDG\u2011avid lesions identified. Normal physiologic uptake. **Bones** - No additional FDG\u2011avid osseous lesions beyond the treated right rib site. **Other** - No abnormal FDG accumulation"
+    },
+    {
+      "chunk_index": 38,
+      "edited_similarity": 0.5195156931877136,
+      "evidence_id": "inner1_row522_chunk38",
+      "original_similarity": 0.47142139077186584,
+      "row_id": 522,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "- Baseline cardiac evaluation (ECG) given age and hypertension. - Re\u2011confirm vaccination status (influenza, COVID\u201119) before immunosuppressive therapy. 4. **Follow\u2011Up & Monitoring** - Schedule oncology follow\u2011up in 1 week to finalize chemotherapy selection and review insurance response. - Plan for first cycle administration in the infusion center with appropriate monitoring for neutropenia, renal function, and infusion reactions. - Arrange for PRO\u2011CTCAE questionnaire completion at each visit to track symptom burden. 5. **Clinical Trial Consideration** - Offer referral to the institutional clinical trials office to explore KRAS\u2011targeted studies or immunotherapy combinations, given KRAS G12C mutation and PD\u2011L1 expression. 6. **Documentation** - Document informed consent discussion regarding risks/benefits of each regimen. - Update treatment plan in the electronic medical record and communicate with the pharmacy team for medication preparation. **Signature:** ________________________ **Date:** *(omitted per instruction)* <new_note> Encounter Record Timepoint: At age 69 Encounter Type: outpatient pharmacy counseling session Diagnosis Codes: - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99213: Established patient visit, low complexity <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 69 Instrument: PRO-CTCAE Nausea - Severity: 1/4 (Mild) Fatigue - Severity: 2/4 (Moderate) Pain - Severity: 1/4 (Mild) Dyspnea - Severity: 2/4 (Moderate) Insomnia - Severity: 1/4 (Mild) <new_note> **Patient:** James Miller **MRN:** 00458721 **Age:** 69 **Sex:** Male **Provider:** Dr. A. Patel, MD **Service:** Medical Oncology --- ### Chief Complaint Baseline oncology assessment prior to initiation of systemic therapy for stage IV squamous non\u2011small cell lung cancer (NSCLC). --- ### History of Present Illness James is a 69\u2011year\u2011old man with a 3\u2011month history of persistent cough,"
+    },
+    {
+      "chunk_index": 6,
+      "edited_similarity": 0.7147464156150818,
+      "evidence_id": "inner1_row830_chunk6",
+      "original_similarity": 0.7033143043518066,
+      "row_id": 830,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "performed. - TMB calculation is based on the targeted panel and may differ from whole\u2011exome estimates. --- **Report Generated By:** Molecular Pathology Laboratory \u2013 Comprehensive Genomic Profiling Service Accredited Clinical Laboratory (CLIA\u2011certified) **Report Version:** 1.0 *End of Report* <new_note> **Radiology Report** **Patient:** James Patel **Age:** 57 **Sex:** Male **Exam:** - Contrast\u2011enhanced computed tomography (CT) of the chest, axial images with multiplanar reconstructions. - Magnetic resonance imaging (MRI) of the brain with gadolinium\u2011enhanced T1\u2011weighted sequences, axial and sagittal planes, diffusion\u2011weighted imaging (DWI) and apparent diffusion coefficient (ADC) maps. **Technique:** - CT chest performed after intravenous administration of iodinated contrast (120 mL, 350 mg I/mL) using a 64\u2011slice multidetector scanner. Images obtained from lung apices through the adrenal glands. - MRI brain performed on a 3\u2011Tesla system; gadolinium\u2011based contrast (0.1 mmol/kg) administered intravenously. Standard brain protocol applied. **Findings** **Chest (CT):** - **Right Upper Lobe:** A solitary, irregular, heterogeneously enhancing mass measuring approximately **5.2 cm** in greatest axial dimension located in the posterior segment of the right upper lobe. The mass demonstrates areas of central necrosis and spiculated margins, invading adjacent bronchovascular structures. - **Lymph Nodes:** Prominent right hilar lymphadenopathy with a short\u2011axis diameter up to **2.1 cm**. Mediastinal stations (subcarinal, right paratracheal, and right lower paratracheal) contain enlarged nodes ranging from **1.5\u20132.3 cm** in short axis. No calcified nodes identified. - **Lung Parenchyma:** No additional pulmonary nodules or masses identified in the remaining lobes. No evidence of pleural effusion or thickening. - **Mediastinum/Upper Abdomen:** No mediastinal mass effect, pericardial effusion, or abdominal organ lesions noted on the limited"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.4774160087108612,
+      "evidence_id": "inner1_row830_chunk0",
+      "original_similarity": 0.46686261892318726,
+      "row_id": 830,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "**Pathology Report** **Specimen Identification** - **Specimen ID:** 2023\u2011RU\u2011LUNG\u2011001 - **Accession Number:** 2023\u201100123 - **Specimen Type:** CT\u2011guided core needle biopsy (right upper lobe lung mass) - **Number of Cores:** 5 cores, each 1.5 cm in length **Clinical History** - 57\u2011year\u2011old male with radiographic right upper lobe pulmonary mass and mediastinal/hilar lymphadenopathy. - Staging work\u2011up demonstrated distant metastases (brain). - Prior EGFR mutation testing negative; PD\u2011L1 expression 20 %. **Gross Description** - Five gray\u2011white, firm core fragments, each measuring 0.6 cm \u00d7 0.3 cm \u00d7 1.5 cm. - Tissue submitted in its entirety in one cassette. **Microscopic Description** *Hematoxylin\u2011Eosin (H&E) Sections* - The cores contain infiltrative nests and sheets of malignant epithelial cells with marked nuclear pleomorphism, irregular nuclear contours, coarse chromatin, and prominent nucleoli. - Cytoplasm is moderate to abundant, eosinophilic, and often keratinizing. - Frequent intercellular bridges and focal keratin pearl formation are identified. - No glandular formation or mucin production is observed. - The background stroma shows desmoplastic reaction with scattered inflammatory cells. - No definitive necrosis is noted within the limited sample. *Immunohistochemistry (IHC)* | Marker | Result | Interpretation | |--------|--------|----------------| | p40 | Strong nuclear positivity in >80 % of tumor cells | Confirms squamous differentiation | | p63 | Diffuse nuclear positivity | Supports squamous lineage | | CK5/6 | Cytoplasmic positivity | Consistent with squamous carcinoma | | TTF\u20111 | Negative (no nuclear staining) | Excludes adenocarcinoma | | Napsin A | Negative | Supports non\u2011adenocarcinoma | | Ki\u201167 (MIB\u20111) | Approximately 40 % of tumor nuclei | Indicates moderate"
+    },
+    {
+      "chunk_index": 12,
+      "edited_similarity": 0.45480024814605713,
+      "evidence_id": "inner1_row830_chunk12",
+      "original_similarity": 0.40919435024261475,
+      "row_id": 830,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "cell carcinoma of the lung** with brain metastases. - Molecular profile: KRAS G12C, TP53 R273C, CDKN2A loss, FGFR1 amplification, high TMB (15 mut/Mb). - PD\u2011L1 expression 20 %. - ECOG performance status 2. 2. **Mild respiratory symptoms** (cough, intermittent dyspnea) likely related to primary tumor burden. 3. **Hypertension**, controlled on lisinopril. --- ### Plan 1. **Systemic Therapy** - Initiate a platinum\u2011based doublet chemotherapy regimen (cisplatin\u2011based) in combination with a second cytotoxic agent appropriate for squamous histology. Discuss the rationale, expected benefits, and potential toxicities (nausea, myelosuppression, nephrotoxicity, neuropathy). - Obtain baseline labs (CBC, CMP, urinalysis) prior to first infusion; repeat CBC and CMP prior to each subsequent cycle. - Provide anti\u2011emetic prophylaxis (e.g., ondansetron + dexamethasone) per institutional protocol. 2. **Central Nervous System Management** - Recommend stereotactic radiosurgery (SRS) or whole\u2011brain radiation therapy (WBRT) for the two frontal lesions, given limited size and number. - Initiate a short taper of dexamethasone 4 mg PO BID to reduce perilesional edema, pending radiation oncology consultation. 3. **Supportive Care** - Counsel on smoking cessation reinforcement (already abstinent). - Encourage adequate hydration and nutrition; refer to dietitian if weight loss develops. - Offer pulmonary rehabilitation referral to improve dyspnea and exercise tolerance. 4. **Clinical Trial Consideration** - Discuss eligibility for clinical trials targeting KRAS G12C (e.g., sotorasib) or immunotherapy\u2011based combinations given PD\u2011L1 20 % and high TMB. Provide patient with trial information and arrange referral to research team if interested. 5. **Follow\u2011up & Monitoring** - Schedule first chemotherapy infusion within the next 7\u201310 days after baseline labs are reviewed. -"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 1,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_001_query_002_targeted",
+  "patient_outcomes_in_prompt": false,
+  "query": 2,
+  "query_id": "effect_query_003"
+}

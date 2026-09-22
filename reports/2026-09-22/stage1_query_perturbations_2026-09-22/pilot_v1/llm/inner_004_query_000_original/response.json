@@ -1,0 +1,60 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "Homozygous loss",
+        "Heterozygous loss",
+        "Wild-type/No alteration"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row510_chunk3",
+          "quote": "**STK11 homozygous loss** and **KEAP1 mutation** are known to be associated with primary resistance to PD\u20111/PD\u2011L1 checkpoint inhibitors"
+        },
+        {
+          "evidence_id": "inner4_row867_chunk19",
+          "quote": "Copy\u2011number loss (heterozygous)"
+        }
+      ],
+      "description": "The genomic status of the STK11 tumor suppressor gene, characterized by copy-number loss or the absence of pathogenic mutations.",
+      "extraction_instruction": "Identify the status of the STK11 gene from the Genomic Findings table or Interpretive Summary. Assign 'Homozygous loss' if homozygous deletion is noted, 'Heterozygous loss' if heterozygous copy-number loss is noted, and 'Wild-type/No alteration' if no pathogenic alteration is detected.",
+      "measurement_definition": "Determination of STK11 alteration via Next-Generation Sequencing (NGS), specified as homozygous deletion, heterozygous copy-number loss, or no pathogenic alteration detected.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The precise clinical impact of heterozygous versus homozygous loss on immunotherapy resistance is not fully detailed.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row407_chunk4",
+          "quote": "**Co\u2011occurring TP53 missense mutation (p.R273C)** is a common loss\u2011of\u2011function event in lung cancer and is associated with a more aggressive phenotype and potentially reduced depth of response to EGFR\u2011TKIs"
+        },
+        {
+          "evidence_id": "inner4_row895_chunk6",
+          "quote": "TP53 mutations are associated with more aggressive disease biology and may modestly reduce the magnitude and duration of response to EGFR\u2011TKI therapy"
+        }
+      ],
+      "description": "The presence or absence of a pathogenic TP53 mutation, particularly hotspot mutations such as p.R273C or p.R273H.",
+      "extraction_instruction": "Check the Genomic Findings for TP53. Assign positive if a pathogenic mutation is listed (e.g., p.R273C, p.R273H). Assign negative if listed as 'Wild-type' or 'No pathogenic alterations detected'.",
+      "measurement_definition": "Positive if a pathogenic TP53 mutation (e.g., missense SNV) is detected via NGS; negative if the gene is reported as wild-type or no pathogenic alterations are detected.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "TP53 Mutation Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether different TP53 mutations (e.g., R273C vs R273H) lead to differing magnitudes of effect on TKI response.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Genomic variables are derived from DNA-based NGS, which may miss rare fusions not captured by the panel.",
+    "The evidence is based on a limited set of patient reports, restricting the generalizability of the hypothesized roles."
+  ],
+  "summary": "The evidence identifies baseline genomic alterations associated with therapeutic response and prognosis in non-small cell lung cancer (NSCLC). STK11 loss is linked to primary resistance to PD\u20111/PD\u2011L1 checkpoint inhibitors, and TP53 mutations are associated with a more aggressive phenotype and potentially reduced response to EGFR-tyrosine kinase inhibitors (TKIs)."
+}

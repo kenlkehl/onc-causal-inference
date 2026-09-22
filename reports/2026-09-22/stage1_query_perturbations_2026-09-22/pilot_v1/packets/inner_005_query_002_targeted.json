@@ -1,0 +1,218 @@
+{
+  "actual_distance": 0.19999989867210388,
+  "condition": "targeted",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.8183513879776001,
+      "evidence_id": "inner5_row206_chunk0",
+      "original_similarity": 0.7687227725982666,
+      "row_id": 206,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "**Pathology Report** **Patient:** Eleanor Martinez **Sex:** Female **Age:** 66 years **Specimen:** CT\u2011guided core needle biopsy of right upper lobe lung mass **Specimen ID:** MARTINEZ_E_66_RUL_001 **Clinical History:** - 66\u2011year\u2011old woman with a right upper lobe pulmonary mass identified on contrast\u2011enhanced CT. - No prior history of malignancy. - No radiographically evident brain metastases. --- ### Gross Description Three core fragments were received, each measuring 0.4 cm \u00d7 0.3 cm \u00d7 0.2 cm (total length 1.2 cm). The tissue is tan\u2011white, firm, and shows areas of necrosis. Specimens are submitted in formalin\u2011fixed, paraffin\u2011embedded blocks. --- ### Microscopic Description - The sections contain fragments of malignant epithelium arranged in nests and sheets with focal keratinization. - Tumor cells display marked nuclear pleomorphism, hyperchromasia, irregular nuclear membranes, and prominent nucleoli. - Numerous mitotic figures (\u226515 per 10 high\u2011power fields) are present. - Foci of necrosis are noted. - No glandular formation, mucin production, or neuroendocrine features are identified. - Adjacent lung parenchyma shows focal alveolar collapse but no definitive in\u2011situ component. --- ### Immunohistochemistry (IHC) | Marker | Result | Interpretation | |--------|--------|----------------| | **p40** | Strong nuclear positivity in >90 % of tumor cells | Supports squamous differentiation | | **CK5/6** | Diffuse cytoplasmic positivity | Supports squamous lineage | | **TTF\u20111** | Negative | Excludes adenocarcinoma | | **Napsin A** | Negative | Consistent with non\u2011adenocarcinoma | | **Synaptophysin** | Negative | No neuroendocrine differentiation | | **p63** (optional) | Positive (if performed) | Further supports squamous phenotype | --- ### Molecular Studies (selected) - **EGFR mutation analysis"
+    },
+    {
+      "chunk_index": 15,
+      "edited_similarity": 0.38492316007614136,
+      "evidence_id": "inner5_row206_chunk15",
+      "original_similarity": 0.3701966404914856,
+      "row_id": 206,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "mmHg | | HR | 78 bpm, regular | | RR | 16 /min | | Temp | 36.8 \u00b0C (98.2 \u00b0F) | | SpO\u2082 | 96 % on room air | **General:** Alert, oriented \u00d7 3, in no acute distress. **HEENT:** Normocephalic, atraumatic; oropharynx clear. **Neck:** No cervical lymphadenopathy; trachea midline. **Cardiovascular:** Regular rate and rhythm; no murmurs, rubs, or gallops. **Respiratory:** - **Inspection:** No use of accessory muscles. - **Auscultation:** Decreased breath sounds over left lower lung field; fine inspiratory crackles at left posterior base. No wheezes. - **Percussion:** Slight dullness over left lower zone. **Abdomen:** Soft, non\u2011tender, no hepatosplenomegaly. **Extremities:** No edema; left iliac crest area non\u2011tender on palpation. **Neurologic:** Grossly intact; CN II\u2011XII intact. **Skin:** No new lesions. --- ### Laboratory Data (most recent, drawn today) | **CBC** | | |---|---| | WBC | 6.8 k/\u00b5L (norm) | | Hgb | 12.2 g/dL (low) | | Hct | 36 % | | Plt | 240 k/\u00b5L (norm) | | ANC | 3.9 k/\u00b5L (norm) | | ALC | 1.2 k/\u00b5L | | **CMP** | | |---|---| | Na\u207a | 138 mmol/L | | K\u207a | 4.2 mmol/L | | Cl\u207b | 102 mmol/L | | CO\u2082 | 24 mmol/L | | BUN | 16 mg/dL (norm) | | Cr | 1.0 mg/dL (norm) | | Glucose | 92 mg/dL | | Ca\u00b2\u207a | 9.4 mg/dL | | Albumin | 3.9 g/dL (norm) | | Total protein | 7.2 g/dL | **Calculated neutrophil\u2011to\u2011lymphocyte ratio:** \u20130.17 (recorded per laboratory algorithm). --- ### Imaging Review"
+    },
+    {
+      "chunk_index": 1,
+      "edited_similarity": 0.7539082765579224,
+      "evidence_id": "inner5_row206_chunk1",
+      "original_similarity": 0.6989319324493408,
+      "row_id": 206,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Supports squamous differentiation | | **CK5/6** | Diffuse cytoplasmic positivity | Supports squamous lineage | | **TTF\u20111** | Negative | Excludes adenocarcinoma | | **Napsin A** | Negative | Consistent with non\u2011adenocarcinoma | | **Synaptophysin** | Negative | No neuroendocrine differentiation | | **p63** (optional) | Positive (if performed) | Further supports squamous phenotype | --- ### Molecular Studies (selected) - **EGFR mutation analysis (PCR):** No activating mutations detected. - **ALK rearrangement (IHC):** Negative. - **ROS1 rearrangement (IHC):** Negative. *(Comprehensive next\u2011generation sequencing was not performed on this specimen.)* --- ### Diagnosis **Poorly differentiated squamous cell carcinoma, right upper lobe lung** (WHO Classification of Tumours of the Lung, Pleura, Thymus and Heart, 5th Edition) --- ### Comment The tumor exhibits a squamous immunophenotype (p40+, CK5/6+) and lacks markers of adenocarcinoma or neuroendocrine differentiation. EGFR mutation testing is negative; additional broad molecular profiling may be considered to identify potential therapeutic targets. No evidence of metastatic disease is present in the sampled tissue. <new_note> **Next\u2011Generation Sequencing (NGS) Report** **Patient:** Eleanor Martinez **Sex:** Female **Age:** 66 y **Specimen** - **Source:** CT\u2011guided core needle biopsy of right upper lobe lung mass - **Specimen ID:** RUL\u2011BX\u20112023\u2011001 - **Tissue Type:** Formalin\u2011fixed, paraffin\u2011embedded (FFPE) core - **Histology (from concurrent pathology):** Poorly differentiated squamous cell carcinoma, p40\u2011positive, CK5/6\u2011positive - **Tumor Content (estimated by pathology):** 40 % **Test Performed** - **Assay:** Comprehensive Genomic Profiling (CGP) \u2013 hybrid\u2011capture, DNA\u2011based NGS panel covering 324 cancer\u2011relevant genes (including full coding regions of KRAS, TP53, STK11, CDKN2A, EGFR, ALK, ROS1, BRAF, MET, RET, NTRK1\u20113, etc.). - **Sequencing Depth:** Median >"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.7820237874984741,
+      "evidence_id": "inner5_row837_chunk0",
+      "original_similarity": 0.7352780103683472,
+      "row_id": 837,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "**Pathology Report** **Patient:** Michael Thompson **Sex:** Male **Age:** 61 years **Specimen:** Bronchoscopic core biopsy \u2013 right upper lobe lung mass **Specimen ID:** BRONC\u2011RU\u20112023\u2011001 **Clinical History:** - 61\u2011year\u2011old male with a 5.8 cm right upper lobe pulmonary mass identified on contrast\u2011enhanced CT. - Imaging demonstrates right hilar and mediastinal lymphadenopathy and a 2.1 cm left adrenal lesion. - No prior systemic therapy. **Gross Description:** - Four core fragments received in formalin, each measuring 0.4 cm \u00d7 0.3 cm \u00d7 0.2 cm (total tissue 1.2 cm). - Tan\u2011white, firm, and slightly gritty on cut surface. - No necrotic debris noted grossly. **Microscopic Description:** - The sections show infiltrative nests and sheets of malignant epithelial cells with marked nuclear pleomorphism, hyperchromasia, and prominent nucleoli. - Cytoplasm is moderate to abundant, eosinophilic. - Scant keratinization; occasional focal keratin pearls noted but not prominent. - Mitotic activity is brisk (\u224812 mitoses per 10 high\u2011power fields). - No definitive glandular formation. - No evidence of necrosis within the sampled tissue. - Adjacent bronchial epithelium is unremarkable. **Immunohistochemistry (IHC):** | Marker | Result | Interpretation | |--------|--------|----------------| | p40 | Strong nuclear positivity in >90 % of tumor cells | Supports squamous differentiation | | CK5/6 | Diffuse cytoplasmic positivity | Supports squamous lineage | | TTF\u20111 | Negative | Excludes adenocarcinoma | | Napsin A | Negative | Excludes adenocarcinoma | | PD\u2011L1 (22C3) | Tumor proportion score 20 % (\u22651 % positive) | Provides information for immunotherapy eligibility | | Ki\u201167 | Approximately 70 % of tumor nuclei positive | High"
+    },
+    {
+      "chunk_index": 17,
+      "edited_similarity": 0.541333794593811,
+      "evidence_id": "inner5_row837_chunk17",
+      "original_similarity": 0.5365628004074097,
+      "row_id": 837,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "performed after intravenous administration of iodinated contrast. Axial images obtained from the lung apices through the adrenal glands with multiplanar reconstructions. **Findings** **Lungs** - Right upper lobe: A partially spiculated soft\u2011tissue mass measuring approximately **5.2 cm** in greatest axial dimension (previously 5.8 cm). The lesion demonstrates heterogeneous attenuation without new cavitation. No interval change in internal calcifications. - Remaining right lung fields: No new pulmonary nodules, consolidations, or ground\u2011glass opacities. No evidence of post\u2011radiation fibrosis beyond the treated region. - Left lung: No focal lesions; no pleural effusion or pneumothorax. **Mediastinum / Hila** - Hilar and mediastinal lymph nodes (stations 2R, 4R, 7) are stable in size (largest short\u2011axis dimension ~1.5 cm) compared with prior study. No new nodal enlargement. - No mediastinal mass, pericardial effusion, or abnormal vascular contour. **Upper Abdomen (included on chest scan)** - Left adrenal gland: A 2.1\u2011cm enhancing lesion consistent with known metastatic deposit; unchanged in size and morphology. Right adrenal gland unremarkable. - Liver, spleen, and kidneys: No focal lesions; attenuation patterns within normal limits. **Osseous structures** - Visualized ribs, vertebrae, and scapulae: No lytic or sclerotic lesions suggestive of metastatic disease. **Other** - No evidence of pleural thickening or effusion. - Upper airway and thyroid appear unremarkable. **Impression** - Slight reduction in size of the right\u2011upper\u2011lobe primary tumor (5.2 cm vs. 5.8 cm). - Mediastinal and hilar lymphadenopathy unchanged. - Left adrenal metastatic lesion stable. - No new thoracic or upper\u2011abdominal metastatic foci identified. Overall appearance is **stable disease with modest decrease in primary tumor size**. No acute abnormality"
+    },
+    {
+      "chunk_index": 1,
+      "edited_similarity": 0.7406601309776306,
+      "evidence_id": "inner5_row837_chunk1",
+      "original_similarity": 0.6823455095291138,
+      "row_id": 837,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "| Supports squamous differentiation | | CK5/6 | Diffuse cytoplasmic positivity | Supports squamous lineage | | TTF\u20111 | Negative | Excludes adenocarcinoma | | Napsin A | Negative | Excludes adenocarcinoma | | PD\u2011L1 (22C3) | Tumor proportion score 20 % (\u22651 % positive) | Provides information for immunotherapy eligibility | | Ki\u201167 | Approximately 70 % of tumor nuclei positive | High proliferative index | **Molecular Studies:** - **EGFR mutation analysis (PCR\u2011based):** No sensitizing EGFR mutations detected. - **KRAS, BRAF, ALK, ROS1:** Not performed on this specimen at the time of reporting. **Diagnosis:** - **Poorly differentiated squamous cell carcinoma, right upper lobe lung** (consistent with primary non\u2011small cell lung cancer, squamous histology). **Comment:** - The immunophenotype (p40+, CK5/6+, TTF\u20111\u2212, Napsin A\u2212) confirms squamous differentiation. - PD\u2011L1 expression of 20 % may be relevant for consideration of immune checkpoint inhibitor therapy. - EGFR wild\u2011type status is noted; additional comprehensive genomic profiling (e.g., KRAS, TP53, CDKN2A) may be considered to further guide systemic treatment options. **Pathologist:** _______________________ **Signature:** _______________________ --- *End of Report* <new_note> **Imaging Modality:** - Contrast\u2011enhanced computed tomography (CT) of the chest - Whole\u2011body ^18F\u2011FDG positron emission tomography/computed tomography (PET/CT) - Magnetic resonance imaging (MRI) of the brain (contrast\u2011enhanced) **Clinical History:** 63\u2011year\u2011old male with newly diagnosed stage IV non\u2011small cell lung cancer, squamous cell carcinoma of the right upper lobe, with known metastatic disease to the left adrenal gland and mediastinal lymph nodes. EGFR mutation negative, PD\u2011L1 tumor proportion score 20 %. --- ### Findings #### Chest CT (Contrast\u2011enhanced) - **Right Upper Lobe:** A"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.7808970212936401,
+      "evidence_id": "inner5_row672_chunk0",
+      "original_similarity": 0.733450174331665,
+      "row_id": 672,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "**Pathology Report** **Hospital:** Memorial Oncology Center \u2013 Department of Pathology **Specimen:** Bronchoscopic core biopsy \u2013 Right Upper Lobe mass **Patient:** Robert J. Miller **MRN:** 001236789 **Accession #:** 2023\u201100145 **Specimen ID:** BX\u2011RUL\u201166\u201101 **Clinical History:** 66\u2011year\u2011old male with newly diagnosed stage IV non\u2011small cell lung cancer (right upper lobe primary, brain metastases). --- ### Gross Description - **Received:** 4 core biopsy fragments. - **Dimensions:** 0.5 cm \u00d7 0.2 cm \u00d7 0.2 cm (largest fragment); remaining fragments range 0.4\u20130.6 cm in length. - **Appearance:** Tan\u2011white, firm, with focal areas of necrosis. - **Fixation:** Formalin\u2011fixed, paraffin\u2011embedded. ### Microscopic Description - **Architecture:** Infiltrative nests and sheets of malignant epithelial cells infiltrating bronchial mucosa and underlying stroma. - **Cytology:** Cells are polygonal with abundant eosinophilic cytoplasm, intercellular bridges, and focal keratinization. Nuclei are moderately pleomorphic with irregular contours, coarse chromatin, and prominent nucleoli. - **Necrosis:** Focal tumor necrosis noted. - **Mitoses:** 8 mitoses per 10 high\u2011power fields. - **Stroma:** Desmoplastic stromal reaction present. ### Immunohistochemistry (IHC) Panel | Marker | Result | Interpretation | |--------|--------|----------------| | p40 | Strong nuclear positivity in >90 % of tumor cells | Supports squamous differentiation | | CK5/6 | Diffuse cytoplasmic positivity | Consistent with squamous lineage | | TTF\u20111 | Negative | Excludes adenocarcinoma phenotype | | Napsin A | Negative | Supports non\u2011adenocarcinoma | | EGFR (clone 31G7) | Negative (wild\u2011type pattern) | No overexpression; EGFR wild\u2011type by IHC | *All controls performed appropriately and yielded expected results.* ### Molecular Studies - **EGFR mutation analysis:** Performed by immunohistochemistry; result interpreted as wild\u2011type (no overexpression)."
+    },
+    {
+      "chunk_index": 20,
+      "edited_similarity": 0.4870544970035553,
+      "evidence_id": "inner5_row672_chunk20",
+      "original_similarity": 0.4760184586048126,
+      "row_id": 672,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "residual enhancing nodule measuring approximately **0.8 cm** in greatest dimension is seen at the prior site of a treated metastasis. The lesion demonstrates decreased size and reduced enhancement compared with the pre\u2011treatment study, with minimal surrounding FLAIR hyperintensity and no appreciable mass effect. - **Left cerebellar hemisphere:** A new, well\u2011circumscribed, enhancing nodule measuring **0.6 cm** is identified in the left cerebellar cortex. The lesion is iso\u2011intense on T1, mildly hyperintense on T2/FLAIR, and demonstrates avid gadolinium enhancement. No adjacent edema or hydrocephalus is evident. - **Other intracranial structures:** No additional parenchymal lesions, hemorrhage, diffusion restriction, or abnormal susceptibility. Ventricular system and basal cisterns are unremarkable. No extra\u2011axial fluid collections. The cerebellar tonsils and brainstem are within normal limits. **Chest (CT):** - **Right upper lobe:** A 5.2 cm mass in the right upper lobe persists unchanged in size and attenuation compared with prior imaging. No new cavitation or calcification. - **Mediastinum:** Ipsilateral mediastinal lymph nodes remain stable in size; no new nodal enlargement. - **Lungs:** No new pulmonary nodules or infiltrates. No pleural effusion or pneumothorax. - **Upper abdomen:** No abnormal soft\u2011tissue masses, hepatic lesions, or adrenal abnormalities. **Impression** 1. **Brain:** Decrease in size of the previously treated right frontal metastasis (now 0.8 cm). New 0.6 cm enhancing lesion in the left cerebellar hemisphere, compatible with a new metastatic focus. No significant surrounding edema or mass effect. 2. **Chest:** Stable right upper lobe primary tumor and mediastinal lymphadenopathy; no interval change compared with prior studies. **Recommendations** - Correlation with the clinical picture and prior imaging is advised."
+    },
+    {
+      "chunk_index": 12,
+      "edited_similarity": 0.5503299236297607,
+      "evidence_id": "inner5_row672_chunk12",
+      "original_similarity": 0.4967919588088989,
+      "row_id": 672,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Plt 210 k/\u00b5L | Normal | | **CMP** | Creatinine 0.78 mg/dL (eGFR 109 mL/min), AST 22 U/L, ALT 18 U/L, Albumin 4.2 g/dL | Normal | | **Neutrophil\u2011to\u2011Lymphocyte Ratio** | 2.49 | \u2013 | | **Tumor Markers** | CEA 3.2 ng/mL (high), LDH 300 U/L (high) | \u2013 | --- ### 12. Imaging Summary - **Contrast\u2011enhanced CT Chest (performed 2 weeks ago):** 5.2 cm right upper lobe mass with irregular margins; ipsilateral mediastinal lymphadenopathy (stations 4R/7). No pleural effusion. - **PET/CT (performed 2 weeks ago):** Hypermetabolic activity in the right upper lobe mass (SUVmax 12.4) and mediastinal nodes (SUVmax 8.1). FDG\u2011avid right frontal brain lesion (SUVmax 9.3) and multiple lytic lesions in lumbar vertebrae (SUVmax 6\u20137). - **MRI Brain (contrast, performed 1 week ago):** 1.8 cm right frontal cortical lesion with surrounding edema; no mass effect. No additional intracranial lesions identified at that time. *Interpretation:* Findings consistent with stage IV squamous NSCLC with brain and osseous metastases. No evidence of new lesions beyond those already documented. --- ### 13. Assessment 1. **Stage IV squamous cell carcinoma of the right upper lobe, T2aN3M1c** \u2013 progressive disease with brain (right frontal) and osseous metastases. 2. **ECOG performance status 3** \u2013 limited functional reserve, significant symptom burden (cough, dyspnea, weight loss). 3. **Symptomatic cough and dyspnea** \u2013 likely tumor\u2011related airway irritation and partial obstruction. 4. **Weight loss & fatigue** \u2013 multifactorial (cancer cachexia, decreased oral intake). 5. **Brain metastasis** \u2013 currently asymptomatic neurologically, but at risk for edema. --- ### 14. Plan | Item | Details | |------|---------|"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.826050877571106,
+      "evidence_id": "inner5_row221_chunk0",
+      "original_similarity": 0.7785866856575012,
+      "row_id": 221,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "**PATHOLOGY REPORT** **Specimen ID:** ALV\u201158\u2011001 **Specimen Type:** CT\u2011guided core needle biopsy \u2013 right upper lobe lung mass **Submitting Clinician:** Oncology Service **Clinical History:** 58\u2011year\u2011old male with a 5.2 cm right upper lobe pulmonary mass on imaging, concerning for primary lung carcinoma. No prior tissue diagnosis. ECOG performance status 1. **Gross Description:** Four core biopsy fragments received in formalin, collectively measuring 1.8 cm in total length. The tissue is tan\u2011white, firm, and appears representative of parenchymal lung. All fragments are submitted in their entirety. **Microscopic Description:** Sections reveal infiltrating nests and sheets of malignant epithelial cells with the following features: * Polygonal cells with abundant eosinophilic cytoplasm. * Prominent intercellular bridges and focal keratinization. * Moderate nuclear pleomorphism, irregular nuclear membranes, and coarse chromatin. * Mitotic activity up to 8 per 10 high\u2011power fields. * No glandular formation or mucin production identified. * Background lung parenchyma shows focal emphysematous change; no necrotizing granulomas. **Immunohistochemistry (IHC):** | Marker | Result | Interpretation | |--------|--------|----------------| | p40 | Strong nuclear positivity in >90% of tumor cells | Supports squamous differentiation | | CK5/6 | Diffuse cytoplasmic positivity | Supports squamous lineage | | TTF\u20111 | Negative | Excludes adenocarcinoma | | Napsin A | Negative | Consistent with non\u2011adenocarcinoma | | CK7 | Negative | Supports squamous phenotype | | Ki\u201167 (MIB\u20111) | Approximately 30% of tumor nuclei | Proliferative index | **Molecular Testing (Sent for Ancillary Studies):** A separate request for targeted next\u2011generation sequencing (including EGFR, KRAS, ALK, and other actionable alterations) has been placed on the biopsy"
+    },
+    {
+      "chunk_index": 18,
+      "edited_similarity": 0.5043343901634216,
+      "evidence_id": "inner5_row221_chunk18",
+      "original_similarity": 0.4901564121246338,
+      "row_id": 221,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "short axis). Carina and trachea unremarkable. - **Pleura/Chest Wall:** No pleural thickening or chest\u2011wall invasion. **Upper Abdomen** - **Liver:** Normal size (13 cm), homogeneous attenuation, no focal hypo\u2011 or hyper\u2011attenuating lesions. No intra\u2011hepatic biliary dilatation. - **Gallbladder:** Collapsed, no wall thickening or stones. - **Spleen:** Normal morphology, 10 cm, homogeneous. - **Adrenal Glands:** Both adrenal glands normal in size and attenuation; no adrenal masses. **Abdomen & Pelvis** - **Kidneys:** Normal size; left kidney contains a 2.0 cm simple cortical cyst (Bosniak I), right kidney unremarkable. No hydronephrosis. - **Pancreas:** Normal contour and attenuation, no mass or ductal dilatation. - **Bowel:** No wall thickening, obstruction, or abnormal enhancement in the stomach, small bowel, or colon. - **Retroperitoneum:** No enlarged lymph nodes. - **Bladder/Prostate:** Unremarkable. - **Pelvis:** No pelvic masses or lymphadenopathy. No free fluid. **Osseous Structures** - Visualized thoracic vertebrae, ribs, pelvis, and sacrum demonstrate normal marrow signal without lytic or sclerotic lesions. No pathologic fractures. **Impression** 1. No evidence of recurrent or metastatic disease in the chest, abdomen, or pelvis. 2. Stable postoperative changes in the right upper lobe; no new pulmonary nodules or mediastinal lymphadenopathy. 3. Incidental simple left renal cyst \u2013 benign appearance. **Recommendation:** None. (Routine surveillance imaging as per clinical protocol.) --- **Radiologist:** _______________________ **Date:** _______________________ (Date to be inserted by EMR) <new_note> assistantfinal**Oncology Progress Note** **Patient:** James Alvarez **MRN:** ******* **DOB:** **[Age 60]** **Sex:** Male **Visit Type:** Follow\u2011up, post\u2011adjuvant therapy --- ### 1. Chief Complaint Routine oncology follow\u2011up after completion of adjuvant chemotherapy and surgical resection for non\u2011small cell lung cancer (NSCLC)."
+    },
+    {
+      "chunk_index": 1,
+      "edited_similarity": 0.712460994720459,
+      "evidence_id": "inner5_row221_chunk1",
+      "original_similarity": 0.6607811450958252,
+      "row_id": 221,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Negative | Excludes adenocarcinoma | | Napsin A | Negative | Consistent with non\u2011adenocarcinoma | | CK7 | Negative | Supports squamous phenotype | | Ki\u201167 (MIB\u20111) | Approximately 30% of tumor nuclei | Proliferative index | **Molecular Testing (Sent for Ancillary Studies):** A separate request for targeted next\u2011generation sequencing (including EGFR, KRAS, ALK, and other actionable alterations) has been placed on the biopsy material. Adequacy for molecular analysis is confirmed; results pending. **Final Diagnosis:** 1. **Primary lung squamous cell carcinoma**, right upper lobe, confirmed by morphology and immunophenotype (p40+, CK5/6+, TTF\u20111\u2212, Napsin A\u2212). **Comments:** The tumor exhibits classic histologic and immunohistochemical features of squamous cell carcinoma of the lung. Molecular testing has been performed to assess for actionable genomic alterations; the results will be reported separately. No further comment on management is provided in this pathology report. <new_note> **Next\u2011Generation Sequencing (NGS) Report** **Molecular Oncology Laboratory \u2013 Comprehensive Genomic Profiling** --- ### 1. Patient & Clinical Information | Item | Detail | |--------------------------|---------------------------------------------------| | **Patient Name** | James Alvarez | | **Medical Record #** | (redacted) | | **Date of Birth** | (redacted) \u2013 Age 58 years at time of testing | | **Sex** | Male | | **Primary Diagnosis** | Non\u2011small cell lung cancer \u2013 squamous histology (right upper lobe) | | **Clinical Stage** | cT3 N2 M0 (Stage IIIA) \u2013 pre\u2011operative work\u2011up | | **Performance Status** | ECOG 1 | | **Specimen Type** | CT\u2011guided core needle biopsy of right upper lobe mass | | **Date of Specimen Collection** | (redacted) | | **Ordering"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.7777196764945984,
+      "evidence_id": "inner5_row18_chunk0",
+      "original_similarity": 0.7394115328788757,
+      "row_id": 18,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "**Pathology Report** **Patient:** Johnathan Miller **MRN:** 001-234567 **Sex:** Male **Age:** 65 years **Specimen:** Right Upper Lobe Lobectomy with Mediastinal Lymph Node Dissection **Specimen ID:** RUL\u20112023\u2011001 --- ### Gross Description The specimen consists of a right upper lobe lung wedge measuring **7.5 cm \u00d7 6.8 cm \u00d7 4.2 cm** and attached mediastinal tissue containing **12 lymph nodes**. The lobectomy is submitted in serial sections labeled RUL\u2011A through RUL\u2011F. A **3.2 cm** tan-white, firm, partially necrotic mass is identified in the peripheral parenchyma, located 1.1 cm from the visceral pleural surface. The bronchial margin is **1.4 cm** from the tumor; the hilar and vascular margins are free of tumor. All twelve lymph nodes range from 0.3 cm to 1.0 cm in greatest dimension. ### Microscopic Description - **Tumor:** Moderately differentiated squamous cell carcinoma, keratinizing type. Tumor cells form nests and sheets with intercellular bridges and focal keratin pearls. Nuclear atypia is moderate with irregular nuclear membranes and prominent nucleoli. Mitotic activity is 6/10 HPF. No evidence of necrosis beyond focal central necrosis noted grossly. - **Margins:** The visceral pleural, bronchial, hilar, and vascular margins are free of tumor (closest distance 1.4 cm). - **Lymphovascular Invasion:** Absent. - **Perineural Invasion:** Not identified. - **Lymph Nodes:** All 12 mediastinal lymph nodes are negative for metastatic carcinoma (0/12). ### Ancillary Studies | Test | Method | Result | |------|--------|--------| | p40 (\u0394Np63) | Immunohistochemistry | Positive (diffuse nuclear staining) | | CK5/6 | Immunohistochemistry | Positive (diffuse cytoplasmic staining) | | TTF\u20111 | Immunohistochemistry | Negative | | Napsin A |"
+    },
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.5573804378509521,
+      "evidence_id": "inner5_row18_chunk2",
+      "original_similarity": 0.5489405393600464,
+      "row_id": 18,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "Diagnosis: J18.9 - Pneumonia, unspecified organism Length of Stay: 3 days Discharge Disposition: home <new_note> Encounter Record Timepoint: At age 66 Encounter Type: outpatient oncology follow-up Diagnosis Codes: - Z08: Encounter for follow-up after cancer treatment Procedure Codes: - 99214: Established patient visit, moderate complexity <new_note> Laboratory Results Timepoint: At age 66 Complete Blood Count (CBC): WBC: 7.1 k/uL [Reference: 3.7-10.5] - Normal Hgb: 13.2 g/dL [Reference: 12.0-16.0] - Normal Plt: 260 k/uL [Reference: 150-400] - Normal Comprehensive Metabolic Panel (CMP): Cr: 0.9 mg/dL [Reference: 0.6-1.2] - Normal BUN: 14 mg/dL [Reference: 7-20] - Normal Albumin: 4.0 g/dL [Reference: 3.5-5.0] - Normal <new_note> **CT Chest/Abdomen/Pelvis \u2013 Contrast Enhanced** **Patient:** Johnathan Miller \u2013 Male, 68 y/o **Referring Physician:** Oncology Service **Study Date:** [Date omitted] **Indication:** Surveillance for recurrent disease; new respiratory symptoms (dyspnea, cough). **Technique:** Multidetector CT of the thorax, abdomen, and pelvis performed after intravenous administration of non\u2011ionic iodinated contrast (120 mL at 3 mL/s). Arterial phase images of the chest were obtained followed by portal\u2011venous phase images extending from the lung apices through the proximal femora. Sagittal and coronal reconstructions were generated. No significant motion artifact. **Findings** **Chest** - **Right Upper Lobe:** Post\u2011lobectomy changes with surgical staple line and fibrosis. No residual mass or suspicious soft\u2011tissue. Mediastinal pleura intact. No evidence of recurrent disease at the resection margin. - **Left Lower Lobe:** A new, irregular, 3.5 \u00d7 2.8 cm solid mass in the posterior basal segment. The lesion is heterogeneous, demonstrates spiculated margins, and shows avid contrast enhancement. No cavitation. - **Pulmonary Parenchyma:** Multiple bilateral"
+    },
+    {
+      "chunk_index": 1,
+      "edited_similarity": 0.7354395389556885,
+      "evidence_id": "inner5_row18_chunk1",
+      "original_similarity": 0.6888288259506226,
+      "row_id": 18,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Invasion:** Absent. - **Perineural Invasion:** Not identified. - **Lymph Nodes:** All 12 mediastinal lymph nodes are negative for metastatic carcinoma (0/12). ### Ancillary Studies | Test | Method | Result | |------|--------|--------| | p40 (\u0394Np63) | Immunohistochemistry | Positive (diffuse nuclear staining) | | CK5/6 | Immunohistochemistry | Positive (diffuse cytoplasmic staining) | | TTF\u20111 | Immunohistochemistry | Negative | | Napsin A | Immunohistochemistry | Negative | | PD\u2011L1 (22C3) Tumor Proportion Score | Immunohistochemistry | 10 % | | EGFR Mutation Analysis | PCR\u2011based assay | No pathogenic mutations detected | ### Final Diagnosis 1. **Right upper lobe, lung** \u2013 Moderately differentiated (keratinizing) squamous cell carcinoma, **pT2a** (tumor size 3.2 cm), **pN0**, **M0**. 2. Surgical margins negative. No lymphovascular or perineural invasion. 3. 12 mediastinal lymph nodes examined, all negative for metastasis. 4. PD\u2011L1 expression 10 % (TPS). EGFR mutation negative. **Stage (AJCC 8th Edition):** Stage IIA (T2a N0 M0) --- *Prepared by:* Pathology Department, Department of Anatomic Pathology [Institution Name] *Report generated by:* Attending Surgical Pathologist, MD, PhD Date of report: __________ (to be entered) <new_note> Hospital Admission Record Timepoint: At age 66 Reason for Admission: community-acquired pneumonia Principal Diagnosis: J18.9 - Pneumonia, unspecified organism Length of Stay: 3 days Discharge Disposition: home <new_note> Encounter Record Timepoint: At age 66 Encounter Type: outpatient oncology follow-up Diagnosis Codes: - Z08: Encounter for follow-up after cancer treatment Procedure Codes: - 99214: Established patient visit, moderate complexity <new_note> Laboratory Results Timepoint: At age 66 Complete Blood Count (CBC): WBC: 7.1 k/uL [Reference: 3.7-10.5] - Normal Hgb:"
+    },
+    {
+      "chunk_index": 1,
+      "edited_similarity": 0.7689610123634338,
+      "evidence_id": "inner5_row970_chunk1",
+      "original_similarity": 0.7196457386016846,
+      "row_id": 970,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "No evidence of glandular (adenocarcinomatous) differentiation. **Immunohistochemistry (IHC)** | Marker | Result | Interpretation | |--------|--------|----------------| | p40 | Strong nuclear positivity in >90 % of tumor cells | Confirms squamous lineage | | CK5/6 | Diffuse cytoplasmic positivity | Supports squamous differentiation | | p63 | Positive (patchy) | Consistent with squamous phenotype | | TTF\u20111 | Negative | Excludes adenocarcinoma | | Napsin A | Negative | Excludes adenocarcinoma | | EGFR (IHC) | Negative | Correlates with molecular testing (see below) | | ALK (D5F3) | Negative | No ALK rearrangement detected | **Molecular Studies** - **EGFR mutation analysis** (PCR\u2011based assay targeting exons 19 and 21) \u2013 No activating mutations identified. - **KRAS, BRAF, MET** \u2013 Wild\u2011type (testing performed by targeted NGS panel; results pending at time of report). **Diagnosis** - **Keratinizing squamous cell carcinoma, left upper lobe** (primary non\u2011small cell lung cancer, squamous type). **Comments** - The immunoprofile (p40+, CK5/6+, TTF\u20111\u2212, Napsin A\u2212) is diagnostic of squamous cell carcinoma of the lung. - EGFR mutation testing is negative; this aligns with the expected molecular profile of squamous histology. - No evidence of small\u2011cell carcinoma or mixed histology. - Staging information (T, N, M) is not provided by pathology and should be correlated with clinical and radiographic data. **Prepared By:** Pathologist: _________________________ Date: _________________________ (Date to be entered by the laboratory) <new_note> **Next\u2011Generation Sequencing (NGS) Report** **Patient:** Eleanor Martinez **Age:** 66 **Sex:** Female **Specimen Type:** Formalin\u2011fixed, paraffin\u2011embedded (FFPE) core biopsy of left upper lobe lung mass **Specimen Site:** Left upper lobe bronchoscopic core"
+    },
+    {
+      "chunk_index": 29,
+      "edited_similarity": 0.47803038358688354,
+      "evidence_id": "inner5_row970_chunk29",
+      "original_similarity": 0.46681758761405945,
+      "row_id": 970,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "soft\u2011tissue windows reviewed. No significant motion artifact. ### FINDINGS **Chest** - **Right hilar region:** A 2.6 cm \u00d7 2.3 cm soft\u2011tissue mass centered in the right hilar compartment, demonstrating heterogeneous enhancement. Size and morphology unchanged from prior examination. - **Mediastinum:** Right paratracheal (station 2R) and subcarinal (station 7) lymph nodes measured up to 1.2 cm in short axis, stable in size. No new mediastinal or hilar nodes identified. - **Left lung:** Post\u2011lobectomy changes with surgical staple line and volume loss in the left upper lobe; no residual mass or consolidation. - **Pleura:** No pleural effusion or thickening. - **Airways:** Patent tracheobronchial tree; no endobronchial lesion. - **Bones (visualized):** No additional osseous lesions in the thoracic spine or ribs. **Abdomen** - **Liver, spleen, pancreas, adrenal glands:** Normal attenuation; no focal lesions. - **Kidneys:** Normal size and enhancement; no calculi or masses. - **Retroperitoneum:** No enlarged lymph nodes. - **Bowel:** Unremarkable; no wall thickening or obstruction. - **Ascites:** None. **Pelvis** - **Osseous structures:** The previously described lytic lesion involving the left iliac crest measures approximately 1.1 cm, unchanged in size and appearance. No new osseous lesions identified in the pelvis or proximal femora. - **Viscera:** Bladder, prostate (female uterus present), and rectum appear unremarkable. - **Lymph nodes:** No pathologically enlarged pelvic nodes. ### IMPRESSION 1. Right hilar mass (2.6 cm) unchanged from prior imaging. 2. Mediastinal lymphadenopathy stable. 3. Left iliac crest lytic lesion unchanged. 4. No new pulmonary, abdominal, or pelvic metastatic lesions identified. Overall impression: **Stable disease** on interval CT surveillance. --- **Radiologist:** *[Signature]* **Accession #:**"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.747965395450592,
+      "evidence_id": "inner5_row970_chunk0",
+      "original_similarity": 0.6882264018058777,
+      "row_id": 970,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "**Pathology Report** **Specimen Identification** - **Specimen ID:** BLU\u20112023\u2011001 - **Specimen Type:** Bronchoscopic core biopsy (left upper lobe mass) - **Submitting Clinician:** Dr. [Name], Pulmonology **Clinical Information** - **Patient:** Eleanor Martinez, 66\u2011year\u2011old female - **Indication:** Evaluation of left upper lobe pulmonary mass identified on imaging; concern for primary lung carcinoma. **Gross Description** - Four core biopsy fragments received in formalin, labeled A\u2011D. - Core A: 0.9 cm \u00d7 0.3 cm, tan\u2011white, firm. - Core B: 0.8 cm \u00d7 0.3 cm, tan\u2011white, firm. - Core C: 0.7 cm \u00d7 0.2 cm, tan\u2011white, firm. - Core D: 0.6 cm \u00d7 0.2 cm, tan\u2011white, firm. - All cores submitted in their entirety, placed in cassettes, and processed for routine histology. **Microscopic Description** - Sections reveal a malignant epithelial neoplasm composed of nests and sheets of polygonal cells with abundant eosinophilic cytoplasm. - Prominent intercellular bridges and focal keratin pearls are present, confirming squamous differentiation. - Nuclei are moderately pleomorphic with irregular contours, coarse chromatin, and occasional nucleoli. - Mitotic activity is brisk (approximately 8\u201310 mitoses per 10 high\u2011power fields). - No necrosis is identified. - The surrounding bronchial mucosa shows focal ulceration but no dysplasia. - No evidence of glandular (adenocarcinomatous) differentiation. **Immunohistochemistry (IHC)** | Marker | Result | Interpretation | |--------|--------|----------------| | p40 | Strong nuclear positivity in >90 % of tumor cells | Confirms squamous lineage | | CK5/6 | Diffuse cytoplasmic positivity | Supports squamous differentiation | | p63 | Positive (patchy) | Consistent with squamous phenotype | | TTF\u20111 | Negative | Excludes adenocarcinoma | |"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 5,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_005_query_002_targeted",
+  "patient_outcomes_in_prompt": false,
+  "query": 2,
+  "query_id": "effect_query_003"
+}

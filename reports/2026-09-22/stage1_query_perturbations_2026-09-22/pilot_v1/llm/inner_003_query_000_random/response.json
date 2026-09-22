@@ -1,0 +1,51 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row329_chunk18",
+          "quote": "Loss of the CDKN2A tumor\u2011suppressor locus (p16INK4a) is observed in a subset of lung adenocarcinomas"
+        },
+        {
+          "evidence_id": "inner3_row84_chunk5",
+          "quote": "Homozygous deletion (exons 1\u20112)"
+        }
+      ],
+      "description": "Homozygous deletion of the CDKN2A tumor-suppressor locus (p16INK4a).",
+      "extraction_instruction": "Search the 'Genomic Findings' or 'Molecular Pathology' sections for mentions of CDKN2A homozygous loss or deletion.",
+      "measurement_definition": "Presence is defined by a genomic profiling report indicating 'homozygous loss' or 'homozygous deletion' of the CDKN2A gene/locus. Absence is the lack of such a finding in the genomic report.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "CDKN2A homozygous loss",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the clinical significance varies by the specific exons deleted (e.g., exons 1-2).",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row519_chunk9",
+          "quote": "Homozygous deletion (exons 1\u20119)"
+        }
+      ],
+      "description": "Homozygous loss of the STK11 gene.",
+      "extraction_instruction": "Check the genomic findings table for STK11 status, specifically looking for 'Homozygous deletion'.",
+      "measurement_definition": "Presence is defined by a genomic profiling report identifying a 'Homozygous deletion' of STK11. Absence is the lack of such a finding.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 homozygous deletion",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The frequency of this alteration across the specific cohort being analyzed.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "The evidence is derived from a small number of genomic reports.",
+    "The analysis lacks a comparison group (patients without these alterations) within the provided snippets to quantify the shift in retrieval signal."
+  ],
+  "summary": "The evidence identifies specific genomic tumor-suppressor losses (CDKN2A and STK11) in non-small cell lung cancer (NSCLC) patients, which are noted in genomic reports as being associated with more aggressive disease or resistance to specific immunotherapies."
+}

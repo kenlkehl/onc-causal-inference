@@ -1,0 +1,5 @@
+{
+  "at": "2026-09-22T14:49:51.367631+00:00",
+  "error": "numerical phase failed; inspect its saved failure artifact",
+  "traceback": "Traceback (most recent call last):\n  File \"/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/stage1_query_perturbations_2026-09-22/finish.py\", line 44, in <module>\n    main()\n    ~~~~^^\n  File \"/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/stage1_query_perturbations_2026-09-22/finish.py\", line 33, in main\n    raise RuntimeError(f\"{kind} phase failed; inspect its saved failure artifact\")\nRuntimeError: numerical phase failed; inspect its saved failure artifact\n"
+}

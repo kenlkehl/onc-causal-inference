@@ -1,0 +1,53 @@
+{
+  "at": "2026-09-22T14:57:22.643496+00:00",
+  "folds": [
+    {
+      "inner_fold": 1,
+      "outer_test_patients_used": 0,
+      "probe_predictions": 2973,
+      "query_variants": 125,
+      "random_control_distance_max_error": 1.1325823834340554e-08,
+      "unit_vector_max_error": 1.1920928955078125e-07
+    },
+    {
+      "inner_fold": 2,
+      "outer_test_patients_used": 0,
+      "probe_predictions": 2973,
+      "query_variants": 125,
+      "random_control_distance_max_error": 1.4901161193847656e-08,
+      "unit_vector_max_error": 1.1920928955078125e-07
+    },
+    {
+      "inner_fold": 3,
+      "outer_test_patients_used": 0,
+      "probe_predictions": 2973,
+      "query_variants": 125,
+      "random_control_distance_max_error": 7.450580596923828e-09,
+      "unit_vector_max_error": 1.1920928955078125e-07
+    },
+    {
+      "inner_fold": 4,
+      "outer_test_patients_used": 0,
+      "probe_predictions": 2973,
+      "query_variants": 125,
+      "random_control_distance_max_error": 4.1477523637922786e-08,
+      "unit_vector_max_error": 1.1920928955078125e-07
+    },
+    {
+      "inner_fold": 5,
+      "outer_test_patients_used": 0,
+      "probe_predictions": 2973,
+      "query_variants": 125,
+      "random_control_distance_max_error": 1.4901161193847656e-08,
+      "unit_vector_max_error": 1.1920928955078125e-07
+    }
+  ],
+  "inner_validation_scoring_started_at_audit_time": false,
+  "numerical_freeze_sha256": "2d9068df5d497cb1d4ff01702590d21a67d2821ee63b630648e1b75989d99830",
+  "numerical_test_command": "python -m pytest -q test_pilot.py",
+  "numerical_tests_passed": 6,
+  "packets_checked": 75,
+  "source_lint": "ruff check --select E9,F: passed",
+  "stage2_frozen_sources_checked": 15,
+  "stage2_sources_changed": []
+}

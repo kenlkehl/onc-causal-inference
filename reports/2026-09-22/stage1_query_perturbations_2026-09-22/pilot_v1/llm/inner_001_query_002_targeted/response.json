@@ -1,0 +1,63 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row124_chunk20",
+          "quote": "ECOG 2 indicates the patient is ambulatory but limited in daily activities"
+        },
+        {
+          "evidence_id": "inner1_row830_chunk12",
+          "quote": "ECOG performance status 2"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, reflecting their ability to perform activities of daily living.",
+      "extraction_instruction": "Identify and extract the numeric value associated with 'ECOG' or 'ECOG performance status'.",
+      "measurement_definition": "The Eastern Cooperative Oncology Group (ECOG) performance status scale, where 0 represents fully active and 4 represents completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Only a value of 2 is documented across the provided snippets; the full range of the scale is not represented.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row830_chunk0",
+          "quote": "PD\u2011L1 expression 20 %"
+        },
+        {
+          "evidence_id": "inner1_row830_chunk12",
+          "quote": "PD\u2011L1 expression 20 %"
+        }
+      ],
+      "description": "The percentage of tumor cells expressing Programmed Death-Ligand 1, used as a biomarker for immunotherapy eligibility.",
+      "extraction_instruction": "Extract the numerical percentage value following the term 'PD-L1 expression'.",
+      "measurement_definition": "Percentage (%) of tumor cells showing positivity for PD-L1 via immunohistochemistry (IHC).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Expression",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific IHC assay or scoring system (e.g., TPS) used to derive the percentage is not specified.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The evidence is based on a very small number of patient records.",
+    "Quantitative biomarker data (PD-L1, TMB) are only provided for a subset of the patients described."
+  ],
+  "summary": "The provided evidence identifies several baseline clinical variables associated with stage IV non-small cell lung cancer (NSCLC), including functional status (ECOG), biomarker expression (PD-L1), and primary tumor dimensions."
+}

@@ -1,0 +1,56 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row332_chunk9",
+          "quote": "Non\u2011small cell lung cancer, adenocarcinoma, right lower lobe, KRAS G12C\u2011mutated"
+        },
+        {
+          "evidence_id": "inner2_row885_chunk28",
+          "quote": "known non\u2011small cell lung adenocarcinoma (KRAS G12C\u2011mutated, PD\u2011L1 10 %)"
+        }
+      ],
+      "description": "Presence or absence of the KRAS G12C mutation in the tumor tissue.",
+      "extraction_instruction": "Identify if the radiology or pathology reports mention 'KRAS G12C-mutated' or 'KRAS G12C mutation'.",
+      "measurement_definition": "Positive: Explicitly documented as 'KRAS G12C-mutated'. Negative: Explicitly documented as KRAS wild-type or absence of the G12C mutation. Absence of mention is not a negative measurement.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "KRAS G12C Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify the assay method (e.g., NGS vs IHC) used to determine mutation status.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row885_chunk28",
+          "quote": "known non\u2011small cell lung adenocarcinoma (KRAS G12C\u2011mutated, PD\u2011L1 10 %)"
+        },
+        {
+          "evidence_id": "inner2_row692_chunk11",
+          "quote": "metastatic non\u2011small cell lung adenocarcinoma (KRAS G12C\u2011mutated, PD\u2011L1 5 %)"
+        }
+      ],
+      "description": "The percentage of tumor cells expressing Programmed Death-Ligand 1 (PD-L1).",
+      "extraction_instruction": "Extract the percentage value associated with 'PD-L1' (e.g., 'PD-L1 10 %').",
+      "measurement_definition": "Numeric percentage of PD-L1 expression.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Expression",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is unclear whether the percentage refers to total tumor cell staining (TPS) or a different scoring system.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of patients provided in the evidence snippets.",
+    "Lack of detailed information on the specific diagnostic assays used for molecular markers.",
+    "Limited variation in the PD-L1 values provided (only 5% and 10% are mentioned)."
+  ],
+  "summary": "The retrieval evidence identifies molecular profiling characteristics in patients with non-small cell lung adenocarcinoma (NSCLC), specifically focusing on KRAS G12C mutation status and PD-L1 expression levels as key baseline clinical variables."
+}

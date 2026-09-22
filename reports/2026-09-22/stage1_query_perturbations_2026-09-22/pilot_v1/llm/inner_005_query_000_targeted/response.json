@@ -1,0 +1,70 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row124_chunk16",
+          "quote": "next\u2011generation sequencing that revealed a TP53 missense mutation (p.R273C) and CDKN2A homozygous deletion"
+        },
+        {
+          "evidence_id": "inner5_row19_chunk34",
+          "quote": "KRAS G12C, TP53 R273C, FGFR1 amplification, CDKN2A loss; PD\u2011L1 TPS 20 %; high tumor mutational burden"
+        },
+        {
+          "evidence_id": "inner5_row608_chunk15",
+          "quote": "stage IV right\u2011lower\u2011lobe adenocarcinoma of the lung (KRAS G12C, TP53 R273H, STK11 loss, CDKN2A deletion; PD\u2011L1 5 %)"
+        }
+      ],
+      "description": "Presence of CDKN2A gene alteration, specifically homozygous deletion or loss.",
+      "extraction_instruction": "Identify mentions of CDKN2A in molecular profiling sections; mark as positive if 'homozygous deletion' or 'loss' is specified.",
+      "measurement_definition": "Detected via next-generation sequencing (NGS) as 'homozygous deletion' or 'loss'. Positive indicates the presence of the deletion/loss; negative indicates wild-type or no documented alteration.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "CDKN2A status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence uses both 'homozygous deletion' and 'loss'; it is uncertain if these are treated as equivalent for all clinical interpretations.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row124_chunk16",
+          "quote": "ECOG performance status remains 2 (ambulatory, capable of self\u2011care but unable to carry out work activities)"
+        },
+        {
+          "evidence_id": "inner5_row672_chunk17",
+          "quote": "ECOG 3 (limited self\u2011care, confined to bed >50% of waking hours)"
+        },
+        {
+          "evidence_id": "inner5_row951_chunk31",
+          "quote": "Her ECOG performance status remains 0"
+        }
+      ],
+      "description": "A scale used to assess the functional status of the patient and their ability to perform activities of daily living.",
+      "extraction_instruction": "Extract the numeric value associated with 'ECOG' or 'performance status'.",
+      "measurement_definition": "Numeric score from 0 (fully active) to 4 (completely disabled), as documented in clinical notes.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Variable timing of measurement (baseline vs. progress notes) may introduce measurement bias.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "The evidence is limited to a small number of specific case excerpts.",
+    "Genomic reporting terminology is slightly inconsistent (e.g., 'deletion' vs 'loss')."
+  ],
+  "summary": "The evidence identifies baseline genomic alterations (specifically CDKN2A loss) and functional status (ECOG Performance Status) as distinct clinical variables associated with patients presenting with stage IV non-small cell lung cancer and brain metastases."
+}

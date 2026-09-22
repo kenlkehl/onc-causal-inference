@@ -1,0 +1,10 @@
+{
+  "at": "2026-09-22T19:05:02.961829+00:00",
+  "previous_monitor_pid": 1161592,
+  "active_monitor_pid": 1169906,
+  "script": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_nested_modifier_count_2026-09-22/progress_2026-09-22.py",
+  "script_sha256": "793e82068b5205ef182ef56766391c0322a5a22344cd036f326f868eb889010d",
+  "selection_pid": 1161593,
+  "experiment_supervisor_pid": 1161519,
+  "reason": "Show full-training ranking, fitting, and evaluation separately; only link the final report after it exists. Scientific workers remain running."
+}

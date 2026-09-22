@@ -1,0 +1,148 @@
+{
+  "actual_distance": 0.13550136983394623,
+  "condition": "targeted",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.5832651853561401,
+      "evidence_id": "inner2_row902_chunk0",
+      "original_similarity": 0.5318232774734497,
+      "row_id": 902,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.5832651853561401,
+      "evidence_id": "inner2_row473_chunk0",
+      "original_similarity": 0.5318232774734497,
+      "row_id": 473,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.5936871767044067,
+      "evidence_id": "inner2_row56_chunk28",
+      "original_similarity": 0.5981735587120056,
+      "row_id": 56,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "(Mild)"
+    },
+    {
+      "chunk_index": 13,
+      "edited_similarity": 0.2321878969669342,
+      "evidence_id": "inner2_row56_chunk13",
+      "original_similarity": 0.17246079444885254,
+      "row_id": 56,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "no pleural effusion. Bone windows show a lytic lesion in the L1 vertebral body. - **Whole\u2011body \u00b9\u2078F\u2011FDG PET/CT (performed 1 month prior):** Intense FDG uptake in the right lower lobe primary (SUVmax 12), mediastinal nodes, left adrenal lesion, and L1 vertebral metastasis. No additional sites of disease. - **Brain MRI:** No intracranial metastases. ### Assessment 1. **Stage IV large\u2011cell carcinoma of the lung** (right lower lobe) with adrenal and vertebral metastases; disease currently stable on imaging. 2. **Molecular profile:** KRAS G12C, TP53 R273C, STK11 loss, PD\u2011L1 TPS 10 %. 3. **Performance status:** ECOG 2. 4. **Symptoms:** Chronic cough, mild exertional dyspnea. 5. **No prior systemic therapy** (platinum\u2011based or immunotherapy). ### Plan 1. **Baseline Laboratory Evaluation** \u2013 CBC with differential, comprehensive metabolic panel, hepatic panel, coagulation profile, and baseline tumor markers (CEA, CA\u201119\u20119) to be obtained prior to initiating systemic therapy. 2. **Pulmonary Function Testing** \u2013 Spirometry and DLCO to assess reserve for potential chemotherapy or immunotherapy. 3. **Symptom Management** \u2013 - Cough: trial of low\u2011dose oral dextromethorphan PRN; consider inhaled bronchodilator if wheezing develops. - Dyspnea: encourage pursed\u2011lip breathing; low\u2011dose supplemental oxygen to be considered if SpO\u2082 falls < 92 % on exertion. 4. **Systemic Therapy Discussion** \u2013 Review options including platinum\u2011based doublet chemotherapy, non\u2011platinum chemotherapy, and immunotherapy (PD\u20111/PD\u2011L1 inhibitors) in the context of KRAS G12C and PD\u2011L1 10 %. Discuss clinical trial eligibility (e.g., KRAS\u2011G12C targeted agents). Decision to be finalized after review of baseline labs and patient preferences. 5. **Bone Metastasis Management** \u2013 Since the L1 lesion is currently asymptomatic, continue observation; educate patient"
+    },
+    {
+      "chunk_index": 33,
+      "edited_similarity": 0.5011071562767029,
+      "evidence_id": "inner2_row17_chunk33",
+      "original_similarity": 0.513023853302002,
+      "row_id": 17,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Pain - Severity: 1/4 (Mild)"
+    },
+    {
+      "chunk_index": 31,
+      "edited_similarity": 0.2217201143503189,
+      "evidence_id": "inner2_row17_chunk31",
+      "original_similarity": 0.1642015427350998,
+      "row_id": 17,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "liver lesion stable, new right adrenal nodule 0.9 cm. No pleural effusion. - **PET/CT (today):** FDG\u2011avid left lung primary (SUVmax 9), mediastinal nodes, liver lesion, and right adrenal nodule. No new skeletal lesions. - **Brain MRI (prior, unchanged):** No intracranial metastases. ### 10. Assessment 1. **Stage IV NSCLC \u2013 progressive disease** (new adrenal metastasis) despite stable thoracic disease. 2. **Performance status:** ECOG 2, functional but limited by dyspnea. 3. **Post\u2011radiation status:** Completed palliative thoracic radiation; no current radiation\u2011related toxicity. 4. **Recent pneumonia:** Resolved; no ongoing infection. ### 11. Plan - **Systemic Therapy:** Discussed standard first\u2011line options for KRAS\u2011mutated NSCLC (platinum\u2011based doublet chemotherapy \u00b1 immunotherapy). Patient prefers to proceed with standard chemotherapy rather than a clinical trial. Will schedule initiation of a platinum doublet regimen (cis\u2011based) with concurrent Keytruda per NCCN guidelines, pending insurance authorization. - **Supportive Care:** - Continue albuterol PRN for dyspnea. - Prescribe low\u2011dose dexamethasone 4 mg PO daily for appetite stimulation if needed. - Counsel on nutrition and maintain adequate caloric intake. - **Laboratory Monitoring:** Repeat CBC, CMP, and baseline coagulation panel prior to first chemotherapy infusion (within 7 days). - **Imaging Follow\u2011up:** Repeat contrast\u2011enhanced CT of chest/abdomen/pelvis in 8 weeks to assess treatment response; consider repeat PET/CT at 12 weeks if clinically indicated. - **Vaccinations:** Ensure up\u2011to\u2011date influenza and pneumococcal vaccination prior to immunosuppressive therapy. - **Palliative Measures:** Discuss early integration of palliative care for symptom management and advance care planning. - **Patient Education:** Reviewed potential side effects of chemotherapy (nausea, cytopenias, neuropathy) and immunotherapy (immune\u2011related adverse events). Provided written materials and"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.30908167362213135,
+      "evidence_id": "inner2_row203_chunk14",
+      "original_similarity": 0.26952239871025085,
+      "row_id": 203,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "or night sweats. - Neurologic: No headache, dizziness, visual disturbances, weakness, numbness, or gait instability. - Respiratory: No increased cough, dyspnea, or hemoptysis. - Gastrointestinal: No nausea, vomiting, abdominal pain, or change in bowel habits. - Musculoskeletal: No bone pain or arthralgias. **Past Medical History:** - Non\u2011small cell lung cancer, squamous histology, stage IV (right lower lobe primary, mediastinal nodes, brain metastasis) \u2013 diagnosed 2 months ago. - Hypertension, well controlled with lisinopril. - Hyperlipidemia, on atorvastatin. **Past Surgical History:** - None. **Family History:** - Mother \u2013 breast cancer (deceased). - Father \u2013 coronary artery disease. **Social History:** - Never smoker; never used recreational drugs. - Alcohol: occasional wine. - Lives independently with spouse; active in community gardening. **Allergies:** - No known drug allergies (NKDA). **Current Medications:** - Lisinopril 10 mg PO daily - Atorvastatin 20 mg PO nightly - Dexamethasone 4 mg PO daily (post\u2011SRS edema prophylaxis) \u2013 plan to taper over 2 weeks - Acetaminophen 500 mg PO q6h PRN for mild headache or discomfort - Multivitamin daily **Physical Examination:** - **Vitals:** BP 124/78 mmHg, HR 72 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96% on room air. - **General:** Alert, oriented, in no acute distress. - **HEENT:** Pupils equal, reactive; extraocular movements intact; no papilledema. - **Neuro:** Cranial nerves II\u2011XII grossly intact; strength 5/5 in all extremities; sensation preserved; gait steady. - **Cardiovascular:** Regular rate and rhythm, no murmurs. - **Respiratory:** Clear to auscultation bilaterally, no wheezes or rales. - **Abdomen:** Soft, non\u2011tender, no organomegaly. - **Extremities:** No edema, no clubbing. **Laboratory Data"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.09923172742128372,
+      "evidence_id": "inner2_row203_chunk0",
+      "original_similarity": 0.07052650302648544,
+      "row_id": 203,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "**Pathology Report** **Patient:** Eleanor Mitchell **Age:** 75 years **Sex:** Female **Medical Record #:** 001\u201175\u2011MIT **Specimen:** CT\u2011guided core needle biopsy of right lower lobe pulmonary mass (right lower lobe, segment 10) \u2013 4 cores submitted in formalin. **Clinical History:** 75\u2011year\u2011old woman with a 5 cm right lower lobe mass identified on contrast\u2011enhanced CT of the chest. No prior systemic therapy or radiation. Differential diagnosis includes primary non\u2011small cell lung carcinoma versus metastatic disease. **Gross Description:** - Four cylindrical core biopsy fragments, each 0.8\u20131.2 cm in length, 0.3\u20130.5 cm in diameter. - Tan\u2011white, firm, and focally hemorrhagic. - All tissue submitted in its entirety. **Microscopic Description:** Sections reveal fragments of bronchial mucosa with underlying infiltrative neoplasm. The tumor is composed of nests and sheets of markedly atypical epithelial cells with the following features: - Moderate to marked nuclear pleomorphism, irregular nuclear contours, coarse chromatin, and prominent nucleoli. - Abundant eosinophilic cytoplasm with occasional intercellular bridges. - Focal keratinization (keratin pearls) noted in a minority of nests. - High mitotic activity (\u224815 mitoses per 10 high\u2011power fields). - No glandular formation or mucin production. - No evidence of necrosis within the limited biopsy material. **Immunohistochemistry (IHC):** | Marker | Result | Interpretation | |--------|--------|----------------| | p40 (\u0394Np63) | Strong nuclear positivity in >90 % of tumor cells | Confirms squamous differentiation | | CK5/6 | Diffuse cytoplasmic positivity | Supports squamous lineage | | TTF\u20111 | Negative | Excludes adenocarcinoma | | Napsin A | Negative | Consistent with non\u2011adenocarcinoma | | PD\u2011L1 (22C3) | Tumor Proportion Score (TPS)"
+    },
+    {
+      "chunk_index": 4,
+      "edited_similarity": 0.23119542002677917,
+      "evidence_id": "inner2_row203_chunk4",
+      "original_similarity": 0.17465311288833618,
+      "row_id": 203,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "instability and aggressive disease biology in squamous cell carcinoma of the lung. It is not directly targetable with approved agents but may influence response to chemotherapy and immunotherapy. 2. **CDKN2A Homozygous Deletion** \u2013 Loss of the CDKN2A tumor\u2011suppressor locus (p16INK4a) is frequent in squamous NSCLC and contributes to unchecked cell\u2011cycle progression. No approved targeted therapy exists, but CDK4/6 inhibition is under investigation in this molecular context. 3. **MET Amplification (Copy Number 5)** \u2013 Amplification above the threshold for clinical significance suggests a driver alteration. MET\u2011directed therapies (e.g., capmatinib, tepotinib, savolitinib) have demonstrated activity in MET\u2011amplified NSCLC, particularly when amplification is high (\u2265 5 copies). The level observed here may render the tumor susceptible to MET inhibition, either within a clinical trial or, where approved, off\u2011label use after careful consideration. 4. **PIK3CA p.E545K (Low\u2011level Subclone)** \u2013 This helical\u2011domain mutation activates the PI3K pathway. Although present at a low VAF, it may represent a minor subpopulation. PI3K/AKT/mTOR inhibitors are being explored in early\u2011phase trials for PIK3CA\u2011mutant NSCLC. 5. **Absence of EGFR, ALK, ROS1, BRAF Alterations** \u2013 Consistent with the prior EGFR\u2011negative testing; no targetable driver mutations from these families are present. Overall, the molecular profile is typical for advanced squamous NSCLC, with a potentially actionable MET amplification and co\u2011occurring alterations that may influence disease behavior and therapeutic options. --- ### Suggested Clinical Considerations * **Targeted Therapy:** The presence of MET amplification warrants evaluation for eligibility in clinical trials of MET inhibitors or, where regulatory approval permits, consideration of MET\u2011directed therapy. * **Immunotherapy:** PD\u2011L1 expression of 20 % (from"
+    },
+    {
+      "chunk_index": 27,
+      "edited_similarity": 0.4923294484615326,
+      "evidence_id": "inner2_row26_chunk27",
+      "original_similarity": 0.5043560266494751,
+      "row_id": 26,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "101.2 ml/min - Normal"
+    },
+    {
+      "chunk_index": 3,
+      "edited_similarity": 0.2902489900588989,
+      "evidence_id": "inner2_row26_chunk3",
+      "original_similarity": 0.24089555442333221,
+      "row_id": 26,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "gain | \u2013 | \u2013 | Amplification | 4.3\u2011fold increase (relative to diploid) | Potentially actionable | | **KRAS** | No pathogenic alteration detected | \u2013 | \u2013 | \u2013 | \u2013 | Wild\u2011type | | **ALK** | No rearrangement detected (FISH\u2011confirmed) | \u2013 | \u2013 | \u2013 | \u2013 | Wild\u2011type | | **ROS1** | No rearrangement detected | \u2013 | \u2013 | \u2013 | \u2013 | Wild\u2011type | | **BRAF** | No pathogenic alteration detected | \u2013 | \u2013 | \u2013 | \u2013 | Wild\u2011type | | **ERBB2** | No pathogenic alteration detected | \u2013 | \u2013 | \u2013 | \u2013 | Wild\u2011type | | **PD-L1 (IHC)** | Not assessed in this assay | \u2013 | \u2013 | \u2013 | \u2013 | \u2013 | | **Tumor Mutational Burden (TMB)** | 3.2 mutations/Mb | \u2013 | \u2013 | \u2013 | \u2013 | Low | | **Microsatellite Instability (MSI)** | Stable | \u2013 | \u2013 | \u2013 | \u2013 | MSI\u2011stable | *All variants reported are somatic; germline status not assessed.* --- ### Interpretation 1. **EGFR exon 19 deletion (p.E746_A750del)** \u2013 a well\u2011characterized activating mutation in EGFR that confers sensitivity to EGFR\u2011directed tyrosine\u2011kinase inhibitors (TKIs). This alteration is the primary driver in this tumor. 2. **TP53 missense mutation (p.R273C)** \u2013 located in the DNA\u2011binding domain; this variant is classified as likely pathogenic and is commonly observed as a co\u2011mutation in EGFR\u2011mutant NSCLC. TP53 alterations may be associated with a modest impact on prognosis and may influence response durability to EGFR\u2011targeted therapy. 3. **MET copy\u2011number gain (\u2248"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 2,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_002_query_004_targeted",
+  "patient_outcomes_in_prompt": false,
+  "query": 4,
+  "query_id": "effect_query_005"
+}

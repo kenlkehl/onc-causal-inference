@@ -1,0 +1,71 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row545_chunk5",
+          "quote": "ECOG performance status improved to 1"
+        },
+        {
+          "evidence_id": "inner1_row672_chunk17",
+          "quote": "**Performance Status:** ECOG 3"
+        },
+        {
+          "evidence_id": "inner1_row124_chunk6",
+          "quote": "ECOG performance status 2"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, where higher numbers indicate greater disability.",
+      "extraction_instruction": "Extract the numerical ECOG score from the patient's clinical assessment.",
+      "measurement_definition": "Standard Eastern Cooperative Oncology Group (ECOG) performance status scale ranging from 0 to 4.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The timing of these assessments relative to the initiation of therapy varies across patient records.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row545_chunk5",
+          "quote": "Creatinine 1.1 mg/dL (eGFR \u2248 70 mL/min)"
+        },
+        {
+          "evidence_id": "inner1_row545_chunk27",
+          "quote": "eGFR (CKD\u2011EPI) | \u2248 50 mL/min/1.73 m\u00b2"
+        },
+        {
+          "evidence_id": "inner1_row672_chunk17",
+          "quote": "Creatinine 0.78 mg/dL (eGFR 109 mL/min)"
+        }
+      ],
+      "description": "A measure of kidney function indicating the rate at which glomeruli filter blood.",
+      "extraction_instruction": "Extract the numerical value for eGFR from laboratory results.",
+      "measurement_definition": "Renal filtration rate measured in mL/min or mL/min/1.73 m\u00b2.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Estimated Glomerular Filtration Rate (eGFR)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "There is inconsistency in the reporting units (mL/min vs mL/min/1.73 m\u00b2) and the specific formula used (e.g., CKD-EPI).",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Limited number of patient examples provided.",
+    "Inconsistent units for renal function measurements across different evidence chunks."
+  ],
+  "summary": "The evidence identifies performance status and renal function as baseline clinical variables used in the assessment of patients with non-small cell lung cancer (NSCLC) prior to systemic therapy."
+}

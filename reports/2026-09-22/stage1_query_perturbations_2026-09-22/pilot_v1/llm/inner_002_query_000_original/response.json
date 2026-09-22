@@ -1,0 +1,56 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row938_chunk8",
+          "quote": "the concurrent STK11 loss may blunt this effect"
+        },
+        {
+          "evidence_id": "inner2_row938_chunk7",
+          "quote": "associated with reduced efficacy of immune checkpoint inhibitors"
+        }
+      ],
+      "description": "Presence or absence of STK11 (LKB1) loss-of-function, often manifesting as a homozygous deletion.",
+      "extraction_instruction": "Search for 'STK11' and identify if 'loss', 'homozygous deletion', or 'deletion' is noted. Assign negative if 'No pathogenic... alterations detected in... STK11' is present.",
+      "measurement_definition": "Positive if the report identifies 'STK11 loss', 'homozygous deletion', or 'copy-number deletion' of STK11; negative if the report states no pathogenic alterations were detected in STK11.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether a variant of unknown significance (VUS) in STK11 should be classified as negative or treated as missing data.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row938_chunk6",
+          "quote": "10 % (low\u2011to\u2011intermediate expression)"
+        },
+        {
+          "evidence_id": "inner2_row253_chunk4",
+          "quote": "PD\u2011L1 expression of 20 % further supports consideration of immunotherapy"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing partial or complete membrane staining for PD-L1.",
+      "extraction_instruction": "Extract the numeric percentage associated with 'Tumor Proportion Score (TPS)' or 'PD-L1 expression'.",
+      "measurement_definition": "Reported as a percentage (%) using the 22C3 pharmDx assay or similar immunohistochemistry (IHC).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Potential for inter-assay variability as noted in the report limitations.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The datasets show high redundancy for certain mutations (KRAS G12C, TP53 R273C), which may reflect a narrow patient cohort or template-based reporting.",
+    "Proposed roles as effect modifiers are derived from pathological interpretations in the reports rather than derived from an independent statistical analysis."
+  ],
+  "summary": "The evidence identifies a consistent genomic profile for squamous non-small cell lung cancer (NSCLC) characterized by KRAS G12C and TP53 R273C mutations. However, variation in STK11 status and PD-L1 expression levels is highlighted as potentially modifying the efficacy of immune checkpoint inhibitors."
+}

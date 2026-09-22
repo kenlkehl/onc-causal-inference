@@ -1,0 +1,72 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row636_chunk23",
+          "quote": "ECOG performance status remains 1"
+        },
+        {
+          "evidence_id": "inner4_row287_chunk24",
+          "quote": "ECOG 3, labs acceptable for systemic therapy"
+        },
+        {
+          "evidence_id": "inner4_row19_chunk25",
+          "quote": "ECOG performance status 2"
+        }
+      ],
+      "description": "A standardized scale used to assess the functional status of a patient, where higher scores indicate greater disability.",
+      "extraction_instruction": "Extract the numeric ECOG performance status value as reported in the assessment or history section of the clinical note.",
+      "measurement_definition": "The reported ECOG score (0-4) documented in the oncology assessment or history of present illness.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The assessment is clinician-reported and may vary in subjectivity between providers.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row19_chunk25",
+          "quote": "Neutrophils 7.0 k/\u00b5L (\u2191), Lymphocytes 0.85 k/\u00b5L (\u2193), NLR 8.26"
+        },
+        {
+          "evidence_id": "inner4_row221_chunk30",
+          "quote": "NLR 5.04 (elevated)"
+        },
+        {
+          "evidence_id": "inner4_row287_chunk24",
+          "quote": "Neutrophil\u2011to\u2011lymphocyte ratio: 1.90"
+        }
+      ],
+      "description": "A ratio calculated by dividing the absolute neutrophil count by the absolute lymphocyte count, often used as a proxy for systemic inflammation.",
+      "extraction_instruction": "Identify the 'NLR' or 'Neutrophil-to-lymphocyte ratio' value in the laboratory results section.",
+      "measurement_definition": "The numeric value of the neutrophil-to-lymphocyte ratio (NLR) derived from the most recent baseline CBC.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Neutrophil-to-Lymphocyte Ratio (NLR)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Varying timepoints for lab draws across different chunks for the same patient may make the definition of 'baseline' inconsistent.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small sample of patients provided in the retrieval evidence.",
+    "NLR is not reported for all patients, limiting its availability as a baseline variable.",
+    "ECOG status is a subjective clinical assessment."
+  ],
+  "summary": "The evidence identifies functional performance status (ECOG PS) and the Neutrophil-to-Lymphocyte Ratio (NLR) as measurable baseline clinical variables associated with patients with non-small cell lung cancer prior to systemic therapy."
+}

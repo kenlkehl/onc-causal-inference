@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row201_chunk100",
+          "quote": "ECOG 2 (limited activity due to fatigue and dyspnea)"
+        },
+        {
+          "evidence_id": "inner4_row201_chunk79",
+          "quote": "tolerability given ECOG 3"
+        },
+        {
+          "evidence_id": "inner4_row767_chunk32",
+          "quote": "ECOG 1, functional independence preserved"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients.",
+      "extraction_instruction": "Extract the numeric value associated with 'ECOG' or 'Performance status'.",
+      "measurement_definition": "The Eastern Cooperative Oncology Group (ECOG) performance status score, where 0 represents fully active and 4 represents completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify if scores were captured at a single baseline visit or averaged over time.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row201_chunk100",
+          "quote": "PD\u2011L1 expression 10 %"
+        },
+        {
+          "evidence_id": "inner4_row811_chunk41",
+          "quote": "low PD\u2011L1 expression (15%)"
+        }
+      ],
+      "description": "The proportion of tumor cells expressing the Programmed Death-Ligand 1 (PD-L1) protein.",
+      "extraction_instruction": "Extract the percentage value associated with 'PD-L1 expression' or 'PD-L1 status'.",
+      "measurement_definition": "The percentage (%) of tumor cells positive for PD-L1 expression as determined by immunohistochemistry (IHC).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Expression",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific IHC assay used (e.g., 22C3) is mentioned in some plans but not consistently documented for all patients.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Limited sample size of patients across the provided excerpts.",
+    "Some molecular markers (e.g., PD-L1) were listed as 'pending' in certain excerpts.",
+    "Variability in how performance status is described (some with qualitative descriptions, some with just the numeric score)."
+  ],
+  "summary": "The evidence identifies baseline clinical variables including performance status and PD-L1 expression levels in patients with non-small cell lung cancer (NSCLC), specifically those with KRAS mutations."
+}

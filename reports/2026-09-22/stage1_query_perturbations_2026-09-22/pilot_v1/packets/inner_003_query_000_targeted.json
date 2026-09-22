@@ -1,0 +1,218 @@
+{
+  "actual_distance": 0.19999989867210388,
+  "condition": "targeted",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.7846814393997192,
+      "evidence_id": "inner3_row367_chunk2",
+      "original_similarity": 0.7342031002044678,
+      "row_id": 367,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "- **Assay:** Hybrid\u2011capture DNA\u2011based comprehensive solid\u2011tumor panel (\u2248 500 cancer\u2011related genes) - **Platform:** Illumina NovaSeq 6000 - **Library Preparation:** DNA extracted from formalin\u2011fixed, paraffin\u2011embedded (FFPE) tissue; enzymatic fragmentation, adapter ligation, target enrichment. - **Sequencing Depth:** Mean coverage \u2248 850\u00d7; > 95 % of targeted bases \u2265 100\u00d7. - **Bioinformatic Pipeline:** Alignment to hg19, variant calling (SNV/indel), copy\u2011number analysis, and assessment for selected gene fusions (RNA\u2011based assay not performed on this specimen). --- ### Detected Genomic Alterations | Gene | Nucleotide Change (c.) | Protein Change (p.) | Variant Allele Frequency* | Classification | Clinical Significance | |------|------------------------|---------------------|----------------------------|----------------|-----------------------| | **EGFR** | c.2235_2249del15 | p.E746_A750del | 32 % | Pathogenic / Activating | Predictive of response to EGFR tyrosine\u2011kinase inhibitors (erlo, gefi, afat, osi). FDA\u2011approved companion diagnostic. | | **TP53** | c.818C>T | p.R273C | 27 % | Likely pathogenic | Associated with poorer prognosis and may attenuate response durability to EGFR\u2011TKI therapy. | | **CDKN2A** | Homozygous deletion (exons 1\u20113) | \u2013 | \u2013 (copy\u2011number loss) | Pathogenic loss | Tumor\u2011suppressor loss; may contribute to cell\u2011cycle dysregulation. No current FDA\u2011approved targeted therapy, but may inform trial eligibility. | \\*VAF = proportion of mutant reads relative to total reads at the locus (tumor\u2011cell enriched sample). --- ### Genes Tested with No Clinically Significant Alterations Detected KRAS, NRAS, HRAS, BRAF (including V600E), MAP2K1, MET (exon 14 skipping), ALK (rearrangement), ROS1 (rearrangement), RET (rearrangement), NTRK1/2/3 (fusion), PIK3CA, STK11, KEAP1, HER2 (ERBB2), and others included in the panel were wild\u2011type or below reporting thresholds. --- ### Interpretation 1. **EGFR exon 19"
+    },
+    {
+      "chunk_index": 46,
+      "edited_similarity": 0.3880714476108551,
+      "evidence_id": "inner3_row367_chunk46",
+      "original_similarity": 0.3745293617248535,
+      "row_id": 367,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "<new_note> Patient-Reported Outcomes Assessment Timepoint: At age 57 Instrument: PRO-CTCAE Fatigue - Severity: 3/4 (Severe) Nausea - Severity: 2/4 (Moderate) Pain - Severity: 2/4 (Moderate) Dyspnea - Severity: 3/4 (Severe) Insomnia - Severity: 2/4 (Moderate) Appetite loss - Severity: 1/4 (Mild)"
+    },
+    {
+      "chunk_index": 26,
+      "edited_similarity": 0.5283416509628296,
+      "evidence_id": "inner3_row367_chunk26",
+      "original_similarity": 0.4614848494529724,
+      "row_id": 367,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Female --- ### Chief Complaint Follow\u2011up visit for evaluation of radiographic disease progression and discussion of systemic therapy options. ### History of Present Illness Laura is a 57\u2011year\u2011old woman with a history of stage IIA (T2aN0M0) right upper lobe adenocarcinoma of the lung, EGFR exon 19 deletion positive, status post right upper lobectomy with mediastinal lymph node dissection (negative margins) and adjuvant cisplatin/pemetrexed (4 cycles) completed 2 years ago. She has been on routine surveillance with no evidence of disease until a recent whole\u2011body \u00b9\u2078F\u2011FDG PET/CT performed 3 weeks ago, which demonstrated: * A new 2.5 cm hypermetabolic lesion in the left lower lobe (SUV \u2248 7.8). * An FDG\u2011avid mediastinal lymph node measuring 1.2 cm (SUV \u2248 5.4). * Multiple subcentimeter hepatic lesions with increased uptake (SUV \u2248 4\u20135). She denies new cough, hemoptysis, chest pain, or neurologic symptoms. She reports mild exertional dyspnea (NYHA class II) and intermittent fatigue, which she attributes to the recent imaging work\u2011up. Her ECOG performance status remains 2. No brain MRI has been obtained to date. She presents today for an oncology consultation to review these findings, assess her current functional status, and discuss systemic treatment options moving forward. ### Review of Systems (pertinent positives/negatives) | System | Positive | Negative | |--------|----------|----------| | Constitutional | Fatigue (moderate) | Fever, chills, weight loss | | Respiratory | Dyspnea on exertion | Cough, sputum, hemoptysis | | Cardiovascular | None | Chest pain, palpitations | | Gastrointestinal | None | Nausea, vomiting, abdominal pain | | Neurologic | None |"
+    },
+    {
+      "chunk_index": 18,
+      "edited_similarity": 0.7799111604690552,
+      "evidence_id": "inner3_row329_chunk18",
+      "original_similarity": 0.7252500057220459,
+      "row_id": 329,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "may be associated with a modestly shorter progression\u2011free survival on EGFR\u2011TKI therapy, but does not preclude benefit from EGFR\u2011targeted agents. Classified as Tier II (potential clinical significance). 3. **CDKN2A homozygous loss** \u2013 Loss of the CDKN2A tumor\u2011suppressor locus (p16INK4a) is observed in a subset of lung adenocarcinomas and may be linked to more aggressive disease and resistance to certain therapies. Classified as Tier II. 4. **Absence of KRAS, BRAF, MET amplification, and ALK/ROS1/RET/NTRK rearrangements** \u2013 Confirms that EGFR is the sole actionable driver in this specimen. **Suggested Clinical Action** - **Targeted therapy:** The presence of an EGFR exon 19 deletion supports the use of an EGFR\u2011TKI as the preferred systemic therapy. - **Monitoring:** Given the co\u2011occurring TP53 mutation and CDKN2A loss, close radiographic and clinical monitoring is advisable to detect early signs of disease progression. - **Clinical trials:** The patient may be eligible for clinical studies evaluating combination strategies (e.g., EGFR\u2011TKI plus agents targeting TP53\u2011mutant pathways or CDK4/6 inhibition). **Technical Notes** - The assay met all quality metrics (\u2265 95% of targeted bases covered at \u2265 100\u00d7, on\u2011target rate > 80%). - No evidence of microsatellite instability or high tumor mutational burden was observed (insufficient data from this targeted panel). **Report Generated By:** Molecular Pathology Laboratory \u2013 Comprehensive Genomic Profiling Service Report ID: NGS\u20112024\u2011LM\u201100123 --- *All findings are reported in accordance with current CAP and AMP/ASCO/CAP guidelines. Clinical correlation is recommended.* <new_note> **Clinical Progress Note** **Patient:** Eleanor Martinez, 60\u2011year\u2011old female **Visit Type:** Follow\u2011up oncology visit (established patient) --- ### Chief Complaint Follow\u2011up for disease status while"
+    },
+    {
+      "chunk_index": 9,
+      "edited_similarity": 0.3784942626953125,
+      "evidence_id": "inner3_row329_chunk9",
+      "original_similarity": 0.3539404571056366,
+      "row_id": 329,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "chills, night sweats, weight loss - Respiratory: Positive for mild dry cough; denies dyspnea, wheezing, chest pain, hemoptysis - Cardiovascular: No palpitations, edema, orthopnea - Gastrointestinal: No nausea, vomiting, abdominal pain, change in bowel habits - Genitourinary: No dysuria, hematuria - Neurologic: No headaches, visual changes, focal deficits - Dermatologic: No new rashes or skin lesions --- ## Physical Examination | **Vital Signs** | | |---|---| | BP | 122/78 mmHg | | HR | 78 bpm, regular | | RR | 16 /min | | Temp | 36.8 \u00b0C (98.2 \u00b0F) | | SpO\u2082 | 97 % on room air | | Height/Weight | 165 cm / 68 kg (BMI 24.9) | **General:** Alert, oriented, in no acute distress. **HEENT:** Normocephalic, atraumatic; oropharynx clear; no cervical lymphadenopathy. **Neck:** Supple, no masses. **Cardiovascular:** Regular rate and rhythm; no murmurs, rubs, or gallops. **Respiratory:** Breath sounds clear bilaterally; mild scattered wheezes noted at right mid\u2011lung fields, no crackles; no use of accessory muscles. **Abdomen:** Soft, non\u2011tender, no hepatosplenomegaly. **Extremities:** No edema, pulses 2+ bilaterally. **Neurologic:** Grossly intact; CN II\u2011XII intact; gait steady. **Skin:** No rashes, lesions, or bruising. --- ## Laboratory Data (drawn today) - **CBC:** WBC 6.2 k/\u00b5L, Hgb 13.0 g/dL, Hct 39 %, Plt 250 k/\u00b5L \u2013 within normal limits - **CMP:** Na 138 mmol/L, K 4.2 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 14 mg/dL, Cr 0.8 mg/dL (eGFR \u2248 95 mL/min/1.73 m\u00b2), AST 22 U/L, ALT 25 U/L, ALP 78 U/L, total bilirubin 0.6 mg/dL \u2013 unremarkable - **Lipids:** LDL 92 mg/dL,"
+    },
+    {
+      "chunk_index": 20,
+      "edited_similarity": 0.6073027849197388,
+      "evidence_id": "inner3_row329_chunk20",
+      "original_similarity": 0.5456235408782959,
+      "row_id": 329,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "| Negative | |--------|----------|----------| | Constitutional | Fatigue (mild) | Fever, chills, weight loss | | Respiratory | Cough, mild dyspnea on exertion | Hemoptysis, chest pain | | Dermatologic | Rash (grade 2) | No new lesions | | Gastrointestinal | Diarrhea (grade 1) | Nausea, vomiting, abdominal pain | | Cardiovascular | No chest pain, palpitations | Syncope | | Neurologic | No headaches, visual changes | Weakness, numbness | | Others | \u2013 | All other systems negative | --- ### Past Medical History - **Non\u2011small cell lung cancer (adenocarcinoma), right upper lobe** \u2013 diagnosed at age 60, stage IIA (pT2aN1M0); right upper lobectomy with mediastinal lymph node dissection; adjuvant cisplatin + vinorelbine (4 cycles). - **EGFR exon 19 deletion (p.E746_A750del)** \u2013 identified on NGS at progression. - Hypertension \u2013 well controlled on lisinopril. ### Surgical History - Right upper lobectomy with mediastinal lymph node dissection (age 60). ### Medications - EGFR\u2011TKI (dose per prescribing oncologist) - Lisinopril 10 mg PO daily - Multivitamin daily ### Allergies - No known drug allergies. ### Family History - Mother: breast cancer (deceased age 78) - Father: hypertension (alive) - No known familial lung cancer. ### Social History - Former smoker, 10 pack\u2011year history, quit 10 years ago. - Alcohol: occasional wine (1\u20132 glasses/week). - Lives with spouse; retired teacher. - No illicit drug use. --- ### Physical Examination - **General:** Alert, oriented, in no acute distress; ECOG 1. - **Vitals:** HR 78 bpm, BP 122/78 mmHg, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96 % on"
+    },
+    {
+      "chunk_index": 26,
+      "edited_similarity": 0.8034816980361938,
+      "evidence_id": "inner3_row488_chunk26",
+      "original_similarity": 0.7463913559913635,
+      "row_id": 488,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "effective therapies are available for EGFR\u2011mutated disease. **Signature:** _________________________ **Attending Oncologist:** Dr. [Name], MD \u2013 Medical Oncology **Date:** (to be entered by EMR) <new_note> **Next\u2011Generation Sequencing (NGS) Report** **Patient:** Johnathan Miller **MRN:** 001\u2011234\u2011567 **Sex:** Male **Age:** 70 y **Specimen:** Formalin\u2011fixed, paraffin\u2011embedded (FFPE) core needle biopsy of left lower lobe lung lesion (\u2265 30 % tumor cellularity). **Diagnosis (from pathology):** Adenocarcinoma, TTF\u20111 positive, CK7 positive \u2013 consistent with prior primary non\u2011small cell lung cancer. **Test Performed:** Comprehensive solid\u2011tumor genomic profiling (DNA + RNA) using a hybrid\u2011capture, 500\u2011gene panel (Illumina NovaSeq). - **DNA input:** 150 ng (\u2265 20 ng/\u00b5L) - **Mean coverage:** 850\u00d7 (\u2265 99 % of targeted bases \u2265 100\u00d7) - **RNA input:** 100 ng (for fusion detection) **Analytical Sensitivity:** \u2265 5 % mutant allele frequency for SNVs/indels; \u2265 3 copies for copy\u2011number alterations; \u2265 10 % for gene fusions. --- ### Genomic Findings | Gene | Alteration | Type | Variant Allele Frequency (VAF) | Clinical Significance | |------|------------|------|--------------------------------|-----------------------| | **EGFR** | **exon 19 deletion (p.E746_A750del)** | In\u2011frame deletion (sensitizing) | 38 % | Predictive of response to EGFR tyrosine\u2011kinase inhibitors (TKIs). | | **TP53** | **p.R273C** | Missense SNV (DNA\u2011binding domain) | 22 % | Associated with poorer prognosis and possible resistance to EGFR\u2011TKI monotherapy. | | **PIK3CA** | **Amplification** | Copy\u2011number gain (estimated copy number \u2248 8) | \u2014 | May confer activation of PI3K/AKT pathway; potential target for PI3K inhibitors (investigational). | | **PD\u2011L1 (CD274)** | **Tumor Proportion Score 5 %** | Immunohistochemistry (IHC) \u2013 reported on same block | \u2014 | Low"
+    },
+    {
+      "chunk_index": 46,
+      "edited_similarity": 0.5048761367797852,
+      "evidence_id": "inner3_row488_chunk46",
+      "original_similarity": 0.47894468903541565,
+      "row_id": 488,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "screening. **Signature:** ___________________________ **Provider:** MD, Oncology \u2013 Thoracic Division <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 71 Instrument: PRO-CTCAE Fatigue - Severity: 2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Pain - Severity: 1/4 (Mild) Dyspnea - Severity: 2/4 (Moderate) <new_note> Encounter Record Timepoint: At age 71 Encounter Type: outpatient oncology visit Diagnosis Codes: - C34.90: Malignant neoplasm of lung - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99215: Established patient visit, high complexity - 96413: Chemotherapy IV infusion, first hour"
+    },
+    {
+      "chunk_index": 41,
+      "edited_similarity": 0.5482110977172852,
+      "evidence_id": "inner3_row488_chunk41",
+      "original_similarity": 0.4817027747631073,
+      "row_id": 488,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "IIA (T2aN0M0) EGFR exon 19\u2011deleted adenocarcinoma of the right upper lobe, status\u2011post right upper lobectomy with mediastinal lymph node dissection (negative margins) and four cycles of adjuvant cisplatin/pemetrexed completed 2 years ago. He remained disease\u2011free on surveillance imaging until 1 year ago when a new left lower lobe nodule and a 1.2 cm mediastinal node were identified. Biopsy of the left lower lobe lesion confirmed recurrent adenocarcinoma, TTF\u20111 positive, with the same EGFR exon 19 deletion, TP53 p.R273C mutation, and PIK3CA amplification; PD\u2011L1 TPS 5 %. He received no systemic therapy at that time and was observed. Two months ago he was hospitalized for community\u2011acquired pneumonia (J18.9), treated with IV antibiotics, and discharged home in stable condition. Since discharge he reports mild worsening of cough and intermittent dyspnea on exertion, but denies fever, chest pain, hemoptysis, weight loss, or neurologic symptoms. He has returned to baseline functional status (ECOG 1). He is eager to discuss systemic treatment options now that imaging demonstrates disease progression. ### Review of Systems (pertinent) - **General:** No fever, chills, night sweats, or recent weight loss. - **Respiratory:** Cough (productive of clear sputum), dyspnea on moderate exertion; no hemoptysis. - **Cardiovascular:** No chest pain, palpitations, or edema. - **Gastrointestinal:** No nausea, vomiting, or abdominal pain. Appetite stable. - **Neurologic:** No headaches, visual changes, seizures, or focal deficits. - **Constitutional:** No fatigue beyond baseline, no insomnia. ### Past Medical History - Non\u2011small cell lung cancer, EGFR exon 19 deletion (diagnosed 2 years ago) - Hypertension, well controlled with lisinopril - Hyperlipidemia, on atorvastatin"
+    },
+    {
+      "chunk_index": 8,
+      "edited_similarity": 0.8040145039558411,
+      "evidence_id": "inner3_row314_chunk8",
+      "original_similarity": 0.7581851482391357,
+      "row_id": 314,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "positive, CK7 positive **Test Performed:** Comprehensive next\u2011generation sequencing (NGS) panel covering coding exons of 500 cancer\u2011related genes, selected introns for gene\u2011fusion detection, and copy\u2011number analysis. **Methodology Overview** - DNA extraction from FFPE tissue (\u2265 50 ng) - Library preparation with hybrid\u2011capture enrichment (Illumina\u2011compatible adapters) - Sequencing performed on Illumina NextSeq 550 (2 \u00d7 150 bp) - Mean target coverage: 850\u00d7; > 95 % of bases covered > 500\u00d7 - Bioinformatic pipeline: alignment to hg19, variant calling (MuTect2), indel realignment, annotation (ClinVar, COSMIC, OncoKB) - Copy\u2011number analysis via normalized read\u2011depth; MET amplification confirmed by orthogonal qPCR - Fusion assessment by targeted RNA\u2011seq (if applicable) \u2013 no ALK, ROS1, RET, or NTRK rearrangements detected **Genomic Findings** | Gene | Alteration (HGVS) | Variant Allele Frequency* | Classification | Clinical Significance | |------|-------------------|----------------------------|----------------|-----------------------| | **EGFR** | c.2235_2249del15 (p.E746_A750del) | 38 % | Pathogenic / Activating | FDA\u2011approved predictive biomarker for EGFR tyrosine\u2011kinase inhibitors (erlo, gefi, Gilotrif, Tagrisso). | | **MET** | Copy\u2011number gain; estimated copy number \u2248 6 (amplification) | \u2014 | Likely pathogenic (amplification) | May confer primary or acquired resistance to EGFR TKIs; potential target for MET\u2011directed agents (e.g., capmatinib, tepotinib). | | **TP53** | c.818C>T (p.R273C) | 45 % | Pathogenic | Associated with genomic instability and poorer prognosis in NSCLC; no direct targeted therapy. | | **KRAS** | No pathogenic variants detected (wild\u2011type) | \u2014 | \u2014 | Wild\u2011type status supports EGFR\u2011targeted approach. | | **ALK** | No rearrangement detected (NGS and FISH negative) | \u2014 | \u2014 | Not applicable. | | **ROS1, RET,"
+    },
+    {
+      "chunk_index": 21,
+      "edited_similarity": 0.43536654114723206,
+      "evidence_id": "inner3_row314_chunk21",
+      "original_similarity": 0.4079585671424866,
+      "row_id": 314,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "### Past Surgical History - Right upper lobectomy (age 55) ### Social History - Former light smoker (5 pack\u2011years, quit >10 years ago) - Lives with husband; works part\u2011time as a school administrator - No illicit drug use; occasional wine socially ### Family History - Mother: breast cancer (diagnosed at 62) - Father: deceased, myocardial infarction at 68 ### Allergies - No known drug allergies ### Medications (current) - **Chemotherapy:** Non\u2011platinum cytotoxic agent, IV q3 weeks (Day 1) - **Antiemetic prophylaxis:** Ondansetron 8 mg PO q8 h PRN nausea - **Steroid:** Dexamethasone 4 mg PO daily (as part of anti\u2011emetic regimen) - **Antihypertensive:** Lisinopril 10 mg PO daily - **Supportive:** Acetaminophen 500 mg PO q6 h PRN pain/fever --- ### Physical Examination - **General:** Alert, oriented, NAD, ECOG 1 - **Vital Signs:** BP 122/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 97% on room air - **HEENT:** Normocephalic, atraumatic, mucous membranes moist - **Neck:** Supple, no lymphadenopathy - **Cardiovascular:** RRR, no murmurs, rubs, or gallops - **Respiratory:** Clear to auscultation bilaterally, no wheezes or rales - **Abdomen:** Soft, non\u2011tender, no hepatosplenomegaly - **Extremities:** No edema, full range of motion, no tenderness over bony prominences - **Neurologic:** Cranial nerves II\u2013XII intact, strength 5/5 throughout, sensation intact, gait steady --- ### Laboratory Data (drawn today) | Test | Result | Reference | |------|--------|-----------| | WBC | 5.8 k/\u00b5L | 4.0\u201310.5 | | ANC | 3.2 k/\u00b5L | 1.5\u20138.0 | | ALC | 1.3 k/\u00b5L | 1.0\u20133.5 | | Hgb | 13.2 g/dL | 12.0\u201316.0 |"
+    },
+    {
+      "chunk_index": 11,
+      "edited_similarity": 0.6797199249267578,
+      "evidence_id": "inner3_row314_chunk11",
+      "original_similarity": 0.620246410369873,
+      "row_id": 314,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "those biomarkers. **Report Generated By:** Dr. Ana S. Mart\u00ednez, MD, PhD \u2013 Molecular Pathology Molecular Oncology Laboratory \u2013 Certified Clinical Laboratory (CLIA\u2011CAP) **Report Date:** ______________________ --- *End of Report* <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit (Age 57)** **Chief Complaint:** Patient presents for evaluation of newly diagnosed metastatic non\u2011small cell lung cancer (NSCLC) and wishes to initiate systemic therapy. **History of Present Illness (HPI):** Elena Ramirez is a 55\u2011year\u2011old woman who was diagnosed 2 years ago with stage IIA (T2aN0M0) right upper lobe adenocarcinoma. She underwent right upper lobectomy with mediastinal lymph node dissection (pT2aN0, negative margins) followed by four cycles of adjuvant cisplatin + vinorelbine, completing therapy without major complications. She remained disease\u2011free on surveillance imaging at age 56. At her most recent surveillance contrast\u2011enhanced CT of the chest/abdomen/pelvis (performed 1 month ago), a new 2.8 cm left lower lobe nodule, bilateral adrenal nodules (largest 1.5 cm), and multiple subcentimeter hepatic lesions were identified. Brain MRI was negative for metastases. Pathology from a CT\u2011guided left lower lobe biopsy confirmed adenocarcinoma, TTF\u20111 positive, CK7 positive. NGS performed on the same specimen revealed an activating EGFR exon 19 deletion (p.E746_A750del), a TP53 missense mutation (p.R273C), and a copy\u2011number gain of MET; KRAS wild\u2011type, no ALK rearrangement. Since the imaging findings, the patient reports mild dyspnea on exertion (e.g., climbing one flight of stairs) but denies cough, hemoptysis, chest pain, fever, weight loss, or neurologic symptoms. She notes a slight decrease in activity tolerance but remains able to perform most activities of daily living with some limitation. She"
+    },
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.7789023518562317,
+      "evidence_id": "inner3_row512_chunk2",
+      "original_similarity": 0.736602783203125,
+      "row_id": 512,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "### 1. Methodology | Parameter | Description | |-----------|-------------| | **Platform** | Hybrid\u2011capture based NGS (Illumina NovaSeq 6000). | | **Library Prep** | DNA extracted from FFPE tissue (\u2265 20 ng). Library prepared with enzymatic fragmentation, indexed adapters, and target enrichment using a custom oncology panel. | | **Sequencing Depth** | Mean unique coverage \u2248 800\u00d7; > 95 % of targeted bases \u2265 200\u00d7. | | **Variant Calling** | Single\u2011nucleotide variants (SNVs) and small insertions/deletions (indels) called with a minimum allele frequency (MAF) of 2 % and \u2265 30 supporting reads. Copy\u2011number alterations (CNAs) assessed by normalized read depth; amplification defined as copy number \u2265 6. Gene fusions detected by anchored multiplex PCR (AMP) for ALK, ROS1, RET, NTRK1\u20113. | | **Quality Metrics** | % On\u2011Target Reads = 78 %; Uniformity = 93 %; Duplicate Rate = 12 %. All metrics met laboratory acceptance criteria. | --- ### 2. Genomic Findings | Gene | Alteration | Nucleotide Change | Protein Change | Variant Allele Frequency (VAF) | Copy\u2011Number | Interpretation | |------|------------|-------------------|----------------|--------------------------------|-------------|----------------| | **EGFR** | Exon 19 deletion | c.2235_2249del15 | p.E746_A750del | 38 % | \u2013 | **Actionable driver** \u2013 sensitizing mutation to EGFR\u2011TKIs. | | **TP53** | Missense SNV | c.818C>T | p.R273C | 27 % | \u2013 | Likely pathogenic; associated with genomic instability and poorer prognosis. | | **PIK3CA** | Missense SNV | c.3140A>G | p.H1047R | 22 % | \u2013 | Activating alteration; may confer sensitivity to PI3K/AKT/mTOR pathway inhibitors. | | **MET** | Copy\u2011number gain | \u2013 | \u2013 |"
+    },
+    {
+      "chunk_index": 33,
+      "edited_similarity": 0.4342350959777832,
+      "evidence_id": "inner3_row512_chunk33",
+      "original_similarity": 0.40908536314964294,
+      "row_id": 512,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "and a low\u2011dose aspirin for cardiovascular prophylaxis. **Review of Systems (pertinent positives/negatives):** - **Constitutional:** Fatigue mild, no fever, no weight loss. - **HEENT:** No headache, visual changes, or ear pain. - **Respiratory:** No dyspnea, cough, or hemoptysis. - **Cardiovascular:** No chest pain, palpitations, or edema. - **Gastrointestinal:** Nausea occasional, no vomiting, no abdominal pain. - **Genitourinary:** No dysuria or hematuria. - **Musculoskeletal:** Bone pain stable, no new focal pain. - **Neurologic:** No weakness, numbness, or seizures. - **Dermatologic:** No rash or skin changes. --- ### OBJECTIVE **Vital Signs:** Within normal limits (BP 122/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 97% on room air). **Physical Examination:** - **General:** Alert, NAD, ECOG performance status 2 (ambulatory, capable of self\u2011care). - **HEENT:** Normocephalic, atraumatic. - **Neck:** No lymphadenopathy. - **Cardiovascular:** RRR, no murmurs. - **Respiratory:** Clear to auscultation bilaterally, no wheezes or rales. - **Abdomen:** Soft, non\u2011tender, no hepatosplenomegaly. - **Extremities:** No edema; mild tenderness over thoracic spine region consistent with known metastatic sites, no new focal tenderness. - **Skin:** No rash, no bruising. - **Neurologic:** Grossly intact, no focal deficits. **Laboratory Data (drawn today):** - **CBC:** WBC 5.6 k/\u00b5L, ANC 2.1 k/\u00b5L (recovered), Hgb 11.6 g/dL, Plt 215 k/\u00b5L. - **CMP:** Na 138 mmol/L, K 4.2 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 16 mg/dL, Cr 1.0 mg/dL (eGFR \u2248 88 mL/min), AST 22 U/L, ALT 18 U/L, ALP 78 U/L, Albumin 3.8 g/dL. - **Tumor Markers:** CEA 3.2 ng/mL (stable). **Patient\u2011Reported Outcomes (most recent):** - PRO\u2011CTCAE: Nausea 2, Fatigue 3, Pain 2,"
+    },
+    {
+      "chunk_index": 5,
+      "edited_similarity": 0.674140453338623,
+      "evidence_id": "inner3_row512_chunk5",
+      "original_similarity": 0.6104280948638916,
+      "row_id": 512,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "is common in EGFR\u2011mutant lung adenocarcinoma and has been associated with a modestly shorter time to progression on EGFR\u2011TKI therapy. 5. **Absence of KRAS, ALK, ROS1, RET, NTRK, BRAF, and HER2 alterations** \u2013 Confirms that EGFR remains the dominant actionable driver. Overall, the molecular profile is dominated by an EGFR sensitizing deletion with co\u2011existing MET amplification and PI3K pathway activation, which together may influence both initial therapeutic response and the pattern of eventual resistance. --- ### 4. Clinical Implications & Recommendations | Category | Recommendation | |----------|----------------| | **Primary Target** | Initiation of an EGFR\u2011TKI (first\u2011 or second\u2011generation) is strongly supported by the EGFR exon 19 deletion. | | **Potential Resistance** | MET amplification may limit durability of EGFR\u2011TKI response. Consider baseline MET inhibitor (e.g., capmatinib, tepotinib) in a clinical\u2011trial or compassionate\u2011use setting, especially if early progression is observed. | | **Additional Targetable Alterations** | PI3K\u2011CA H1047R could be addressed with PI3K/AKT/mTOR pathway inhibitors; enrollment in a trial evaluating such agents in EGFR\u2011mutant NSCLC is reasonable. | | **Prognostic Considerations** | Co\u2011mutation in TP53 is associated with a higher likelihood of early progression; close radiographic monitoring is advised. | | **Further Testing** | Repeat NGS or liquid biopsy at progression to identify emergent resistance mechanisms (e.g., EGFR T790M, additional MET amplification, HER2 alterations). | | **Clinical Trials** | Patient may be eligible for trials combining EGFR\u2011TKI with MET inhibition, or for agents targeting the PI3K pathway in EGFR\u2011mutant disease. | --- ### 5. Limitations * The assay does not assess tumor mutational burden (TMB) or microsatellite"
+    },
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.8110527396202087,
+      "evidence_id": "inner3_row726_chunk2",
+      "original_similarity": 0.7659460306167603,
+      "row_id": 726,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "should be interpreted in the context of the overall therapeutic plan. **Pathologist** Dr. [Name], MD Board\u2011Certified Anatomic Pathologist **Signature** *Electronic signature on file* <new_note> **Molecular Pathology \u2013 Next\u2011Generation Sequencing (NGS) Report** --- **Patient:** James O'Connor **Age:** 73 y **Sex:** Male **Specimen:** Core needle biopsy, right lower lobe lung mass (CT\u2011guided) **Diagnosis (from pathology):** Adenocarcinoma, TTF\u20111 positive, CK7 positive **Clinical History (provided by ordering physician):** - Stage IV (T2b N3 M1b) non\u2011small cell lung cancer, adenocarcinoma of the right lower lobe - EGFR exon 19 deletion previously identified on limited testing (confirmed on this assay) - PD\u2011L1 expression 10 % (22C3 assay) - ECOG performance status 1 - No prior systemic therapy --- ### 1. Test Performed **Assay:** Comprehensive Solid Tumor NGS Panel (\u2248 500 genes) **Platform:** Hybrid\u2011capture DNA sequencing (Illumina NovaSeq) **Library Preparation:** DNA extracted from formalin\u2011fixed, paraffin\u2011embedded (FFPE) tissue; \u2265 150 ng input; enzymatic fragmentation, adapter ligation, target enrichment. **Sequencing Depth:** Median unique coverage \u2248 800\u00d7 (minimum 250\u00d7 across > 99 % of targets). **Limit of Detection (LOD):** \u2265 5 % variant allele frequency (VAF) for single\u2011nucleotide variants (SNVs) and insertions/deletions; \u2265 10 % for copy\u2011number alterations (CNAs). **Quality Metrics:** - Total reads: 85 M (paired\u2011end) - On\u2011target rate: 92 % - Uniformity (\u2265 0.2\u00d7 mean coverage): 96 % - Duplicate rate: 12 % - Molecular barcode consensus: > 99 % concordance with internal controls --- ### 2. Detected Genomic Alterations | Gene | Alteration | Nucleotide Change | Protein Change | Variant Type | VAF* | Interpretation | |------|------------|-------------------|----------------|--------------|------|----------------| | **EGFR** | Exon 19"
+    },
+    {
+      "chunk_index": 18,
+      "edited_similarity": 0.30932745337486267,
+      "evidence_id": "inner3_row726_chunk18",
+      "original_similarity": 0.2970983386039734,
+      "row_id": 726,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "| Facial rash | No new lesions, no pruritus elsewhere | | Neurologic | No headaches, dizziness | No focal deficits | | Psychiatric | Mood stable | No anxiety or depression | | Endocrine | No polyuria/polydipsia | \u2013 | | Hematologic/Lymphatic | \u2013 | No bruising, bleeding | | Musculoskeletal | No bone pain | \u2013 | | Genitourinary | No dysuria, hematuria | \u2013 | --- ### Objective **Vital Signs:** - BP 128/78 mmHg, HR 72 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96 % on room air, Weight 78 kg (stable). **Physical Examination:** | System | Findings | |--------|----------| | General | Alert, NAD, well\u2011appearing. | | HEENT | Mild erythematous papular eruption on cheeks and nasolabial folds; no crusting or ulceration. No conjunctival injection. | | Neck | Supple, no lymphadenopathy. | | Lungs | Clear to auscultation bilaterally, no wheezes or rales. | | Cardiovascular | Regular rate and rhythm, no murmurs, rubs, or gallops. | | Abdomen | Soft, non\u2011tender, no hepatosplenomegaly. | | Skin | Rash limited to face; no other cutaneous lesions. | | Extremities | No edema, pulses 2+ bilaterally. | | Neurologic | Cranial nerves II\u2011XII intact, strength 5/5 throughout, sensation grossly intact. | | Psych/Mood | Cooperative, mood euthymic. | **Laboratory Data (most recent, drawn 1 week ago):** | Test | Result | Reference | |------|--------|-----------| | CBC \u2013 WBC | 6.2 k/\u00b5L | 4.0\u201110.5 | | Neutrophils | 2.4 k/\u00b5L | 1.5\u20117.5 | | Lymphocytes | 2.8 k/\u00b5L | 1.0\u20114.0 | | Hgb"
+    },
+    {
+      "chunk_index": 13,
+      "edited_similarity": 0.6485222578048706,
+      "evidence_id": "inner3_row726_chunk13",
+      "original_similarity": 0.5911294221878052,
+      "row_id": 726,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "(core needle biopsy, right lower lobe):** Adenocarcinoma, TTF\u20111 positive, CK7 positive. **Molecular Testing (NGS, 400\u2011gene panel):** EGFR exon 19 deletion (p.E746_A750del) \u2013 actionable; TP53 R273C missense mutation; CDKN2A loss; no KRAS, ALK, ROS1, MET, or other targetable alterations. --- ### ASSESSMENT 1. **Stage IV (T2b N3 M1b) non\u2011small cell lung cancer \u2013 adenocarcinoma, right lower lobe** - EGFR exon 19 deletion positive, PD\u2011L1 10 % - ECOG performance status 1 - No prior systemic therapy (platinum\u2011based or otherwise) 2. **Hypertension, well controlled** 3. **Hyperlipidemia, on statin therapy** --- ### PLAN 1. **First\u2011line targeted therapy** - Initiate an EGFR tyrosine kinase inhibitor (EGFR\u2011TKI) appropriate for exon 19 deletion (e.g., osimertinib 80 mg PO daily). - Discuss expected benefits (high response rates, CNS penetration) and potential adverse effects (rash, diarrhea, QTc prolongation, interstitial lung disease). - Obtain baseline ECG to assess QT interval prior to starting therapy. 2. **Supportive care & monitoring** - Continue current antihypertensive and lipid\u2011lowering agents. - Counsel on smoking cessation reinforcement (though already quit). - Vaccinations up to date (influenza, COVID\u201119, pneumococcal). - Encourage regular moderate exercise as tolerated. 3. **Baseline assessments** - Repeat CBC, CMP, and thyroid panel in 2 weeks after therapy initiation. - Re\u2011check ECG at 2\u2011week visit. - Baseline dermatologic assessment; prescribe low\u2011to\u2011moderate potency topical corticosteroid (hydrocortisone 1 %) for prophylactic use if rash develops. 4. **Follow\u2011up schedule** - Return visit in 4 weeks for clinical assessment, labs, and medication tolerance. - Repeat contrast\u2011enhanced CT chest/abdomen/pelvis and brain MRI at 8 weeks to evaluate radiographic response per RECIST 1.1. 5."
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 3,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_003_query_000_targeted",
+  "patient_outcomes_in_prompt": false,
+  "query": 0,
+  "query_id": "effect_query_001"
+}

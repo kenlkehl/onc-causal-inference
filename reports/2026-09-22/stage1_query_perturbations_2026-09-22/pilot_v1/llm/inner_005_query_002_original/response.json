@@ -1,0 +1,65 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row438_chunk5",
+          "quote": "EGFR mutation\u2011negative, PD\u2011L1 TPS 10%, ECOG 1."
+        },
+        {
+          "evidence_id": "inner5_row73_chunk0",
+          "quote": "PD\u2011L1 (22C3) | Tumor Proportion Score 10 %"
+        },
+        {
+          "evidence_id": "inner5_row54_chunk9",
+          "quote": "5 % tumor proportion score (optional, reported per institutional protocol)"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing membrane staining for PD-L1, expressed as a Tumor Proportion Score (TPS).",
+      "extraction_instruction": "Identify the 'PD-L1' result, specifically looking for the 'Tumor Proportion Score' or 'TPS' value expressed as a percentage.",
+      "measurement_definition": "Tumor Proportion Score (TPS) as a percentage (%)",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Expression (TPS)",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Variability in assay clones (e.g., 22C3) may influence the consistency of the TPS measurement across different reports.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row337_chunk9",
+          "quote": "KRAS G12C mutation (activating)"
+        },
+        {
+          "evidence_id": "inner5_row73_chunk9",
+          "quote": "G12C mutation (VAF 27 %)"
+        },
+        {
+          "evidence_id": "inner5_row612_chunk10",
+          "quote": "KRAS G12C, TP53 R273H, STK11 loss, MET copy\u2011number gain"
+        }
+      ],
+      "description": "Presence or absence of the activating G12C mutation in the KRAS gene.",
+      "extraction_instruction": "Scan molecular testing or NGS reports for 'KRAS' and 'G12C'. Mark as positive if the G12C mutation is explicitly listed as detected or activating.",
+      "measurement_definition": "Positive: KRAS G12C mutation detected; Negative: KRAS G12C mutation not detected or KRAS wild-type.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "KRAS G12C Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence reports both binary presence and variant allele frequency (VAF); only binary status is proposed.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Molecular profiling was not performed for all patients, limiting the available data for KRAS status.",
+    "PD-L1 expression is only documented in a subset of the provided clinical excerpts.",
+    "The evidence consists of discrete pathology reports and clinical summaries rather than a structured dataset."
+  ],
+  "summary": "The evidence supports the use of PD-L1 Tumor Proportion Score (TPS) and KRAS G12C mutation status as measurable baseline clinical variables in patients with lung adenocarcinoma."
+}

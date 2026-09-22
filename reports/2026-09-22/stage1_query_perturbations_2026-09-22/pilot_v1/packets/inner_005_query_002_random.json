@@ -1,0 +1,168 @@
+{
+  "actual_distance": 0.19999989867210388,
+  "condition": "random",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.6966210603713989,
+      "evidence_id": "inner5_row951_chunk0",
+      "original_similarity": 0.70844566822052,
+      "row_id": 951,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "**Pathology Report** **Patient:** Evelyn Martinez **MRN:** 000-68-001 **Age/Sex:** 68\u2011year\u2011old Female **Specimen:** CT\u2011guided core needle biopsy of right lower lobe lung mass **Specimen ID:** LM\u201168\u2011001 **Specimen Type:** Core needle biopsy (3 cores) **Clinical History:** - Newly diagnosed stage IV (T3 N2 M1b) non\u2011small cell lung carcinoma, right lower lobe. - Radiographic evidence of mediastinal lymphadenopathy and brain metastases. - No prior systemic therapy. **Gross Description:** - Three core biopsy fragments received, each measuring 0.4 cm \u00d7 0.2 cm \u00d7 0.2 cm. - Tan\u2011white, firm, and focally hemorrhagic. - Fixed in 10 % neutral buffered formalin and submitted in entirety. **Microscopic Description:** - Sections reveal sheets and nests of large polygonal cells with abundant eosinophilic cytoplasm. - Nuclei are vesicular with coarse chromatin, prominent nucleoli, and frequent mitoses (\u226515/10 HPF). - Focal necrosis and apoptotic bodies are present. - No glandular formation, keratinization, or neuroendocrine features identified. **Immunohistochemistry (IHC):** | Marker | Result | Interpretation | |--------|--------|----------------| | Cytokeratin 7 (CK7) | Diffuse strong positivity | Supports epithelial origin | | Thyroid transcription factor\u20111 (TTF\u20111) | Negative | Excludes adenocarcinoma phenotype | | Napsin A | Negative | Consistent with non\u2011adenocarcinoma | | p40 (\u0394Np63) | Negative | Excludes squamous differentiation | | Synaptophysin | Negative | No neuroendocrine differentiation | | Chromogranin A | Negative | No neuroendocrine differentiation | **Molecular Testing:** - **EGFR**: Exon 19 deletion (p.E746_A750del) detected by targeted PCR/NGS assay. - No additional driver alterations (KRAS, ALK, ROS1, BRAF) identified on the limited panel performed. **Diagnosis:** 1. Poorly differentiated non\u2011small cell carcinoma, consistent with"
+    },
+    {
+      "chunk_index": 1,
+      "edited_similarity": 0.6262297630310059,
+      "evidence_id": "inner5_row951_chunk1",
+      "original_similarity": 0.6390402913093567,
+      "row_id": 951,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "(\u0394Np63) | Negative | Excludes squamous differentiation | | Synaptophysin | Negative | No neuroendocrine differentiation | | Chromogranin A | Negative | No neuroendocrine differentiation | **Molecular Testing:** - **EGFR**: Exon 19 deletion (p.E746_A750del) detected by targeted PCR/NGS assay. - No additional driver alterations (KRAS, ALK, ROS1, BRAF) identified on the limited panel performed. **Diagnosis:** 1. Poorly differentiated non\u2011small cell carcinoma, consistent with large\u2011cell carcinoma, right lower lobe lung (core needle biopsy). 2. EGFR exon 19 deletion (activating mutation) detected. **Comment:** - The morphology and IHC profile are most compatible with large\u2011cell carcinoma of the lung. - Presence of an activating EGFR exon 19 deletion is an actionable molecular alteration; correlation with clinical findings is advised. **Pathologist:** Dr. A. Rivera, MD Board\u2011Certified Anatomic Pathologist **Signature:** _______________________ --- End of Report --- <new_note> **COMPREHENSIVE GENOMIC PROFILING REPORT** *Next\u2011Generation Sequencing (NGS) \u2013 DNA based* --- **Patient:** Evelyn Martinez **Sex:** Female **Age:** 68 y **Specimen:** CT\u2011guided core needle biopsy \u2013 right lower lobe lung mass (large\u2011cell carcinoma) **Clinical indication:** Advanced (stage IV) non\u2011small cell lung cancer, EGFR\u2011directed molecular work\u2011up **Test performed:** - Platform: Hybrid\u2011capture NGS panel covering 324 cancer\u2011relevant genes (including SNVs, indels, copy\u2011number alterations, selected fusions). - DNA input: \u2265 50 ng from formalin\u2011fixed, paraffin\u2011embedded (FFPE) tissue. - Sequencing: Illumina NovaSeq 6000, paired\u2011end 150 bp reads; mean unique coverage \u2248 800\u00d7. - Analytical sensitivity: \u2265 5 % mutant allele frequency for SNVs/indels; \u2265 3\u2011fold copy\u2011number change for amplifications; \u2265 10 % for homozygous deletions. --- ### GENOMIC FINDINGS | Gene | Alteration (HGVS) | Protein change |"
+    },
+    {
+      "chunk_index": 34,
+      "edited_similarity": 0.35981136560440063,
+      "evidence_id": "inner5_row951_chunk34",
+      "original_similarity": 0.3638097047805786,
+      "row_id": 951,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "lung, EGFR exon 19 deletion** \u2013 disease stable on imaging after two cycles of protocol\u2011specified platinum\u2011free doublet chemotherapy. ECOG 0. 2. **Brain metastases** \u2013 stable after stereotactic radiosurgery. 3. **Chemotherapy\u2011related neutropenia** \u2013 resolved with growth\u2011factor support; current counts pending but trending upward. 4. **Fatigue (intermittent)** \u2013 likely multifactorial (treatment\u2011related, anemia of chronic disease). 5. **Hypertension**, well\u2011controlled on lisinopril. ### Plan 1. **Continue current chemotherapy regimen** per study protocol. Next cycle scheduled for Day 1 of the upcoming 21\u2011day cycle. 2. **Laboratory monitoring:** CBC with differential and CMP on Day 7 of each cycle; hold chemotherapy for ANC < 1.0 k/\u00b5L or platelets < 100 k/\u00b5L per protocol. 3. **Growth\u2011factor support:** Continue filgrastim 300 \u00b5g SC weekly; consider dose escalation if ANC remains < 1.0 k/\u00b5L. 4. **Fatigue management:** - Encourage regular low\u2011impact exercise (e.g., walking 20 min daily). - Review sleep hygiene; consider melatonin 3 mg PO nightly if insomnia persists. - Evaluate for anemia; if hemoglobin < 11 g/dL on repeat labs, discuss possible iron supplementation or erythropoiesis\u2011stimulating agents. 5. **Imaging follow\u2011up:** - Repeat contrast\u2011enhanced CT chest/abdomen/pelvis in 6 weeks to reassess thoracic disease. - Brain MRI in 3 months or sooner if new neurologic symptoms develop. 6. **Supportive care:** - Continue acetaminophen PRN for aches. - Maintain current antihypertensive regimen; monitor BP at each visit. 7. **Patient education:** Reviewed signs of infection (fever, chills) and instructed to seek care promptly. Discussed importance of adherence to growth\u2011factor schedule and scheduled chemotherapy appointments. 8. **Next appointment:** Return to clinic in 2 weeks for lab review and"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.7922753095626831,
+      "evidence_id": "inner5_row835_chunk0",
+      "original_similarity": 0.8104678392410278,
+      "row_id": 835,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "**Pathology Report** **Patient:** James Miller **MRN:** 001234567 **Sex/Age:** Male / 61 y **Specimen ID:** RLU\u2011CORE\u2011001 **Specimen Type:** CT\u2011guided core needle biopsy \u2013 right lower lobe lung mass **Clinical Information:** 61\u2011year\u2011old man with a 4.5 cm right lower lobe pulmonary mass (CT) concerning for primary lung carcinoma. No prior systemic therapy. --- ### Gross Description - **Number of cores:** 5 - **Length of cores:** 1.2 cm, 1.0 cm, 0.9 cm, 0.8 cm, 0.7 cm (total tissue 4.6 cm) - **Appearance:** Tan\u2011white, firm, focally hemorrhagic. - **Fixation:** 10 % neutral buffered formalin, processed in routine fashion. --- ### Microscopic Description Sections reveal infiltrating malignant epithelial cells forming irregular glandular structures and occasional lepidic\u2011type growth. The tumor cells exhibit moderate nuclear atypia, prominent nucleoli, and abundant cytoplasmic mucin. Mitotic activity is brisk (\u22488/10 HPF). No necrosis is identified in the limited sample. The background lung parenchyma shows focal emphysematous change without evidence of granulomatous inflammation. --- ### Immunohistochemistry (IHC) \u2013 Performed on biopsy material | Marker | Result | Interpretation | |--------|--------|----------------| | TTF\u20111 (clone 8G7G3/1) | Positive (nuclear) | Supports pulmonary adenocarcinoma | | Napsin A | Positive (cytoplasmic) | Supports adenocarcinoma lineage | | CK7 | Positive (cytoplasmic) | Consistent with lung primary | | p40 | Negative | Excludes squamous differentiation | | CK5/6 | Negative | Excludes squamous differentiation | | ALK (D5F3) | Negative | No ALK protein expression | | PD\u2011L1 (22C3) \u2013 Tumor Proportion Score | 10 % | Low\u2011level expression | --- ### Molecular Testing (Results available on same specimen) -"
+    },
+    {
+      "chunk_index": 1,
+      "edited_similarity": 0.6997414827346802,
+      "evidence_id": "inner5_row835_chunk1",
+      "original_similarity": 0.7185291051864624,
+      "row_id": 835,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "| CK7 | Positive (cytoplasmic) | Consistent with lung primary | | p40 | Negative | Excludes squamous differentiation | | CK5/6 | Negative | Excludes squamous differentiation | | ALK (D5F3) | Negative | No ALK protein expression | | PD\u2011L1 (22C3) \u2013 Tumor Proportion Score | 10 % | Low\u2011level expression | --- ### Molecular Testing (Results available on same specimen) - **EGFR mutation analysis (PCR):** No sensitizing mutations detected. - **KRAS, TP53, STK11, CDKN2A:** Testing not performed on this specimen; results pending from separate NGS assay. --- ### Diagnosis 1. **Primary lung adenocarcinoma, right lower lobe** \u2013 invasive, moderately differentiated (based on glandular architecture and cytologic features). 2. **Immunophenotype:** TTF\u20111+, Napsin A+, CK7+, p40\u2011, CK5/6\u2011, ALK\u2011, PD\u2011L1 TPS 10 %. **Comment:** The immunoprofile is characteristic of a primary pulmonary adenocarcinoma. EGFR mutation testing is negative. Molecular profiling (e.g., KRAS, TP53, STK11, CDKN2A) is recommended to further define actionable alterations. No additional tissue is required for ancillary studies at this time. --- **Pathologist:** _________________________ **Signature:** _________________________ *Report generated electronically; no date is displayed per institutional policy.* <new_note> **Next\u2011Generation Sequencing (NGS) Report** **Patient:** James Miller **Age:** 61 **Sex:** Male **Specimen Information** - **Specimen Type:** Formalin\u2011fixed, paraffin\u2011embedded (FFPE) core biopsy - **Site of Collection:** Right lower lobe lung mass (CT\u2011guided) - **Diagnosis (from pathology):** Adenocarcinoma, non\u2011small cell lung cancer (NSCLC); TTF\u20111 positive, CK7 positive - **Tumor Content:** Estimated neoplastic cellularity \u2265 30 % (adequate for NGS) **Clinical Indication** Comprehensive genomic profiling requested for newly diagnosed stage IV (T2aN3M1c) NSCLC, adenocarcinoma histology, to identify actionable alterations and"
+    },
+    {
+      "chunk_index": 42,
+      "edited_similarity": 0.2740756571292877,
+      "evidence_id": "inner5_row835_chunk42",
+      "original_similarity": 0.27829986810684204,
+      "row_id": 835,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "- Brain MRI to be repeated only if new neurologic symptoms develop. 5. **Symptom Management** - Optimize pain control for back discomfort (consider low\u2011dose gabapentin if neuropathic component suspected). - Encourage activity as tolerated; refer to physical therapy for conditioning. 6. **Psychosocial Support** - Offer referral to oncology social worker for financial counseling and coping resources. - Discuss advance care planning and document patient\u2019s goals of care. 7. **Follow\u2011up Appointments** - Return to clinic 1 week prior to next planned chemotherapy for labs and toxicity review. - Schedule a telehealth check\u2011in 3 days after each infusion to assess acute side effects. **Signature:** [Oncologist Name], MD Medical Oncology, [Institution] --- *Prepared by the oncology team for the patient\u2019s upcoming second\u2011line treatment discussion.*"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.3093843162059784,
+      "evidence_id": "inner5_row985_chunk0",
+      "original_similarity": 0.31616055965423584,
+      "row_id": 985,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.3093843162059784,
+      "evidence_id": "inner5_row473_chunk0",
+      "original_similarity": 0.31616055965423584,
+      "row_id": 473,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease",
+        "largest_similarity_increase"
+      ],
+      "text": ""
+    },
+    {
+      "chunk_index": 9,
+      "edited_similarity": 0.6680762767791748,
+      "evidence_id": "inner5_row80_chunk9",
+      "original_similarity": 0.6783590912818909,
+      "row_id": 80,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "of stage IIA (T2aN1M0) large\u2011cell non\u2011small cell lung carcinoma, right lower lobe, resected 2 years prior. - Completed adjuvant Platinol/vinorelbine chemotherapy. - Recent imaging (contrast\u2011enhanced CT chest) demonstrated a 3.2 cm right hilar mass with mediastinal lymphadenopathy, concerning for recurrent disease. **Gross Description:** Four cylindrical core fragments, each measuring 0.5\u20130.9 cm in length and 0.2\u20130.3 cm in diameter, are received in formalin. The cores are tan\u2011white, firm, and show focal areas of necrosis. All tissue is submitted in its entirety for histologic evaluation. **Microscopic Description:** Sections reveal a malignant neoplasm composed of sheets and nests of large polygonal cells. The tumor cells display: - Abundant eosinophilic cytoplasm - Vesicular nuclei with coarse chromatin and prominent nucleoli - Marked nuclear pleomorphism - Frequent mitoses (\u226515 per 10 high\u2011power fields) - Focal geographic necrosis No glandular differentiation, mucin production, or keratin pearl formation is identified. The background lung parenchyma shows chronic inflammatory changes but no residual in\u2011situ component. **Immunohistochemistry (Ancillary Studies):** | Marker | Result | Interpretation | |--------|--------|----------------| | Cytokeratin 7 (CK7) | Positive (diffuse, strong) | Supports pulmonary epithelial origin | | p40 (\u0394Np63) | Positive (diffuse, strong) | Consistent with squamous lineage, commonly expressed in large\u2011cell carcinoma with squamous differentiation | | Thyroid transcription factor\u20111 (TTF\u20111) | Negative | Excludes typical adenocarcinoma phenotype | | Napsin A | Negative | Supports non\u2011adenocarcinoma histology | | EGFR (immunostain) | Negative (no membranous staining) | Correlates with prior molecular testing showing EGFR wild\u2011type | | Ki\u201167 (MIB\u20111) | High proliferative index (~70 %) | Reflects aggressive behavior"
+    },
+    {
+      "chunk_index": 11,
+      "edited_similarity": 0.555458664894104,
+      "evidence_id": "inner5_row80_chunk11",
+      "original_similarity": 0.5681651830673218,
+      "row_id": 80,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "lower lobectomy with mediastinal lymph node dissection (adjuvant cisplatin + vinorelbine completed) - Disease recurrence at age 68 with right hilar mass, mediastinal nodes, left adrenal nodule, and three brain metastases (treated with stereotactic radiosurgery) **Specimen:** - **Type:** CT\u2011guided core needle biopsy - **Site:** Right hilar mass (right lung) - **Diagnosis (histology):** Large\u2011cell carcinoma, CK7\u207a, p40\u207a, EGFR IHC negative **Test Performed:** - **Assay:** Hybrid\u2011capture DNA\u2011based NGS panel (covers > 500 cancer\u2011relevant genes, including SNVs, indels, copy\u2011number alterations, and selected fusions) - **Platform:** Illumina NovaSeq 6000 - **Library Prep:** DNA extracted from formalin\u2011fixed, paraffin\u2011embedded (FFPE) tissue; average unique coverage 550\u00d7; \u2265 99 % of targeted bases \u2265 100\u00d7 - **Quality Metrics:** % On\u2011Target Reads = 92 %; Mean Insert Size = 180 bp; Molecular Barcode Consensus Accuracy > 99.9 % --- ### Genomic Findings | Gene | Alteration | Nucleotide Change | Protein Change | Variant Allele Frequency* | Classification | Clinical Significance | |------|------------|-------------------|----------------|---------------------------|----------------|-----------------------| | **KRAS** | Missense (SNV) | c.34G>T | p.G12C | 28 % | Pathogenic | FDA\u2011approved KRAS G12C inhibitors (sotorasib, adagrasib) in metastatic NSCLC; eligibility for KRAS\u2011targeted clinical trials | | **TP53** | Missense (SNV) | c.818G>A | p.R273H | 45 % | Pathogenic | Associated with poorer prognosis and aggressive disease biology; no direct targeted therapy | | **STK11** | Splice\u2011site alteration | c.291+1G>A | Predicted loss\u2011of\u2011function | 30 % (estimated) | Pathogenic | Correlates with reduced response to PD\u20111/PD\u2011L1 checkpoint blockade; potential enrollment in trials exploring STK11\u2011directed strategies | | **CDKN2A** | Homozygous deletion (copy\u2011number loss) | \u2013 | \u2013"
+    },
+    {
+      "chunk_index": 36,
+      "edited_similarity": 0.3325920104980469,
+      "evidence_id": "inner5_row80_chunk36",
+      "original_similarity": 0.33713459968566895,
+      "row_id": 80,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "eligible for trials evaluating novel taxane\u2011 or nucleoside analog\u2011based regimens. --- ### Plan 1. **Continue current systemic therapy** (Platinol\u2011taxane doublet) until next tumor board review, provided no new toxicities emerge. 2. **Trial enrollment discussion:** - Review eligibility for ongoing KRAS\u2011G12C inhibitor trials and for trials evaluating taxane\u2011based versus nucleoside analog\u2011based regimens. - Provide patient with written information and schedule a dedicated counseling session. 3. **Consideration of alternative regimens:** - **Taxane\u2011based option:** e.g., weekly PTX or Taxotere with or without platinum, focusing on dose adjustments to mitigate neuropathy. - **Nucleoside analog option:** e.g., gem\u2011based doublet, with attention to hematologic toxicity given prior neutropenia. - Decision pending patient preference, trial availability, and multidisciplinary consensus. 4. **Supportive care:** - Continue anti\u2011emetic prophylaxis (ondansetron + dexamethasone). - Maintain G\u2011CSF support as per ASCO guidelines for high\u2011risk neutropenia. - Monitor neuropathy; consider dose reduction or substitution if progression. 5. **Laboratory monitoring:** CBC and CMP prior to each infusion; repeat CEA in 6 weeks to trend tumor marker. 6. **Imaging follow\u2011up:** Repeat contrast\u2011enhanced CT chest and MRI brain in 8 weeks to reassess disease status. 7. **Follow\u2011up appointments:** - Oncology clinic in 2 weeks for labs review and toxicity assessment. - Return to tumor board in 4 weeks for final treatment decision and trial enrollment status. **Signature:** Dr. A. Patel, MD Medical Oncology [Electronic Signature]"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.8097208738327026,
+      "evidence_id": "inner5_row706_chunk0",
+      "original_similarity": 0.8284183144569397,
+      "row_id": 706,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "**PATHOLOGY REPORT** **Patient:** Eleanor Martinez Sex: Female Age: 65 y **Specimen ID:** RL\u2011CORE\u2011001 **Specimen Type:** CT\u2011guided core needle biopsy \u2013 right lower lobe lung mass **Clinical History:** 65\u2011year\u2011old woman with a 5 cm right lower lobe pulmonary mass on imaging, concerning for primary lung carcinoma. --- ### Gross Description - Four core biopsy fragments received, total combined length 2.5 cm. - Cores are tan\u2011white, firm, and measure 0.4\u20130.8 cm in length. - Specimen is inked, fixed in 10 % neutral buffered formalin, and submitted in standard cassettes. ### Microscopic Description - Sections reveal infiltrating malignant epithelial cells forming irregular glandular structures with both acinar and lepidic patterns. - Tumor cells display enlarged, hyperchromatic nuclei, prominent nucleoli, and moderate cytoplasmic vacuolization. - Mitotic activity is increased (\u22486/10 HPF). - No necrosis identified in the sampled cores. - Background lung parenchyma shows focal emphysematous change, without evidence of granulomatous inflammation. ### Immunohistochemistry (IHC) | Marker | Result | Interpretation | |--------|--------|----------------| | TTF\u20111 (nuclear) | Positive (strong, diffuse) | Supports pulmonary origin | | CK7 (cytoplasmic) | Positive (diffuse) | Consistent with adenocarcinoma | | Napsin A | Positive (moderate) | Supports lung adenocarcinoma | | p40 | Negative | Excludes squamous differentiation | | ALK (IHC) | Negative | No ALK protein expression | | ROS1 (IHC) | Negative | No ROS1 protein expression | | PD\u2011L1 (22C3, TPS) | 20 % (tumor proportion score) | Low\u2011intermediate expression | ### Molecular Testing (NGS \u2013 500\u2011gene panel) - **KRAS:** G12C mutation, variant allele frequency (VAF) 34 % \u2013"
+    },
+    {
+      "chunk_index": 27,
+      "edited_similarity": 0.4262460768222809,
+      "evidence_id": "inner5_row706_chunk27",
+      "original_similarity": 0.42879241704940796,
+      "row_id": 706,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "**Liver:** New 1.6 cm lesion in segment VII (previously 1.5 cm), SUV 7.5 on prior PET, now slightly larger \u2192 **progression** of hepatic metastasis. - **Other pulmonary nodules:** Sub\u2011centimeter, stable. - **No new osseous lesions.** **Impression:** - Progressive hepatic metastasis (increase from 1.5 cm to 1.6 cm) despite docetaxel therapy. - Pulmonary primary and mediastinal disease remain stable. --- ### Assessment 1. **Stage IV KRAS\u2011G12C adenocarcinoma of the lung** \u2013 hepatic progression on third\u2011line docetaxel; pulmonary disease stable. 2. **Treatment\u2011related toxicities:** - Grade 2 peripheral neuropathy (persistent, attributable to prior paclitaxel). - History of grade 3 neutropenia (resolved; current ANC adequate). 3. **Performance status:** ECOG 1, functional but limited by fatigue and dyspnea. 4. **Laboratory profile:** Mild anemia, stable renal function, slight rise in CEA. --- ### Plan 1. **Systemic Therapy** - **Hold docetaxel** pending discussion of next\u2011line options. - Review eligibility for clinical trials targeting KRAS\u2011G12C (e.g., sotorasib, adagrasib) and for immunotherapy\u2011based combinations given PD\u2011L1 TPS 20 %. - If trial enrollment not feasible, consider a non\u2011platinum doublet (e.g., vinorelbine\u2011 or gemcitabine\u2011based) with dose adjustments for renal function; discuss risks/benefits with patient. 2. **Supportive Care** - Continue **anti\u2011emetic prophylaxis** (ondansetron 8 mg PO q8h PRN). - **G\u2011CSF** (filgrastim) prophylaxis for next chemotherapy cycle if a myelosuppressive regimen is chosen, given prior neutropenia. - **Neuropathy management:** Gabapentin 300 mg TID, monitor for efficacy and side effects. - **Fatigue:** Encourage moderate activity as tolerated, consider low\u2011dose dexamethasone 4 mg PO BID for short term if fatigue worsens. 3. **Laboratory & Imaging Follow\u2011up** - CBC, CMP, and CEA"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 5,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_005_query_002_random",
+  "patient_outcomes_in_prompt": false,
+  "query": 2,
+  "query_id": "effect_query_003"
+}

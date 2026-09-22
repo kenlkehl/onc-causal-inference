@@ -1,0 +1,70 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row243_chunk12",
+          "quote": "ECOG 1, asymptomatic aside from mild dry cough."
+        },
+        {
+          "evidence_id": "inner1_row729_chunk4",
+          "quote": "He has returned to baseline activity (ECOG performance status 0)"
+        },
+        {
+          "evidence_id": "inner1_row4_chunk20",
+          "quote": "Throughout, his ECOG performance status has remained 1."
+        }
+      ],
+      "description": "A scale used to assess a patient's functional ability and level of independence in daily activities.",
+      "extraction_instruction": "Identify the numerical value associated with 'ECOG' or 'ECOG performance status'.",
+      "measurement_definition": "A categorical scale from 0 (fully active) to 4 (completely disabled).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific criteria used for grading ECOG in each clinical note are assumed to follow the standard ECOG scale, but are not explicitly defined within the text.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [
+        "Negative/Wild-type",
+        "Mutant"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row243_chunk18",
+          "quote": "Stage IIA (T2aN1M0) left lower lobe adenocarcinoma, EGFR\u2011negative"
+        },
+        {
+          "evidence_id": "inner1_row4_chunk20",
+          "quote": "diagnosed with stage IV (T2aN3M1) right\u2011upper\u2011lobe adenocarcinoma of the lung harboring an activating EGFR exon 19 deletion."
+        }
+      ],
+      "description": "The presence or absence of activating mutations in the Epidermal Growth Factor Receptor (EGFR) gene in the tumor tissue.",
+      "extraction_instruction": "Search for 'EGFR' in the pathology or molecular profile sections; identify if the patient is labeled 'EGFR-negative' or if a specific mutation/deletion is mentioned.",
+      "measurement_definition": "Categorized as 'EGFR-negative' (Wild-type) or 'Mutant' if an activating mutation is identified (e.g., 'EGFR exon 19 deletion').",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain if all patients underwent the same molecular testing method (e.g., NGS vs. PCR) to determine mutation status.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Sample size is very small, consisting of only a few patients.",
+    "Molecular profiling is not documented for all patients in the provided excerpts.",
+    "Baseline comorbidities are mentioned but not consistently structured across all patient records."
+  ],
+  "summary": "The evidence identifies several measurable baseline clinical variables used to characterize patients with non-small cell lung cancer (NSCLC), including functional status (ECOG) and molecular markers (EGFR status)."
+}

@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-22T14:51:19.392445+00:00",
+  "entry_point": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/stage1_query_perturbations_2026-09-22/run_numerical.py",
+  "max_tasks_per_child": 1,
+  "max_workers": 2,
+  "reason": "PyTorch interop threads can be configured only once in each process; frozen science is unchanged.",
+  "source_sha256": "c49aee7dc9e3e188493e08580c1b044f121b7474451adbcd5a9ffcfcd363a231"
+}

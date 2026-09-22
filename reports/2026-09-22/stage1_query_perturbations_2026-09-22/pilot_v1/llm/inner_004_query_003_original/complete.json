@@ -1,0 +1,13 @@
+{
+  "all_evidence_from_inner_training": true,
+  "at": "2026-09-22T15:26:40.842687+00:00",
+  "candidates": 2,
+  "condition": "original",
+  "excerpts": 24,
+  "inner_fold": 4,
+  "input_sha256": "edf85dc4265404af7f950da0d675a6218dc0032c5d3dc323c6c4c2bb2a8fe77a",
+  "packet_sha256": "d296388c6c36f498bfc2b1320dc2fcf81536c239d8f9a8ea40f4945a2d843f75",
+  "prompt_chars": 51378,
+  "query": 3,
+  "response_sha256": "f46b61d7ce78e3f91bb7bab82e14abc1dabb59e1c5a64a17a0fd138db0d11797"
+}

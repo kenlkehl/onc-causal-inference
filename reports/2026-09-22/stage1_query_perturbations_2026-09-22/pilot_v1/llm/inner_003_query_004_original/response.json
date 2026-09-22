@@ -1,0 +1,65 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row54_chunk1",
+          "quote": "Ki\u201167 (MIB\u20111) | Approximately 30 % (moderate proliferative index)"
+        },
+        {
+          "evidence_id": "inner3_row475_chunk1",
+          "quote": "Ki\u201167 (MIB\u20111) | Approximately 30% of tumor nuclei labeled"
+        },
+        {
+          "evidence_id": "inner3_row629_chunk0",
+          "quote": "Ki\u201167 (MIB\u20111) | Approx. 30 % labeling index"
+        }
+      ],
+      "description": "A measure of the proportion of tumor cells undergoing active proliferation, determined by Ki-67 (MIB-1) immunohistochemical staining.",
+      "extraction_instruction": "Extract the numerical percentage value associated with Ki-67 or MIB-1 staining in the immunohistochemistry section of the pathology report.",
+      "measurement_definition": "The percentage of tumor nuclei labeled with Ki-67/MIB-1 antibody.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Ki-67 Proliferation Index",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is unclear if the 'approximately 30%' value is a common threshold or a specific patient-level measurement across these cases.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row311_chunk1",
+          "quote": "Loss\u2011of\u2011function alteration (frameshift)"
+        },
+        {
+          "evidence_id": "inner3_row337_chunk10",
+          "quote": "STK11 loss (inactivating)"
+        },
+        {
+          "evidence_id": "inner3_row958_chunk4",
+          "quote": "Homozygous deletion of STK11 (also known as LKB1) is linked to an immunologically \u201ccold\u201d tumor microenvironment and may attenuate response to immune checkpoint blockade."
+        }
+      ],
+      "description": "Presence or absence of a loss-of-function alteration or homozygous deletion of the STK11 (LKB1) gene.",
+      "extraction_instruction": "Review the molecular testing or NGS section for mentions of STK11, LKB1, or 'STK11 loss'.",
+      "measurement_definition": "Positive evidence is the documentation of an STK11 'loss-of-function alteration', 'loss', or 'homozygous deletion' via NGS. Negative evidence is the explicit documentation of STK11 as 'wild-type' or 'no alteration detected'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether different types of STK11 alterations (e.g., frameshift vs. homozygous deletion) should be grouped as a single binary 'loss' variable.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Small number of unique patients represented in the provided excerpts.",
+    "Inconsistent reporting of molecular markers across all patients (some have comprehensive NGS, others only limited IHC).",
+    "Limited data on the specific clinical outcomes used to determine the effect modification."
+  ],
+  "summary": "The evidence identifies several baseline histopathological and molecular markers in patients with pulmonary adenocarcinoma. Key recurring variables include the Ki-67 proliferation index, PD-L1 expression (Tumor Proportion Score), Tumor Mutational Burden (TMB), and specific genetic alterations such as KRAS G12C mutations and STK11 loss, the latter of which is explicitly noted as potentially modifying the response to immunotherapy."
+}

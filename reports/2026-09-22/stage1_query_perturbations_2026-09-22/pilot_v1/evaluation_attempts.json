@@ -1,0 +1,10 @@
+[
+  {
+    "at": "2026-09-22T15:44:49.390795+00:00",
+    "evaluator_sha256": "f712deb714e38cd2444dc1ee7a226e30a8e45197f0371544fbc9fcaa58d71eef",
+    "llm_freeze_sha256": "d0de0cd94dd275081c2ccb29d70610b7e9393ed3aa147e2f15d54d24378d889c",
+    "numerical_freeze_sha256": "2d9068df5d497cb1d4ff01702590d21a67d2821ee63b630648e1b75989d99830",
+    "outer_test_labels_accessed": false,
+    "scope": "the five inner-validation sets within outer fold 1 training"
+  }
+]

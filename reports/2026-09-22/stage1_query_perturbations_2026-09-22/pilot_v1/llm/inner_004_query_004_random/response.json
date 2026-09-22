@@ -1,0 +1,64 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row201_chunk85",
+          "quote": "ECOG performance status 3"
+        },
+        {
+          "evidence_id": "inner4_row56_chunk18",
+          "quote": "ECOG 2, functional but limited"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, where higher numbers indicate greater disability.",
+      "extraction_instruction": "Extract the numeric value associated with 'ECOG performance status' or 'Performance status: ECOG'.",
+      "measurement_definition": "The Eastern Cooperative Oncology Group (ECOG) scale, typically ranging from 0 (fully active) to 5 (dead).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific definitions for each grade are not provided in the text, relying on standard clinical knowledge of the ECOG scale.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row56_chunk18",
+          "quote": "PD\u2011L1 TPS 10%, and the patient\u2019s ECOG 2 status"
+        },
+        {
+          "evidence_id": "inner4_row266_chunk0",
+          "quote": "Tumor proportion score 10 % (low expression)"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing partial or complete membrane staining for PD-L1.",
+      "extraction_instruction": "Extract the percentage value associated with 'PD-L1 TPS' or 'PD-L1 (22C3) IHC: Tumor proportion score'.",
+      "measurement_definition": "Percentage value (0-100%) determined by immunohistochemistry (IHC), such as the 22C3 assay.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence only provides one value (10%) across different patients, limiting the range of observed variability.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of patients described in the evidence.",
+    "Limited variability in the PD-L1 TPS values provided.",
+    "Lack of standardized reporting for some biomarkers across different patients."
+  ],
+  "summary": "The provided evidence identifies baseline clinical and molecular markers in patients with non-small cell lung cancer (NSCLC), specifically functional performance status (ECOG) and biomarker expression (PD-L1 Tumor Proportion Score), which are commonly associated with treatment selection and outcomes."
+}

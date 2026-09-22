@@ -1,0 +1,158 @@
+{
+  "actual_distance": 0.13550136983394623,
+  "condition": "random",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.5903397798538208,
+      "evidence_id": "inner2_row56_chunk28",
+      "original_similarity": 0.5981735587120056,
+      "row_id": 56,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "(Mild)"
+    },
+    {
+      "chunk_index": 18,
+      "edited_similarity": 0.10500845313072205,
+      "evidence_id": "inner2_row56_chunk18",
+      "original_similarity": 0.10372839123010635,
+      "row_id": 56,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Chest (66.5) & PET/CT (66.8):** Right lower lobe mass 5.5 cm, mediastinal nodes stable, left adrenal lesion and L1 vertebral metastasis unchanged. No new pulmonary nodules or effusion. Brain MRI negative for metastasis. **Assessment of Radiation Toxicities:** - Grade 2 esophagitis resolved; no current dysphagia. No evidence of radiation dermatitis. ### ASSESSMENT 1. **Stage IV large\u2011cell non\u2011small cell lung carcinoma (right lower lobe) with adrenal and vertebral metastases** \u2013 disease appears radiographically stable per prior imaging; no new lesions identified. 2. **Post\u2011palliative external\u2011beam radiation to L1 vertebral metastasis** \u2013 successful pain control, no acute complications. 3. **Radiation\u2011induced esophagitis (grade 2)** \u2013 resolved. 4. **Performance status:** ECOG 2, functional but limited. 5. **Laboratory profile:** Mild lymphopenia; otherwise within normal limits. 6. **No prior exposure to platinum\u2011based chemotherapy** \u2013 systemic therapy pending discussion. ### PLAN 1. **Symptom Management** - Continue acetaminophen 650 mg q6h PRN for residual back soreness; consider low\u2011dose oral morphine if pain escalates. - Maintain proton pump inhibitor (omeprazole 20 mg daily) for esophageal protection. - Encourage deep breathing exercises and incentive spirometry to aid pulmonary function. 2. **Surveillance** - Order repeat contrast\u2011enhanced CT chest, abdomen, and pelvis in 8 weeks to reassess disease status. - Repeat CBC and CMP prior to next imaging to monitor for cytopenias or renal changes. 3. **Systemic Therapy Consideration** - Discuss systemic treatment options at the upcoming visit, taking into account KRAS G12C mutation, STK11 loss, PD\u2011L1 TPS 10%, and the patient\u2019s ECOG 2 status. - Obtain baseline baseline pulmonary function tests (PFTs) to aid in therapy selection. 4."
+    },
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.8733009696006775,
+      "evidence_id": "inner2_row201_chunk2",
+      "original_similarity": 0.8801422119140625,
+      "row_id": 201,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad"
+    },
+    {
+      "chunk_index": 67,
+      "edited_similarity": 0.18205776810646057,
+      "evidence_id": "inner2_row201_chunk67",
+      "original_similarity": 0.18091905117034912,
+      "row_id": 201,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "**Clinical Trial Referral** - Recommend referral to a clinical\u2011trial office to explore combination strategies (e.g., KRAS G12C inhibitor + MET inhibitor) or novel agents targeting KRAS\u2011mutant/ STK11\u2011deficient NSCLC. - **Further Testing** - RNA\u2011based fusion assay could be performed if clinical suspicion for rare fusions arises. - Serial liquid biopsy (circulating tumor DNA) may be useful for monitoring minimal residual disease post\u2011surgery. --- ### Technical Details - **DNA Input:** 180 ng (average fragment size 180 bp). - **Library Quality:** Bioanalyzer profile showed a peak at 300 bp; no significant degradation. - **Sequencing Run:** 2 \u00d7 150 bp, 1.2 billion reads generated. - **Coverage Uniformity:** 96 % of target bases \u2265 200\u00d7. - **Variant Confirmation:** KRAS G12C and STK11 frameshift were confirmed by orthogonal amplicon\u2011based sequencing; MET amplification validated by digital PCR. --- **Molecular Pathology Report** - **Report Date:** *[Date to be inserted by EMR]* - **Report Generated By:** Dr. Alicia M. Chen, MD, PhD \u2013 Molecular Pathology - **Accreditation:** CLIA\u2011certified, CAP\u2011accredited laboratory *This report reflects the molecular profile of the resected primary tumor at the time of testing and is intended to assist the treating oncology team in therapeutic decision\u2011making.* <new_note> Encounter Record Timepoint: At age 49 Encounter Type: outpatient oncology visit Diagnosis Codes: - C34.90: Malignant neoplasm of unspecified part of unspecified bronchus or lung - Z08: Encounter for follow-up after cancer treatment Procedure Codes: - 99214: Established patient visit, moderate complexity <new_note> **Oncology Progress Note** **Patient:** James Patel **MRN:** ******* **Sex:** Male **Age:** 51 **Encounter Type:** Follow\u2011up / Surveillance --- ### Chief Complaint Routine surveillance"
+    },
+    {
+      "chunk_index": 36,
+      "edited_similarity": 0.5565143823623657,
+      "evidence_id": "inner2_row19_chunk36",
+      "original_similarity": 0.5653491616249084,
+      "row_id": 19,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "- Severity: 1/4 (Mild)"
+    },
+    {
+      "chunk_index": 13,
+      "edited_similarity": 0.15590324997901917,
+      "evidence_id": "inner2_row19_chunk13",
+      "original_similarity": 0.15442419052124023,
+      "row_id": 19,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "KRAS G12C\u2011specific inhibitors in clinical trials or future approved therapies. - **TP53 R273C** is a loss\u2011of\u2011function mutation commonly co\u2011occurring with KRAS alterations, contributing to tumor aggressiveness and genomic instability. - **FGFR1 amplification** and **CDKN2A loss** are recurrent events in squamous cell carcinoma of the lung and may represent additional therapeutic targets under investigation. - **PD\u2011L1 TPS 20 %** and **high TMB** suggest a tumor microenvironment that could be responsive to immune checkpoint inhibition, though these biomarkers are not definitive predictors of benefit. - The absence of EGFR, ALK, ROS1, RET, NTRK, BRAF, and MET actionable alterations indicates that standard targeted therapies directed at those drivers are not applicable. Overall, the molecular profile is consistent with a KRAS\u2011driven, squamous NSCLC with multiple co\u2011occurring alterations that may influence prognosis and eligibility for investigational agents. --- ### Limitations - The assay was performed on FFPE tissue; low tumor cellularity can limit detection of subclonal events. - Copy\u2011number analysis may be less sensitive for focal amplifications in regions of heterogeneous tumor content. - The report reflects somatic alterations only; germline variants were not assessed. - PD\u2011L1 IHC and TMB were performed on the same specimen; intratumoral heterogeneity could affect the reported values. --- **Report Generated By:** Molecular Pathology Laboratory, Comprehensive Genomic Profiling Service **Report Date:** *[Date to be inserted by EMR system]* --- <new_note> Encounter Record Timepoint: At age 55 Encounter Type: initial oncology outpatient visit Diagnosis Codes: - C34.90: Malignant neoplasm of unspecified part of unspecified bronchus or lung Procedure Codes: - 99214: Established patient visit, moderate complexity <new_note>"
+    },
+    {
+      "chunk_index": 33,
+      "edited_similarity": 0.5042623281478882,
+      "evidence_id": "inner2_row17_chunk33",
+      "original_similarity": 0.513023853302002,
+      "row_id": 17,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Pain - Severity: 1/4 (Mild)"
+    },
+    {
+      "chunk_index": 17,
+      "edited_similarity": 0.1561555415391922,
+      "evidence_id": "inner2_row17_chunk17",
+      "original_similarity": 0.15537947416305542,
+      "row_id": 17,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Core needle biopsy (adenocarcinoma, TTF\u20111\u207a, CK7\u207a). - NGS: KRAS G12C, STK11 loss\u2011of\u2011function, KEAP1 missense, TP53 R175H; EGFR/ALK/ROS1/BRAF wild\u2011type; no fusions. - PD\u2011L1 IHC: 5% tumor proportion score. **Performance Status:** ECOG 2 (ambulatory, capable of self\u2011care but unable to carry out work activities). --- ### ASSESSMENT 1. **Stage IV NSCLC, adenocarcinoma** \u2013 post\u2011palliative radiation, clinically stable disease. 2. **Radiation\u2011induced esophagitis (grade 2)** \u2013 resolved. 3. **Symptomatic improvement:** cough markedly better, dysphagia resolved. 4. **ECOG 2** \u2013 unchanged. 5. **Molecular profile:** KRAS G12C, STK11 loss, KEAP1, TP53 \u2013 informs systemic therapy considerations. --- ### PLAN 1. **Imaging:** - Obtain contrast\u2011enhanced CT chest/abdomen/pelvis within the next week to assess radiographic response and identify any new sites of disease. - Brain MRI to be repeated only if new neurologic symptoms develop. 2. **Symptom Management:** - Continue topical lidocaine mouth rinse PRN for throat discomfort. - Encourage adequate hydration and a high\u2011protein diet to support weight maintenance. - Reinforce smoking cessation; patient remains abstinent since counseling (CPT 99406). 3. **Laboratory Monitoring:** - Repeat CBC and CMP prior to any systemic therapy initiation or if clinical status changes. 4. **Systemic Therapy Discussion:** - Review systemic options with the patient once imaging results are available, taking into account KRAS G12C mutation, low PD\u2011L1 expression, and STK11/KEAP1 co\u2011alterations. - Discuss potential enrollment in biomarker\u2011driven clinical trials (patient expressed interest in clinical research during prior visits). - Emphasize goals of care, quality\u2011of\u2011life considerations, and the balance between efficacy and toxicity given ECOG 2 status. 5. **Follow\u2011up:** - Schedule return visit in 4 weeks for review"
+    },
+    {
+      "chunk_index": 36,
+      "edited_similarity": 0.5565143823623657,
+      "evidence_id": "inner2_row375_chunk36",
+      "original_similarity": 0.5653491616249084,
+      "row_id": 375,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "- Severity: 1/4 (Mild)"
+    },
+    {
+      "chunk_index": 22,
+      "edited_similarity": 0.12752152979373932,
+      "evidence_id": "inner2_row375_chunk22",
+      "original_similarity": 0.12461818009614944,
+      "row_id": 375,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "No additional enlarged mediastinal or hilar nodes identified. **Chest Wall & Upper Abdomen** - No chest wall masses, rib lesions, or abdominal organ abnormalities. **Osseous Structures** - L1 vertebral body: Known lytic lesion consistent with metastatic disease is unchanged in size and appearance. No new osseous lesions identified in the visualized thoracic spine or ribs. **Airways, Vessels, and Cardiovascular** - Trachea and main bronchi are patent. No evidence of airway obstruction. - Central pulmonary arteries are patent without filling defects. No pulmonary embolus visualized. **Other** - No pneumothorax, pericardial effusion, or mediastinal shift. --- ### Impression 1. **Progressive disease** of the known right lower lobe primary NSCLC, now measuring 5.5 cm (increase from 5.2 cm). 2. New small right pleural effusion, likely reactive to tumor progression. 3. Mediastinal (station 7) lymphadenopathy stable. 4. Known L1 vertebral body metastatic lesion unchanged. 5. No additional thoracic metastatic lesions identified. *Correlation with clinical status and consideration of systemic therapy is recommended.* <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit** **Patient:** Harold Jensen **Age:** 70 **Sex:** Male --- ### Chief Complaint - Follow\u2011up for metastatic non\u2011small cell lung cancer (NSCLC) with worsening shortness of breath and new cough. ### History of Present Illness Harold Jensen is a 70\u2011year\u2011old male with a known diagnosis of stage IV (cT4 N3 M1c) adenocarcinoma of the right lower lobe, KRAS G12C\u2011mutated, TP53 R273H, STK11 loss, and MET amplification (PD\u2011L1 TPS 10 %). He completed palliative external\u2011beam radiation to a lytic L1 vertebral metastasis (30 Gy/10 fx) 1 month ago without acute complications aside from grade"
+    },
+    {
+      "chunk_index": 30,
+      "edited_similarity": 0.5034316778182983,
+      "evidence_id": "inner2_row826_chunk30",
+      "original_similarity": 0.5117229223251343,
+      "row_id": 826,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "Severity: 3/4 (Severe)"
+    },
+    {
+      "chunk_index": 23,
+      "edited_similarity": 0.16562893986701965,
+      "evidence_id": "inner2_row826_chunk23",
+      "original_similarity": 0.16504500806331635,
+      "row_id": 826,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "structures:** Spleen, adrenal glands, pancreas, and kidneys are unremarkable. No retroperitoneal lymphadenopathy. - **Osseous structures:** Visualized ribs, vertebrae, and scapulae show no lytic or sclerotic lesions. **Impression:** 1. **Progression of known right lower lobe NSCLC** \u2013 increase in primary tumor size to 5.3 cm. 2. **New right pleural effusion** likely secondary to malignant involvement. 3. **New hepatic lesions** compatible with metastatic disease. 4. **Stable mediastinal lymphadenopathy** and unchanged bilateral pulmonary nodules. 5. **No intracranial metastases** on MRI brain. Overall imaging demonstrates disease progression with new extra\u2011pulmonary metastatic sites. No acute intracranial abnormality identified. <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit** **Patient:** John Miller **Age:** 68 **Sex:** Male **MRN:** ******* --- ### SUBJECTIVE **Chief Complaint:** Worsening shortness of breath, decreased appetite, and unintentional weight loss. **History of Present Illness:** John Miller is a 68\u2011year\u2011old man with stage IV non\u2011small cell lung cancer (adenocarcinoma) diagnosed one year ago. He completed four cycles of first\u2011line systemic therapy (platinum\u2011based doublet; exact agents not specified) with an initial partial response followed by disease stability. Over the past 3 weeks he has experienced progressive dyspnea now present at rest, a marked decline in oral intake, and a 5\u2011kg (\u224811 lb) weight loss despite attempts to increase caloric intake. He reports increasing fatigue (unable to perform activities of daily living), persistent dry cough, and intermittent right\u2011sided chest discomfort. He denies fever, chills, hemoptysis, new neurologic symptoms, or abdominal pain. He notes that the nausea, previously grade 1\u20132, has worsened to a level that interferes with meals. **Review of Systems (pertinent positives/negatives):** | System"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 2,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_002_query_004_random",
+  "patient_outcomes_in_prompt": false,
+  "query": 4,
+  "query_id": "effect_query_005"
+}

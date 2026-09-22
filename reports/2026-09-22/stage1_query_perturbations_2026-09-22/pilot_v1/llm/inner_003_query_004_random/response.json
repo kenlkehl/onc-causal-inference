@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row888_chunk26",
+          "quote": "| NLR | 4.44 | \u2013 (elevated) |"
+        },
+        {
+          "evidence_id": "inner3_row522_chunk2",
+          "quote": "**Calculated NLR:** 6.11"
+        },
+        {
+          "evidence_id": "inner3_row794_chunk24",
+          "quote": "lymphocytes 1.3 k/\u00b5L (NLR \u2248 2.9)"
+        }
+      ],
+      "description": "A calculated ratio of the absolute neutrophil count to the absolute lymphocyte count, used as a marker of systemic inflammation.",
+      "extraction_instruction": "Search the Laboratory Results or CBC section for 'NLR' or 'Neutrophil-to-Lymphocyte Ratio' and extract the reported numerical value.",
+      "measurement_definition": "The numerical ratio of neutrophils to lymphocytes, reported as a unitless decimal value.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Neutrophil-to-Lymphocyte Ratio",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the NLR was calculated using a standardized formula across different laboratory reports is not explicitly stated.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "Adenocarcinoma",
+        "Squamous cell carcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row888_chunk10",
+          "quote": "Supports squamous differentiation"
+        },
+        {
+          "evidence_id": "inner3_row485_chunk13",
+          "quote": "moderately differentiated adenocarcinoma with lepidic and acinar components"
+        },
+        {
+          "evidence_id": "inner3_row522_chunk2",
+          "quote": "Poorly differentiated squamous cell carcinoma"
+        }
+      ],
+      "description": "The histopathological classification of the lung malignancy based on cellular morphology and immunohistochemical markers.",
+      "extraction_instruction": "Review the 'Final Diagnosis', 'Histology', or 'Microscopic Examination' sections of the pathology report to identify the tumor subtype.",
+      "measurement_definition": "Classification as 'Adenocarcinoma' (typically TTF-1 positive, Napsin A positive) or 'Squamous cell carcinoma' (typically p40 positive, CK5/6 positive).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Histologic Subtype",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence mentions 'moderately differentiated' and 'poorly differentiated' as grades; it is uncertain if grading should be captured as a separate variable or bundled into the subtype.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Limited number of patients presented in the evidence fragments.",
+    "Lack of standardized reporting for NLR across all records (some provided as calculations, others as results)."
+  ],
+  "summary": "The provided evidence identifies measurable baseline variables in patients with non-small cell lung cancer (NSCLC), specifically focusing on the inflammatory marker Neutrophil-to-Lymphocyte Ratio (NLR) and the histologic subtype of the tumor (Adenocarcinoma vs. Squamous Cell Carcinoma)."
+}

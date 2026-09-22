@@ -1,0 +1,75 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row243_chunk12",
+          "quote": "ECOG 1, asymptomatic aside from mild dry cough."
+        },
+        {
+          "evidence_id": "inner2_row421_chunk5",
+          "quote": "**Performance Status:** ECOG 0 (fully active, able to carry on all pre\u2011disease activities without restriction)."
+        },
+        {
+          "evidence_id": "inner2_row867_chunk7",
+          "quote": "ECOG performance status remains 2."
+        }
+      ],
+      "description": "A standardized scale used to assess the functional status and level of activity of patients with cancer.",
+      "extraction_instruction": "Extract the numeric value associated with 'ECOG' or 'ECOG performance status'.",
+      "measurement_definition": "A numeric grade (0-4) where 0 indicates fully active and 4 indicates completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify if the ECOG status was recorded at the time of diagnosis or at the most recent surveillance visit.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [
+        "Never-smoker",
+        "Former smoker",
+        "Current smoker"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row243_chunk6",
+          "quote": "Reinforce smoking\u2011cessation benefits (already abstinent)"
+        },
+        {
+          "evidence_id": "inner2_row962_chunk5",
+          "quote": "**Former smoker**, counseling reinforced."
+        },
+        {
+          "evidence_id": "inner2_row492_chunk7",
+          "quote": "patient is a never\u2011smoker"
+        }
+      ],
+      "description": "The patient's history of tobacco use.",
+      "extraction_instruction": "Identify mentions of smoking status, including terms like 'never-smoker', 'former smoker', 'abstinent', or 'smoking-free'.",
+      "measurement_definition": "Classification based on clinical documentation of smoking history: 'never-smoker' for those who never smoked, 'former smoker' or 'abstinent' for those who stopped, and 'current smoker' for those currently using tobacco.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Smoking Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not provide pack-year history for the smokers.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "The evidence is based on a small number of patient case excerpts.",
+    "ECOG status may fluctuate over the course of surveillance, making the exact baseline timepoint unclear."
+  ],
+  "summary": "The evidence identifies baseline clinical characteristics including functional status (ECOG performance status) and smoking history across a cohort of patients undergoing post-surgical surveillance for lung adenocarcinoma and large-cell carcinoma."
+}

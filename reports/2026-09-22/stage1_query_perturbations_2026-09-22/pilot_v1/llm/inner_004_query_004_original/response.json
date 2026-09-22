@@ -1,0 +1,48 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row232_chunk18",
+          "quote": "metastatic non\u2011small cell lung cancer (adenocarcinoma) harboring an EGFR exon 19 deletion."
+        }
+      ],
+      "description": "Presence of a deletion mutation in exon 19 of the Epidermal Growth Factor Receptor (EGFR) gene in the tumor tissue.",
+      "extraction_instruction": "Identify if the patient's cancer is described as 'harboring an EGFR exon 19 deletion'.",
+      "measurement_definition": "Positive if the tumor is documented as harboring an EGFR exon 19 deletion; negative if the mutation is documented as absent. Absence of mention is not a negative measurement.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR exon 19 deletion",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific method of detection (e.g., NGS, PCR) is not specified.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row232_chunk17",
+          "quote": "SUVmax reduced from 12.4 (pre\u2011radiation) to 6.1."
+        }
+      ],
+      "description": "The maximum Standardized Uptake Value (SUVmax) of the primary lung tumor measured by PET imaging prior to radiation treatment.",
+      "extraction_instruction": "Extract the numeric value for SUVmax associated with the primary tumor that is specified as 'pre-radiation'.",
+      "measurement_definition": "The numeric SUVmax value explicitly identified as pre-radiation.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Baseline primary tumor SUVmax",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific PET radiotracer and imaging protocol used to obtain the SUVmax are not provided.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The evidence is based on a single patient's progress note and imaging report, which may not represent a broad population.",
+    "Baseline values are presented in the context of a comparison with post-treatment values rather than as a standalone baseline table."
+  ],
+  "summary": "The evidence provides baseline clinical and molecular characteristics for a patient with metastatic non-small cell lung cancer, specifically highlighting a known EGFR mutation and pre-treatment metabolic activity of the primary lung tumor."
+}

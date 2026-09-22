@@ -1,0 +1,69 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row367_chunk14",
+          "quote": "ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner3_row329_chunk3",
+          "quote": "ECOG performance status 0"
+        },
+        {
+          "evidence_id": "inner3_row844_chunk7",
+          "quote": "Overall performance status remains ECOG 1"
+        }
+      ],
+      "description": "Baseline functional status of the patient based on the Eastern Cooperative Oncology Group scale.",
+      "extraction_instruction": "Extract the numeric value associated with 'ECOG performance status' or 'ECOG status'.",
+      "measurement_definition": "A score from 0 (fully active) to 2 (ambulatory and capable of all self-care but unable to carry out any work activities) as documented in clinical assessments.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact timing of the assessment (whether it represents the absolute baseline prior to any therapy or a stable state during surveillance) varies across notes.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row367_chunk14",
+          "quote": "Calculated CrCl (Cockcroft\u2011Gault) 66.9 mL/min"
+        },
+        {
+          "evidence_id": "inner3_row367_chunk8",
+          "quote": "~68 mL/min (acceptable for most chemotherapeutic agents)"
+        },
+        {
+          "evidence_id": "inner3_row52_chunk28",
+          "quote": "mild renal impairment (CrCl \u2248 84 mL/min)"
+        }
+      ],
+      "description": "Estimated renal function used to determine chemotherapy dose suitability.",
+      "extraction_instruction": "Extract the numeric value and units (mL/min) associated with 'Calculated CrCl' or 'Calculated Creatinine Clearance'.",
+      "measurement_definition": "Calculated creatinine clearance (CrCl) measured in mL/min, typically using the Cockcroft-Gault formula.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Creatinine Clearance",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some patients have eGFR reported instead of CrCl, which may not be directly interchangeable depending on the formula used.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Creatinine clearance is not documented for every patient in the provided evidence.",
+    "The sample size of patients is very small, limiting the range of values observed for performance status and renal function."
+  ],
+  "summary": "The evidence supports the use of baseline functional status (ECOG performance status) and renal function (Creatinine Clearance) as measurable clinical variables in this cohort of NSCLC patients."
+}

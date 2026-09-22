@@ -1,0 +1,60 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row201_chunk63",
+          "quote": "**KRAS** | c.34G>T (p.G12C) | Missense SNV (activating)"
+        },
+        {
+          "evidence_id": "inner1_row672_chunk2",
+          "quote": "**KRAS** | **G12C** (c.34G>T) | 18 % | *Pathogenic*; activating mutation"
+        }
+      ],
+      "description": "Presence of the activating KRAS G12C missense mutation in the tumor.",
+      "extraction_instruction": "Identify mentions of 'KRAS G12C' or 'c.34G>T (p.G12C)' in the genomic findings section.",
+      "measurement_definition": "Positive if the KRAS c.34G>T (p.G12C) mutation is detected via NGS; negative if KRAS is wild-type or harbors a different mutation.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "KRAS G12C mutation status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the specific variant allele frequency (VAF) of the G12C mutation influences the retrieval signal beyond its binary presence.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row314_chunk8",
+          "quote": "estimated copy number \u2248 6 (amplification)"
+        },
+        {
+          "evidence_id": "inner1_row512_chunk3",
+          "quote": "8 copies (estimated)"
+        },
+        {
+          "evidence_id": "inner1_row574_chunk2",
+          "quote": "copy number \u2248 4.5\u00d7"
+        }
+      ],
+      "description": "The estimated number of copies of the MET gene, used to identify MET amplification.",
+      "extraction_instruction": "Search for 'MET' in the genomic findings table and extract the associated 'copy number' or 'copies' value.",
+      "measurement_definition": "The numerical value of the MET gene copy number as determined by normalized read depth from NGS or qPCR.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "MET copy number",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Variation in thresholds for 'low-level' vs 'amplification' across different laboratory reporting standards.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small sample size of unique patients across the provided excerpts.",
+    "Data is limited to retrospective reports with varying sequencing depths and analytical sensitivities.",
+    "Lack of consistent reporting for all variables (e.g., TMB and PD-L1 are only mentioned in a subset of cases)."
+  ],
+  "summary": "The evidence distinguishes between two primary genomic driver profiles in non-small cell lung carcinoma (NSCLC) adenocarcinomas: those harboring the KRAS G12C mutation (often associated with STK11 or CDKN2A loss) and those harboring EGFR exon 19 deletions (often associated with MET amplification). TP53 R273C is a common co-mutation across both groups."
+}

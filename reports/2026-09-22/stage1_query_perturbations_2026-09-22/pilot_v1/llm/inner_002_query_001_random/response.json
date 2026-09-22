@@ -1,0 +1,70 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row844_chunk7",
+          "quote": "Stage IIA EGFR\u2011mutant NSCLC"
+        },
+        {
+          "evidence_id": "inner2_row844_chunk4",
+          "quote": "EGFR exon 19\u2011deleted adenocarcinoma of the right upper lobe"
+        },
+        {
+          "evidence_id": "inner2_row256_chunk19",
+          "quote": "Absence of actionable alterations in EGFR, ALK, ROS1, BRAF, MET, and other driver genes"
+        }
+      ],
+      "description": "Presence of a pathogenic mutation in the epidermal growth factor receptor (EGFR) gene.",
+      "extraction_instruction": "Identify mentions of EGFR mutation status in pathology or molecular testing reports.",
+      "measurement_definition": "Positive if the patient is documented as 'EGFR-mutant' or has a specific mutation (e.g., exon 19 deletion). Negative if documented as having an 'absence of actionable alterations in EGFR' or negative testing results.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is unclear if 'Wild-type' and 'Unknown/Not Tested' are treated as the same negative category.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row329_chunk3",
+          "quote": "ECOG performance status 0"
+        },
+        {
+          "evidence_id": "inner2_row329_chunk7",
+          "quote": "ECOG performance status of 1 (restricted strenuous activity but ambulatory and capable of self\u2011care)"
+        },
+        {
+          "evidence_id": "inner2_row844_chunk7",
+          "quote": "Overall performance status remains ECOG 1"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients.",
+      "extraction_instruction": "Locate the ECOG performance status mentioned in the assessment or physical examination sections of oncology notes.",
+      "measurement_definition": "The numerical value (0-4) assigned via the Eastern Cooperative Oncology Group (ECOG) scale.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some notes provide the score without the descriptive definition, while others provide both.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "The evidence consists of a small number of patient cases, limiting the diversity of observed variables.",
+    "Molecular testing for some patients was recommended but not necessarily completed at baseline."
+  ],
+  "summary": "The evidence describes patients with non-small cell lung cancer (NSCLC) adenocarcinoma following right upper lobectomy and adjuvant chemotherapy. Key baseline clinical distinctions include the presence of EGFR mutations, functional status via ECOG performance score, and renal function measured by eGFR."
+}

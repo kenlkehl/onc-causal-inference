@@ -1,0 +1,60 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row551_chunk5",
+          "quote": "The presence of both TP53 and STK11 alterations may influence response to immunotherapy"
+        },
+        {
+          "evidence_id": "inner5_row91_chunk4",
+          "quote": "**Co\u2011occurring STK11 loss** is frequently observed in KRAS\u2011mutant lung adenocarcinomas and has been associated with primary resistance to PD\u20111/PD\u2011L1 checkpoint inhibition"
+        }
+      ],
+      "description": "Presence or absence of STK11 loss or alterations in the tumor genome.",
+      "extraction_instruction": "Identify mentions of 'STK11 loss', 'STK11 alterations', or 'STK11-mutated'.",
+      "measurement_definition": "Positive if STK11 loss or alterations are identified via genomic profiling (e.g., NGS); negative if no such alterations are detected or the gene is wild-type.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether 'loss' and 'alterations' (e.g., missense mutations vs. deletions) should be grouped into a single binary variable or distinguished.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [
+        "Exon 19 deletion",
+        "Wild-type",
+        "Other"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row574_chunk15",
+          "quote": "EGFR exon 19 deletion positive"
+        },
+        {
+          "evidence_id": "inner5_row91_chunk4",
+          "quote": "The tumor is **EGFR wild\u2011type**, **ALK\u2011negative**, and **ROS1\u2011negative**"
+        }
+      ],
+      "description": "The specific mutation status of the Epidermal Growth Factor Receptor (EGFR) gene.",
+      "extraction_instruction": "Search for 'EGFR' followed by mutation type (e.g., 'exon 19 deletion') or the term 'wild-type'.",
+      "measurement_definition": "Determined by molecular oncology reports using NGS or IHC. Categorized by the specific mutation (e.g., Exon 19 deletion) or as wild-type.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR Mutation Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact range of 'Other' mutations encountered across the full dataset is unknown.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Sample size is limited to the provided excerpts, potentially over-representing specific genomic drivers like KRAS and EGFR.",
+    "Genomic status is often reported alongside other co-mutations (e.g., TP53), making it difficult to isolate the effect of a single variable."
+  ],
+  "summary": "The evidence identifies genomic markers, specifically STK11 alterations and EGFR mutation status, as key baseline characteristics that influence therapy selection and the predicted efficacy of immunotherapies in non-small cell lung cancer (NSCLC)."
+}

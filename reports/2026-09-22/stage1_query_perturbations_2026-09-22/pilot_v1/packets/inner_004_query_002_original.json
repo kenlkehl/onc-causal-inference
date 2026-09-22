@@ -1,0 +1,278 @@
+{
+  "actual_distance": 0.0,
+  "condition": "original",
+  "distance_budget": 0,
+  "evidence": [
+    {
+      "chunk_index": 21,
+      "edited_similarity": 0.8164942264556885,
+      "evidence_id": "inner4_row540_chunk21",
+      "original_similarity": 0.8164942264556885,
+      "row_id": 540,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "| Findings | |--------|----------| | **General** | Alert, NAD, well\u2011nourished, ECOG 1 | | **Vital Signs** | HR 78 bpm, BP 128/78 mmHg, RR 16/min, SpO\u2082 96% RA, Temp 36.8 \u00b0C | | **HEENT** | Normocephalic, no lymphadenopathy | | **Neck** | Supple, no masses | | **Lungs** | Clear to auscultation bilaterally, mild scattered rhonchi, no wheezes | | **Cardiovascular** | RRR, no murmurs | | **Abdomen** | Soft, non\u2011tender, no hepatosplenomegaly | | **Extremities** | No edema, pulses 2+ bilaterally | | **Neurologic** | Grossly intact, CN II\u2011XII intact | | **Skin** | No rashes or lesions | ### Laboratory Data (most recent, drawn today) - **CBC:** WBC 7.2 k/\u00b5L (N 5.3, L 1.4, NLR 3.79), Hgb 13.0 g/dL, Plt 210 k/\u00b5L. - **CMP:** Na 140 mEq/L, K 4.2 mEq/L, Cl 102 mEq/L, BUN 14 mg/dL, Cr 0.9 mg/dL (eGFR \u2248 85 mL/min), AST 30 U/L, ALT 25 U/L, Albumin 4.0 g/dL. - **Tumor Markers:** Not ordered at this visit. ### Imaging Review - **CT Chest/Abdomen (contrast):** New 1.2 cm left upper lobe nodule, unchanged right lower lobe post\u2011lobectomy changes, mediastinal nodes stable. Hepatic metastasis now 2.3 cm (up from 1.8 cm). No new intra\u2011abdominal lesions. - **Brain MRI:** No enhancing lesions; unchanged from prior study. ### Patient\u2011Reported Outcomes (PRO) - **EORTC QLQ\u2011C30:** Physical 80, Role 70, Emotional 75, Cognitive 85, Social 70, Fatigue 30, Nausea 10, Pain 20, Dyspnea 15, Insomnia 20, Appetite 15, Global Health 70. - **PRO\u2011CTCAE:** Fatigue 1, Cough 1, Nausea 0. ### Assessment 1. **Stage IV NSCLC, adenocarcinoma** \u2013"
+    },
+    {
+      "chunk_index": 35,
+      "edited_similarity": 0.7878718972206116,
+      "evidence_id": "inner4_row540_chunk35",
+      "original_similarity": 0.7878718972206116,
+      "row_id": 540,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "with metastatic non\u2011small cell lung adenocarcinoma (KRAS G12C, TP53 R273C, STK11 loss, PD\u2011L1 15%) diagnosed at age 68. He underwent right lower lobectomy with mediastinal lymph node dissection and received adjuvant cisplatin\u2011vinorelbine (4 cycles). Surveillance imaging at age 69 demonstrated progression with a new left upper lobe nodule and enlargement of a hepatic metastasis. He was started on first\u2011line cisplatin combined with a nucleoside analog (vinorelbine or gemcitabine) at age 70. He completed two cycles of the regimen. After the second cycle he experienced grade 2 neutropenia (ANC 1.2 k/\u00b5L) and moderate fatigue (PRO\u2011CTCAE fatigue 2), which progressed to febrile neutropenia requiring a 3\u2011day inpatient stay. He recovered with supportive care and growth\u2011factor support. Since discharge his fatigue has been mild (PRO\u2011CTCAE fatigue 2) and he reports no new cough, dyspnea, or neuropathic symptoms. He denies fever, chills, nausea, vomiting, or changes in appetite. Restaging contrast\u2011enhanced CT of the chest/abdomen/pelvis performed today shows a reduction in the right lower lobe primary mass to 3.2 cm (previously 4.5 cm) and a decrease in the hepatic lesion to 1.8 cm (previously 2.3 cm). No new pulmonary nodules, mediastinal nodes, or extra\u2011hepatic disease are identified. Brain MRI remains negative for metastasis. **Review of Systems (pertinent):** - **General:** Mild fatigue, no weight loss. - **HEENT:** No headache, visual changes, or sinus symptoms. - **Respiratory:** Occasional dry cough, no dyspnea at rest or exertion. - **Cardiovascular:** No chest pain or palpitations. - **Gastrointestinal:** No nausea, vomiting, or abdominal pain. - **Genitourinary:** No dysuria or hematuria. - **Neurologic:** No neuropathy, dizziness, or"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.7726855278015137,
+      "evidence_id": "inner4_row540_chunk14",
+      "original_similarity": 0.7726855278015137,
+      "row_id": 540,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "bowel sounds present. - **Extremities:** No edema, cyanosis, or clubbing. - **Skin:** No new lesions or rashes. - **Neurologic:** Alert, oriented \u00d73; cranial nerves II\u2011XII intact; strength 5/5 throughout; sensation intact; gait steady. **Laboratory Data (most recent, drawn today):** | Test | Result | Reference | |------|--------|-----------| | CBC \u2013 WBC | 6.5 \u00d710\u00b3/\u00b5L | 4.0\u201110.5 | | CBC \u2013 Hemoglobin | 13.2 g/dL | 13.0\u201117.0 (male) | | CBC \u2013 Platelets | 210 \u00d710\u00b3/\u00b5L | 150\u2011400 | | Differential \u2013 Neutrophils | 4.9 \u00d710\u00b3/\u00b5L | 1.5\u20117.5 | | Differential \u2013 Lymphocytes | 1.4 \u00d710\u00b3/\u00b5L | 1.0\u20113.0 | | CMP \u2013 Creatinine | 0.9 mg/dL | 0.6\u20111.3 | | CMP \u2013 BUN | 14 mg/dL | 7\u201120 | | CMP \u2013 AST | 28 U/L | 10\u201140 | | CMP \u2013 ALT | 24 U/L | 7\u201156 | | CMP \u2013 Albumin | 4.0 g/dL | 3.5\u20115.0 | | Electrolytes \u2013 Na\u207a | 140 mmol/L | 135\u2011145 | | Electrolytes \u2013 K\u207a | 4.2 mmol/L | 3.5\u20115.0 | **Imaging:** - **Contrast\u2011enhanced CT chest (performed 2 weeks ago):** Post\u2011operative changes in the right lower lobe with complete resection of the prior tumor. No residual soft\u2011tissue mass, no mediastinal or hilar lymphadenopathy, and no new pulmonary nodules. No pleural effusion. - **Abdominal imaging:** Not obtained at this visit; prior imaging demonstrated a 1.8 cm hepatic metastasis stable for several months. --- ### ASSESSMENT 1. **Stage IV NSCLC, adenocarcinoma \u2013 postoperative surveillance** - Right lower lobe resected with negative margins; mediastinal nodes not enlarged on recent CT. - Known"
+    },
+    {
+      "chunk_index": 31,
+      "edited_similarity": 0.7680844068527222,
+      "evidence_id": "inner4_row540_chunk31",
+      "original_similarity": 0.7680844068527222,
+      "row_id": 540,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "4.0\u201311.0 | | ANC | 4.9 \u00d7 10\u00b3/\u00b5L | \u22651.5 | | Lymphocytes | 1.3 \u00d7 10\u00b3/\u00b5L | 1.0\u20133.5 | | Hemoglobin | 13.04 g/dL | 13.5\u201317.5 (male) | | Platelets | 190 \u00d7 10\u00b3/\u00b5L | 150\u2013400 | | Creatinine | 0.95 mg/dL | 0.6\u20131.3 | | Calculated CrCl (Cockcroft\u2011Gault) | 85.6 mL/min | >60 mL/min acceptable | | BUN | 13 mg/dL | 7\u201320 | | Sodium | 138 mEq/L | 135\u2013145 | | Potassium | 4.1 mEq/L | 3.5\u20135.0 | | AST | 28 U/L | 10\u201340 | | ALT | 22 U/L | 7\u201356 | | Albumin | 3.9 g/dL | 3.5\u20135.0 | All values are within institutional criteria for cisplatin\u2011based chemotherapy. --- ### Imaging Review - **Contrast\u2011enhanced CT chest/abdomen/pelvis (baseline, pre\u2011chemo):** - Right lower lobe post\u2011lobectomy changes, no residual mass. - Left upper lobe nodule 1.2 cm, unchanged from prior study. - Hepatic metastasis 2.3 cm, stable in size. - No new pulmonary nodules, mediastinal nodes unchanged. - No ascites or intra\u2011abdominal lesions. - **Brain MRI:** No enhancing lesions; no evidence of intracranial metastasis. Interpretation: Disease is currently stable compared with prior imaging; no new sites of involvement. --- ### Assessment 1. **Stage IV KRAS G12C\u2011mutated adenocarcinoma of the lung**, currently stable disease on imaging, ECOG 1, labs acceptable for platinum\u2011based chemotherapy. 2. **Hypertension**, controlled on lisinopril. 3. **Hyperlipidemia**, on atorvastatin. --- ### Plan 1. **Systemic Therapy** - Initiate cisplatin 75 mg/m\u00b2 IV on day 1 combined with a nucleoside analog (either vinorelbine 25 mg/m\u00b2 IV on days 1 and 8 **or**"
+    },
+    {
+      "chunk_index": 21,
+      "edited_similarity": 0.8009491562843323,
+      "evidence_id": "inner4_row692_chunk21",
+      "original_similarity": 0.8009491562843323,
+      "row_id": 692,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "new lytic lesions in lumbar spine or pelvis. **Other Findings** - No retroperitoneal or pelvic lymphadenopathy. - No evidence of pulmonary embolus. --- ### Impression 1. **Progressive pulmonary disease** \u2013 increase in size of right lower\u2011lobe residual mass (now 4.2 cm) with new small right pleural effusion. 2. **Progressive hepatic metastases** \u2013 enlargement of dominant liver lesion to 3.0 cm. 3. **Stable mediastinal lymphadenopathy**. 4. **No new osseous disease**; prior right iliac bone metastasis unchanged. 5. **Recent brain MRI** (performed concurrently) shows **no new intracranial metastases**. *Correlation with clinical status and oncologic management plan is recommended.* <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 63 Instrument: EORTC QLQ-C30 Physical Function: 55/100 Role Function: 45/100 Emotional Function: 60/100 Cognitive Function: 70/100 Social Function: 50/100 Fatigue: 70/100 Nausea: 25/100 Pain: 40/100 Dyspnea: 55/100 Insomnia: 60/100 Appetite Loss: 65/100 Global Health: 45/100 Instrument: PRO-CTCAE Fatigue - Severity: 3/4 (Severe) Nausea - Severity: 2/4 (Moderate) Pain - Severity: 2/4 (Moderate) Neuropathy - Severity: 1/4 (Mild) <new_note> Encounter Record Timepoint: At age 63 Encounter Type: follow-up oncology visit Procedure Codes: - 99214: Established patient visit, moderate complexity - 96415: Chemotherapy IV infusion, additional hour <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit** **Patient:** Eleanor Martinez **Age:** 64 y/o female **MRN:** ******* **Provider:** Dr. __________, MD \u2013 Medical Oncology --- ### SUBJECTIVE **Chief Complaint:** Follow\u2011up after two additional cycles of current IV chemotherapy; evaluation of disease status and treatment\u2011related symptoms. **History of Present Illness:** Ms. Martinez is a 64\u2011year\u2011old woman with stage IV KRAS\u2011mutated (G12C) adenocarcinoma of the right lower lobe, previously treated with"
+    },
+    {
+      "chunk_index": 24,
+      "edited_similarity": 0.7681446075439453,
+      "evidence_id": "inner4_row692_chunk24",
+      "original_similarity": 0.7681446075439453,
+      "row_id": 692,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "extremities; gait steady. **Laboratory Data (most recent, 2 days ago):** | Test | Result | Reference | |------|--------|-----------| | WBC | 7.5 \u00d710\u00b3/\u00b5L | 4.0\u201311.0 | | ANC | 4.2 \u00d710\u00b3/\u00b5L | 1.5\u20138.0 | | ALC | 1.2 \u00d710\u00b3/\u00b5L | 1.0\u20134.0 | | Hgb | 9.5 g/dL | 12.0\u201316.0 | | Plt | 230 \u00d710\u00b3/\u00b5L | 150\u2013400 | | Creatinine | 0.80 mg/dL | 0.6\u20131.2 | | eGFR (CKD\u2011EPI) | 89.5 mL/min/1.73 m\u00b2 | >60 | | Albumin | 3.5 g/dL | 3.5\u20135.0 | | AST/ALT | 32/28 U/L | \u226435 | | CEA | 5.2 ng/mL | \u22643.0 (sex\u2011adjusted) | **Imaging:** - **PET/CT (performed 1 week ago):** Stable size of the right lower lobe primary mass (\u22484.2 cm). Hepatic metastases demonstrate decreased metabolic activity (SUVmax reduced from 8.5 to 4.2). No new hypermetabolic foci identified in bone, mediastinum, or elsewhere. No evidence of new distant disease. **Patient\u2011Reported Outcomes (EORTC QLQ\u2011C30, completed today):** - Physical Function 65, Role Function 55, Emotional Function 70, Cognitive Function 75, Social Function 60. - Fatigue 55, Nausea 15, Pain 30, Dyspnea 45, Insomnia 50, Appetite Loss 45, Global Health 55. **PRO\u2011CTCAE (current):** Fatigue severity 2, Nausea 1, Pain 1, Neuropathy 2. --- ### ASSESSMENT 1. **Stage IV KRAS\u2011G12C adenocarcinoma of the lung** \u2013 currently **stable disease** per RECIST criteria and metabolic response on PET/CT. 2. **Treatment\u2011related grade 2 peripheral neuropathy** \u2013 persistent, affecting fine motor tasks. 3. **Anemia, secondary to chronic disease and prior chemotherapy** \u2013 improved to Hgb 9.5 g/dL after transfusion; still below target for optimal functional status."
+    },
+    {
+      "chunk_index": 9,
+      "edited_similarity": 0.7671765089035034,
+      "evidence_id": "inner4_row692_chunk9",
+      "original_similarity": 0.7671765089035034,
+      "row_id": 692,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "WBC 6.8 k/\u00b5L, ANC 4.0 k/\u00b5L, ALC 1.2 k/\u00b5L, Hgb 10.2 g/dL, Hct 31 %, Plt 210 k/\u00b5L - **CMP:** Na 138 mmol/L, K 4.2 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 14 mg/dL, Creatinine 0.78 mg/dL (eGFR \u2248 92 mL/min/1.73 m\u00b2), AST 30 U/L, ALT 28 U/L, Albumin 3.6 g/dL - **Tumor Markers:** CEA 4.5 ng/mL (reference < 3.0) ### Imaging **CT Chest/Abdomen/Pelvis** (performed 3 weeks ago) \u2013 Review of recent report: - Right lower lobe post\u2011surgical changes with a residual soft\u2011tissue nodule measuring **3.2 cm** (stable compared with prior). - Mediastinal lymph nodes (stations 4R, 7) unchanged, \u2264 1 cm short axis. - Liver: No new hypoattenuating lesions; previously noted subcentimeter lesions unchanged. - Bone: Right iliac lesion post\u2011radiation shows sclerosis, no interval progression. - No pleural effusion or pneumothorax. **Impression:** No radiographic evidence of disease progression; findings consistent with stable disease. ### Assessment 1. **Metastatic KRAS G12C\u2011mutated adenocarcinoma of the lung, currently stable** \u2013 ECOG 1, mild exertional dyspnea likely related to residual pulmonary disease. 2. **Anemia of chronic disease** \u2013 Hgb 10.2 g/dL, stable; no transfusion required. 3. **Hypertension, well controlled**. 4. **Bone metastasis (right iliac) \u2013 post\u2011radiation** \u2013 stable, on bisphosphonate therapy. The patient remains in a relatively functional state with stable radiographic disease. Given the presence of a KRAS G12C mutation and low PD\u2011L1 expression, systemic therapy will be required in the near future to mitigate the risk of progression. ### Plan 1. **Systemic Therapy Discussion** - Reviewed therapeutic options with the patient, including: - KRAS G12C\u2011specific inhibitor (clinical"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.7621239423751831,
+      "evidence_id": "inner4_row692_chunk14",
+      "original_similarity": 0.7621239423751831,
+      "row_id": 692,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "mg/dL - Normal calculated creatinine clearance: 90.99 mL/min - Normal AST: 32 U/L [Reference: 10-40] - Normal ALT: 28 U/L [Reference: 7-56] - Normal Tumor markers - CEA: 4.8 ng/mL - HIGH <new_note> Encounter Record Timepoint: At age 62 Encounter Type: outpatient oncology visit Diagnosis Codes: - C34.90: Malignant neoplasm of unspecified part of unspecified bronchus or lung - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99214: Established patient visit, moderate complexity - 96413: Chemotherapy IV infusion, first hour <new_note> Hospital Admission Record Timepoint: At age 62 Reason for Admission: febrile neutropenia Principal Diagnosis: D70.1 - Chemotherapy-induced neutropenia Length of Stay: 4 days Discharge Disposition: home with outpatient growth-factor support <new_note> Laboratory Results <new_note> **Oncology Progress Note** **Patient:** Eleanor Martinez \u2013 62\u2011year\u2011old female (age 63 at time of visit) **MRN:** (redacted) **Visit Type:** Follow\u2011up (4 weeks post\u2011hospitalization) --- ### Chief Complaint \u201cFeeling more tired than usual and a mild pressure on the right side of my chest.\u201d --- ### History of Present Illness Eleanor is a 62\u2011year\u2011old woman with stage IV KRAS\u2011mutated adenocarcinoma of the right lower lobe, status post\u2011lobectomy, adjuvant cisplatin\u2011based chemotherapy, and palliative radiation to a right iliac bone metastasis. She was hospitalized 4 weeks ago for febrile neutropenia (ANC 0.4 k/\u00b5L) after Cycle 1 of her current systemic therapy. She recovered and was discharged on outpatient pegfilgrastim support. Since discharge she has completed Cycle 2 of the same regimen (administered 2 weeks ago). She reports: * **Fatigue:** progressive over the past week, now moderate (grade 3) and limiting daily activities. No associated"
+    },
+    {
+      "chunk_index": 47,
+      "edited_similarity": 0.7893886566162109,
+      "evidence_id": "inner4_row62_chunk47",
+      "original_similarity": 0.7893886566162109,
+      "row_id": 62,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "ml/min - REDUCED LDH: 190 U/L [Reference: 140-280] - Normal <new_note> **Oncology Progress Note** **Patient:** John A. Doe **MRN:** 000123456 **DOB:** (58 y/o male) **Date:** *[to be added]* --- ### Chief Complaint - Follow\u2011up visit for evaluation of disease progression and discussion of second\u2011line systemic therapy. ### History of Present Illness John is a 67\u2011year\u2011old man with a history of stage IIIA (T2aN2M0) right lower\u2011lobe adenocarcinoma of the lung diagnosed 2 years ago. He underwent a right lower lobectomy with mediastinal lymph node dissection (R0) followed by four cycles of adjuvant Platinol\u2011based doublet chemotherapy. Post\u2011operative surveillance was disease\u2011free until age 60 when a contrast\u2011enhanced CT revealed a left hilar lymph node (2.5 cm) and a right adrenal nodule (1.8 cm) suspicious for metastasis; brain MRI was negative. He subsequently received first\u2011line platinum\u2011based doublet chemotherapy (Platinol + Alimta) for 4 cycles with modest response (stable disease) but later developed new hepatic metastasis (segment VII, 1.2 cm) on imaging at age 65. He completed first\u2011line therapy without major complications aside from grade 2 nausea/fatigue after cycle 2 (managed with anti\u2011emetics and dose adjustment). Current performance status is ECOG 2. He reports mild fatigue and occasional dyspnea on exertion but denies chest pain, cough, hemoptysis, or neurologic symptoms. Recent labs (see below) demonstrate preserved bone\u2011marrow reserve and acceptable renal function for further chemotherapy. Molecular profiling of the original biopsy showed KRAS G12C, co\u2011occurring STK11 loss, TP53 R273H, MET copy\u2011number gain, EGFR wild\u2011type, ALK/ROS1 negative, and a tumor mutational burden of 7 mut/Mb. No actionable EGFR mutation is present. The"
+    },
+    {
+      "chunk_index": 56,
+      "edited_similarity": 0.7876685857772827,
+      "evidence_id": "inner4_row62_chunk56",
+      "original_similarity": 0.7876685857772827,
+      "row_id": 62,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "background:** 58\u2011year\u2011old male diagnosed with stage IIIA (T2aN2M0) adenocarcinoma of the right lower lobe, EGFR\u2011negative, KRAS G12C\u2011mutated, STK11 loss, TP53 R273H, MET copy\u2011number gain, TMB 7 mut/Mb. Underwent right lower lobectomy with mediastinal lymph node dissection (R0) followed by four cycles of adjuvant cisplatin\u2011based chemotherapy. Completed adjuvant therapy without residual disease. - **Recurrence:** At age 60, surveillance CT identified left hilar lymphadenopathy (2.5 cm) and right adrenal nodule (1.8 cm); subsequent PET/CT confirmed hypermetabolic activity in these sites and additional thoracic spine lytic lesions \u2192 classified as metastatic disease (stage IV). - **First\u2011line systemic therapy:** Initiated platinum\u2011based doublet chemotherapy at age 61; tolerated with grade 2 nausea/fatigue; labs showed mild neutropenia and transient creatinine rise (Cr 1.3 mg/dL, eGFR \u224855 mL/min). Imaging after four cycles demonstrated partial response of hilar node (to 1.8 cm) and stable adrenal lesion \u2192 stable disease. - **Second\u2011line systemic therapy:** Began second\u2011line chemotherapy at age 67 (agent not specified). Completed two cycles. - **Current status (post\u2011second\u2011line):** - **Symptoms:** Persistent fatigue (PRO\u2011CTCAE fatigue 3/5), mild nausea (2/5), occasional dull right upper quadrant discomfort, no new dyspnea, cough, or neurologic symptoms. - **Patient\u2011reported outcomes (EORTC QLQ\u2011C30):** Physical Function 60, Role Function 45, Emotional Function 55, Cognitive Function 60, Social Function 50, Fatigue 70, Nausea 35, Pain 30, Dyspnea 45, Global Health 55. - **Performance status:** ECOG 2 (ambulatory, capable of self\u2011care but unable to carry out work activities). - **Imaging (CT chest/abdomen, performed after two cycles of second\u2011line therapy):** - Hepatic segment VII lesion enlarged from 1.2 cm to 1.8 cm, hypodense, consistent"
+    },
+    {
+      "chunk_index": 50,
+      "edited_similarity": 0.7832826375961304,
+      "evidence_id": "inner4_row62_chunk50",
+      "original_similarity": 0.7832826375961304,
+      "row_id": 62,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "Supple, no lymphadenopathy. - **Cardiovascular:** Regular rate and rhythm, no murmurs, rubs, or gallops. - **Respiratory:** Decreased breath sounds over right lower lung field (post\u2011lobectomy); mild bibasilar crackles, no wheezes. - **Abdomen:** Soft, non\u2011tender, no hepatosplenomegaly, no masses. - **Extremities:** No edema, full range of motion, no clubbing. - **Neurologic:** Cranial nerves II\u2013XII intact, strength 5/5 all extremities, sensation intact, gait steady. - **Skin:** No rashes or lesions. ### Laboratory Data (most recent, drawn 1 week ago) | Test | Result | Reference | |------|--------|-----------| | **CBC** | WBC 9.0 k/\u00b5L (NL) | 4.0\u201310.5 | | | Neutrophils 7.3 k/\u00b5L | 1.5\u20138.0 | | | Lymphocytes 0.9 k/\u00b5L (low) | 1.0\u20134.0 | | | Hgb 13.4 g/dL (NL) | 13.0\u201317.0 | | | Plt 210 k/\u00b5L (NL) | 150\u2013400 | | **CMP** | Creatinine 1.2 mg/dL (high\u2011normal) | 0.6\u20131.2 | | | eGFR 53 mL/min/1.73 m\u00b2 (reduced) | >60 | | | Albumin 3.6 g/dL (low\u2011normal) | 3.5\u20135.0 | | | AST/ALT 34/28 U/L (NL) | 0\u201340 | | | LDH 190 U/L (NL) | 100\u2013190 | | **Tumor Markers** | CEA 6.2 ng/mL (slightly elevated) | \u22645.0 | ### Imaging Summary (within the past month) - **Brain MRI:** No intracranial metastases; normal parenchyma. - **Chest/Abdomen CT (contrast):** Stable right adrenal nodule (1.8 cm, unchanged), left hilar lymph node decreased to 1.8 cm, new 1.2 cm hypodense lesion in hepatic segment VII consistent with metastasis; no new pleural effusion or pulmonary nodules. ### Assessment 1. **Metastatic non\u2011small cell lung adenocarcinoma** (KRAS G12C, STK11 loss, TP53 R273H,"
+    },
+    {
+      "chunk_index": 36,
+      "edited_similarity": 0.7782514095306396,
+      "evidence_id": "inner4_row62_chunk36",
+      "original_similarity": 0.7782514095306396,
+      "row_id": 62,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "Plt 190 k/\u00b5L - **CMP:** Na 138 mmol/L, K 4.2 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 16 mg/dL, Cr 1.2 mg/dL (CrCl \u2248 58 mL/min), AST 32 U/L, ALT 28 U/L, ALP 78 U/L, Albumin 4.0 g/dL - **LDH:** 210 U/L (upper\u2011normal) - **Serum electrolytes:** within normal limits ### Imaging Review **CT Chest/Abdomen (contrast, post\u2011cycle 4):** - Left hilar lymph node decreased to 1.8 cm (previously 2.5 cm) \u2013 consistent with partial response. - Right adrenal nodule unchanged at 1.8 cm, no new enhancement. - No new pulmonary nodules or pleural effusion. - No evidence of hepatic lesions or osseous metastases. **Impression:** Stable disease per RECIST 1.1 criteria. No radiographic progression. ### Assessment 1. **Metastatic NSCLC, adenocarcinoma** \u2013 KRAS G12C, STK11 loss, TP53 R273H, MET copy\u2011gain. Currently **stable disease** after four cycles of Platinol\u2011based doublet chemotherapy (Platinol + peme). 2. **ECOG performance status 2** \u2013 limited by fatigue but ambulatory and capable of self\u2011care. 3. **Mild renal insufficiency** (Cr 1.2 mg/dL, CrCl \u2248 58 mL/min) \u2013 acceptable for continued Platinol with close monitoring. 4. **Treatment\u2011related toxicities:** Grade 1 nausea, grade 1 fatigue, mild neutropenia (ANC 2.5 k/\u00b5L). ### Plan 1. **Continue current chemotherapy regimen** (Platinol + peme) for two additional cycles to complete a total of six cycles, pending tolerance and laboratory parameters. 2. **Pre\u2011cycle labs** (CBC, CMP, renal panel) to be obtained 1 day prior to each infusion; hold chemotherapy for ANC < 1.5 k/\u00b5L or CrCl < 45 mL/min. 3. **Supportive care:** - Continue ondansetron PRN; consider adding a NK1\u2011receptor antagonist if"
+    },
+    {
+      "chunk_index": 12,
+      "edited_similarity": 0.7945899963378906,
+      "evidence_id": "inner4_row177_chunk12",
+      "original_similarity": 0.7945899963378906,
+      "row_id": 177,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "palpable - **Extremities:** No edema, pulses 2+ bilaterally - **Neurologic:** Grossly intact, no focal deficits ### Laboratory Data (most recent, obtained today) - **CBC:** WBC 9.0 k/\u00b5L, ANC 7.2 k/\u00b5L, ALC 1.5 k/\u00b5L (NLR 4.8), Hgb 16.9 g/dL, Plt 240 k/\u00b5L - **CMP:** Cr 1.2 mg/dL, eGFR \u2248 58 mL/min/1.73 m\u00b2, BUN 22 mg/dL, AST 35 U/L, ALT 30 U/L, Albumin 3.6 g/dL - **Tumor Markers:** CEA 4.2 ng/mL (slightly elevated) ### Imaging Summary - **CT Chest/Abdomen/Pelvis (contrast):** - New left lower\u2011lobe pulmonary nodule, 2.8 cm, solid, irregular margins. - Mediastinal lymphadenopathy: stations 4R, 7, and 10R enlarged (up to 1.8 cm). - Liver lesion: 1.5 cm hypodense focus in segment VI, indeterminate but concerning for metastasis. - No pleural effusion, no additional abdominal lesions. - **Brain MRI:** Not performed; pending decision. ### Assessment 1. **Stage IV (T2aN3M1) non\u2011small cell lung cancer, adenocarcinoma** \u2013 disease progression after definitive surgery and adjuvant platinum\u2011based chemotherapy. ECOG 1. 2. **Molecular profiling:** Tissue obtained from liver lesion; NGS pending to assess actionable mutations (e.g., KRAS, EGFR, ALK, ROS1, PD\u2011L1). 3. **Symptomatic status:** Mild cough and exertional dyspnea; otherwise functional. 4. **Supportive issues:** Slightly low albumin, borderline renal function (eGFR \u2248 58 mL/min). ### Plan 1. **Molecular Testing** \u2013 Await NGS results from liver biopsy; will guide selection of targeted therapy or immunotherapy. 2. **Systemic Therapy Discussion** \u2013 Reviewed treatment landscape with the patient, including: - Platinum\u2011based doublet chemotherapy (considering renal function) - Immune checkpoint inhibition (PD\u20111/PD\u2011L1 inhibitor) given PD\u2011L1 expression of 5% - Potential enrollment in a clinical trial targeting"
+    },
+    {
+      "chunk_index": 5,
+      "edited_similarity": 0.7714992761611938,
+      "evidence_id": "inner4_row177_chunk5",
+      "original_similarity": 0.7714992761611938,
+      "row_id": 177,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "k/\u00b5L - **CMP:** Creatinine 0.9 mg/dL (eGFR \u224885 mL/min/1.73 m\u00b2), BUN 14 mg/dL, AST 22 U/L, ALT 18 U/L, Albumin 4.2 g/dL, electrolytes within normal limits - **Tumor Markers:** CEA 3.8 ng/mL (within normal range) ### Imaging **Chest CT (post\u2011operative, contrast\u2011enhanced, performed 4 weeks ago):** - No residual pulmonary mass. Surgical margins intact. No new pulmonary nodules. - Mediastinal and hilar lymph node stations stable; no enlargement. - No pleural effusion or pericardial fluid. **Abdominal ultrasound (baseline, performed 5 weeks ago):** Unremarkable; liver, spleen, kidneys normal. ### Patient\u2011Reported Outcomes (EORTC QLQ\u2011C30) - Physical Function: 90 - Role Function: 85 - Emotional Function: 80 - Cognitive Function: 85 - Social Function: 80 - Fatigue: 10 (mild) - Nausea: 5 (minimal) - Pain: 5 (minimal) - Global Health Status/QoL: 85 The patient reports that she feels \u201calmost back to normal\u201d and is able to walk her dog daily without limitation. ### Assessment 1. **Status post left upper\u2011lobe lobectomy for stage IIA adenocarcinoma of the lung, currently disease\u2011free on imaging.** 2. **Adjuvant chemotherapy (cis + vinorelbine) \u2013 cycle 3 pending; tolerating regimen well with minimal nausea and no hematologic toxicity.** 3. **ECOG performance status 1.** 4. **Hypertension, well controlled.** 5. **Hyperlipidemia, stable.** ### Plan 1. **Adjuvant Chemotherapy** - Proceed with Cycle 3 of cis (75 mg/m\u00b2 day 1) and vinorelbine (25 mg/m\u00b2 days 1 and 8) as scheduled. - Pre\u2011cycle labs (CBC, CMP) to be drawn 1 day prior; repeat CBC on day 10 to monitor for neutropenia. - Continue ondansetron PRN for nausea; consider dexamethasone pre\u2011medication if nausea"
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.7672395706176758,
+      "evidence_id": "inner4_row177_chunk28",
+      "original_similarity": 0.7672395706176758,
+      "row_id": 177,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "- **Cardiovascular:** No chest pain or palpitations. - **Gastrointestinal:** No nausea, vomiting, or abdominal pain. - **Neurologic:** No headaches, visual changes, or focal deficits. - **Musculoskeletal:** No new bone pain aside from previously irradiated scapular site. - **Dermatologic:** No rash or skin changes. --- ### Physical Examination - **Vitals:** BP 122/78 mmHg, HR 78 bpm, RR 16/min, SpO\u2082 96% on room air, Temp 36.8 \u00b0C. - **General:** Alert, oriented, in no acute distress. - **HEENT:** Normocephalic, atraumatic. - **Neck:** No cervical lymphadenopathy. - **Cardiopulmonary:** Regular rate and rhythm; lungs clear to auscultation bilaterally, no wheezes or rales. - **Abdomen:** Soft, non\u2011tender, no hepatomegaly or palpable masses. - **Extremities:** No edema; right scapular area shows healed radiation site, no tenderness. - **Neurologic:** Grossly intact. --- ### Laboratory Data (most recent) - **CBC:** WBC 9.0 k/\u00b5L, ANC 7.2 k/\u00b5L, Hgb 16.9 g/dL, Plt 240 k/\u00b5L. - **CMP:** Creatinine 1.2 mg/dL (eGFR \u2248 58 mL/min), BUN 22 mg/dL, AST 35 U/L, ALT 30 U/L, Albumin 3.6 g/dL. - **Tumor Markers:** CEA 4.2 ng/mL (slightly elevated). --- ### Imaging Summary - **PET/CT (Chest/Abdomen/Pelvis):** - Left lower\u2011lobe mass 2.8 cm, SUV \u2248 8, consistent with active disease. - Mediastinal lymph nodes mildly enlarged, hypermetabolic. - Liver lesion 1.5 cm, SUV \u2248 6, compatible with metastatic deposit. - No new osseous lesions beyond previously irradiated scapular metastasis. - **Brain MRI:** Not performed; intracranial disease status pending. --- ### Assessment 1. **Metastatic KRAS G12C\u2011mutated adenocarcinoma of the lung, progressive disease** (stage IV, T2aN3M1). 2. **ECOG performance status 1**, adequate hematologic and hepatic function;"
+    },
+    {
+      "chunk_index": 22,
+      "edited_similarity": 0.7661401033401489,
+      "evidence_id": "inner4_row177_chunk22",
+      "original_similarity": 0.7661401033401489,
+      "row_id": 177,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "| Soft, non\u2011tender, no hepatosplenomegaly. | | **Extremities** | No edema; right scapular area mildly tender, no erythema. | | **Neurologic** | Grossly intact, strength 5/5 bilaterally, sensation intact. | | **Skin** | No rashes, bruising, or lesions. | ### Laboratory Data (most recent, drawn 1 week prior to visit) - **CBC:** WBC 9.0 k/\u00b5L, ANC 7.2 k/\u00b5L, Hgb 16.9 g/dL, Plt 240 k/\u00b5L. - **CMP:** Creatinine 1.2 mg/dL (eGFR \u2248 58 mL/min), BUN 22 mg/dL, AST 35 U/L, ALT 30 U/L, Albumin 3.6 g/dL. - **Tumor Markers:** CEA 4.2 ng/mL (slightly elevated). ### Imaging **Contrast\u2011enhanced CT chest/abdomen/pelvis (performed 2 weeks post\u2011radiation):** - **Chest:** Right scapular lesion shows post\u2011radiation changes without residual soft\u2011tissue mass; no new osseous lesions. Left lower\u2011lobe mass unchanged at 2.8 cm, mediastinal nodes stable in size. No pleural effusion noted. - **Abdomen:** Liver lesion 1.5 cm unchanged, no new hepatic lesions. No intra\u2011abdominal lymphadenopathy. - **Bone windows:** No additional metastatic foci identified. **Brain MRI:** Not performed; status of intracranial disease remains unknown. ### Assessment 1. **Stage IV KRAS\u2011mutant lung adenocarcinoma** \u2013 currently stable disease after palliative radiation to right scapular metastasis; visceral lesions unchanged. 2. **Performance status:** ECOG 1, functional and independent. 3. **Symptoms:** Mild fatigue and intermittent nausea, both controlled with supportive measures. 4. **Laboratory profile:** Mildly reduced renal function (eGFR ~58 mL/min) but otherwise acceptable for systemic therapy. 5. **Molecular profile:** KRAS G12C, TP53 R273C, STK11 loss \u2013 informs potential therapeutic options. ### Plan 1. **Systemic Therapy Planning** - Discuss systemic options appropriate for KRAS\u2011mutant NSCLC, including cytotoxic agents (vinorelbine,"
+    },
+    {
+      "chunk_index": 15,
+      "edited_similarity": 0.7833982706069946,
+      "evidence_id": "inner4_row947_chunk15",
+      "original_similarity": 0.7833982706069946,
+      "row_id": 947,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "kidneys normal in size and attenuation; no hydronephrosis. - No calculi. **Lower Abdomen/Pelvis** - No abnormal pelvic masses or lymphadenopathy. - Visualized bowel loops unremarkable; no obstruction or wall thickening. **Osseous Structures** - Left iliac bone: Lytic lesion measuring 1.2 cm, unchanged. - No additional osseous lesions identified throughout the visualized spine, pelvis, or femora. No pathologic fracture. **Incidental Findings** - Small bilateral pleural-based fibrotic bands, likely chronic; unchanged. - No pulmonary embolus visualized in the segmental arteries. **IMPRESSION** 1. Known right upper lobe primary lung mass (5.1 cm) stable in size. 2. Mediastinal and hilar lymph nodes unchanged. 3. Hepatic metastatic lesions stable. 4. Left iliac bone metastasis unchanged. 5. No new intrathoracic, intra\u2011abdominal, or osseous disease. Overall imaging appearance is consistent with stable disease per RECIST criteria. <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit** **Patient:** Elena Martinez **Age:** 51 **Sex:** Female **MRN:** *** **Chief Complaint:** Follow\u2011up after two cycles of systemic chemotherapy for metastatic non\u2011small cell lung cancer (NSCLC). --- ### Subjective **History of Present Illness:** Ms. Martinez is a 51\u2011year\u2011old woman with stage IV (T3N2M1) adenocarcinoma of the right upper lobe, diagnosed 6 months ago. Molecular profiling demonstrated KRAS G12C, TP53 R273C, STK11 loss, and MET copy\u2011number gain; EGFR wild\u2011type. She initiated a platinum\u2011doublet chemotherapy regimen (carboplatin AUC 5 + pemetrexed 500 mg/m\u00b2) 4 weeks ago. - **Cycle 1:** Developed grade 3 neutropenia (ANC 0.8 k/\u00b5L) without fever; required inpatient management for febrile neutropenia and was discharged on filgrastim support. - **Cycle 2 (completed 1 week ago):** Tolerated treatment with mild fatigue and"
+    },
+    {
+      "chunk_index": 34,
+      "edited_similarity": 0.7832764387130737,
+      "evidence_id": "inner4_row947_chunk34",
+      "original_similarity": 0.7832764387130737,
+      "row_id": 947,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "Physical Function 70, Role Function 65, Emotional Function 70, Cognitive Function 75, Social Function 60, Fatigue 45, Nausea 20, Pain 30, Dyspnea 25, Insomnia 35, Appetite Loss 30, Constipation 15, Diarrhea 10, Financial Difficulties 25, Global Health 60. - **PRO\u2011CTCAE:** Nausea 1, Fatigue 2, Pain 1, Neuropathy 0, Diarrhea 0, Constipation 0. ### Imaging Summary - **CT Chest/Abdomen/Pelvis (post\u2011cycle 4):** Right upper lobe mass reduced to 3.8 cm; mediastinal nodes decreased in size; hepatic metastases decreased to 0.8 cm; left iliac bone lesion unchanged. No new lesions. **Impression:** Partial response. ### Assessment 1. **Stage IV NSCLC, adenocarcinoma** \u2013 KRAS G12C, TP53 R273C, STK11 loss, MET gain. Currently in partial response to first\u2011line platinum\u2011based doublet chemotherapy (completed 4 cycles). ECOG 2. 2. **Treatment\u2011related toxicities:** Resolved grade 3 neutropenia, prior febrile neutropenia (now resolved), grade 2 fatigue (improving), grade 2 esophagitis (controlled). 3. **Bone metastasis** \u2013 left iliac lesion treated with palliative radiation; pain well controlled. 4. **Supportive care needs:** Ongoing mild nausea, fatigue, and anemia (Hgb 10.8 g/dL). ### Plan 1. **Multidisciplinary Review:** The tumor board (medical oncology, radiation oncology, palliative care, pharmacy) will convene to determine the optimal next\u2011line systemic regimen. Options under active consideration include vinorelbine versus gemcitabine, with attention to the patient\u2019s prior toxicities, renal function, and convenience of administration. 2. **Laboratory Monitoring:** Repeat CBC, CMP, and NLR prior to initiation of the next regimen (within 7 days). Consider prophylactic G\u2011CSF if neutropenia risk is deemed high for the chosen agent. 3. **Supportive Care:** - Continue ondansetron PRN for nausea; consider adding a low\u2011dose"
+    },
+    {
+      "chunk_index": 30,
+      "edited_similarity": 0.7748453617095947,
+      "evidence_id": "inner4_row947_chunk30",
+      "original_similarity": 0.7748453617095947,
+      "row_id": 947,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "LOW CMP - Creatinine: 0.9 mg/dL - Normal <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 51 Instrument: EORTC QLQ-C30 Physical Function: 70/100 Role Function: 65/100 Emotional Function: 70/100 Cognitive Function: 75/100 Social Function: 60/100 Fatigue: 45/100 Nausea: 20/100 Pain: 30/100 Dyspnea: 25/100 Insomnia: 35/100 Appetite Loss: 30/100 Constipation: 15/100 Diarrhea: 10/100 Financial Difficulties: 25/100 Global Health: 60/100 Instrument: PRO-CTCAE Nausea - Severity: 1/4 (Mild) Fatigue - Severity: 2/4 (Moderate) Pain - Severity: 1/4 (Mild) Neuropathy - Severity: 0/4 (None) Diarrhea - Severity: 0/4 (None) Constipation - Severity: 0/4 (None) <new_note> **Oncology Progress Note** **Patient:** Elena Martinez, 51\u2011year\u2011old female **MRN:** (redacted) **Date:** (to be entered) --- ### Chief Complaint Follow\u2011up visit for assessment of treatment response and discussion of next\u2011line systemic therapy. ### History of Present Illness Elena was diagnosed with stage IV (T3N2M1) non\u2011small cell lung cancer, adenocarcinoma, arising in the right upper lobe. Molecular profiling demonstrated EGFR wild\u2011type, KRAS G12C, TP53 R273C, STK11 loss, and MET copy\u2011number gain. She initiated first\u2011line platinum\u2011based doublet chemotherapy at age 51 and has now completed four cycles. - **Response:** CT chest/abdomen/pelvis after four cycles shows reduction of the right upper lobe mass from 5.2 cm to 3.8 cm and decreased mediastinal nodal size. Hepatic lesions have decreased to 0.8 cm. Osseous lesions remain unchanged. Radiology impression: **partial response** per RECIST 1.1. - **Symptoms:** She reports overall improvement in energy and activity tolerance. Occasional mild nausea persists; no vomiting. No new dyspnea, cough, chest pain, or neurologic deficits. Bone pain is controlled with scheduled analgesics after palliative external\u2011beam radiation (30"
+    },
+    {
+      "chunk_index": 27,
+      "edited_similarity": 0.769440233707428,
+      "evidence_id": "inner4_row947_chunk27",
+      "original_similarity": 0.769440233707428,
+      "row_id": 947,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "performance status 2 (ambulatory, capable of self\u2011care but unable to carry out work activities). **HEENT:** Oral mucosa moist, mild erythema of posterior pharynx, no ulcerations. **Neck:** No cervical lymphadenopathy. **Cardiovascular:** RRR, no murmurs. **Respiratory:** Decreased breath sounds over right upper lung field, no crackles, no wheezes. No use of accessory muscles. **Abdomen:** Soft, non\u2011tender, no hepatomegaly on palpation. No palpable masses. **Extremities:** No edema. Tenderness over left iliac crest mild, improved with analgesics. **Neurologic:** Grossly intact, CN II\u2011XII intact, gait steady. **Skin:** No rashes or lesions. --- ### Laboratory Data (most recent, after cycle 4) | Test | Result | Reference | |------|--------|-----------| | WBC | 5.4 k/\u00b5L | 4.0\u201310.5 | | ANC | 2.9 k/\u00b5L | 1.5\u20138.0 | | Lymphocytes | 0.9 k/\u00b5L | 1.0\u20133.5 (low) | | Hgb | 10.8 g/dL | 12.0\u201315.5 (low) | | Plt | 190 k/\u00b5L | 150\u2013400 | | Creatinine | 0.9 mg/dL | 0.6\u20131.2 | | BUN | 14 mg/dL | 7\u201320 | | AST/ALT | 28/22 U/L | \u226435 | | Albumin | 3.9 g/dL | 3.5\u20135.0 | | NLR | 5.22 | \u2013 (elevated) | --- ### Imaging Summary **CT Chest/Abdomen/Pelvis (post\u2011cycle 4, pre\u2011radiation):** - Right\u2011upper\u2011lobe mass now 3.8 cm (previously 5.2 cm). - Mediastinal lymph nodes decreased in short\u2011axis dimension (now \u22641.2 cm). - Hepatic lesions reduced to \u22640.8 cm, no new lesions. - Left iliac bone lytic lesion unchanged; post\u2011radiation changes noted. **Impression:** Partial radiographic response per RECIST 1.1 criteria. No new metastatic sites. --- ### Assessment 1. **Stage IV lung adenocarcinoma, KRAS\u2011mutated, TP53\u2011mutated,"
+    },
+    {
+      "chunk_index": 17,
+      "edited_similarity": 0.7928735017776489,
+      "evidence_id": "inner4_row228_chunk17",
+      "original_similarity": 0.7928735017776489,
+      "row_id": 228,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "Hgb | 12.0 g/dL | 13.5\u201117.5 | | Plt | 250 k/\u00b5L | 150\u2011400 | | CMP \u2013 Creatinine | 0.9 mg/dL | 0.6\u20111.3 | | BUN | 14 mg/dL | 7\u201120 | | AST/ALT | 24/22 U/L | \u226440 | | Albumin | 4.0 g/dL | 3.5\u20115.0 | | Tumor Marker \u2013 CEA | 4.5 ng/mL | \u22643.0 (elevated) | | Lipid panel \u2013 LDL | 115 mg/dL | <130 | **Imaging:** - **CT Chest (contrast, performed 2 weeks ago):** - Right lower lobe mass decreased from 5.1 cm to 3.4 cm in maximal axial dimension. - Mediastinal (station 7) lymph node reduced in size (now 1.2 cm). - Bilateral pulmonary nodules show interval decrease in number and size; the largest now measures 0.8 cm. - No new pleural effusion or consolidations. - **MRI Brain (contrast, performed 2 weeks ago):** - Three known enhancing lesions (left frontal 1.2 cm, right cerebellar 0.9 cm, occipital 0.8 cm) unchanged in size; no new lesions; minimal surrounding edema. **Assessment:** 1. **Stage IV KRAS G12C\u2011mutated adenocarcinoma of the right lung with stable brain metastases** \u2013 currently responding to carboplatin/pemetrexed (partial response per RECIST 1.1). ECOG 1. 2. **Treatment\u2011related fatigue (grade 1)** \u2013 likely multifactorial (chemotherapy, disease burden). 3. **Elevated CEA** \u2013 consistent with known disease; trend will be monitored. 4. **No evidence of new organ dysfunction** \u2013 labs within acceptable limits for continued therapy. --- ### PLAN 1. **Continue current regimen** \u2013 carboplatin (AUC 5) + pemetrexed 500 mg/m\u00b2 IV on day 1 of a 21\u2011day cycle. Plan to"
+    },
+    {
+      "chunk_index": 38,
+      "edited_similarity": 0.7854393124580383,
+      "evidence_id": "inner4_row228_chunk38",
+      "original_similarity": 0.7854393124580383,
+      "row_id": 228,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "128/78 mmHg, HR 78 bpm, RR 16/min, SpO\u2082 96% on room air, Temp 36.8 \u00b0C. | | **HEENT** | Normocephalic, atraumatic; pupils equal, reactive; no scleral icterus. | | **Neck** | Supple, no lymphadenopathy. | | **Cardiovascular** | Regular rate and rhythm, no murmurs, rubs, or gallops. | | **Respiratory** | Clear to auscultation bilaterally, no wheezes or rales. | | **Abdomen** | Soft, non\u2011tender, no hepatosplenomegaly, no masses. | | **Extremities** | No edema, pulses 2+ bilaterally. | | **Neurologic** | Cranial nerves II\u2011XII intact, no focal deficits, gait steady. | | **Skin** | No rashes, bruising, or lesions. | --- ### Laboratory & Imaging Summary - **CBC:** WBC 8.5 \u00d710\u00b3/\u00b5L, ANC 7.2 \u00d710\u00b3/\u00b5L, lymphocytes 1.25 \u00d710\u00b3/\u00b5L (NLR 5.74), Hgb 11.9 g/dL, Plt 210 \u00d710\u00b3/\u00b5L. - **CMP:** Creatinine 0.96 mg/dL, BUN 14 mg/dL, electrolytes within normal limits, albumin 3.9 g/dL. - **Tumor Markers:** CEA 5.0 ng/mL (\u2191). - **PET/CT (2 weeks ago):** Stable metabolic activity of pulmonary lesions (SUVmax 3.5); no new hypermetabolic foci. - **Brain MRI (concurrent with PET):** Three known enhancing lesions (left frontal 1.2 cm, right cerebellar 0.9 cm, occipital 0.8 cm) unchanged, no surrounding edema. **Patient\u2011Reported Outcomes (most recent):** - **EORTC QLQ\u2011C30:** Physical 55, Role 45, Emotional 60, Cognitive 70, Social 50, Fatigue 70, Nausea 30, Pain 40, Dyspnea 45, Insomnia 35, Appetite 40, Global Health 45. - **PRO\u2011CTCAE:** Fatigue 2, Nausea 1, Pain 1, Neuropathy 0, Dyspnea 2. --- ### Assessment 1. **Metastatic KRAS\u2011mutated adenocarcinoma of the lung, stable disease** per imaging, ECOG 1. 2. **Brain metastases**, radiographically stable, currently"
+    },
+    {
+      "chunk_index": 24,
+      "edited_similarity": 0.7768279314041138,
+      "evidence_id": "inner4_row228_chunk24",
+      "original_similarity": 0.7768279314041138,
+      "row_id": 228,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "| **Respiratory** | Decreased breath sounds at right lower lung field, no crackles or wheezes | | **Abdomen** | Soft, non\u2011tender, no hepatosplenomegaly | | **Extremities** | No edema, pulses 2+ bilaterally | | **Neurologic** | Cranial nerves II\u2013XII intact, no focal deficits, gait steady | | **Skin** | No rashes or lesions | --- ### Laboratory Data (drawn today) - **CBC:** WBC 6.2 k/\u00b5L, ANC 3.4 k/\u00b5L, Hgb 12.0 g/dL, Plt 210 k/\u00b5L - **CMP:** Na 138 mmol/L, K 4.1 mmol/L, Cl 102 mmol/L, CO\u2082 24 mmol/L, BUN 14 mg/dL, Cr 0.94 mg/dL, AST 22 U/L, ALT 25 U/L, ALP 78 U/L, Albumin 3.9 g/dL - **Tumor markers:** CEA 5.0 ng/mL (\u2191) --- ### Imaging Summary (most recent) - **CT Chest (contrast):** New right pleural effusion; bilateral pulmonary nodules increased in size (largest 2.2 cm). Primary right\u2011lower\u2011lobe mass stable at 5.1 cm. No new mediastinal lymphadenopathy. - **MRI Brain (with/without contrast):** Three known enhancing lesions (left frontal 1.2 cm, right cerebellar 0.9 cm, occipital 0.8 cm) unchanged; no new lesions, no significant perilesional edema. --- ### Assessment 1. **Stage IV KRAS\u2011mutated lung adenocarcinoma** \u2013 progressive disease on second\u2011line Paraplatin + Taxotere (radiographic progression noted). 2. **Mild fatigue and grade 1 nausea** \u2013 likely related to ongoing chemotherapy. 3. **Right pleural effusion** \u2013 small, asymptomatic; no evidence of infection. 4. **Brain metastases** \u2013 stable on imaging. 5. **Performance status:** ECOG 1, functional. --- ### Plan 1. **Symptom Management** - Continue ondansetron 4 mg PO q6h PRN for nausea; add metoclopramide 10 mg PO q8h PRN if"
+    },
+    {
+      "chunk_index": 35,
+      "edited_similarity": 0.7657655477523804,
+      "evidence_id": "inner4_row228_chunk35",
+      "original_similarity": 0.7657655477523804,
+      "row_id": 228,
+      "selection_reasons": [
+        "original_high_similarity"
+      ],
+      "text": "8.5 k/uL [Reference: 3.7-10.5] - Normal Lymphocytes: 1.25 k/uL - LOW Hgb: 11.89 g/dL [Reference: 12.0-16.0] - LOW Comprehensive Metabolic Panel (CMP): Cr: 0.96 mg/dL [Reference: 0.6-1.2] - Normal Tumor Markers: CEA: 5.0 ng/mL [Reference: 0-2.5] - HIGH <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 68.9 Instrument: PRO-CTCAE Fatigue - Severity: 2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Pain - Severity: 1/4 (Mild) Neuropathy - Severity: 0/4 (None) Dyspnea - Severity: 2/4 (Moderate) <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit** **Patient:** John Miller **MRN:** \u2588\u2588\u2588\u2588\u2588\u2588 **Age:** 69 **Sex:** Male **Visit Type:** Established patient \u2013 follow\u2011up --- ### Chief Complaint Evaluation for selection of next\u2011line systemic therapy for metastatic non\u2011small cell lung cancer (adenocarcinoma). --- ### History of Present Illness John Miller is a 69\u2011year\u2011old man with stage IV right\u2011lower\u2011lobe adenocarcinoma diagnosed 3 years ago (T2a N3 M1c). He has completed two prior platinum\u2011based regimens: (1) carboplatin + pemetrexed with partial radiographic response, and (2) carboplatin + docetaxel complicated by febrile neutropenia requiring a 5\u2011day inpatient stay. He subsequently recovered and has been monitored off therapy. Over the past month he reports **stable energy levels** with mild fatigue (PRO\u2011CTCAE grade 2) and occasional nausea (grade 1) that is well controlled with ondansetron PRN. He denies new cough, dyspnea, chest pain, headache, visual changes, or seizures. No new neurologic deficits have emerged. He continues low\u2011dose dexamethasone (4 mg daily) for brain metastases prophylaxis. Baseline laboratory studies obtained 2 days ago show hemoglobin 11.9 g/dL, white blood cell count 8.5 \u00d710\u00b3/\u00b5L with ANC 7.2 \u00d710\u00b3/\u00b5L, lymphocytes 1.25 \u00d710\u00b3/\u00b5L (NLR"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 4,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_004_query_002_original",
+  "patient_outcomes_in_prompt": false,
+  "query": 2,
+  "query_id": "effect_query_003"
+}

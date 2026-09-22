@@ -1,0 +1,56 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row951_chunk0",
+          "quote": "**EGFR**: Exon 19 deletion (p.E746_A750del) detected by targeted PCR/NGS assay."
+        },
+        {
+          "evidence_id": "inner5_row835_chunk1",
+          "quote": "**EGFR mutation analysis (PCR):** No sensitizing mutations detected."
+        }
+      ],
+      "description": "Presence of a sensitizing EGFR mutation in the lung tumor.",
+      "extraction_instruction": "Identify 'EGFR' in molecular testing sections. Label as positive if a mutation (e.g., exon 19 deletion) is 'detected'; label as negative if 'No sensitizing mutations detected' is explicitly stated.",
+      "measurement_definition": "Positive if a sensitizing EGFR mutation is detected by PCR or NGS; negative if no sensitizing mutations are detected or if specifically described as wild-type. Absence of documentation is not a negative result.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether all non-sensitizing variants are grouped under 'negative' or if they should be treated as missing.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row835_chunk0",
+          "quote": "PD\u2011L1 (22C3) \u2013 Tumor Proportion Score | 10 %"
+        },
+        {
+          "evidence_id": "inner5_row706_chunk0",
+          "quote": "PD\u2011L1 (22C3, TPS) | 20 % (tumor proportion score)"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing partial or complete membranous staining for PD-L1.",
+      "extraction_instruction": "Locate the 'PD-L1' entry in the Immunohistochemistry (IHC) table and extract the associated numeric percentage.",
+      "measurement_definition": "The numeric percentage (%) of tumor cells staining positive for PD-L1 as reported by the Tumor Proportion Score (TPS).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether different PD-L1 clones (e.g., 22C3) are interchangeable for this variable.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small cohort of patients represented in the provided excerpts.",
+    "Variable NGS panel sizes (324-gene vs 500-gene) across different patients.",
+    "Variability in reporting of EGFR status (some reports use IHC, others use PCR/NGS)."
+  ],
+  "summary": "The evidence identifies baseline clinical and molecular characteristics of non-small cell lung carcinoma (NSCLC) patients, specifically focusing on histological subtypes (adenocarcinoma, large-cell carcinoma), molecular drivers (EGFR mutations), and immune markers (PD-L1 expression)."
+}

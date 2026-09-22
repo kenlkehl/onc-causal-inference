@@ -1,0 +1,12 @@
+{
+  "at": "2026-09-22T15:44:57.888531+00:00",
+  "candidate_proposals": 144,
+  "llm_freeze_sha256": "d0de0cd94dd275081c2ccb29d70610b7e9393ed3aa147e2f15d54d24378d889c",
+  "llm_requests": 75,
+  "numerical_freeze_sha256": "2d9068df5d497cb1d4ff01702590d21a67d2821ee63b630648e1b75989d99830",
+  "oracle_columns_loaded": false,
+  "outer_fold": 1,
+  "outer_test_patients_used": 0,
+  "probe_loss_rows": 14865,
+  "signal_rows": 3750
+}

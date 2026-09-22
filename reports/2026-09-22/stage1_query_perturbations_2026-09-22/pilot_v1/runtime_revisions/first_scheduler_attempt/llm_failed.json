@@ -1,0 +1,5 @@
+{
+  "at": "2026-09-22T14:46:06.148929+00:00",
+  "error": "Numerical pilot failed; interpretations paused",
+  "traceback": "Traceback (most recent call last):\n  File \"/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/stage1_query_perturbations_2026-09-22/interpret.py\", line 181, in <module>\n    main()\n    ~~~~^^\n  File \"/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/stage1_query_perturbations_2026-09-22/interpret.py\", line 156, in main\n    raise RuntimeError(\"Numerical pilot failed; interpretations paused\")\nRuntimeError: Numerical pilot failed; interpretations paused\n"
+}

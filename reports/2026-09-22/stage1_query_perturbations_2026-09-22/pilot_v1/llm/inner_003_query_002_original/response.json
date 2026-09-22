@@ -1,0 +1,71 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row135_chunk27",
+          "quote": "currently not a candidate for platinum\u2011based regimens due to ECOG 3 and renal reserve"
+        },
+        {
+          "evidence_id": "inner3_row687_chunk36",
+          "quote": "ECOG 2, functional limitations due to fatigue and dyspnea"
+        },
+        {
+          "evidence_id": "inner3_row871_chunk12",
+          "quote": "ECOG 1 \u2013 fully ambulatory, capable of self\u2011care"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, influencing the choice between aggressive combination therapy and palliative single-agent regimens.",
+      "extraction_instruction": "Identify the numeric value associated with 'ECOG' or 'performance status' in the clinical notes.",
+      "measurement_definition": "Eastern Cooperative Oncology Group (ECOG) scale ranging from 0 (fully active) to 4 (completely disabled).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not explicitly list the criteria for all five categories, though the numeric assignments follow the standard ECOG scale.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row687_chunk29",
+          "quote": "Renal function preserved (CrCl \u2248 110 mL/min)"
+        },
+        {
+          "evidence_id": "inner3_row871_chunk32",
+          "quote": "CrCl 66 mL/min, acceptable for most cytotoxic agents"
+        },
+        {
+          "evidence_id": "inner3_row352_chunk36",
+          "quote": "both require dose adjustments for renal function (patient\u2019s CrCl \u2248 85 mL/min)"
+        }
+      ],
+      "description": "A measure of renal function used to determine the safety and dosage of cytotoxic agents.",
+      "extraction_instruction": "Extract the numeric value and unit associated with 'CrCl' or 'renal function'.",
+      "measurement_definition": "Renal clearance rate expressed in milliliters per minute (mL/min).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Creatinine Clearance",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is unclear if CrCl was calculated using the Cockcroft-Gault formula or measured via 24-hour urine collection.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Renal function is sometimes described qualitatively (e.g., 'preserved' or 'adequate') rather than quantitatively.",
+    "Performance status is documented as a single point in time, and its stability over the course of the evidence window is not specified."
+  ],
+  "summary": "The provided evidence suggests that baseline ECOG performance status and renal function (measured by creatinine clearance) are key clinical variables used to determine the appropriateness of specific systemic therapy regimens, particularly in deciding between platinum-based and non-platinum chemotherapy for patients with NSCLC."
+}

@@ -1,0 +1,62 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row329_chunk3",
+          "quote": "ECOG performance status 0"
+        },
+        {
+          "evidence_id": "inner2_row367_chunk15",
+          "quote": "Current ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner2_row811_chunk4",
+          "quote": "Disease\u2011free on imaging; ECOG 1"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, ranging from 0 (fully active) to 4 (completely disabled).",
+      "extraction_instruction": "Locate the mention of 'ECOG performance status' or 'ECOG' followed by a numeric value.",
+      "measurement_definition": "The numeric ECOG performance status score recorded in the clinical note (e.g., 0, 1, 2).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The full range of 0-4 is standard, but only 0, 1, and 2 are explicitly mentioned in this subset.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row811_chunk19",
+          "quote": "Loss of the serine/threonine kinase STK11 (also known as LKB1) is linked to primary resistance to PD\u20111/PD\u2011L1 checkpoint blockade in KRAS\u2011mutant NSCLC"
+        }
+      ],
+      "description": "The presence or absence of a homozygous deletion in the STK11 (LKB1) gene.",
+      "extraction_instruction": "Search for 'STK11' in the genomic/molecular testing section and identify if 'Homozygous Deletion' or 'Wild-type' is reported.",
+      "measurement_definition": "Positive if 'STK11 Homozygous Deletion' is documented; negative if 'Wild-type' or no deletion is noted.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Only one patient in the provided evidence had molecular testing documented for STK11.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Small sample size of evidence chunks provided.",
+    "Genomic profiling data is only available for a subset of patients."
+  ],
+  "summary": "The evidence identifies baseline variables related to patient functional status (ECOG performance status) and specific genomic alterations (STK11 status) in patients with non-small cell lung adenocarcinoma."
+}

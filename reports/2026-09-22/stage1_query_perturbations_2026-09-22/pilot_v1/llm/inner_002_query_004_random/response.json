@@ -1,0 +1,66 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row56_chunk18",
+          "quote": "taking into account KRAS G12C mutation, STK11 loss, PD\u2011L1 TPS 10%, and the patient\u2019s ECOG 2 status"
+        },
+        {
+          "evidence_id": "inner2_row19_chunk13",
+          "quote": "**PD\u2011L1 TPS 20 %** and **high TMB** suggest a tumor microenvironment"
+        },
+        {
+          "evidence_id": "inner2_row17_chunk17",
+          "quote": "PD\u2011L1 IHC: 5% tumor proportion score"
+        }
+      ],
+      "description": "The percentage of viable tumor cells showing membrane staining for PD-L1 by immunohistochemistry.",
+      "extraction_instruction": "Extract the numerical percentage associated with 'PD-L1 TPS' or 'tumor proportion score'.",
+      "measurement_definition": "Percentage value (0-100%) representing the tumor proportion score.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Tumor Proportion Score (TPS)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the measurement is based on a specific clone of PD-L1 antibody (e.g., 22C3 or SP263) is not specified.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row56_chunk18",
+          "quote": "**Performance status:** ECOG 2, functional but limited"
+        },
+        {
+          "evidence_id": "inner2_row17_chunk17",
+          "quote": "**Performance Status:** ECOG 2 (ambulatory, capable of self\u2011care but unable to carry out work activities)"
+        }
+      ],
+      "description": "A scale used to assess the functional status and activities of daily living of patients with cancer.",
+      "extraction_instruction": "Extract the integer following the term 'ECOG'.",
+      "measurement_definition": "A grade from 0 (fully active) to 4 (completely disabled) as defined by the Eastern Cooperative Oncology Group.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific timepoint of assessment (baseline vs. at time of visit) is implicit but not explicitly standardized across all notes.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "The sample size in the provided excerpts is very small, limiting the breadth of observed categorical levels for ECOG.",
+    "PD-L1 measurements may vary based on the specific immunohistochemistry assay used, which is not detailed in the text."
+  ],
+  "summary": "The provided evidence identifies baseline molecular markers and functional status indicators in patients with stage IV non-small cell lung cancer (NSCLC), specifically noting PD-L1 expression levels and ECOG performance status."
+}

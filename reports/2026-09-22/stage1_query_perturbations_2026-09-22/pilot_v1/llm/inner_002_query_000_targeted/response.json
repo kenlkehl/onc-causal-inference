@@ -1,0 +1,57 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row329_chunk18",
+          "quote": "Loss of the CDKN2A tumor\u2011suppressor locus (p16INK4a) is observed in a subset of lung adenocarcinomas and may be linked to more aggressive disease and resistance to certain therapies."
+        },
+        {
+          "evidence_id": "inner2_row522_chunk13",
+          "quote": "The CDKN2A homozygous deletion may render the tumor susceptible to CDK4/6 inhibitors in a research setting."
+        }
+      ],
+      "description": "Loss of the CDKN2A tumor-suppressor locus (p16INK4a) through homozygous deletion.",
+      "extraction_instruction": "Identify if the NGS or molecular pathology report explicitly lists 'CDKN2A homozygous loss' or 'CDKN2A homozygous deletion' as present. Mark as negative only if 'wild-type' or 'no alteration detected' is specified for CDKN2A.",
+      "measurement_definition": "Presence of 'CDKN2A homozygous loss' or 'CDKN2A homozygous deletion' in a genomic profiling report; negative is defined as 'wild-type' or 'no alteration detected'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "CDKN2A homozygous loss",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact threshold for 'homozygous loss' (e.g., copy number 0 vs 1) is not explicitly defined across all reports, although one mentions 'Complete loss (0 copies)'.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row18_chunk7",
+          "quote": "**TP53 R273C** is a loss\u2011of\u2011function mutation associated with genomic instability and adverse prognosis."
+        },
+        {
+          "evidence_id": "inner2_row522_chunk11",
+          "quote": "associated with genomic instability and poorer prognosis in squamous NSCLC."
+        }
+      ],
+      "description": "A specific pathogenic loss-of-function missense mutation in the TP53 gene (p.R273C).",
+      "extraction_instruction": "Search the genomic findings table or text for the specific mutation 'p.R273C' (or 'R273C') associated with the TP53 gene. Mark as negative only if TP53 is explicitly reported as wild-type or without alteration.",
+      "measurement_definition": "Presence of 'TP53 p.R273C' or 'TP53 R273C' identified via sequencing; negative is defined as 'TP53 wild-type' or 'no alteration detected'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "TP53 p.R273C mutation",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "It is uncertain whether other TP53 mutations would exhibit the same effect modifying properties as the p.R273C variant.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Evidence is based on a small number of individual patient case reports rather than a large cohort study.",
+    "The reports combine multiple genomic markers (e.g., KRAS G12C, EGFR deletions), making it difficult to isolate the independent effect of a single variable.",
+    "Histology varies between patients (adenocarcinoma vs. squamous), which may act as a confounding factor for the observed genomic alterations."
+  ],
+  "summary": "The provided evidence suggests that specific genomic alterations in non-small cell lung cancer (NSCLC), particularly CDKN2A homozygous loss and TP53 p.R273C mutations, are associated with more aggressive disease biology, poorer prognosis, and potential sensitivity to targeted therapies such as CDK4/6 inhibitors."
+}

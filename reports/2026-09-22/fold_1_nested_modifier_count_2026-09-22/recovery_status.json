@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-22T18:52:07.731370+00:00",
+  "child_pid": 1161593,
+  "completed_stages": [],
+  "monitor_pid": 1161592,
+  "phase": "selection",
+  "reason": "Prior selection, completion, and progress processes were absent; resume verified checkpoints without changing scientific settings.",
+  "started_at": "2026-09-22T18:52:07.693469+00:00",
+  "supervisor_pid": 1161519,
+  "supervisor_source_sha256": "ff4d29cef554915892bc0a6596004c4432cc2e5de23ca56d7824b067177e92d6"
+}

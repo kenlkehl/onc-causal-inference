@@ -1,0 +1,65 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row522_chunk0",
+          "quote": "baseline creatinine 1.8 mg/dL"
+        },
+        {
+          "evidence_id": "inner4_row522_chunk25",
+          "quote": "Creatinine: 1.9 mg/dL"
+        },
+        {
+          "evidence_id": "inner4_row18_chunk17",
+          "quote": "Cr: 0.85 mg/dL [Reference: 0.6-1.2]"
+        }
+      ],
+      "description": "The patient's serum creatinine level measured at baseline or prior to the initiation of systemic therapy.",
+      "extraction_instruction": "Extract the numeric value associated with 'creatinine', 'Cr', or 'baseline creatinine' measured in mg/dL.",
+      "measurement_definition": "Serum creatinine concentration measured in milligrams per deciliter (mg/dL).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Baseline Serum Creatinine",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain whether the values provided are stable baselines or fluctuate due to acute illness (e.g., pneumonia mentioned in the notes).",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row522_chunk0",
+          "quote": "long smoking history (\u224840 pack\u2011years)"
+        },
+        {
+          "evidence_id": "inner4_row18_chunk19",
+          "quote": "Former smoker, 30 pack\u2011year history"
+        },
+        {
+          "evidence_id": "inner4_row837_chunk34",
+          "quote": "Former smoker, 30\u2011pack\u2011year history"
+        }
+      ],
+      "description": "The cumulative amount of cigarette smoking history expressed in pack-years.",
+      "extraction_instruction": "Extract the numeric value associated with 'pack-year history' or 'pack-years'.",
+      "measurement_definition": "The total number of pack-years (calculated as packs smoked per day multiplied by number of years smoked).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Smoking History",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some values are approximated (e.g., using the symbol \u2248).",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of patients represented in the retrieval evidence.",
+    "Baseline values may be confounded by acute comorbidities (e.g., community-acquired pneumonia) documented in the same records."
+  ],
+  "summary": "The provided evidence identifies measurable baseline clinical variables including renal function (serum creatinine) and smoking history (pack-years) across multiple patients with squamous non-small cell lung cancer."
+}

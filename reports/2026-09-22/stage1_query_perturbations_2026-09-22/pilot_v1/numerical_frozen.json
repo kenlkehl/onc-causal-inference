@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-22T14:54:48.169009+00:00",
+  "folds": {
+    "inner_001": "dc698f40ba743ed09a97fa76ef103c5c3a88a07d68142946a3fb572ce14ba4ff",
+    "inner_002": "2d2d8ab9445086fcce8a266015f6ba17501e4cddd37c0b59dd7f7bbaba48ee4e",
+    "inner_003": "f2a5561e575da7bdf8269052c2bf68f4d99c98715206ce1669759ccc785989b1",
+    "inner_004": "5ad4d13c0448356d4aa00988e817b3921875792e923e7eecc56bb18b6aa03283",
+    "inner_005": "2889d4f9259c49c9acec61ccba34b1080aed01633bdca6b5650b1bae7ee8caa3"
+  },
+  "manifest_sha256": "b5c5b8c797474f6181557d2e1b3bd68cfb082c8d5f00a5051aec1e9c1ee1444f",
+  "scheduler": {
+    "at": "2026-09-22T14:51:19.392445+00:00",
+    "entry_point": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/stage1_query_perturbations_2026-09-22/run_numerical.py",
+    "max_tasks_per_child": 1,
+    "max_workers": 2,
+    "reason": "PyTorch interop threads can be configured only once in each process; frozen science is unchanged.",
+    "source_sha256": "c49aee7dc9e3e188493e08580c1b044f121b7474451adbcd5a9ffcfcd363a231"
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner5_row201_chunk78",
+          "quote": "2. **Performance status:** ECOG 3, primarily limited by dyspnea and fatigue."
+        },
+        {
+          "evidence_id": "inner5_row158_chunk24",
+          "quote": "2. **Performance status:** ECOG 1, remains functional."
+        },
+        {
+          "evidence_id": "inner5_row267_chunk38",
+          "quote": "Performance status has declined to ECOG 2."
+        }
+      ],
+      "description": "The Eastern Cooperative Oncology Group (ECOG) scale used to assess how a patient's disease affects their daily living abilities.",
+      "extraction_instruction": "Extract the numerical ECOG grade provided in the assessment or performance status section of the clinical note.",
+      "measurement_definition": "Standard ECOG scale where 0 is fully active and 4 is completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not provide the full criteria used for the classification in each specific case, only the resulting grade.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner5_row18_chunk19",
+          "quote": "(NLR = 5.14, elevated)"
+        },
+        {
+          "evidence_id": "inner5_row267_chunk38",
+          "quote": "Baseline neutrophil\u2011to\u2011lymphocyte ratio (NLR) is 3.22."
+        }
+      ],
+      "description": "A calculated ratio of the absolute neutrophil count to the absolute lymphocyte count, often used as a marker of systemic inflammation.",
+      "extraction_instruction": "Identify and extract the numeric value listed as 'NLR' or 'neutrophil-to-lymphocyte ratio' from laboratory data or baseline summaries.",
+      "measurement_definition": "The quotient of the absolute neutrophil count divided by the absolute lymphocyte count, typically expressed as a decimal.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Neutrophil-to-Lymphocyte Ratio (NLR)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact timing of the blood draw relative to the 'baseline' is not consistently specified across all mentions.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Small number of patients with explicitly reported NLR values.",
+    "Limited variation in PD-L1 expression (consistently 10%) across multiple cases, reducing its utility as a modifier in this specific dataset.",
+    "Heterogeneity in histology (adenocarcinoma vs. squamous) is present but not quantified across a large enough cohort to establish a strong baseline trend."
+  ],
+  "summary": "The evidence identifies variations in baseline functional status (ECOG) and inflammatory markers (NLR) among patients with stage IV non-small cell lung cancer (NSCLC) presenting with KRAS G12C mutations."
+}

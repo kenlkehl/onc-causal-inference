@@ -1,0 +1,71 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner3_row598_chunk18",
+          "quote": "Alert, NAD, well\u2011appearing, ECOG PS 1"
+        },
+        {
+          "evidence_id": "inner3_row52_chunk12",
+          "quote": "Well\u2011appearing, NAD, ECOG 0"
+        },
+        {
+          "evidence_id": "inner3_row113_chunk23",
+          "quote": "ECOG 2 (limited ambulation, dyspnea on exertion)"
+        }
+      ],
+      "description": "The Eastern Cooperative Oncology Group (ECOG) scale used to assess how a patient's disease affects their daily living abilities.",
+      "extraction_instruction": "Search for 'ECOG' or 'performance status' followed by a numeric value.",
+      "measurement_definition": "A score from 0 (fully active) to 4 (completely disabled).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence only contains values 0, 1, and 2; it is unclear if scores 3 or 4 occur in the broader population.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row598_chunk18",
+          "quote": "Former smoker: 20 pack\u2011years"
+        },
+        {
+          "evidence_id": "inner3_row598_chunk43",
+          "quote": "Former smoker, 30\u2011pack\u2011year history"
+        },
+        {
+          "evidence_id": "inner3_row52_chunk26",
+          "quote": "40\u2011pack\u2011year history"
+        }
+      ],
+      "description": "Cumulative lifetime tobacco exposure measured in pack-years.",
+      "extraction_instruction": "Extract the numeric value associated with 'pack\u2011years' or 'pack-year history'.",
+      "measurement_definition": "The number of packs of cigarettes smoked per day multiplied by the number of years the person smoked.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Smoking History (Pack-Years)",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Consistency in reporting varies slightly between 'pack-year history' and 'pack-years'.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The provided evidence represents a small subset of patients.",
+    "Smoking history is predominantly provided for former smokers."
+  ],
+  "summary": "The evidence describes baseline clinical characteristics of patients with non-small cell lung cancer (NSCLC), specifically documenting functional status (ECOG), smoking history, and common comorbidities such as hypertension and hyperlipidemia."
+}

@@ -1,0 +1,64 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row938_chunk8",
+          "quote": "the concurrent STK11 loss may blunt this effect."
+        },
+        {
+          "evidence_id": "inner3_row366_chunk3",
+          "quote": "*Co\u2011occurring alteration*; may attenuate response to immune checkpoint blockade."
+        },
+        {
+          "evidence_id": "inner3_row867_chunk21",
+          "quote": "STK11 loss has been linked to reduced responsiveness to immune checkpoint inhibitors"
+        },
+        {
+          "evidence_id": "inner3_row968_chunk4",
+          "quote": "May affect response to immunotherapy"
+        }
+      ],
+      "description": "Presence or absence of STK11 (LKB1) gene loss.",
+      "extraction_instruction": "Identify the STK11 entry in the genomic findings table or interpretation section; record as positive if 'loss', 'homozygous deletion', or 'heterozygous copy-number loss' is specified.",
+      "measurement_definition": "Positive: Documentation of STK11 homozygous deletion or heterozygous copy-number loss. Negative: Documentation of wild-type STK11 or absence of mentioned STK11 alteration.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether heterozygous loss has the same modulating effect as homozygous deletion is not specified.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row938_chunk8",
+          "quote": "**TMB of 12 mut/Mb** is in the intermediate range; while higher TMB can correlate with better response to immunotherapy, the concurrent STK11 loss may blunt this effect."
+        },
+        {
+          "evidence_id": "inner3_row366_chunk3",
+          "quote": "**Tumor Mutational Burden (TMB)**: 7.2 mutations/Mb (intermediate)."
+        }
+      ],
+      "description": "The number of somatic mutations per megabase of genomic DNA in the tumor.",
+      "extraction_instruction": "Locate the 'Tumor Mutational Burden' or 'TMB' value in the genomic findings or molecular metrics section; extract the numeric value and the unit (mut/Mb).",
+      "measurement_definition": "Numerical value expressed in mutations per megabase (mut/Mb).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Tumor Mutational Burden (TMB)",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "The exact thresholds for 'low', 'intermediate', and 'high' TMB are not consistently defined across all reports.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The identified roles are based on clinical hypotheses provided in the reports rather than validated outcomes from the provided data.",
+    "TMB values are reported with different qualitative descriptors (low, intermediate) which may vary by laboratory assay."
+  ],
+  "summary": "The evidence describes genomic profiling of patients with non-small cell lung cancer (NSCLC), predominantly harboring KRAS G12C mutations. Multiple reports explicitly hypothesize that STK11 loss and Tumor Mutational Burden (TMB) may modulate the efficacy of immunotherapy (immune checkpoint blockade)."
+}

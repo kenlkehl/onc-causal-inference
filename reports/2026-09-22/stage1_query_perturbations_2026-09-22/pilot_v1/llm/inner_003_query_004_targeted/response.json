@@ -1,0 +1,69 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row84_chunk26",
+          "quote": "PD\u2011L1 12 %; EGFR wild\u2011type"
+        },
+        {
+          "evidence_id": "inner3_row522_chunk13",
+          "quote": "PD\u2011L1 expression of 10 %"
+        },
+        {
+          "evidence_id": "inner3_row653_chunk22",
+          "quote": "20% tumor proportion score"
+        }
+      ],
+      "description": "The percentage of tumor cells expressing Programmed Death-Ligand 1 (PD-L1) as determined by immunohistochemistry (IHC).",
+      "extraction_instruction": "Extract the numerical percentage value associated with PD-L1 IHC or tumor proportion score from the molecular or pathology report sections.",
+      "measurement_definition": "The Tumor Proportion Score (TPS) expressed as a percentage (0-100%).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "PD-L1 Expression",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific IHC assay used (e.g., 22C3 vs SP263) is not explicitly detailed for all patients.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner3_row84_chunk26",
+          "quote": "KRAS G12C mutant, TP53 R273C, CDKN2A loss, PD\u2011L1 12 %"
+        },
+        {
+          "evidence_id": "inner3_row522_chunk13",
+          "quote": "**TP53** and **CDKN2A** alterations are common in squamous cell carcinoma of the lung"
+        },
+        {
+          "evidence_id": "inner3_row653_chunk22",
+          "quote": "TP53 R273C mutation, CDKN2A loss, PIK3CA H1047R mutation"
+        },
+        {
+          "evidence_id": "inner3_row794_chunk6",
+          "quote": "Loss of the CDKN2A locus (p16INK4a)"
+        }
+      ],
+      "description": "The presence or absence of CDKN2A genomic loss or homozygous deletion.",
+      "extraction_instruction": "Search the molecular/NGS results for mentions of CDKN2A status; record as positive if loss/deletion is noted and negative if wild-type is noted.",
+      "measurement_definition": "Positive evidence consists of documentation of 'CDKN2A loss', 'CDKN2A homozygous deletion', or 'CDKN2A alterations'. Negative evidence consists of documentation of 'CDKN2A wild-type' or 'CDKN2A preserved'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "CDKN2A Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain whether 'alterations' always implies loss/deletion or includes other types of mutations.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Small number of distinct patients across the provided evidence chunks.",
+    "Inconsistency in reporting molecular marker terminology (e.g., 'loss' vs 'alteration').",
+    "Lack of detailed assay specifications for PD-L1 IHC across all reports."
+  ],
+  "summary": "The provided evidence describes baseline clinical and molecular characteristics of patients with non-small cell lung carcinoma (NSCLC), predominantly squamous cell carcinoma. Key documented variables include PD-L1 expression levels and the genomic status of CDKN2A."
+}

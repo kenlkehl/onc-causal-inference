@@ -1,0 +1,5 @@
+{
+  "at": "2026-09-22T15:43:44.509539+00:00",
+  "stopped_pid": 1047451,
+  "reason": "Cache saved NPZ arrays once per fold instead of repeatedly decompressing per row. Predictions, scoring formulas, and scientific choices unchanged."
+}

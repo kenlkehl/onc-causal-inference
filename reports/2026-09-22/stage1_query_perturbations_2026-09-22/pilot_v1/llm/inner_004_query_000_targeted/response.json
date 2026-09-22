@@ -1,0 +1,55 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row201_chunk64",
+          "quote": "Associated with primary resistance to PD\u20111/PD\u2011L1 checkpoint blockade; may influence immunotherapy selection."
+        },
+        {
+          "evidence_id": "inner4_row206_chunk2",
+          "quote": "**STK11** | \u2013 | \u2013 | Homozygous deletion (copy\u2011number loss) | \u2013 | Pathogenic"
+        }
+      ],
+      "description": "Presence of a pathogenic alteration in the STK11 gene, including loss-of-function mutations or homozygous deletions.",
+      "extraction_instruction": "Scan the genomic findings section for STK11; identify as positive if 'loss-of-function' or 'Homozygous deletion' is specified, and negative if 'Wild-type' is listed.",
+      "measurement_definition": "Positive if a frameshift loss-of-function mutation or homozygous deletion (copy-number loss) is detected; negative if reported as 'Wild-type' or 'No alteration detected'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "STK11 Alteration Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is unclear if different types of STK11 alterations (e.g., SNV vs. homozygous deletion) are treated as functionally equivalent for the purpose of modifying treatment effect.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row672_chunk4",
+          "quote": "An intermediate TMB (\u2248 12 mut/Mb) and microsatellite stability suggest that the tumor may derive benefit from immune\u2011checkpoint inhibition"
+        },
+        {
+          "evidence_id": "inner4_row522_chunk12",
+          "quote": "**TMB** | 7 mut/Mb | \u2013 | \u2013 | Intermediate; limited predictive value for checkpoint blockade."
+        }
+      ],
+      "description": "The total number of somatic mutations per megabase (mut/Mb) in the tumor genome.",
+      "extraction_instruction": "Extract the numeric value associated with 'Tumor Mutational Burden' or 'TMB' in the results or interpretation sections (e.g., '12 mut/Mb').",
+      "measurement_definition": "The numeric value of mutations per megabase (mut/Mb) as reported by NGS analysis.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Tumor Mutational Burden (TMB)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence uses qualitative descriptors (e.g., 'intermediate') to interpret continuous values, but specific quantitative thresholds for these categories are not provided.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Some variables, such as PD-L1 TPS, are mentioned but lack consistent reporting across all patients.",
+    "Genomic data is derived from a mix of different NGS panel sizes (e.g., 324 genes vs 500 genes), which may introduce variability in detection sensitivity."
+  ],
+  "summary": "The evidence identifies several genomic and molecular baseline variables in patients with KRAS G12C-mutant NSCLC, most notably STK11 alteration status and Tumor Mutational Burden (TMB), both of which are described as influencing the potential response to immunotherapy."
+}

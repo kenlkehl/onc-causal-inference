@@ -1,0 +1,71 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row329_chunk23",
+          "quote": "known stage IV EGFR\u2011mutant non\u2011small cell lung adenocarcinoma"
+        },
+        {
+          "evidence_id": "inner2_row367_chunk14",
+          "quote": "Stage IIA EGFR\u2011mutated NSCLC"
+        },
+        {
+          "evidence_id": "inner2_row367_chunk16",
+          "quote": "EGFR exon 19\u2011deleted adenocarcinoma (stage IIA)"
+        }
+      ],
+      "description": "Presence of activating mutations in the epidermal growth factor receptor (EGFR) gene within tumor tissue.",
+      "extraction_instruction": "Identify mentions of 'EGFR-mutant', 'EGFR-mutated', or specific mutations such as 'EGFR exon 19-deleted'.",
+      "measurement_definition": "Positive if a mutation (e.g., exon 19 deletion) is identified via NGS or molecular testing; negative if wild-type or not documented.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "EGFR Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify the exact assay used for all patients, though NGS is mentioned as a request.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner2_row329_chunk3",
+          "quote": "ECOG performance status 0"
+        },
+        {
+          "evidence_id": "inner2_row256_chunk3",
+          "quote": "\u2013 ECOG 1, wound healing uncomplicated"
+        },
+        {
+          "evidence_id": "inner2_row367_chunk14",
+          "quote": "ECOG performance status 2"
+        }
+      ],
+      "description": "A scale measuring the level of functional impairment in cancer patients.",
+      "extraction_instruction": "Extract the number following 'ECOG performance status' or 'ECOG'.",
+      "measurement_definition": "Numerical value (0-4) as documented in the clinical assessment or radiology report.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some reports may list ECOG status at different time points (e.g., baseline vs. recurrence), requiring careful temporal alignment.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small number of patient records analyzed.",
+    "Variation in the timing of ECOG status documentation relative to treatment.",
+    "Incomplete molecular profiling data for all patients in the provided snippets."
+  ],
+  "summary": "The provided clinical excerpts for patients with resected non-small cell lung adenocarcinoma (NSCLC) indicate distinctions in molecular driver status (specifically EGFR mutations) and functional baseline status (ECOG performance status), which are standard predictors for targeted therapy eligibility and general prognosis."
+}

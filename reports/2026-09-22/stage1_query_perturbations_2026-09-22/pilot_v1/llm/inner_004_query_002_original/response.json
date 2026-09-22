@@ -1,0 +1,67 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row540_chunk21",
+          "quote": "Alert, NAD, well\u2011nourished, ECOG 1"
+        },
+        {
+          "evidence_id": "inner4_row62_chunk56",
+          "quote": "ECOG 2 (ambulatory, capable of self\u2011care but unable to carry out work activities)"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients.",
+      "extraction_instruction": "Identify the numerical value following 'ECOG' in the general findings or assessment sections.",
+      "measurement_definition": "The Eastern Cooperative Oncology Group (ECOG) scale, where 0 represents fully active, 1 represents restricted in physically strenuous activity, and 2 represents ambulatory and capable of self-care but unable to carry out work activities.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact mapping of patients to the full 0-5 scale is limited by the provided excerpts, which primarily show scores 1 and 2.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row540_chunk21",
+          "quote": "WBC 7.2 k/\u00b5L (N 5.3, L 1.4, NLR 3.79)"
+        },
+        {
+          "evidence_id": "inner4_row947_chunk27",
+          "quote": "NLR | 5.22 | \u2013 (elevated)"
+        },
+        {
+          "evidence_id": "inner4_row228_chunk38",
+          "quote": "WBC 8.5 \u00d710\u00b3/\u00b5L, ANC 7.2 \u00d710\u00b3/\u00b5L, lymphocytes 1.25 \u00d710\u00b3/\u00b5L (NLR 5.74)"
+        }
+      ],
+      "description": "A ratio calculated from the absolute counts of neutrophils and lymphocytes, often used as a systemic inflammatory marker.",
+      "extraction_instruction": "Locate 'NLR' within the CBC or laboratory data sections and extract the associated numeric value.",
+      "measurement_definition": "The absolute neutrophil count divided by the absolute lymphocyte count, typically reported as a decimal value.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Neutrophil-to-Lymphocyte Ratio (NLR)",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain whether NLR was calculated consistently across all patients or only recorded when identified as elevated.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The dataset consists of a small number of patients, limiting the ability to identify rare baseline variables.",
+    "NLR is not recorded for all patients, which may introduce selection bias in its availability."
+  ],
+  "summary": "The evidence supports the identification of ECOG performance status and the Neutrophil-to-Lymphocyte Ratio (NLR) as measurable baseline clinical variables in patients with metastatic KRAS-mutated non-small cell lung cancer (NSCLC)."
+}

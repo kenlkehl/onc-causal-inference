@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-22T15:45:00.375203+00:00",
+  "evaluation_sha256": "bd35971100a3341db9c98650bb0dbbeb2ae3e33cb1fff5d24adcb49afd9c5576",
+  "generated_report_sha256": "63493d24a7a7ba7d7b2579c7592a6ac50a28f5c659906c14ee43a7b07c9d13ad",
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/stage1_query_perturbations_2026-09-22/REPORT_2026-09-22.md",
+  "report_review_note": "Added observed conclusions and recommendations after inspecting frozen metrics; no model, prediction, or metric changed.",
+  "report_reviewed_at": "2026-09-22T15:48:31.198199+00:00",
+  "report_sha256": "dfbc09277e636dac4eea0cb70f78e5f51073ca148d6d3aaaa8660d3b00d137be"
+}

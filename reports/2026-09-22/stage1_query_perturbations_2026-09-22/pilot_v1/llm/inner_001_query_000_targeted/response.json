@@ -1,0 +1,63 @@
+{
+  "candidates": [
+    {
+      "categories": [
+        "Squamous Cell Carcinoma",
+        "Adenocarcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row522_chunk6",
+          "quote": "p40 | Strong nuclear positivity in >90 % of tumor cells | Supports squamous differentiation"
+        },
+        {
+          "evidence_id": "inner1_row548_chunk0",
+          "quote": "TTF\u20111 (nuclear) | Strong diffuse positivity | Supports pulmonary origin"
+        },
+        {
+          "evidence_id": "inner1_row548_chunk0",
+          "quote": "CK7 (cytoplasmic) | Strong diffuse positivity | Consistent with adenocarcinoma"
+        }
+      ],
+      "description": "The histological subtype of the lung carcinoma as determined by pathology and immunohistochemistry.",
+      "extraction_instruction": "Identify the diagnosis in the pathology report. Confirm the subtype using the Immunohistochemistry (IHC) table: look for p40/CK5/6 positivity for squamous and TTF-1/Napsin A/CK7 positivity for adenocarcinoma.",
+      "measurement_definition": "Categorized as Squamous Cell Carcinoma if p40 or CK5/6 are positive and TTF-1/Napsin A are negative. Categorized as Adenocarcinoma if TTF-1 or Napsin A are positive and p40 is negative.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "tumor_histology",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Some reports may list 'non-small cell lung carcinoma' without specifying the subtype in the primary diagnosis line, necessitating reliance on IHC markers.",
+      "variable_type": "categorical"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row522_chunk6",
+          "quote": "Ki\u201167 (MIB\u20111) | Approximately 70 %"
+        },
+        {
+          "evidence_id": "inner1_row124_chunk8",
+          "quote": "Ki\u201167 (MIB\u20111) | Approximately 45 % labeling index"
+        }
+      ],
+      "description": "The percentage of tumor cells expressing the Ki-67 (MIB-1) proliferation marker.",
+      "extraction_instruction": "Locate the Immunohistochemistry (IHC) section of the pathology report and extract the numeric percentage associated with the Ki-67 or MIB-1 marker.",
+      "measurement_definition": "The percentage (%) of cells showing nuclear positivity for Ki-67 as reported in the IHC section of the pathology report.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ki67_labeling_index",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "The reports use the term 'Approximately', which introduces a small degree of measurement imprecision.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "The available evidence is based on a small number of case reports.",
+    "IHC marker panels are not identical across all provided pathology reports."
+  ],
+  "summary": "The evidence identifies distinct baseline histopathological and proliferative characteristics in patients with non-small cell lung cancer (NSCLC), specifically distinguishing between squamous cell carcinoma and adenocarcinoma via immunohistochemistry (IHC) and quantifying tumor proliferation via the Ki-67 labeling index."
+}

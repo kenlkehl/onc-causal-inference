@@ -1,0 +1,61 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row522_chunk11",
+          "quote": "Homozygous deletion (exons 1\u20113) | Copy\u2011number loss"
+        },
+        {
+          "evidence_id": "inner2_row794_chunk3",
+          "quote": "Homozygous deletion (loss) | \u2013 | \u2013 | \u2013 | Pathogenic"
+        },
+        {
+          "evidence_id": "inner2_row124_chunk13",
+          "quote": "The CDKN2A homozygous deletion may qualify the patient for investigational CDK4/6 inhibitor studies"
+        }
+      ],
+      "description": "Loss of both alleles of the CDKN2A tumor suppressor gene, identified via next-generation sequencing (NGS).",
+      "extraction_instruction": "Identify the 'Genomic Findings' table in the NGS report and check the 'Alteration' column for 'CDKN2A' and the phrase 'Homozygous deletion'.",
+      "measurement_definition": "Positive if the NGS report specifies a 'homozygous deletion' of CDKN2A; negative if the gene is reported as wild-type or no deletion is noted. Absence of mention is not a negative measurement.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "CDKN2A homozygous deletion",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The exact genomic region affected (e.g., specific exons 1-3) may vary between patients.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner2_row522_chunk11",
+          "quote": "c.34G>T (p.G12C) | Missense SNV | 28 | Activating driver"
+        },
+        {
+          "evidence_id": "inner2_row201_chunk64",
+          "quote": "c.34G>T (p.G12C) | Missense SNV (activating) | 38 %"
+        }
+      ],
+      "description": "Presence of the specific activating missense mutation p.G12C (c.34G>T) in the KRAS gene.",
+      "extraction_instruction": "In the NGS 'Genomic Findings' section, locate 'KRAS' in the Gene column and verify if the 'Alteration' or 'Protein Change' is 'G12C' or 'c.34G>T'.",
+      "measurement_definition": "Positive if the NGS report explicitly lists the KRAS p.G12C or c.34G>T mutation; negative if KRAS is reported as wild-type or a different KRAS mutation is identified. Absence of mention is not a negative measurement.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "KRAS G12C mutation",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether the variant allele frequency (VAF) significantly modifies the clinical role beyond the binary presence of the mutation.",
+      "variable_type": "binary"
+    }
+  ],
+  "limitations": [
+    "Small number of patients provided in the evidence snippets.",
+    "Lack of consistency in reporting formats across different laboratory reports (e.g., different table structures)."
+  ],
+  "summary": "The provided evidence contains genomic profiling results from multiple patients with non-small cell lung cancer (NSCLC), highlighting recurrent alterations in CDKN2A and KRAS, particularly in squamous cell carcinoma and adenocarcinoma histologies."
+}

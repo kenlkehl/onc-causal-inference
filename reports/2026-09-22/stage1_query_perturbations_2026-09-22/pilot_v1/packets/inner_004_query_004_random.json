@@ -1,0 +1,168 @@
+{
+  "actual_distance": 0.19999989867210388,
+  "condition": "random",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.8605529069900513,
+      "evidence_id": "inner4_row201_chunk2",
+      "original_similarity": 0.8767725229263306,
+      "row_id": 201,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad"
+    },
+    {
+      "chunk_index": 85,
+      "edited_similarity": 0.24526092410087585,
+      "evidence_id": "inner4_row201_chunk85",
+      "original_similarity": 0.2433827668428421,
+      "row_id": 201,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "| 4.0 g/dL | 3.5\u20135.0 | --- ### Imaging Summary **PET/CT (baseline):** - Left lower lobe mass 2.5 cm, intense FDG uptake (SUV \u2248 8.5). - Mediastinal lymph nodes (subcarinal, right hilar) up to 1.2 cm, moderate uptake (SUV \u2248 6.2). - Multiple bilateral pulmonary nodules \u2264 0.8 cm, low\u2011grade uptake. - No pleural effusion or osseous lesions. **Brain MRI:** No intracranial metastatic disease. --- ### Assessment 1. **Recurrent/metastatic non\u2011small cell lung adenocarcinoma, KRAS G12C\u2011mutant, STK11\u2011loss, TP53 R273C, MET amplification (stage IV).** 2. **ECOG performance status 3** \u2013 significant functional limitation. 3. **Baseline laboratory profile** acceptable for platinum\u2011based chemotherapy; mild anemia (Hb 12.6 g/dL). 4. **No radiographic brain metastases** \u2013 continues to be a candidate for systemic therapy without immediate CNS-directed treatment. 5. **Supportive issues:** Dyspnea on exertion, fatigue, mild appetite decrease; psychosocial stress related to disease recurrence. --- ### Plan | Item | Details | |------|---------| | **Systemic therapy** | Initiate cis + Alimta every 21 days (standard dosing for non\u2011squamous NSCLC). Pre\u2011hydration and anti\u2011emetic prophylaxis (ondansetron + dexamethasone) per institutional protocol. | | **Growth factor support** | Primary prophylactic G\u2011CSF (filgrastim) recommended given ECOG 3 and anticipated myelosuppression. | | **Supportive care** | \u2022 Antiemetic regimen as above; consider metoclopramide PRN. <br>\u2022 Low\u2011dose oral dexamethasone for appetite stimulation. <br>\u2022 Initiate home oxygen titrated to maintain SpO\u2082 \u2265 92% if dyspnea worsens. | | **Laboratory monitoring** | CBC, CMP, and electrolytes prior to each cycle; repeat NLR and renal function. Hold chemotherapy for ANC < 1.5 \u00d710\u00b3/\u00b5L or Hgb < 10 g/dL. | | **Imaging"
+    },
+    {
+      "chunk_index": 14,
+      "edited_similarity": 0.8605529069900513,
+      "evidence_id": "inner4_row969_chunk14",
+      "original_similarity": 0.8767725229263306,
+      "row_id": 969,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad\u00ad"
+    },
+    {
+      "chunk_index": 135,
+      "edited_similarity": 0.27351123094558716,
+      "evidence_id": "inner4_row969_chunk135",
+      "original_similarity": 0.2710171937942505,
+      "row_id": 969,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Bone:** - No destructive osseous lesions identified in ribs, vertebrae, or scapulae. No soft\u2011tissue masses. **Upper Abdomen (included in scan range):** - Liver: Known right hepatic lobe metastasis measuring **1.8 cm** remains unchanged in size and attenuation. No new hepatic lesions. - Spleen, adrenal glands, and pancreas unremarkable. **Upper Chest Vessels:** - No pulmonary embolus visualized in segmental or subsegmental branches. **Incidental Findings:** - Mild bibasilar emphysematous changes consistent with chronic smoking history. - No significant mediastinal calcifications or pericardial effusion. **Impression:** 1. Slight decrease in size of right lower lobe primary tumor (4.8 cm vs 5.2 cm), compatible with a modest radiographic response to recent palliative thoracic radiation. 2. Mediastinal lymphadenopathy unchanged; no new thoracic nodal disease. 3. Hepatic metastasis unchanged in size. 4. No new pulmonary nodules, pleural effusion, or osseous metastases identified. 5. Findings overall consistent with stable thoracic disease burden with early post\u2011radiation changes. *Prepared by:* Radiology Department \u2013 Thoracic Imaging Service [Signature] Attending Radiologist, MD --- *Note: This report is intended for the treating clinical team. No therapeutic recommendations are provided herein.* <new_note> Encounter Record Timepoint: At age 55 Encounter Type: chemotherapy infusion visit Diagnosis Codes: - C34.90: Malignant neoplasm of unspecified part of unspecified bronchus or lung - Z51.11: Encounter for antineoplastic chemotherapy Procedure Codes: - 99213: Established patient visit, low complexity - 96413: Chemotherapy intravenous infusion, first hour <new_note> Laboratory Results Timepoint: At age 55 Laboratory Results: ANC: 2.5 k/uL [Reference: 1.5-8.0] - LOW Lymphocytes: 1.0 k/uL - Normal Hgb: 11.8 g/dL [Reference: 12.0-16.0] - LOW Plt: 190 k/uL"
+    },
+    {
+      "chunk_index": 28,
+      "edited_similarity": 0.5917359590530396,
+      "evidence_id": "inner4_row56_chunk28",
+      "original_similarity": 0.6033880710601807,
+      "row_id": 56,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "(Mild)"
+    },
+    {
+      "chunk_index": 18,
+      "edited_similarity": 0.2201579511165619,
+      "evidence_id": "inner4_row56_chunk18",
+      "original_similarity": 0.2183637022972107,
+      "row_id": 56,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Chest (66.5) & PET/CT (66.8):** Right lower lobe mass 5.5 cm, mediastinal nodes stable, left adrenal lesion and L1 vertebral metastasis unchanged. No new pulmonary nodules or effusion. Brain MRI negative for metastasis. **Assessment of Radiation Toxicities:** - Grade 2 esophagitis resolved; no current dysphagia. No evidence of radiation dermatitis. ### ASSESSMENT 1. **Stage IV large\u2011cell non\u2011small cell lung carcinoma (right lower lobe) with adrenal and vertebral metastases** \u2013 disease appears radiographically stable per prior imaging; no new lesions identified. 2. **Post\u2011palliative external\u2011beam radiation to L1 vertebral metastasis** \u2013 successful pain control, no acute complications. 3. **Radiation\u2011induced esophagitis (grade 2)** \u2013 resolved. 4. **Performance status:** ECOG 2, functional but limited. 5. **Laboratory profile:** Mild lymphopenia; otherwise within normal limits. 6. **No prior exposure to platinum\u2011based chemotherapy** \u2013 systemic therapy pending discussion. ### PLAN 1. **Symptom Management** - Continue acetaminophen 650 mg q6h PRN for residual back soreness; consider low\u2011dose oral morphine if pain escalates. - Maintain proton pump inhibitor (omeprazole 20 mg daily) for esophageal protection. - Encourage deep breathing exercises and incentive spirometry to aid pulmonary function. 2. **Surveillance** - Order repeat contrast\u2011enhanced CT chest, abdomen, and pelvis in 8 weeks to reassess disease status. - Repeat CBC and CMP prior to next imaging to monitor for cytopenias or renal changes. 3. **Systemic Therapy Consideration** - Discuss systemic treatment options at the upcoming visit, taking into account KRAS G12C mutation, STK11 loss, PD\u2011L1 TPS 10%, and the patient\u2019s ECOG 2 status. - Obtain baseline baseline pulmonary function tests (PFTs) to aid in therapy selection. 4."
+    },
+    {
+      "chunk_index": 35,
+      "edited_similarity": 0.5934982299804688,
+      "evidence_id": "inner4_row266_chunk35",
+      "original_similarity": 0.6018335819244385,
+      "row_id": 266,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "second opinion"
+    },
+    {
+      "chunk_index": 6,
+      "edited_similarity": 0.3457494378089905,
+      "evidence_id": "inner4_row266_chunk6",
+      "original_similarity": 0.3543364405632019,
+      "row_id": 266,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "previously treated large\u2011cell carcinoma. 2. Small left upper\u2011lobe pulmonary nodule (0.9 cm) with low\u2011grade FDG activity; differential includes early metastatic deposit versus benign granuloma; correlation with prior imaging and clinical context recommended. 3. No additional FDG\u2011avid mediastinal, pleural, osseous, or visceral metastatic disease identified. 4. Post\u2011surgical and post\u2011radiation changes in the right lower\u2011lobe region are stable. **Recommendations** (for referring physician): Correlate with prior imaging studies, consider tissue confirmation of the right hilar node if clinically indicated, and continue surveillance per established protocol. <new_note> **Oncology Progress Note \u2013 Follow\u2011up Visit** **Patient:** Eleanor Martinez, 65\u2011year\u2011old female **MRN:** ******* **Visit Type:** Established patient \u2013 moderate complexity --- ### Chief Complaint Follow\u2011up after surveillance PET/CT performed for postoperative monitoring of previously resected non\u2011small cell lung cancer. ### History of Present Illness Eleanor is a 65\u2011year\u2011old woman with a history of stage IIIB (T3N2M0) large\u2011cell carcinoma of the right lower lobe, status post right lower lobectomy with mediastinal lymph node dissection, adjuvant Platinol\u2011vinorelbine (4 cycles) and postoperative thoracic radiation (60 Gy). She was disease\u2011free on imaging at age 66. At her most recent surveillance PET/CT (performed 2 months ago) there was new FDG\u2011avid uptake in a right hilar lymph node measuring 1.8 cm (SUV 5.2) and a subcentimeter (0.9 cm) nodule in the left upper lobe. No distant metastases were identified; brain MRI remained negative. Since the imaging, the patient reports a gradual increase in shortness of breath on exertion (now limited to walking a short block), a mild, non\u2011productive cough, and low\u2011grade fatigue. She denies fever, chills, night sweats, hemoptysis,"
+    },
+    {
+      "chunk_index": 0,
+      "edited_similarity": 0.1524224877357483,
+      "evidence_id": "inner4_row266_chunk0",
+      "original_similarity": 0.15247511863708496,
+      "row_id": 266,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "**Pathology Report** **Patient:** Eleanor Martinez **Sex:** Female **Age:** 65 y **Specimen:** CT\u2011guided core needle biopsy of right lower lobe lung mass **Accession #:** 2023\u2011001234 **Clinical Information:** - Suspected primary lung carcinoma, right lower lobe mass. - Radiographic staging at the time of biopsy: T3 N2 M0 (Stage IIIB). **Gross Description:** - Three core fragments, each 0.8 cm in length (maximum dimension 0.3 cm), tan\u2011white, firm, with focal areas of necrosis. - Specimens placed in 10 % neutral buffered formalin and labeled as \u201cright lower lobe mass.\u201d **Microscopic Description:** - The sections reveal a malignant neoplasm composed of large polygonal cells with abundant eosinophilic cytoplasm, vesicular nuclei, prominent nucleoli, and brisk mitotic activity (\u226515 mitoses/10 high\u2011power fields). - Diffuse necrosis is present; no definitive glandular formation, keratinization, or squamous differentiation is identified. **Immunohistochemistry (IHC):** | Marker | Result | Interpretation | |--------|--------|----------------| | Cytokeratin AE1/AE3 | Positive (diffuse, strong cytoplasmic) | Confirms epithelial origin | | TTF\u20111 | Negative | Supports non\u2011adenocarcinoma phenotype | | p40 | Negative | No squamous differentiation | | Synaptophysin | Negative | No neuroendocrine differentiation | | Ki\u201167 | ~70 % (high) | High proliferative index | **Molecular Studies:** - **EGFR mutation analysis (PCR):** No sensitizing EGFR mutations detected (wild\u2011type). - **PD\u2011L1 (22C3) IHC:** Tumor proportion score 10 % (low expression). - Additional panels (KRAS, ALK, ROS1, STK11, TP53) were not performed on this specimen. **Diagnosis:** 1. **Large\u2011cell carcinoma, poorly differentiated**, right lower lobe (primary lung). 2. No evidence of squamous or glandular differentiation. **Margins:** Not applicable for core needle biopsy;"
+    },
+    {
+      "chunk_index": 36,
+      "edited_similarity": 0.538076639175415,
+      "evidence_id": "inner4_row19_chunk36",
+      "original_similarity": 0.5465372800827026,
+      "row_id": 19,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "- Severity: 1/4 (Mild)"
+    },
+    {
+      "chunk_index": 35,
+      "edited_similarity": 0.251949280500412,
+      "evidence_id": "inner4_row19_chunk35",
+      "original_similarity": 0.24937111139297485,
+      "row_id": 19,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "develops. - Continue levetiracetam; check serum level in 4 weeks. 3. **Nutritional Intervention** - Referral to dietitian for high\u2011calorie, high\u2011protein diet plan; consider oral nutritional supplement. 4. **Imaging & Follow\u2011up** - Repeat contrast\u2011enhanced CT chest/abdomen/pelvis in 6 weeks to assess treatment response. - Brain MRI in 3 months or sooner if new neurologic symptoms arise. 5. **Vaccinations & Preventive Health** - Ensure influenza vaccination (if seasonally appropriate) and COVID\u201119 booster. - Discuss bone health; consider baseline DEXA scan given chronic steroid exposure. 6. **Documentation & Coordination** - Update oncology EMR with current assessment and plan. - Communicate plan to primary care physician and radiation oncology team. **Patient Education & Consent** - Discuss goals of care, emphasizing quality of life and disease\u2011directed therapy. - Reviewed potential side effects of proposed chemotherapy regimens and supportive measures. - Patient verbalized understanding and expressed willingness to proceed with shared decision\u2011making after further discussion. **Signature:** _____________________________ **Provider:** Dr. A. M. Rao, MD \u2013 Medical Oncology **Date:** *(to be entered by EMR)* <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 57 Instrument: PRO-CTCAE Fatigue - Severity: 3/4 (Severe) Nausea - Severity: 2/4 (Moderate) Pain - Severity: 2/4 (Moderate) Neuropathy - Severity: 1/4 (Mild)"
+    },
+    {
+      "chunk_index": 43,
+      "edited_similarity": 0.6197500228881836,
+      "evidence_id": "inner4_row232_chunk43",
+      "original_similarity": 0.630123496055603,
+      "row_id": 232,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak",
+        "largest_similarity_decrease"
+      ],
+      "text": "by EMR)"
+    },
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.18576064705848694,
+      "evidence_id": "inner4_row232_chunk2",
+      "original_similarity": 0.18309219181537628,
+      "row_id": 232,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "allergies) ### Medications - Lisinopril 10 mg PO daily - Atorvastatin 20 mg PO nightly - Multivitamin daily --- ### Physical Examination | Parameter | Findings | |-----------|----------| | General | Alert, NAD, appears thin, in no acute distress | | Vital Signs | BP 128/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96% on room air | | HEENT | Normocephalic, atraumatic; oropharynx clear | | Neck | No cervical lymphadenopathy, supple | | Cardiovascular | RRR, no murmurs, normal S1/S2 | | Respiratory | Decreased breath sounds over right upper lung field; mild inspiratory crackles, no wheezes; no egophony | | Abdomen | Soft, non\u2011tender, no hepatosplenomegaly | | Extremities | No edema, pulses 2+ bilaterally | | Skin | No rashes or lesions | | Neurologic | Grossly intact, CN II\u2011XII intact, gait normal | --- ### Assessment 1. **Suspected malignant pulmonary process** \u2013 3\u2011month history of persistent cough, weight loss, and focal decreased breath sounds in the right upper lobe raises concern for primary lung carcinoma versus infectious/inflammatory etiology. 2. **Hypertension, controlled** 3. **Hyperlipidemia, controlled** --- ### Plan 1. **Diagnostic Work\u2011up** - **Chest CT with contrast** (high\u2011resolution protocol) to characterize the right upper lobe lesion, assess mediastinal nodes, and evaluate for additional pulmonary or pleural abnormalities. - **Baseline laboratory studies**: CBC with differential, CMP, coagulation panel, and serum tumor markers (CEA, CYFRA 21\u20111) as baseline. - **Pulmonary function tests (PFTs)** to assess baseline lung function prior to any potential intervention. - **Referral to interventional radiology** for CT\u2011guided core needle"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 4,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_004_query_004_random",
+  "patient_outcomes_in_prompt": false,
+  "query": 4,
+  "query_id": "effect_query_005"
+}

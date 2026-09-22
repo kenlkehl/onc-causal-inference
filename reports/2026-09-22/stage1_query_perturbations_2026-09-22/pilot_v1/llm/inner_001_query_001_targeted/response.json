@@ -1,0 +1,68 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row485_chunk18",
+          "quote": "Next\u2011generation sequencing (NGS) on the biopsy specimen revealed a KRAS G12C mutation"
+        },
+        {
+          "evidence_id": "inner1_row971_chunk11",
+          "quote": "history of stage IIIA right lower\u2011lobe adenocarcinoma (KRAS G12C\u2011mutated)"
+        },
+        {
+          "evidence_id": "inner1_row500_chunk10",
+          "quote": "**KRAS G12C** is an established oncogenic driver in non\u2011small cell lung cancer (NSCLC)"
+        }
+      ],
+      "description": "Presence of the KRAS G12C activating mutation in the tumor tissue.",
+      "extraction_instruction": "Review the 'Genomic Findings' or 'Next-generation sequencing (NGS)' section for the presence of the 'KRAS G12C' mutation.",
+      "measurement_definition": "Positive if the NGS or molecular report identifies a KRAS G12C mutation; negative if KRAS is reported as wild-type or no G12C mutation is detected.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "KRAS G12C Mutation Status",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Whether the mutation status is being evaluated only in primary tumors or also in metastatic recurrence sites.",
+      "variable_type": "binary"
+    },
+    {
+      "categories": [
+        "Adenocarcinoma",
+        "Squamous Cell Carcinoma"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row485_chunk18",
+          "quote": "history of stage IIA (T2aN1M0) right upper lobe adenocarcinoma of the lung"
+        },
+        {
+          "evidence_id": "inner1_row124_chunk15",
+          "quote": "diagnosis of stage IIIB (T4N2M0) squamous cell carcinoma of the left upper lobe"
+        },
+        {
+          "evidence_id": "inner1_row500_chunk4",
+          "quote": "poorly differentiated squamous cell carcinoma"
+        }
+      ],
+      "description": "The histological subtype of the primary non-small cell lung cancer.",
+      "extraction_instruction": "Identify the histology mentioned in the 'History of Present Illness' or 'Pathology Report' sections.",
+      "measurement_definition": "Categorized based on pathology report findings as either 'Adenocarcinoma' or 'Squamous Cell Carcinoma'.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Lung Cancer Histological Subtype",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Presence of mixed histologies or transformation between subtypes is not documented in the excerpts.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "The evidence set is derived from a small number of patient cases, limiting the ability to generalize the prevalence of these variables.",
+    "Measurement of KRAS G12C relies on NGS, which may have different detection thresholds across laboratories."
+  ],
+  "summary": "The evidence identifies distinct clinical characteristics across the patient cohort, specifically focusing on genomic drivers (KRAS G12C mutation status) and the histological classification of the primary lung cancer (Adenocarcinoma vs. Squamous Cell Carcinoma)."
+}

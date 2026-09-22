@@ -1,0 +1,218 @@
+{
+  "actual_distance": 0.1999998837709427,
+  "condition": "targeted",
+  "distance_budget": 0.2,
+  "evidence": [
+    {
+      "chunk_index": 64,
+      "edited_similarity": 0.8363938927650452,
+      "evidence_id": "inner4_row201_chunk64",
+      "original_similarity": 0.7965182065963745,
+      "row_id": 201,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "\u2248 8 %. | | **Analysis Pipeline** | Alignment to hg19, variant calling with Mutect2/VarDict, annotation with ClinVar, COSMIC, OncoKB, and internal database. CNA assessed by normalized read depth. | --- ### Genomic Findings | Gene | Alteration | Type | Variant Allele Frequency (VAF) | Copy Number* | Clinical Significance | |------|------------|------|--------------------------------|--------------|-----------------------| | **KRAS** | c.34G>T (p.G12C) | Missense SNV (activating) | 38 % | \u2013 | FDA\u2011approved KRAS G12C inhibitors (sotorasib, adagrasib) for metastatic NSCLC; may be considered in the adjuvant or early\u2011stage setting within clinical trials. | | **STK11** | c.291del (p.F97fs*12) | Frameshift loss\u2011of\u2011function | 45 % | \u2013 | Associated with primary resistance to PD\u20111/PD\u2011L1 checkpoint blockade; may influence immunotherapy selection. | | **TP53** | c.817C>T (p.R273C) | Missense SNV (DNA\u2011binding domain) | 52 % | \u2013 | Common co\u2011mutation in KRAS\u2011mutant NSCLC; prognostic of more aggressive biology; no approved targeted therapy. | | **MET** | Amplification (copy number = 5) | Gene amplification | \u2013 | 5\u2011fold increase over diploid | Predictive of response to MET tyrosine\u2011kinase inhibitors (capmatinib, tepotinib) in MET\u2011amplified NSCLC; eligibility for MET\u2011targeted trials. | | **EGFR** | No pathogenic alterations detected (exons 18\u201121) | \u2013 | \u2013 | \u2013 | Confirms prior EGFR\u2011negative testing; EGFR\u2011directed TKIs not indicated. | | **ALK, ROS1, RET, NTRK1/2/3** | No rearrangements detected (RNA fusion panel not performed; DNA breakpoints negative) | \u2013 | \u2013 | \u2013 | Not targetable at this time. | \\*Copy number reported as fold\u2011change relative to diploid reference; values \u2265 3 considered amplification. **Additional Genes Tested"
+    },
+    {
+      "chunk_index": 63,
+      "edited_similarity": 0.6920769810676575,
+      "evidence_id": "inner4_row201_chunk63",
+      "original_similarity": 0.6760818958282471,
+      "row_id": 201,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "Report** --- ### Patient Information - **Name:** James Patel - **Age:** 48 years - **Sex:** Male - **Specimen ID:** RUL\u2011RES\u20112023\u2011001 - **Specimen Type:** Formalin\u2011fixed, paraffin\u2011embedded (FFPE) tissue from right upper\u2011lobe lobectomy (primary tumor) - **Diagnosis:** Non\u2011small cell lung carcinoma, adenocarcinoma (stage IIA, T2aN1M0) - **Clinical Indication:** Comprehensive molecular profiling of resected tumor to identify actionable genomic alterations and guide adjuvant/early\u2011stage therapeutic decision\u2011making. --- ### Test Performed | Parameter | Details | |-----------|---------| | **Assay** | Hybrid\u2011capture DNA\u2011based NGS panel (OncoPanel\u2011500) covering 500 cancer\u2011relevant genes, including all exons of KRAS, STK11, TP53, MET, EGFR and other driver/therapeutic genes. | | **Platform** | Illumina NovaSeq 6000 (paired\u2011end 150 bp reads). | | **Library Prep** | DNA extracted from FFPE (\u2265150 ng), enzymatic fragmentation, end\u2011repair/A\u2011tailing, adapter ligation, target capture with biotinylated probes. | | **Sequencing Depth** | Mean on\u2011target coverage \u2248 800\u00d7 (\u2265 99 % of bases > 200\u00d7). | | **Limit of Detection** | Single\u2011nucleotide variants (SNV) & indels \u2265 5 % VAF; copy\u2011number alterations (CNA) \u2265 3\u2011fold change; gene fusions \u2265 10 % VAF (RNA\u2011based assay not performed). | | **Quality Metrics** | Q30 > 92 %; uniformity > 95 %; duplicate rate \u2248 8 %. | | **Analysis Pipeline** | Alignment to hg19, variant calling with Mutect2/VarDict, annotation with ClinVar, COSMIC, OncoKB, and internal database. CNA assessed by normalized read depth. | --- ### Genomic Findings | Gene | Alteration | Type | Variant Allele Frequency (VAF) | Copy Number* | Clinical Significance | |------|------------|------|--------------------------------|--------------|-----------------------| | **KRAS** | c.34G>T (p.G12C) | Missense SNV (activating) | 38"
+    },
+    {
+      "chunk_index": 65,
+      "edited_similarity": 0.8147815465927124,
+      "evidence_id": "inner4_row201_chunk65",
+      "original_similarity": 0.7612543106079102,
+      "row_id": 201,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "18\u201121) | \u2013 | \u2013 | \u2013 | Confirms prior EGFR\u2011negative testing; EGFR\u2011directed TKIs not indicated. | | **ALK, ROS1, RET, NTRK1/2/3** | No rearrangements detected (RNA fusion panel not performed; DNA breakpoints negative) | \u2013 | \u2013 | \u2013 | Not targetable at this time. | \\*Copy number reported as fold\u2011change relative to diploid reference; values \u2265 3 considered amplification. **Additional Genes Tested (selected) \u2013 No pathogenic alterations identified:** - **BRAF, ERBB2, KRAS (other codons), PIK3CA, NRAS, MAP2K1, CDKN2A, CDKN2B, PTEN, SMARCA4, KEAP1, NFE2L2, FGFR1\u20114, HER2, AKT1, IDH1/2, CDK4/6, etc.** --- ### Interpretation / Clinical Significance 1. **KRAS G12C (38 % VAF)** \u2013 The most prevalent KRAS mutation in lung adenocarcinoma. FDA\u2011approved KRAS G12C inhibitors (sotorasib, adagrasib) have demonstrated objective responses in metastatic disease. While the patient is currently in the adjuvant setting, enrollment in a clinical trial evaluating KRAS G12C inhibition as adjuvant therapy could be considered. 2. **STK11 Loss\u2011of\u2011Function (45 % VAF)** \u2013 Co\u2011occurs frequently with KRAS mutations and is linked to reduced efficacy of PD\u20111/PD\u2011L1 checkpoint inhibitors. This may impact future immunotherapy decisions and supports consideration of alternative or combination strategies. 3. **TP53 R273C (52 % VAF)** \u2013 A hotspot missense mutation within the DNA\u2011binding domain, often associated with genomic instability and poorer prognosis. No targeted agents are available, but its presence underscores the aggressive potential of the tumor. 4. **MET Amplification (5\u2011fold)** \u2013 High\u2011level MET amplification is an established predictive biomarker for response to MET inhibitors (capmatinib, tepotinib). The amplification level observed meets the threshold used in pivotal trials. Potential eligibility"
+    },
+    {
+      "chunk_index": 12,
+      "edited_similarity": 0.8360186219215393,
+      "evidence_id": "inner4_row522_chunk12",
+      "original_similarity": 0.8200290203094482,
+      "row_id": 522,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "\u2013 | No activating mutations; EGFR\u2011targeted TKIs not indicated. | | **ALK** | No rearrangement detected | \u2013 | \u2013 | ALK inhibitors not indicated. | | **ROS1** | No rearrangement detected | \u2013 | \u2013 | ROS1 inhibitors not indicated. | | **BRAF** | Wild\u2011type | \u2013 | \u2013 | No BRAF V600E; BRAF\u2011targeted therapy not indicated. | | **MET** | No amplification; no exon 14 skipping | \u2013 | \u2013 | MET\u2011targeted therapy not indicated. | | **STK11** | Wild\u2011type | \u2013 | \u2013 | No co\u2011occurring STK11 alteration. | | **KEAP1** | Wild\u2011type | \u2013 | \u2013 | No alteration. | | **PD\u2011L1 (IHC)** | 10 % tumor proportion score (TPS) | \u2013 | \u2013 | Modest expression; may inform immunotherapy decisions (reported separately). | | **TMB** | 7 mut/Mb | \u2013 | \u2013 | Intermediate; limited predictive value for checkpoint blockade. | | **MSI** | Stable | \u2013 | \u2013 | No MSI\u2011high phenotype. | **Interpretation** - **KRAS G12C** is the sole actionable oncogenic driver identified. KRAS G12C\u2011specific inhibitors have demonstrated efficacy in KRAS\u2011mutated NSCLC after progression on standard therapy and are available in clinical trials for treatment\u2011na\u00efve patients. - **TP53** and **CDKN2A** alterations are common in squamous cell carcinoma of the lung and are associated with aggressive disease biology; they do not currently direct specific FDA\u2011approved targeted agents. - Absence of EGFR activating mutations, ALK/ROS1 rearrangements, BRAF V600E, and MET exon 14 skipping excludes the use of corresponding targeted therapies. - PD\u2011L1 expression of 10 % suggests a modest likelihood of"
+    },
+    {
+      "chunk_index": 8,
+      "edited_similarity": 0.7496733665466309,
+      "evidence_id": "inner4_row522_chunk8",
+      "original_similarity": 0.7598325610160828,
+      "row_id": 522,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "methodology, genomic findings (including actionable alterations, co-mutations, fusions, copy number alterations). Provide interpretation, clinical significance, potential therapies (but not specific assigned therapy). Should be realistic. We must incorporate everything we know about patient history and cancer generally. Should not mention future events as if they have already occurred, but can use knowledge to inform what the report might have contained at the time. We must not add dates. We must not mention which specific treatment the patient will receive for the comparison (vinorelbine vs gemcitabine). That's fine. We must not invent treatments not in list of events. List of events includes many but not specific therapy. So we can mention potential targeted therapies (e.g., KRAS G12C inhibitors like sotorasib) but that's not a treatment they will receive for the comparison. It's okay. We must not mention the comparison. So just give standard NGS report. Let's craft: Header: \"MUTATIONAL ANALYSIS REPORT\" Specimen: \"Formalin\u2011fixed paraffin\u2011embedded (FFPE) core needle biopsy of right hilar lung mass\" Diagnosis: \"Poorly differentiated squamous cell carcinoma of the lung\" Methodology: \"Hybrid capture-based next\u2011generation sequencing (NGS) covering 500 cancer\u2011related genes; DNA extracted; library prep; sequencing on Illumina platform; average coverage >500x; variant calling; copy number analysis; fusion detection by anchored multiplex PCR.\" Findings: - KRAS: G12C (c.34G>T) VAF 28% \u2013 pathogenic, activating, predictive of response to KRAS G12C inhibitors (e.g., sotorasib, adagrasib) in clinical trials. - TP53: R273C (c.818C>T) VAF 45% \u2013 pathogenic, tumor suppressor loss. - CDKN2A: Homozygous deletion (exons 1-3) \u2013 loss of tumor suppressor, may confer sensitivity to CDK4/6 inhibition (investigational). -"
+    },
+    {
+      "chunk_index": 26,
+      "edited_similarity": 0.48924165964126587,
+      "evidence_id": "inner4_row522_chunk26",
+      "original_similarity": 0.4493378698825836,
+      "row_id": 522,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "lung cancer (NSCLC) who presents for routine oncology follow\u2011up. Since his last visit 4 weeks ago, he reports: * **Respiratory symptoms:** No new cough, dyspnea, or hemoptysis. He notes occasional mild chest wall discomfort at the prior right rib metastasis site, which has improved since stereotactic body radiation therapy (SBRT) completed 2 weeks ago. * **Systemic symptoms:** No fever, chills, night sweats, or weight change. He feels \u201cgenerally well\u201d but mentions low\u2011grade fatigue (\u22482/10) that he attributes to his cancer and recent hospitalization. * **Renal function:** No new urinary symptoms; he is aware of chronic kidney disease (baseline CrCl \u224831 mL/min). * **Medication adherence:** Continues prescribed opioid analgesic (hydromorphone 2 mg PO q6h PRN) and ondansetron 4 mg PO PRN for nausea. Completed a 5\u2011day course of oral amoxicillin\u2011clavulanate for community\u2011acquired pneumonia 2 weeks ago; no residual cough. * **Goals of care:** Expresses desire to initiate systemic therapy now that his symptoms are controlled and imaging is stable. He denies any new gastrointestinal, neurologic, or musculoskeletal complaints. --- ### Review of Systems - **Constitutional:** No fever, chills, or recent weight loss. Fatigue present, mild. - **HEENT:** No sore throat, sinus pain, or visual changes. - **Respiratory:** No dyspnea at rest, no cough, no wheezing. - **Cardiovascular:** No chest pain, palpitations, or edema. - **Gastrointestinal:** No nausea (aside from occasional opioid\u2011related episodes), no vomiting, no abdominal pain, normal bowel movements. - **Genitourinary:** No dysuria, hematuria, or flank pain. - **Neurologic:** No headaches, dizziness, or focal deficits. - **Skin:** No new rashes or lesions. - **Psychiatric:** Mood stable,"
+    },
+    {
+      "chunk_index": 4,
+      "edited_similarity": 0.8207787871360779,
+      "evidence_id": "inner4_row672_chunk4",
+      "original_similarity": 0.8215035200119019,
+      "row_id": 672,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "confer a specific targeted therapy but may influence disease biology and response to treatment. 3. **CDKN2A Homozygous Deletion** - Loss of CDKN2A is a frequent event in smoking\u2011related squamous cell carcinoma and contributes to unchecked cell\u2011cycle progression. While not directly targetable, its presence underscores an aggressive molecular phenotype. 4. **Absence of EGFR, ALK, ROS1, and other driver alterations** - The lack of EGFR activating mutations, ALK or ROS1 rearrangements eliminates eligibility for the corresponding FDA\u2011approved targeted agents. 5. **Tumor Mutational Burden & Microsatellite Status** - An intermediate TMB (\u2248 12 mut/Mb) and microsatellite stability suggest that the tumor may derive benefit from immune\u2011checkpoint inhibition, consistent with current practice for advanced NSCLC lacking actionable driver mutations. ### Recommendations (Interpretive, not prescriptive) - **Targeted Therapy Consideration:** The presence of KRAS G12C supports evaluation for KRAS\u2011G12C inhibitor therapy, either through approved agents (post\u2011platinum) or clinical trial enrollment. - **Immunotherapy Eligibility:** Given the intermediate TMB and absence of high\u2011level PD\u2011L1 data in this report, immunotherapy remains a therapeutic option per standard guidelines for metastatic NSCLC. - **Further Testing:** If not already performed, assessment of PD\u2011L1 expression by IHC is recommended to inform immunotherapy decisions. ### Technical Notes - All variants were confirmed by orthogonal review of the raw sequencing data. - No evidence of sample contamination or low tumor cellularity was identified; estimated tumor content \u2265 30 %. ### References (selected) 1. FDA. *Sotorasib (Lumakras) \u2013 FDA Approved Drug Information.* 2021. 2. Skoulidis F, et al. KRAS(G12C) inhibition with sotorasib in advanced NSCLC. *N Engl J Med.* 2021;385:1256\u20111267. 3. Cancer"
+    },
+    {
+      "chunk_index": 3,
+      "edited_similarity": 0.8084825873374939,
+      "evidence_id": "inner4_row672_chunk3",
+      "original_similarity": 0.811728298664093,
+      "row_id": 672,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "| | **ALK** | No rearrangement (RNA\u2011seq) | \u2013 | Negative. | | **ROS1** | No rearrangement (RNA\u2011seq) | \u2013 | Negative. | | **Other genes (selected)** | No pathogenic alterations detected in BRAF, MET, ERBB2, RET, NTRK1\u20113, PIK3CA, or other clinically actionable loci. | \u2013 | \u2013 | | **Tumor Mutational Burden (TMB)** | 12 mut/Mb (estimated) | \u2013 | Intermediate TMB; may have implications for immunotherapy eligibility. | | **Microsatellite Stability (MSS)** | Stable | \u2013 | No evidence of microsatellite instability. | ### Interpretation / Clinical Significance 1. **KRAS G12C** - The identified KRAS G12C substitution is an activating driver mutation present in ~ 2\u20134 % of NSCLC overall and is more common in smokers. In the context of squamous histology, KRAS mutations are less frequent but clinically relevant. FDA\u2011approved KRAS\u2011G12C inhibitors are available for patients with metastatic NSCLC harboring this alteration after prior systemic therapy; enrollment in a clinical trial may also be considered. 2. **TP53 R273C** - TP53 missense mutations affecting the DNA\u2011binding domain are among the most common alterations in lung cancer and are associated with genomic instability and adverse outcomes. This mutation does not currently confer a specific targeted therapy but may influence disease biology and response to treatment. 3. **CDKN2A Homozygous Deletion** - Loss of CDKN2A is a frequent event in smoking\u2011related squamous cell carcinoma and contributes to unchecked cell\u2011cycle progression. While not directly targetable, its presence underscores an aggressive molecular phenotype. 4. **Absence of EGFR, ALK, ROS1, and other driver alterations** - The lack of EGFR activating"
+    },
+    {
+      "chunk_index": 21,
+      "edited_similarity": 0.5335526466369629,
+      "evidence_id": "inner4_row672_chunk21",
+      "original_similarity": 0.4924916923046112,
+      "row_id": 672,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "size of the previously treated right frontal metastasis (now 0.8 cm). New 0.6 cm enhancing lesion in the left cerebellar hemisphere, compatible with a new metastatic focus. No significant surrounding edema or mass effect. 2. **Chest:** Stable right upper lobe primary tumor and mediastinal lymphadenopathy; no interval change compared with prior studies. **Recommendations** - Correlation with the clinical picture and prior imaging is advised. - Consider follow\u2011up MRI of the brain in 6\u20138 weeks to assess the new cerebellar lesion and overall intracranial disease burden. - Continue routine surveillance of the thoracic disease per oncologic protocol. <new_note> Hospital Admission Record Timepoint: At age 67.2 Reason for Admission: community-acquired pneumonia Principal Diagnosis: J18.9 - Pneumonia, unspecified organism Length of Stay: 5 days Discharge Disposition: home <new_note> Laboratory Results Timepoint: At age 67.2 (hospital discharge) Complete Blood Count (CBC): Comprehensive Metabolic Panel (CMP): AST: 30 U/L [Reference: 10-40] - Normal ALT: 25 U/L [Reference: 7-56] - Normal <new_note> Encounter Record Timepoint: At age 67.5 Encounter Type: outpatient visit Diagnosis Codes: - C34.90: Malignant neoplasm of lung - Z51.11: Encounter for antineoplastic chemotherapy counseling Procedure Codes: - 99214: Established visit - 96413: Chemotherapy infusion planning <new_note> Patient-Reported Outcomes Assessment Timepoint: At age 67.5 Instrument: EORTC QLQ-C30 Physical Function: 55/100 Role Function: 45/100 Emotional Function: 50/100 Cognitive Function: 60/100 Social Function: 50/100 Fatigue: 70/100 Nausea: 15/100 Pain: 40/100 Dyspnea: 55/100 Insomnia: 30/100 Appetite Loss: 35/100 Constipation: 20/100 Diarrhea: 10/100 Financial Difficulties: 40/100 Global Health Status: 45/100 Instrument: PRO-CTCAE Fatigue - Severity: 2/4 (Moderate) Nausea - Severity: 1/4 (Mild) Pain -"
+    },
+    {
+      "chunk_index": 6,
+      "edited_similarity": 0.8278278112411499,
+      "evidence_id": "inner4_row18_chunk6",
+      "original_similarity": 0.8137367963790894,
+      "row_id": 18,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "copies) | Tumor\u2011suppressor loss; may confer sensitivity to CDK4/6 inhibition (investigational). | | **STK11** | Wild\u2011type | \u2013 | \u2013 | No alteration detected. | | **EGFR** | Wild\u2011type | \u2013 | \u2013 | No activating mutation or exon 20 insertion. | | **ALK** | No rearrangement detected | \u2013 | \u2013 | Negative (DNA\u2011based assessment). | | **ROS1** | No rearrangement detected | \u2013 | \u2013 | Negative. | | **BRAF** | Wild\u2011type | \u2013 | \u2013 | No V600E or non\u2011V600 mutations. | | **MET** | Wild\u2011type | \u2013 | \u2013 | No exon 14 skipping or amplification. | | **RET** | Wild\u2011type | \u2013 | \u2013 | No rearrangements. | | **NTRK1/2/3** | Wild\u2011type | \u2013 | \u2013 | No fusions detected. | | **Other genes (e.g., KRAS\u2011wild\u2011type codons, PIK3CA, ERBB2, etc.)** | No pathogenic alterations identified. | \u2013 | \u2013 | \u2013 | *All reported variants meet the laboratory\u2019s criteria for pathogenic or likely pathogenic status according to ACMG/AMP guidelines.* --- ### 3. Interpretation 1. **KRAS G12C** is an activating mutation that drives oncogenic signaling through the MAPK pathway. In NSCLC, KRAS G12C\u2013mutant tumors are eligible for FDA\u2011approved KRAS G12C inhibitors (sotorasib, adagrasib) either as monotherapy or in combination regimens, depending on regulatory status and clinical trial availability. 2. **FGFR1 amplification** is observed in a subset of squamous cell lung cancers and may confer sensitivity to selective FGFR inhibitors. Clinical trials evaluating FGFR\u2011targeted agents in FGFR\u2011amplified squamous NSCLC are ongoing. 3. **CDKN2A homozygous deletion** results in loss of p16INK4a, a regulator of"
+    },
+    {
+      "chunk_index": 5,
+      "edited_similarity": 0.7693884372711182,
+      "evidence_id": "inner4_row18_chunk5",
+      "original_similarity": 0.7666596174240112,
+      "row_id": 18,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "solid\u2011tumor panel covering 500+ cancer\u2011relevant genes (including SNVs, indels, copy\u2011number alterations, and selected rearrangements). - **DNA Input:** 150 ng (extracted from macro\u2011dissected tumor tissue). - **Tumor Content:** Estimated 45 % neoplastic cells (H&E review). - **Sequencing Depth:** Mean target coverage \u2248 800\u00d7; > 99 % of bases \u2265 100\u00d7. - **Analytical Sensitivity:** \u2265 5 % allele frequency for SNVs/indels; \u2265 3\u2011fold copy\u2011number change; detection of rearrangements \u2265 10 % tumor fraction. - **Quality Controls:** Internal positive/negative controls passed; no evidence of sample contamination. --- ### 2. Genomic Findings | Gene | Alteration | Type | Allele Frequency / Copy Number | Clinical Significance | |------|------------|------|--------------------------------|-----------------------| | **KRAS** | **G12C** (c.34G>T) | Missense SNV | 28 % | Activating driver; FDA\u2011approved KRAS G12C inhibitors (sotorasib, adagrasib) for NSCLC. | | **TP53** | **R273C** (c.818C>T) | Missense SNV | 35 % | Loss\u2011of\u2011function; associated with poorer prognosis, but no direct targeted therapy. | | **FGFR1** | Amplification | Copy\u2011number gain | Copy number \u2248 8 (\u2248 8\u2011fold increase) | Potential target; FGFR inhibitors (e.g., erdafitinib, pemigatinib) under investigation in squamous NSCLC. | | **CDKN2A** | Homozygous deletion | Copy\u2011number loss | Complete loss (0 copies) | Tumor\u2011suppressor loss; may confer sensitivity to CDK4/6 inhibition (investigational). | | **STK11** | Wild\u2011type | \u2013 | \u2013 | No alteration detected. | | **EGFR** | Wild\u2011type | \u2013 | \u2013 | No activating mutation or exon 20 insertion. | | **ALK** | No rearrangement detected | \u2013 | \u2013 | Negative (DNA\u2011based assessment). | | **ROS1** | No rearrangement detected |"
+    },
+    {
+      "chunk_index": 3,
+      "edited_similarity": 0.5204241275787354,
+      "evidence_id": "inner4_row18_chunk3",
+      "original_similarity": 0.48608773946762085,
+      "row_id": 18,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "Lobe:** Post\u2011lobectomy changes with surgical staple line and fibrosis. No residual mass or suspicious soft\u2011tissue. Mediastinal pleura intact. No evidence of recurrent disease at the resection margin. - **Left Lower Lobe:** A new, irregular, 3.5 \u00d7 2.8 cm solid mass in the posterior basal segment. The lesion is heterogeneous, demonstrates spiculated margins, and shows avid contrast enhancement. No cavitation. - **Pulmonary Parenchyma:** Multiple bilateral pulmonary nodules ranging from 3 mm to 8 mm in size, predominantly subpleural and peribronchial. Distribution is bilateral and multifocal, compatible with metastatic deposits. No new consolidations or ground\u2011glass opacities. - **Mediastinum/Hilum:** Enlarged mediastinal lymph nodes: subcarinal (short axis 1.6 cm), right paratracheal (1.4 cm), left hilar (1.3 cm). Nodes demonstrate homogeneous enhancement. No evidence of necrosis. - **Pleura:** No pleural effusion or thickening. No pneumothorax. - **Heart/Great Vessels:** Normal size and contour. No pericardial effusion. - **Chest Wall/Upper Abdomen:** No osseous lesions identified in visualized ribs, vertebrae, or scapulae. **Abdomen** - **Liver:** Normal size, homogeneous attenuation, no focal lesions. - **Gallbladder/Biliary Tree:** Unremarkable. - **Spleen:** Normal morphology. - **Pancreas:** No mass or ductal dilatation. - **Adrenal Glands:** Both appear normal in size and attenuation. - **Kidneys:** Normal size, no hydronephrosis or masses. - **Retroperitoneum:** No enlarged lymph nodes. - **Peritoneal Cavity:** No ascites or peritoneal implants. **Pelvis** - **Bladder/Prostate:** Unremarkable. - **Rectosigmoid Colon:** No wall thickening or focal lesions. - **Pelvic Lymph Nodes:** No enlargement. - **Musculoskeletal:** No destructive bony lesions identified in the visualized pelvis. **Impression** 1. New left lower\u2011lobe mass (3.5 cm) with suspicious features for recurrent/metastatic squamous cell"
+    },
+    {
+      "chunk_index": 3,
+      "edited_similarity": 0.8411825895309448,
+      "evidence_id": "inner4_row206_chunk3",
+      "original_similarity": 0.8313437700271606,
+      "row_id": 206,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "\u2013 | Pathogenic | | **EGFR** | \u2013 | \u2013 | No activating mutations detected | \u2013 | Wild\u2011type | | **ALK** | \u2013 | \u2013 | No rearrangements detected | \u2013 | Wild\u2011type | | **ROS1** | \u2013 | \u2013 | No rearrangements detected | \u2013 | Wild\u2011type | | **BRAF** | \u2013 | \u2013 | No V600E/K/D or other activating mutations | \u2013 | Wild\u2011type | | **MET** | \u2013 | \u2013 | No exon\u201114 skipping or amplification | \u2013 | Wild\u2011type | | **RET** | \u2013 | \u2013 | No rearrangements detected | \u2013 | Wild\u2011type | | **NTRK1\u20113** | \u2013 | \u2013 | No fusions detected | \u2013 | Wild\u2011type | \\*Allele frequency reflects the proportion of mutant reads relative to total reads at the locus; values are rounded to the nearest whole percent. **Tumor Mutational Burden (TMB):** 12 mutations/Mb (high for squamous NSCLC). **Microsatellite Instability (MSI):** Microsatellite stable (MSS). --- ### Interpretation 1. **KRAS G12C (Pathogenic, Actionable)** - The G12C substitution is a well\u2011characterized oncogenic driver in non\u2011small cell lung cancer (NSCLC). Emerging agents that selectively inhibit KRAS G12C are under clinical investigation and may be considered in the context of a clinical trial or expanded\u2011access program. 2. **Co\u2011occurring TP53 R273C (Pathogenic)** - TP53 missense mutations, particularly at codon 273, are common in smoking\u2011related squamous carcinomas and are associated with genomic instability. This alteration does not currently confer a specific targeted therapy but may influence disease biology. 3. **STK11 Homozygous Deletion (Pathogenic)** - Loss of STK11 (also known as LKB1) is"
+    },
+    {
+      "chunk_index": 2,
+      "edited_similarity": 0.7808868288993835,
+      "evidence_id": "inner4_row206_chunk2",
+      "original_similarity": 0.7843644618988037,
+      "row_id": 206,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "Type:** Formalin\u2011fixed, paraffin\u2011embedded (FFPE) core - **Histology (from concurrent pathology):** Poorly differentiated squamous cell carcinoma, p40\u2011positive, CK5/6\u2011positive - **Tumor Content (estimated by pathology):** 40 % **Test Performed** - **Assay:** Comprehensive Genomic Profiling (CGP) \u2013 hybrid\u2011capture, DNA\u2011based NGS panel covering 324 cancer\u2011relevant genes (including full coding regions of KRAS, TP53, STK11, CDKN2A, EGFR, ALK, ROS1, BRAF, MET, RET, NTRK1\u20113, etc.). - **Sequencing Depth:** Median > 500\u00d7 (\u2265 250\u00d7 for > 95 % of targeted bases) - **Analytical Sensitivity:** \u2265 5 % mutant allele frequency (MAF) for single\u2011nucleotide variants (SNVs) and indels; \u2265 10 % for copy\u2011number alterations (CNAs). - **Quality Metrics:** All QC parameters met; no evidence of sample contamination. --- ### Genomic Findings | Gene | Nucleotide Change (c.) | Protein Change (p.) | Variant Type | Allele Frequency* | Classification | |------|------------------------|---------------------|--------------|-------------------|----------------| | **KRAS** | c.34G>T | p.G12C | Missense SNV | 28 % | Pathogenic (actionable) | | **TP53** | c.818C>T | p.R273C | Missense SNV | 45 % | Pathogenic | | **STK11** | \u2013 | \u2013 | Homozygous deletion (copy\u2011number loss) | \u2013 | Pathogenic | | **CDKN2A** | \u2013 | \u2013 | Homozygous deletion (copy\u2011number loss) | \u2013 | Pathogenic | | **EGFR** | \u2013 | \u2013 | No activating mutations detected | \u2013 | Wild\u2011type | | **ALK** | \u2013 | \u2013 | No rearrangements detected | \u2013 | Wild\u2011type | | **ROS1** | \u2013 | \u2013 | No rearrangements detected | \u2013 | Wild\u2011type | | **BRAF** | \u2013 | \u2013 | No V600E/K/D or other activating mutations |"
+    },
+    {
+      "chunk_index": 22,
+      "edited_similarity": 0.48416557908058167,
+      "evidence_id": "inner4_row206_chunk22",
+      "original_similarity": 0.4386214017868042,
+      "row_id": 206,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "600 mg/400 IU PO daily **Allergies:** No known drug allergies. **Social History:** Retired schoolteacher, lives with husband, former light smoker (10 pack\u2011years, quit at age 55). No alcohol misuse. Independent in ADLs. **Family History:** Father died of myocardial infarction at 78; mother alive with hypertension. No known familial cancer syndromes. **Physical Examination:** - **General:** Alert, oriented, in no acute distress. ECOG performance status 0. - **Vital Signs:** BP 124/78 mmHg, HR 78 bpm, RR 16/min, Temp 36.8 \u00b0C, SpO\u2082 96% on room air. - **HEENT:** Normocephalic, atraumatic. - **Neck:** No lymphadenopathy. - **Cardiovascular:** Regular rate and rhythm, no murmurs. - **Respiratory:** Clear to auscultation bilaterally, no wheezes or rales. - **Abdomen:** Soft, non\u2011tender, no organomegaly. - **Extremities:** Tenderness to palpation over left iliac crest; no swelling. No peripheral edema. - **Neurologic:** Grossly intact; mild decreased sensation in fingertips consistent with prior neuropathy (grade 1). **Laboratory Data (most recent, pre\u2011second\u2011line labs):** - CBC: WBC 5.5 k/\u00b5L, Hgb 11.12 g/dL, Plt 210 k/\u00b5L, ANC 2.8 k/\u00b5L. - CMP: Cr 1.2 mg/dL, BUN 18 mg/dL, Na 138 mmol/L, K 4.1 mmol/L, Ca 9.2 mg/dL, Albumin 3.9 g/dL. - Calculated creatinine clearance (Cockcroft\u2011Gault): 66.7 mL/min. - Neutrophil\u2011to\u2011lymphocyte ratio: \u20130.17 (recorded per laboratory calculation). **Imaging Summary (PET/CT):** - Hypermetabolic left lower\u2011lobe mass (3.4 cm, SUV 9.2). - Persistent left iliac crest lytic lesion (SUV 5.8). - New right adrenal nodule (0.9 cm, SUV 3.4). - No intracranial disease. **Patient\u2011Reported Outcomes (PRO\u2011CTCAE, past 7 days):** - Fatigue: 2 (moderate) - Nausea: 1 (mild) \u2013 consistent with grade 1 nausea noted during counseling."
+    },
+    {
+      "chunk_index": 11,
+      "edited_similarity": 0.836337685585022,
+      "evidence_id": "inner4_row837_chunk11",
+      "original_similarity": 0.8279858827590942,
+      "row_id": 837,
+      "selection_reasons": [
+        "original_peak",
+        "edited_peak"
+      ],
+      "text": "trials are evaluating CDK4/6 inhibitors in this molecular context. 4. **TP53 R273H** \u2013 A common hotspot mutation associated with genomic instability; currently no direct targeted therapy, but may influence response to DNA\u2011damage agents and immunotherapy. 5. **Low\u2011Intermediate TMB (8 mut/Mb)** and **PD\u2011L1 TPS 20 %** \u2013 Suggest modest likelihood of response to PD\u20111/PD\u2011L1 blockade; PD\u2011L1 status should be integrated with clinical factors when considering immunotherapy. 6. **Overall** \u2013 The molecular profile is characteristic of smoking\u2011related squamous NSCLC, with co\u2011occurring KRAS activation, FGFR1 amplification, and CDKN2A loss. The presence of a KRAS G12C mutation provides a potential targeted therapeutic avenue, while FGFR1 amplification and CDKN2A loss may qualify the patient for relevant clinical trials. --- ### 7. Recommendations - **Targeted Therapy Consideration:** Evaluate eligibility for KRKRAS G12C\u2011specific inhibitors (e.g., sotorasib, adagrasib) based on prior lines of therapy and performance status. - **Clinical Trial Referral:** Consider enrollment in trials investigating FGFR inhibitors or CDK4/6 inhibitors for squamous NSCLC with FGFR1 amplification or CDKN2A loss. - **Further Molecular Testing:** If not already performed, comprehensive RNA\u2011based fusion testing may be considered to rule out rare actionable fusions. - **Correlation with Clinical Findings:** Integrate these results with radiographic disease status, PD\u2011L1 expression, and patient comorbidities when formulating the next line of systemic therapy. --- ### 8. Limitations - The assay detects single\u2011nucleotide variants, small insertions/deletions, copy\u2011number alterations, and selected structural variants. Large genomic rearrangements outside the targeted regions may be missed. - Tumor purity estimation is based on histologic review; low tumor content could reduce sensitivity for sub\u2011clonal alterations. --- **Prepared"
+    },
+    {
+      "chunk_index": 9,
+      "edited_similarity": 0.8212684392929077,
+      "evidence_id": "inner4_row837_chunk9",
+      "original_similarity": 0.8155272006988525,
+      "row_id": 837,
+      "selection_reasons": [
+        "largest_similarity_decrease"
+      ],
+      "text": "CNVkit (copy\u2011number), and FusionCatcher (RNA\u2011based fusion detection \u2013 not applicable to DNA\u2011only assay) - **Quality Metrics:** > 99 % bases > Q30, on\u2011target rate 92 %, duplicate rate 4 % (UMI\u2011deduplication applied) --- ### 3. Genomic Findings | Gene | Alteration | Type | Allele Frequency* | Interpretation | |------|------------|------|-------------------|----------------| | **KRAS** | c.34G>T (p.G12C) | Missense SNV | 28 % | **Pathogenic** \u2013 activating KRAS mutation. FDA\u2011approved KRAS G12C inhibitors (sotorasib, adagrasib) are available for NSCLC in the appropriate line of therapy. | | **TP53** | c.818G>A (p.R273H) | Missense SNV | 45 % | **Pathogenic** \u2013 hotspot mutation associated with loss of tumor\u2011suppressor function; prognostic significance in squamous NSCLC. | | **CDKN2A** | Homozygous deletion (exons 1\u20113) | Copy\u2011Number Loss | \u2013 | **Loss of function** \u2013 common in squamous histology; may confer sensitivity to CDK4/6 inhibition (clinical trials). | | **FGFR1** | Amplification (copy number \u2248 7) | Copy\u2011Number Gain | \u2013 | **Potentially actionable** \u2013 FGFR1 amplification occurs in ~10 % of squamous NSCLC; investigational FGFR inhibitors are available in clinical trials. | | **EGFR** | Wild\u2011type (no pathogenic variants detected) | \u2013 | \u2013 | Consistent with prior EGFR testing. | | **Other Genes** | No additional pathogenic or likely\u2011pathogenic alterations detected in the 500\u2011gene panel. | \u2013 | \u2013 | \u2013 | \\*Allele frequency calculated from tumor\u2011enriched DNA; reflects proportion of mutant alleles among sequenced reads. --- ### 4. Tumor Mutational Burden (TMB) - **Result:** 8 mutations per megabase (mut/Mb) (whole\u2011exome equivalent). - **Interpretation:** Low\u2011intermediate TMB; does not independently predict"
+    },
+    {
+      "chunk_index": 17,
+      "edited_similarity": 0.47144177556037903,
+      "evidence_id": "inner4_row837_chunk17",
+      "original_similarity": 0.42960721254348755,
+      "row_id": 837,
+      "selection_reasons": [
+        "largest_similarity_increase"
+      ],
+      "text": "performed after intravenous administration of iodinated contrast. Axial images obtained from the lung apices through the adrenal glands with multiplanar reconstructions. **Findings** **Lungs** - Right upper lobe: A partially spiculated soft\u2011tissue mass measuring approximately **5.2 cm** in greatest axial dimension (previously 5.8 cm). The lesion demonstrates heterogeneous attenuation without new cavitation. No interval change in internal calcifications. - Remaining right lung fields: No new pulmonary nodules, consolidations, or ground\u2011glass opacities. No evidence of post\u2011radiation fibrosis beyond the treated region. - Left lung: No focal lesions; no pleural effusion or pneumothorax. **Mediastinum / Hila** - Hilar and mediastinal lymph nodes (stations 2R, 4R, 7) are stable in size (largest short\u2011axis dimension ~1.5 cm) compared with prior study. No new nodal enlargement. - No mediastinal mass, pericardial effusion, or abnormal vascular contour. **Upper Abdomen (included on chest scan)** - Left adrenal gland: A 2.1\u2011cm enhancing lesion consistent with known metastatic deposit; unchanged in size and morphology. Right adrenal gland unremarkable. - Liver, spleen, and kidneys: No focal lesions; attenuation patterns within normal limits. **Osseous structures** - Visualized ribs, vertebrae, and scapulae: No lytic or sclerotic lesions suggestive of metastatic disease. **Other** - No evidence of pleural thickening or effusion. - Upper airway and thyroid appear unremarkable. **Impression** - Slight reduction in size of the right\u2011upper\u2011lobe primary tumor (5.2 cm vs. 5.8 cm). - Mediastinal and hilar lymphadenopathy unchanged. - Left adrenal metastatic lesion stable. - No new thoracic or upper\u2011abdominal metastatic foci identified. Overall appearance is **stable disease with modest decrease in primary tumor size**. No acute abnormality"
+    }
+  ],
+  "evidence_scope": "inner_training_only",
+  "inner_fold": 4,
+  "interpretation": "Training-guided semantic retrieval evidence. No validated causal role is established.",
+  "packet_id": "inner_004_query_000_targeted",
+  "patient_outcomes_in_prompt": false,
+  "query": 0,
+  "query_id": "effect_query_001"
+}

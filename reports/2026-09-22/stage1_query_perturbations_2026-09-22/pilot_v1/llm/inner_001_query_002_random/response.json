@@ -1,0 +1,77 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row124_chunk5",
+          "quote": "A 5.2 cm (maximal axial dimension) spiculated mass is identified in the posterior segment of the left upper lobe."
+        },
+        {
+          "evidence_id": "inner1_row134_chunk6",
+          "quote": "A 5.1 \u00d7 4.6 \u00d7 4.3 cm irregular, spiculated mass centered in the posterior segment of the right lower lobe."
+        },
+        {
+          "evidence_id": "inner1_row675_chunk13",
+          "quote": "Right lower\u2011lobe mass 3.5 cm"
+        },
+        {
+          "evidence_id": "inner1_row655_chunk20",
+          "quote": "A 4.5 cm (max axial dimension) soft\u2011tissue mass centered in the right hilar region"
+        },
+        {
+          "evidence_id": "inner1_row653_chunk26",
+          "quote": "**Enlarged left upper\u2011lobe mass** now measuring 6.0 cm"
+        },
+        {
+          "evidence_id": "inner1_row256_chunk13",
+          "quote": "New 3.5 cm spiculated soft\u2011tissue mass in the posterior segment of the left lower lobe."
+        }
+      ],
+      "description": "The maximum axial dimension of the primary pulmonary lesion as measured by CT imaging.",
+      "extraction_instruction": "Extract the numerical value of the maximum axial dimension of the primary lung mass in centimeters.",
+      "measurement_definition": "Maximum dimension measured in centimeters (cm) using axial CT images.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "maximum_primary_tumor_dimension",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Whether the dimension refers to the absolute maximum or only the axial plane across all reports.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row124_chunk33",
+          "quote": "Hb 12.3 g/dL (low\u2011normal)"
+        },
+        {
+          "evidence_id": "inner1_row675_chunk13",
+          "quote": "Hgb | 14.5 g/dL"
+        },
+        {
+          "evidence_id": "inner1_row256_chunk25",
+          "quote": "Anemia (Hgb 9.7 g/dL)"
+        }
+      ],
+      "description": "The baseline concentration of hemoglobin in the blood.",
+      "extraction_instruction": "Extract the numeric value for hemoglobin (Hb or Hgb) reported at baseline in g/dL.",
+      "measurement_definition": "Hemoglobin level measured in grams per deciliter (g/dL).",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "baseline_hemoglobin",
+      "role_hypotheses": [
+        "effect_modifier",
+        "confounder"
+      ],
+      "uncertainty": "Timing of 'baseline' relative to the start of systemic therapy across different patients.",
+      "variable_type": "continuous"
+    }
+  ],
+  "limitations": [
+    "Limited number of patients providing a comprehensive set of lab values.",
+    "Variability in whether tumor size is reported as a single maximum dimension or a three-dimensional product."
+  ],
+  "summary": "The evidence provides measurable baseline clinical variables for patients with non-small cell lung cancer (NSCLC), specifically focusing on pulmonary tumor dimensions and baseline hematologic markers."
+}

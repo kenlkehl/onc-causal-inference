@@ -1,0 +1,71 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner4_row522_chunk29",
+          "quote": "renal impairment (CrCl \u224831 mL/min)"
+        },
+        {
+          "evidence_id": "inner4_row485_chunk33",
+          "quote": "calculated creatinine clearance: 67.67 ml/min"
+        },
+        {
+          "evidence_id": "inner4_row608_chunk18",
+          "quote": "Renal function remains excellent (CrCl >120 mL/min)"
+        }
+      ],
+      "description": "The estimated or calculated rate of creatinine clearance, used to assess renal function and determine the safety of certain chemotherapy regimens.",
+      "extraction_instruction": "Extract the numeric value and units associated with 'CrCl', 'creatinine clearance', or 'eGFR' from laboratory data or assessment notes.",
+      "measurement_definition": "Calculated creatinine clearance measured in mL/min or mL/min/1.73 m\u00b2.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Creatinine Clearance",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "Whether eGFR and CrCl should be treated as interchangeable or distinct variables depends on the specific formula used (e.g., CKD-EPI).",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner4_row551_chunk24",
+          "quote": "ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner4_row608_chunk18",
+          "quote": "ECOG 1, functional and tolerating current supportive measures"
+        },
+        {
+          "evidence_id": "inner4_row672_chunk26",
+          "quote": "limited functional reserve but able to tolerate non\u2011platinum chemotherapy"
+        }
+      ],
+      "description": "A scale used to assess the functional status of cancer patients, impacting the choice between aggressive doublet therapy and single-agent or supportive care.",
+      "extraction_instruction": "Extract the integer value (0-4) associated with 'ECOG' or 'performance status'.",
+      "measurement_definition": "ECOG score where 0 is fully active, 1 is restricted in physically strenuous activity, 2 is ambulatory and capable of all self-care but unable to carry out work activities, 3 is capable of limited self-care, and 4 is completely disabled.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The evidence does not specify if the ECOG status was assessed by the patient or the clinician, which may introduce measurement variability.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small sample size across the provided evidence chunks.",
+    "Lack of longitudinal data to determine if these baseline variables remained stable throughout treatment."
+  ],
+  "summary": "The provided evidence identifies baseline renal function and functional performance status as key clinical variables associated with the selection and suitability of systemic therapies in patients with advanced NSCLC."
+}

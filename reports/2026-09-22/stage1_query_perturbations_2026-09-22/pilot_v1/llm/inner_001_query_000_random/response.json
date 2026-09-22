@@ -1,0 +1,70 @@
+{
+  "candidates": [
+    {
+      "categories": [],
+      "citations": [
+        {
+          "evidence_id": "inner1_row522_chunk6",
+          "quote": "| Ki\u201167 (MIB\u20111) | Approximately 70 %"
+        },
+        {
+          "evidence_id": "inner1_row161_chunk1",
+          "quote": "| Ki\u201167 (nuclear) | Approximately 30 % (moderate)"
+        },
+        {
+          "evidence_id": "inner1_row355_chunk0",
+          "quote": "| Ki\u201167 (MIB\u20111) | Approximately 30% of tumor nuclei"
+        }
+      ],
+      "description": "The percentage of tumor nuclei expressing the Ki-67 protein, used as a marker for cellular proliferation.",
+      "extraction_instruction": "Extract the percentage value associated with Ki-67 or MIB-1 in the pathology report's immunohistochemistry (IHC) section.",
+      "measurement_definition": "The percentage of tumor cells showing nuclear positivity for Ki-67 (MIB-1) as determined by immunohistochemistry.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "Ki-67 Proliferative Index",
+      "role_hypotheses": [
+        "effect_modifier"
+      ],
+      "uncertainty": "It is uncertain whether the percentage is based on a manual count or automated imaging analysis.",
+      "variable_type": "continuous"
+    },
+    {
+      "categories": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "citations": [
+        {
+          "evidence_id": "inner1_row522_chunk3",
+          "quote": "ECOG 0 \u2013 fully active, asymptomatic aside from respiratory symptoms"
+        },
+        {
+          "evidence_id": "inner1_row252_chunk0",
+          "quote": "ECOG performance status 2"
+        },
+        {
+          "evidence_id": "inner1_row355_chunk32",
+          "quote": "ECOG 1, functional status unchanged"
+        }
+      ],
+      "description": "A scale measuring a patient's level of functioning and ability to carry out daily activities.",
+      "extraction_instruction": "Locate the mention of 'ECOG' or 'Performance status' and extract the corresponding numeric grade (0-4).",
+      "measurement_definition": "The patient's status according to the Eastern Cooperative Oncology Group (ECOG) scale.",
+      "missing_value_policy": "null_if_not_documented",
+      "name": "ECOG Performance Status",
+      "role_hypotheses": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "uncertainty": "The specific criteria for the grade assignment are not fully detailed in the excerpts.",
+      "variable_type": "categorical"
+    }
+  ],
+  "limitations": [
+    "Small number of patients provided in the evidence.",
+    "Lack of diversity in molecular mutations across the provided samples."
+  ],
+  "summary": "The evidence identifies baseline clinical variables used in the assessment of non-small cell lung cancer (NSCLC) patients, specifically focusing on tumor proliferative markers and functional status."
+}
