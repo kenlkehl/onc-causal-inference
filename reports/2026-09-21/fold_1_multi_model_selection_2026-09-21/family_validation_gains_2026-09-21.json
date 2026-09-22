@@ -1,0 +1,74 @@
+[
+  {
+    "family": "causal_forest",
+    "role": "effect",
+    "cells": 115,
+    "positive_validation_gain_cells": 58,
+    "mean_validation_gain": -9.807339157493283e-05,
+    "min_validation_gain": -0.004927550996679381,
+    "max_validation_gain": 0.006512503044555862
+  },
+  {
+    "family": "orthogonal_linear",
+    "role": "effect",
+    "cells": 15,
+    "positive_validation_gain_cells": 7,
+    "mean_validation_gain": 8.42322107459011e-05,
+    "min_validation_gain": -0.0014769317797634074,
+    "max_validation_gain": 0.0023665022748616538
+  },
+  {
+    "family": "penalized_interactions",
+    "role": "effect",
+    "cells": 15,
+    "positive_validation_gain_cells": 12,
+    "mean_validation_gain": 0.0007557266020012757,
+    "min_validation_gain": -0.0020727170783518267,
+    "max_validation_gain": 0.002365657520038811
+  },
+  {
+    "family": "penalized_interactions",
+    "role": "outcome",
+    "cells": 15,
+    "positive_validation_gain_cells": 15,
+    "mean_validation_gain": 0.1308233952231425,
+    "min_validation_gain": 0.09024161574644796,
+    "max_validation_gain": 0.1707000248508741
+  },
+  {
+    "family": "penalized_main",
+    "role": "outcome",
+    "cells": 15,
+    "positive_validation_gain_cells": 15,
+    "mean_validation_gain": 0.12679210166098248,
+    "min_validation_gain": 0.08878248091853536,
+    "max_validation_gain": 0.16675703049599888
+  },
+  {
+    "family": "penalized_main",
+    "role": "treatment",
+    "cells": 15,
+    "positive_validation_gain_cells": 15,
+    "mean_validation_gain": 0.18654110281262243,
+    "min_validation_gain": 0.15837889871789024,
+    "max_validation_gain": 0.21728352817027735
+  },
+  {
+    "family": "predictive_forest",
+    "role": "outcome",
+    "cells": 115,
+    "positive_validation_gain_cells": 110,
+    "mean_validation_gain": 0.05267833580661185,
+    "min_validation_gain": -0.024644957789779265,
+    "max_validation_gain": 0.1672011992279423
+  },
+  {
+    "family": "predictive_forest",
+    "role": "treatment",
+    "cells": 115,
+    "positive_validation_gain_cells": 108,
+    "mean_validation_gain": 0.07173404921757985,
+    "min_validation_gain": -0.021809109612832667,
+    "max_validation_gain": 0.21520196554583432
+  }
+]

@@ -1,0 +1,5823 @@
+{
+  "input_fingerprint": "59e954acf1801edff466b5c2b21161ebc671f73777fae8d73ee47831b0024e65",
+  "payload": {
+    "candidates": [
+      {
+        "definition": {
+          "categories_or_unit": [
+            "Wild-type",
+            "Mutant"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "The status of the Epidermal Growth Factor Receptor (EGFR) gene regarding activating mutations in tumor tissue.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_111",
+          "investigator_locked": false,
+          "measurement_definition": "Extract the EGFR mutation status from molecular pathology, NGS, or PCR reports. Map 'Wild-type', 'Negative', or 'No activating mutation detected' to 'Wild-type'. Map 'Mutant', 'Positive', or the identification of a specific activating mutation (e.g., 'exon 19 deletion', 'L858R', 'p.E746_A750del') to 'Mutant'.",
+          "missing_value_rule": "Represent as null if the EGFR analysis was not performed, the result is pending, or no documentation is present in the record.",
+          "name": "egfr_mutation_status",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments",
+            "embedding_clustered",
+            "embedding_whole_cohort",
+            "htr_neural",
+            "matched_pair_uplift",
+            "tfidf_topics"
+          ],
+          "value_type": "categorical"
+        },
+        "feature_id": "outer_001_feature_111",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.9403730719130736,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.6411292440404123,
+            "mean_split_importance": null,
+            "median_p": 0.30323661571055754,
+            "median_q": 0.5878385790590138,
+            "min_score": 0.06444338313311228,
+            "not_evaluable": 0,
+            "q_supported": 1,
+            "role": "treatment",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 2.3180992069378275,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.9733445798684702,
+            "mean_split_importance": null,
+            "median_p": 0.13660528920911358,
+            "median_q": 0.3842419159741997,
+            "min_score": 0.45820151729410874,
+            "not_evaluable": 0,
+            "q_supported": 1,
+            "role": "outcome",
+            "support_fraction": 0.2,
+            "supported": 3
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.9956329749225642,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.28584950122076586,
+            "mean_split_importance": null,
+            "median_p": 0.6099374757282248,
+            "median_q": 0.8722045586326579,
+            "min_score": 0.003227939386058781,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.0733772990963206,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.023954507600335698,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.5333333333333333,
+            "supported": 8
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.07121198134478314,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0243963892924744,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.6,
+            "supported": 9
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.007690471348068379,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0005126980898712253,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.0010994276293250782,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.000884906464591421,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.003303740304620356,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.4,
+            "supported": 6
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0022775358855348835,
+            "mean_model_gain": 0.08999056228235033,
+            "mean_permutation_sd": 0.0009723438147948746,
+            "mean_score": -0.00032018215104601247,
+            "mean_split_importance": 0.009977785661584056,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0036868488287114345,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.2,
+            "supported": 3
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0020858656989755455,
+            "mean_model_gain": 0.07214689959352819,
+            "mean_permutation_sd": 0.0005213893170670357,
+            "mean_score": 0.0002742989230566668,
+            "mean_split_importance": 0.006805925514194992,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.001064903627180147,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_111:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 5.7340460262761406e-05,
+            "mean_model_gain": -0.0004501773544538309,
+            "mean_permutation_sd": 2.8885625241835152e-05,
+            "mean_score": 7.389996587583682e-06,
+            "mean_split_importance": 0.008086358656649879,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -6.268999969175071e-05,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.4666666666666667,
+            "supported": 7
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "Present",
+            "Absent"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "Binary indicator of whether an embolism is documented as present or explicitly documented as absent in the patient's pretreatment records.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_112",
+          "investigator_locked": false,
+          "measurement_definition": "Extract 'Present' if an embolism is documented; extract 'Absent' if the record explicitly states the absence of an embolism.",
+          "missing_value_rule": "Represent as null if no mention of embolism is found or if documentation is ambiguous.",
+          "name": "embolism_presence",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments"
+          ],
+          "value_type": "binary"
+        },
+        "feature_id": "outer_001_feature_112",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.0234769781098578,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.32433388422348586,
+            "mean_split_importance": null,
+            "median_p": 0.5216452294913623,
+            "median_q": 0.7640513922460045,
+            "min_score": 0.05185653872928073,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.7191736227093982,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.26809677134903964,
+            "mean_split_importance": null,
+            "median_p": 0.5762742247293724,
+            "median_q": 0.7778616568331638,
+            "min_score": 0.05078277216688839,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.8217849210759044,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.3698779858222233,
+            "mean_split_importance": null,
+            "median_p": 0.48216891041073673,
+            "median_q": 0.817914593781882,
+            "min_score": 0.09610221797878875,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.030547832309044894,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.002036522153936326,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0005449833183395758,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.0020459568953970406,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.00752727664801911,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.006523400531533552,
+            "mean_model_gain": 0.09146300460915355,
+            "mean_permutation_sd": 0.0012512472881763606,
+            "mean_score": -0.0006464045500624416,
+            "mean_split_importance": 0.019481536899136346,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0034615967891158763,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.4,
+            "supported": 6
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.0026057874177782456,
+            "mean_model_gain": 0.0760405969688722,
+            "mean_permutation_sd": 0.0009545144438555784,
+            "mean_score": 0.000414232760331538,
+            "mean_split_importance": 0.017343279721660835,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0007523061687965867,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.6,
+            "supported": 9
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_112:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.00020379472570425383,
+            "mean_model_gain": -0.0002254469331248769,
+            "mean_permutation_sd": 0.0001348489534518544,
+            "mean_score": -7.323108548783178e-05,
+            "mean_split_importance": 0.026604019973018426,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0003582836857254264,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.26666666666666666,
+            "supported": 4
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "Present",
+            "Absent"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "Presence of emphysema in the lungs.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_113",
+          "investigator_locked": false,
+          "measurement_definition": "Extract whether emphysema is documented in the patient's pretreatment records, such as imaging reports or clinical notes.",
+          "missing_value_rule": "If emphysema is not mentioned or documentation is ambiguous, represent as 'Absent'.",
+          "name": "emphysema",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments"
+          ],
+          "value_type": "binary"
+        },
+        "feature_id": "outer_001_feature_113",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 3.6809722820631072,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 1.8528861293197358,
+            "mean_split_importance": null,
+            "median_p": 0.012949018062654846,
+            "median_q": 0.07836486417796674,
+            "min_score": 0.8221326336248997,
+            "not_evaluable": 0,
+            "q_supported": 8,
+            "role": "treatment",
+            "support_fraction": 0.7333333333333333,
+            "supported": 11
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.3449680988178447,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.5445773389857038,
+            "mean_split_importance": null,
+            "median_p": 0.4512582504236645,
+            "median_q": 0.6955175762965365,
+            "min_score": 0.03343928928484742,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.327517728089047,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.7710350252885061,
+            "mean_split_importance": null,
+            "median_p": 0.18675722951208096,
+            "median_q": 0.6434602130856614,
+            "min_score": 0.20016436899110673,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.04402530869906026,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0034199583969168118,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0142355168625135,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0009490344575009,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.005166298624788845,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.001018194785170921,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.007622755381488183,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.4,
+            "supported": 6
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.0036655113156552157,
+            "mean_model_gain": 0.09717269804199517,
+            "mean_permutation_sd": 0.0009897202068886583,
+            "mean_score": -0.00010132124821500893,
+            "mean_split_importance": 0.011582342960267862,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.006267159325836473,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.5333333333333333,
+            "supported": 8
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0026676637034378503,
+            "mean_model_gain": 0.07852046884218024,
+            "mean_permutation_sd": 0.0007885436765347564,
+            "mean_score": -0.0005171235212513478,
+            "mean_split_importance": 0.011885899052612305,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.003653011201409669,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.3333333333333333,
+            "supported": 5
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_113:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.0010710648463359285,
+            "mean_model_gain": -0.00010232463669052987,
+            "mean_permutation_sd": 0.00025864821189127346,
+            "mean_score": 0.00028469268377987096,
+            "mean_split_importance": 0.03353730198406548,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -7.242712298968779e-05,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.8,
+            "supported": 12
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "Employed",
+            "Retired",
+            "Unemployed",
+            "Student",
+            "Disabled"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "The patient's current employment status at the time of the pretreatment record.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_114",
+          "investigator_locked": false,
+          "measurement_definition": "Extract the patient's current employment status from the social history or general demographics section of the record. Identify terms indicating whether the patient is currently working (Employed), has ceased working (Retired), is not currently working and seeking work (Unemployed), is a student (Student), or is unable to work due to disability (Disabled).",
+          "missing_value_rule": "Represent as null if employment status is not documented or is ambiguous.",
+          "name": "employment_status",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "bow_r_loss",
+            "embedding_whole_cohort",
+            "tfidf_topics"
+          ],
+          "value_type": "categorical"
+        },
+        "feature_id": "outer_001_feature_114",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 17.713113300211194,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 13.714311860183296,
+            "mean_split_importance": null,
+            "median_p": 1.5619799716816142e-15,
+            "median_q": 9.033450836225336e-14,
+            "min_score": 9.472893597917674,
+            "not_evaluable": 0,
+            "q_supported": 15,
+            "role": "treatment",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 10.497134283802325,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 6.970636899452625,
+            "mean_split_importance": null,
+            "median_p": 1.1804426067199078e-07,
+            "median_q": 4.119744697452478e-06,
+            "min_score": 4.310053523199012,
+            "not_evaluable": 0,
+            "q_supported": 15,
+            "role": "outcome",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.1908236429338548,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.4265336898295771,
+            "mean_split_importance": null,
+            "median_p": 0.479013612956971,
+            "median_q": 0.77251328332367,
+            "min_score": 0.021871438198278473,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.12276778718030731,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.03779841445500543,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.6,
+            "supported": 9
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.20226825866655124,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.07919795949010507,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.1984995814765144,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.077832313671684,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0205384028971869,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0013692268598124598,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": -0.0008050773857588844,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.004296366002826924,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.015531169231587455,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.14750905609935352,
+            "mean_model_gain": 0.12159030192073182,
+            "mean_permutation_sd": 0.014165129072232314,
+            "mean_score": 0.06795784282853537,
+            "mean_split_importance": 0.18346644313387672,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.003480968633591005,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.10733919724607233,
+            "mean_model_gain": 0.09130362175340385,
+            "mean_permutation_sd": 0.011595604672039043,
+            "mean_score": 0.05781011968970476,
+            "mean_split_importance": 0.16429986013467246,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.009978243637146797,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_114:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.00015857850583457975,
+            "mean_model_gain": -0.0004242102918412464,
+            "mean_permutation_sd": 0.00016008599287434827,
+            "mean_score": -0.0003484693017068996,
+            "mean_split_importance": 0.05102445915188348,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.001652196558736857,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.2,
+            "supported": 3
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "Present",
+            "Absent"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "Presence of elevated enzyme levels as documented in the patient's record.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_115",
+          "investigator_locked": false,
+          "measurement_definition": "Identify if the clinical documentation states that enzymes are elevated or references 'enzyme elevation' (e.g., in the context of enzyme elevation neuropathy).",
+          "missing_value_rule": "Represent as null if enzyme levels are not documented or are ambiguous.",
+          "name": "enzyme_elevation",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments"
+          ],
+          "value_type": "binary"
+        },
+        "feature_id": "outer_001_feature_115",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.4180065555189993,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.61416767378369,
+            "mean_split_importance": null,
+            "median_p": 0.29031461859153807,
+            "median_q": 0.5587741150728665,
+            "min_score": 0.31786952378227906,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.9776525427439863,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.47155227358141893,
+            "mean_split_importance": null,
+            "median_p": 0.2841370960068673,
+            "median_q": 0.5922375615564824,
+            "min_score": 0.02370138497311179,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 0,
+            "evidence_id": "multi:outer_001_feature_115:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 0,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 0,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 0,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 0,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 0,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": null,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": null,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": null,
+            "not_evaluable": 15,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": null,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.03346018449228153,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0031208621715708624,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.026587456453946983,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0026638396119590085,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.04325008633327474,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.006185868219011914,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.26666666666666666,
+            "supported": 4
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.0007190982611508245,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.00016770774368976744,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.002687483987610595,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.6,
+            "supported": 9
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.00012212267504404148,
+            "mean_model_gain": 0.09639616440267253,
+            "mean_permutation_sd": 2.6567955443269286e-05,
+            "mean_score": 2.327816077509512e-05,
+            "mean_split_importance": 0.00015168933663873782,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -4.1714543608832123e-05,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.26666666666666666,
+            "supported": 4
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.07985462759956219,
+            "mean_permutation_sd": 8.2817668779527e-06,
+            "mean_score": -6.97129321177344e-06,
+            "mean_split_importance": 7.396556873235503e-05,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -8.091069377602622e-05,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_115:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": -0.00026317771253205334,
+            "mean_permutation_sd": 0.0,
+            "mean_score": 0.0,
+            "mean_split_importance": 0.0,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "score"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "A patient-reported outcome score measuring cognitive function using the EORTC QLQ-C30 instrument.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_116",
+          "investigator_locked": false,
+          "measurement_definition": "Extract the numerical value for 'Cognitive Function' reported under the 'EORTC QLQ-C30' instrument from the patient record.",
+          "missing_value_rule": "Represent missing, incomplete, or ambiguous documentation as null.",
+          "name": "eortc_qlq_c30_cognitive_function",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments"
+          ],
+          "value_type": "continuous"
+        },
+        "feature_id": "outer_001_feature_116",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 3.8152346727042814,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 2.280459088503602,
+            "mean_split_importance": null,
+            "median_p": 0.008495116888973819,
+            "median_q": 0.05787431710511859,
+            "min_score": 0.7061181420099442,
+            "not_evaluable": 0,
+            "q_supported": 11,
+            "role": "treatment",
+            "support_fraction": 0.8666666666666667,
+            "supported": 13
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 6.251710608446446,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 4.557647538447673,
+            "mean_split_importance": null,
+            "median_p": 2.4520469104504813e-05,
+            "median_q": 0.0005018856494664028,
+            "min_score": 2.6228881348314674,
+            "not_evaluable": 0,
+            "q_supported": 15,
+            "role": "outcome",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.0381762383522262,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.4638810106381604,
+            "mean_split_importance": null,
+            "median_p": 0.38132312194232687,
+            "median_q": 0.7647631683611431,
+            "min_score": 0.003579374626298252,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.009641735735822098,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0006427823823881399,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.0011924028922877805,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.001267033934365767,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.003203246668161741,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.017866140148026417,
+            "mean_model_gain": 0.09324888551358682,
+            "mean_permutation_sd": 0.002567168971719279,
+            "mean_score": 0.002873087029915204,
+            "mean_split_importance": 0.05846210444233449,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.00741352881611627,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.047619404622521344,
+            "mean_model_gain": 0.08256761144936299,
+            "mean_permutation_sd": 0.004585924295569249,
+            "mean_score": 0.015287880540388996,
+            "mean_split_importance": 0.08469794796538661,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0017786771046409688,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.8,
+            "supported": 12
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_116:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.0004371267976051585,
+            "mean_model_gain": 0.00038862022813916376,
+            "mean_permutation_sd": 0.0002410764507787647,
+            "mean_score": -1.5975251063481286e-05,
+            "mean_split_importance": 0.06553502848588807,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0003207574506396323,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.4666666666666667,
+            "supported": 7
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "score"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "The patient's self-reported emotional functioning score from the EORTC QLQ-C30 quality of life questionnaire.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_117",
+          "investigator_locked": false,
+          "measurement_definition": "Extract the numeric score for 'Emotional Function' (or 'Emotional') from the EORTC QLQ-C30 assessment. If reported as a fraction (e.g., '75/100'), extract the numerator.",
+          "missing_value_rule": "Represent as null if no EORTC QLQ-C30 emotional function score is documented.",
+          "name": "eortc_qlq_c30_emotional_function",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments",
+            "htr_neural"
+          ],
+          "value_type": "continuous"
+        },
+        "feature_id": "outer_001_feature_117",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 3.2288606223366325,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 1.8362008192340689,
+            "mean_split_importance": null,
+            "median_p": 0.014267788265059424,
+            "median_q": 0.08536073324095897,
+            "min_score": 0.723856073375106,
+            "not_evaluable": 0,
+            "q_supported": 8,
+            "role": "treatment",
+            "support_fraction": 0.8666666666666667,
+            "supported": 13
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 6.544992920292204,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 5.052334948923983,
+            "mean_split_importance": null,
+            "median_p": 6.049179894758571e-06,
+            "median_q": 0.00016534714778611103,
+            "min_score": 2.7953846674626432,
+            "not_evaluable": 0,
+            "q_supported": 15,
+            "role": "outcome",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 2.4438009342178737,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.8490151157675329,
+            "mean_split_importance": null,
+            "median_p": 0.1827624733274175,
+            "median_q": 0.6765874668092319,
+            "min_score": 0.04746831515918089,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.014535791875524793,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.001099168512202049,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.012413784976649399,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.00082758566510996,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.001627509742497868,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.001662456048575219,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.003765164164179241,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.009625875012773233,
+            "mean_model_gain": 0.0963884873682552,
+            "mean_permutation_sd": 0.002678514784352336,
+            "mean_score": 0.0012889515061579552,
+            "mean_split_importance": 0.051653149511967394,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.012453259363888894,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.04141851836627478,
+            "mean_model_gain": 0.07220793127724123,
+            "mean_permutation_sd": 0.004967773108725182,
+            "mean_score": 0.008633042063424386,
+            "mean_split_importance": 0.07347387233393539,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0026285115815937177,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_117:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.0005261327613144499,
+            "mean_model_gain": -0.0007132815555221383,
+            "mean_permutation_sd": 0.0001761666888216076,
+            "mean_score": -4.6193905298122826e-05,
+            "mean_split_importance": 0.05438519437322571,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0006658764710629669,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.4,
+            "supported": 6
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "score"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "Patient-reported global health status and quality of life score from the EORTC QLQ-C30 questionnaire.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_118",
+          "investigator_locked": false,
+          "measurement_definition": "Extract the numerical value reported for 'Global Health' or 'Global Health Status' within the EORTC QLQ-C30 assessment instrument, typically presented as a value out of 100.",
+          "missing_value_rule": "Represent as null if the EORTC QLQ-C30 global health score is not documented or is illegible.",
+          "name": "eortc_qlq_c30_global_health",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments",
+            "htr_neural"
+          ],
+          "value_type": "continuous"
+        },
+        "feature_id": "outer_001_feature_118",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 3.7861218046996172,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 2.217635792181115,
+            "mean_split_importance": null,
+            "median_p": 0.00535256584436149,
+            "median_q": 0.04520262064504053,
+            "min_score": 1.066260037371602,
+            "not_evaluable": 0,
+            "q_supported": 11,
+            "role": "treatment",
+            "support_fraction": 0.8,
+            "supported": 12
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 5.7814109815533605,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 4.596888578819912,
+            "mean_split_importance": null,
+            "median_p": 2.8217711785658508e-05,
+            "median_q": 0.0005759732935072648,
+            "min_score": 3.0299040213224813,
+            "not_evaluable": 0,
+            "q_supported": 15,
+            "role": "outcome",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 1.5973753196960931,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.6994084392780776,
+            "mean_split_importance": null,
+            "median_p": 0.24399696461806863,
+            "median_q": 0.6932373698239404,
+            "min_score": 0.03363821257467292,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0027431569159977287,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0001828771277331819,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.06666666666666667,
+            "supported": 1
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0008107889659888234,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.0011212749597738104,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.002743517829233766,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.02722885786077182,
+            "mean_model_gain": 0.12201512756507572,
+            "mean_permutation_sd": 0.0022396040641628917,
+            "mean_score": 0.003984177687193833,
+            "mean_split_importance": 0.04798881328960454,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.004941638759081675,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.03990298290417001,
+            "mean_model_gain": 0.0863108674535182,
+            "mean_permutation_sd": 0.004495214910422047,
+            "mean_score": 0.012670498306828658,
+            "mean_split_importance": 0.08041813251862022,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0009588599775115133,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.7333333333333333,
+            "supported": 11
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_118:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.0016063335314498255,
+            "mean_model_gain": 0.00048330337566929914,
+            "mean_permutation_sd": 0.00022976572289474005,
+            "mean_score": 0.00017933457337259584,
+            "mean_split_importance": 0.06598859541840675,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0004475326269361424,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.4,
+            "supported": 6
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "score"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "The nausea symptom score from the EORTC QLQ-C30 quality of life questionnaire.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_119",
+          "investigator_locked": false,
+          "measurement_definition": "Extract the numerical value specifically attributed to 'Nausea' within the EORTC QLQ-C30 instrument assessment, typically reported as a score from 0 to 100.",
+          "missing_value_rule": "Represent as null if the EORTC QLQ-C30 Nausea score is not documented in the patient record.",
+          "name": "eortc_qlq_c30_nausea",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments"
+          ],
+          "value_type": "continuous"
+        },
+        "feature_id": "outer_001_feature_119",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.6834064696564974,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.2851891398826162,
+            "mean_split_importance": null,
+            "median_p": 0.5335273529454521,
+            "median_q": 0.7715110435392792,
+            "min_score": 0.04233039980840269,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 1.4197931592897142,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.706902825458244,
+            "mean_split_importance": null,
+            "median_p": 0.22717658150840633,
+            "median_q": 0.528564179642892,
+            "min_score": 0.012516557713570818,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.5767433492897445,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.2239491087217874,
+            "mean_split_importance": null,
+            "median_p": 0.6936698380600205,
+            "median_q": 0.8851272252600603,
+            "min_score": 0.03907260546664657,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.008375967473250484,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0008509196232328975,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.2,
+            "supported": 3
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": -6.869521902522213e-05,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.0023733425470741586,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.006821794799838271,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.009933524235680872,
+            "mean_model_gain": 0.09933922898564411,
+            "mean_permutation_sd": 0.0020910452861870477,
+            "mean_score": 0.0010614218310028005,
+            "mean_split_importance": 0.03351465949372276,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.00534635808310846,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.6,
+            "supported": 9
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0034969220011872673,
+            "mean_model_gain": 0.06899766695833713,
+            "mean_permutation_sd": 0.0024339629247102867,
+            "mean_score": -0.0005986025529353838,
+            "mean_split_importance": 0.03834594441315679,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.008450645789281674,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.4666666666666667,
+            "supported": 7
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_119:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.0003710402992847343,
+            "mean_model_gain": 9.131073202686505e-05,
+            "mean_permutation_sd": 0.00013677885622412507,
+            "mean_score": 1.133341032762907e-05,
+            "mean_split_importance": 0.04262067157606226,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0003050759773131258,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.4666666666666667,
+            "supported": 7
+          }
+        ]
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "score"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "The patient's reported physical functioning score from the EORTC QLQ-C30 quality of life questionnaire.",
+          "evidence_axes": [],
+          "feature_id": "outer_001_feature_120",
+          "investigator_locked": false,
+          "measurement_definition": "Extract the numeric score for the Physical Function domain from the EORTC QLQ-C30 instrument, typically reported as a value out of 100.",
+          "missing_value_rule": "Represent as null if the EORTC QLQ-C30 Physical Function score is not documented or is ambiguous.",
+          "name": "eortc_qlq_c30_physical_function",
+          "source_feature_ids": [],
+          "supporting_architectures": [
+            "neural_query_moments",
+            "tfidf_topics"
+          ],
+          "value_type": "continuous"
+        },
+        "feature_id": "outer_001_feature_120",
+        "modeling_evidence": [
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:univariable:treatment",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 6.571014940289862,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 4.131716075204273,
+            "mean_split_importance": null,
+            "median_p": 5.568649969157302e-05,
+            "median_q": 0.0006441071797658613,
+            "min_score": 2.530840675130301,
+            "not_evaluable": 0,
+            "q_supported": 15,
+            "role": "treatment",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:univariable:outcome",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 9.134718434210159,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 7.28146948051934,
+            "mean_split_importance": null,
+            "median_p": 6.449985974628053e-08,
+            "median_q": 3.2157787216359866e-06,
+            "min_score": 4.560618987626006,
+            "not_evaluable": 0,
+            "q_supported": 15,
+            "role": "outcome",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:univariable:effect",
+            "exposures": 15,
+            "family": "univariable",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 1.0985852434976249,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": 0.5688138987629388,
+            "mean_split_importance": null,
+            "median_p": 0.31612862535709685,
+            "median_q": 0.7111419036658001,
+            "min_score": 0.1333468727419333,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:penalized_main:treatment",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.18654110281262243,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:penalized_main:outcome",
+            "exposures": 15,
+            "family": "penalized_main",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.05213120717674878,
+            "mean_model_gain": 0.12679210166098248,
+            "mean_permutation_sd": null,
+            "mean_score": 0.010295465228460867,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.4,
+            "supported": 6
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:penalized_interactions:outcome",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.05184372953552922,
+            "mean_model_gain": 0.1308233952231425,
+            "mean_permutation_sd": null,
+            "mean_score": 0.011080563729488959,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 0.4,
+            "supported": 6
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:penalized_interactions:effect",
+            "exposures": 15,
+            "family": "penalized_interactions",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 0.0007557266020012757,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:orthogonal_linear:effect",
+            "exposures": 15,
+            "family": "orthogonal_linear",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 0
+              }
+            ],
+            "max_score": 0.0,
+            "mean_model_gain": 8.42322107459011e-05,
+            "mean_permutation_sd": null,
+            "mean_score": 0.0,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.0,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.0,
+            "supported": 0
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:univariable_rlearner:effect",
+            "exposures": 15,
+            "family": "univariable_rlearner",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 1
+              }
+            ],
+            "max_score": 0.0010187167829200927,
+            "mean_model_gain": null,
+            "mean_permutation_sd": null,
+            "mean_score": -0.0009122127527266044,
+            "mean_split_importance": null,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0021462772748000736,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.13333333333333333,
+            "supported": 2
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:predictive_forest:treatment",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 0
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.04104165668987599,
+            "mean_model_gain": 0.10280674968216857,
+            "mean_permutation_sd": 0.006712720384154377,
+            "mean_score": 0.00710936240483145,
+            "mean_split_importance": 0.0687188976642527,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.013324398404712187,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "treatment",
+            "support_fraction": 0.6666666666666666,
+            "supported": 10
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:predictive_forest:outcome",
+            "exposures": 15,
+            "family": "predictive_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 3
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 3
+              }
+            ],
+            "max_score": 0.0538748780662629,
+            "mean_model_gain": 0.08668394813222863,
+            "mean_permutation_sd": 0.005356672826735479,
+            "mean_score": 0.019003924587548213,
+            "mean_split_importance": 0.10589296910691176,
+            "median_p": null,
+            "median_q": null,
+            "min_score": 0.00039360900793590964,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "outcome",
+            "support_fraction": 1.0,
+            "supported": 15
+          },
+          {
+            "evaluated": 15,
+            "evidence_id": "multi:outer_001_feature_120:causal_forest:effect",
+            "exposures": 15,
+            "family": "causal_forest",
+            "folds": [
+              {
+                "evaluated": 3,
+                "inner_fold": 1,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 2,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 3,
+                "supported": 1
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 4,
+                "supported": 2
+              },
+              {
+                "evaluated": 3,
+                "inner_fold": 5,
+                "supported": 2
+              }
+            ],
+            "max_score": 0.001169094416783358,
+            "mean_model_gain": 2.599774315805344e-06,
+            "mean_permutation_sd": 0.00021120698070093813,
+            "mean_score": 0.00010755768039960587,
+            "mean_split_importance": 0.07427503737303431,
+            "median_p": null,
+            "median_q": null,
+            "min_score": -0.0004001792470194887,
+            "not_evaluable": 0,
+            "q_supported": 0,
+            "role": "effect",
+            "support_fraction": 0.5333333333333333,
+            "supported": 8
+          }
+        ]
+      }
+    ],
+    "coverage": "Cover every supplied candidate, including weak/unevaluable candidates.",
+    "prompt_version": "stage2_multi_model_themes_v1",
+    "required_response": {
+      "themes": [
+        {
+          "disagreements": "contradictions, weak signals, and proxy distinctions",
+          "evidence_ids": [
+            "at most 12 representative supplied modeling evidence IDs"
+          ],
+          "interpretation": "common or complementary evidence",
+          "member_feature_ids": [
+            "candidate IDs"
+          ],
+          "name": "theme"
+        }
+      ]
+    },
+    "score_meaning": {
+      "causal_forest": "heldout_R_loss_increase_after_group_permutation",
+      "orthogonal_linear": "nonzero_group_norm_in_joint_R_loss_model",
+      "penalized_interactions": "nonzero_group_norm_in_joint_outcome_interaction_model",
+      "penalized_main": "nonzero_group_norm_for_prediction",
+      "predictive_forest": "heldout_prediction_loss_increase_after_group_permutation",
+      "univariable": "minus_log10_p; support uses nominal_p; q_support recorded separately",
+      "univariable_rlearner": "heldout_R_loss_gain_over_constant_effect"
+    },
+    "task": "review_stage2_multi_model_themes"
+  },
+  "system": "You review pretreatment candidate measurements using modeling evidence\nfrom one outer-training fold. First identify themes across candidates; then\nreconcile their roles as confounder, effect_modifier, both, or neither.\nAll evidence is fallible. No individual family, p-value, or support frequency is\na hard selection gate. A credible complementary signal can justify retention\neven when other methods shrink it away. Do not mistake correlated aliases or\nproxies for multiple independent discoveries. Themes organize evidence; they\ndo not establish equivalence, merge measurements, or transfer a role to every\ntheme member. Preserve investigator-locked roles exactly.\n\nTreatment prediction, outcome prognosis, and confounding are distinct. Discuss\nwhether a candidate could be a common cause rather than an instrument or only a\nprognostic factor. Effect modification needs treatment-heterogeneity evidence;\noutcome main-effect importance alone does not establish it. Univariable logistic\ninteractions are on the log-odds scale and unadjusted for other covariates.\nOrthogonal linear models, candidate R-learners, and causal forests assess the\nprobability/outcome scale after elastic-net nuisance adjustment. Their targets\nand biases differ. A model family is evidence, not an independent replication.\n\nUse exposure and evaluability denominators. Missing or nonconverged fits are not\nnegative votes. Repeated samples and folds overlap; support fractions are not\ncausal probabilities or formal stability-selection error guarantees. Raw and BH\np-values do not correct the upstream adaptive discovery process. Permutation\nimportance can be diluted by correlated alternatives and does not prove a\ncausal role. Compare fold consistency, methods, subsets, and conflicting facts.\nDefinitions and theme names cannot establish a role without the supplied\nempirical evidence. Never invent an oracle, data-generating process, or hidden\ntruth. Return the requested JSON and cite only supplied evidence IDs."
+}

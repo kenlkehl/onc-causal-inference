@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-22T01:57:00.863590+00:00",
+  "audit_sha256": "25f3e757d238877810521cc08b0fc9d23d59d524e28e630c3bd0591f349c7c5d",
+  "evaluation_sha256": "52c3866ac15b99fd1d0a2a2bde1340e10c451d120b727d3ac60d1e50b65a2770",
+  "figure_sha256": "31551dc9cc156fa969301bd12e3a75f0859cd93db500a88aa90be1c8bad7ffba",
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/REPORT_2026-09-21.md",
+  "report_sha256": "90f036e704ceb524384ca069b93cd14b8b81316f0c1234b8daa6f0b647ebe312",
+  "source_sha256": "50a9c399cacdf780a656f837599f0eb5f554442a6afe8d35a0bcadac3a7e6347"
+}

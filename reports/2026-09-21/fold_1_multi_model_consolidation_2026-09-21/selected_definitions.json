@@ -1,0 +1,847 @@
+{
+  "features": [
+    {
+      "categories_or_unit": [
+        "years"
+      ],
+      "caveats": "Age may be reported as an integer or a range in some clinical texts; standardizing to a single scalar requires extracting the most specific numeric value.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "The age of the patient at the time of the clinical encounter or index date.",
+      "feature_id": "outer_001_feature_009",
+      "measurement_definition": "Extract the patient's age in years from the demographic section, pathology reports, or clinical narratives (e.g., '86-year-old', 'age 45').",
+      "missing_value_rule": "Represent as null if age is not documented or is ambiguous.",
+      "modeling_strategy": "continuous",
+      "name": "age",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "Age is a fundamental demographic variable consistently reported as a numeric value in years across the provided clinical evidence.",
+      "supporting_architectures": [
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_topics"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_016e5873e8f69151e7a5",
+        "outer_001_card_3b647ece593f87400e4a",
+        "outer_001_card_41446c5d545a0ba59c4b",
+        "outer_001_card_5dec12bc7a9e0c43858c",
+        "outer_001_card_994fba14fdb8b59555b3",
+        "outer_001_card_bf6f870140c8fd3c089d",
+        "outer_001_card_0d950640d37b373d5855",
+        "outer_001_card_2c3a0ab559261b524196",
+        "outer_001_card_c8ee0cf99a666f68cb88",
+        "outer_001_card_70f181e1d196bbff2900",
+        "outer_001_card_858a9e6c40ad1d483665",
+        "outer_001_card_8ad16acf819266590a7b",
+        "outer_001_card_a12f2524fb3c772d9213",
+        "outer_001_card_b3de3991325522167148",
+        "outer_001_card_bf79176afdabf2e9929c",
+        "outer_001_card_cd935444c923bdbc7783",
+        "outer_001_card_cdae1903e3643864d104",
+        "outer_001_card_d801e0bfc028b08d09d3",
+        "outer_001_card_04a7e1d231c4bd274d3a",
+        "outer_001_card_0dc3edd8d658168c0a37",
+        "outer_001_card_0e982e2eb1711ccea059",
+        "outer_001_card_1089c97066537aa11003",
+        "outer_001_card_14994f5e8e640a956ef1",
+        "outer_001_card_1c8d252cdfdd3200c84c",
+        "outer_001_card_40d4bccf0e812fad54a5",
+        "outer_001_card_4d9ea9bbe9b1a2384cee",
+        "outer_001_card_4dd91426dd27c98ccb87",
+        "outer_001_card_507e810b459361fdb1dc",
+        "outer_001_card_5935c2c5d1474164dfb2",
+        "outer_001_card_5a703b1c69f79c044c99",
+        "outer_001_card_5eb21fd23ad4ee715e65",
+        "outer_001_card_66b6637439b03de8dae3",
+        "outer_001_card_6f4c4ac04a5bd355e8cd",
+        "outer_001_card_7f3925f74d7afec48f73",
+        "outer_001_card_84870e8546088d111a44",
+        "outer_001_card_875ef71ffdb34a122ce2",
+        "outer_001_card_8b06b5fad71dd33124c7",
+        "outer_001_card_9064874e15fb979f858b",
+        "outer_001_card_9a9d8ee2d73ee912cb32",
+        "outer_001_card_9aad2a71c6d0b9117516",
+        "outer_001_card_a22938f693bdb87c3035",
+        "outer_001_card_a527dd8dd2c6a4b8a849",
+        "outer_001_card_a7a5314a1018e06dc5e5",
+        "outer_001_card_ab67946f06a40a78a0b8",
+        "outer_001_card_be8c9654e286bae92d64",
+        "outer_001_card_c1a622f6ad4968bdbac9",
+        "outer_001_card_c7fd7772263a6d112f41",
+        "outer_001_card_da8c81ef86c9fdcca6d2",
+        "outer_001_card_db14d4a8453fb5559433",
+        "outer_001_card_dbcea1514589d163cceb",
+        "outer_001_card_e6910c4110181b8efd64",
+        "outer_001_card_f0be02df0e074d29919c",
+        "outer_001_card_f1b2aa18378b32381b4c",
+        "outer_001_card_f4d3f90e82a60e815919",
+        "outer_001_card_7c72af4bac024b023f5a",
+        "outer_001_card_88ee57e5e1def93e02a5",
+        "outer_001_card_dfac5d68cb9fe3aecd33",
+        "outer_001_card_09a62a96c314d397df0d",
+        "outer_001_card_7e17700f511bc5e27e34",
+        "outer_001_card_8e5eb3ec68fbb17c40c0",
+        "outer_001_card_996226bcb15694aa4992",
+        "outer_001_card_d6521348899aaae4cee5",
+        "outer_001_card_dc51d014630461b7a40b",
+        "outer_001_card_f5501bcbb134d28f8a4e",
+        "outer_001_card_04f34e7529cde8672aa0",
+        "outer_001_card_063fb5dc9b811ecbc00e",
+        "outer_001_card_131e5090fbcf0c9cd48c",
+        "outer_001_card_1a191fd34c8aa5247d4c",
+        "outer_001_card_20c74abde14568e280fe",
+        "outer_001_card_37d8054fa04c51ebe5e0",
+        "outer_001_card_3b59d34d3a03bcd3e7be",
+        "outer_001_card_3f54927c359c7830dc80",
+        "outer_001_card_3f7f8bd99c2be3f047fc",
+        "outer_001_card_58af1ee9ced2bdc84576",
+        "outer_001_card_63832d3c53586fa1cf6e",
+        "outer_001_card_63b9d6a1625277f40f35",
+        "outer_001_card_6485f78fc09d9e4ab98f",
+        "outer_001_card_581f242155d5c72107f6",
+        "outer_001_card_675574c6bd8dec47e267",
+        "outer_001_card_71982c792a9557370047",
+        "outer_001_card_72dacce6f2bd33618651",
+        "outer_001_card_84334160eb349aeefd57",
+        "outer_001_card_853c08372813b68883db",
+        "outer_001_card_8f7e7281b91cf2141e2b",
+        "outer_001_card_932ec57fe11b3eab858c",
+        "outer_001_card_a13fc855f60737ec8650",
+        "outer_001_card_b3b08e577dc9637a8220",
+        "outer_001_card_cfb0bd656268e52c440c",
+        "outer_001_card_d82167c2474fbe0620d8",
+        "outer_001_card_db51771a83f9b7fdd9f5",
+        "outer_001_card_ffceb5ee992c10eb25b7",
+        "outer_001_card_dbe6c0f176e44c7a7d04",
+        "outer_001_card_3fce59bde730fc688940"
+      ],
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "Present",
+        "Absent"
+      ],
+      "caveats": "Anxiety may be described with qualifiers such as 'mild' or 'occasional' and may be situational (e.g., related to treatment).",
+      "conflict_resolution": {
+        "positive_category": "Present",
+        "strategy": "any_positive"
+      },
+      "description": "Presence of anxiety symptoms or a diagnosis of anxiety during the pretreatment period.",
+      "feature_id": "outer_001_feature_022",
+      "measurement_definition": "Identify if the patient record mentions the presence of anxiety in the psychiatric or psychosocial sections, or within the history of present illness. Any mention of anxiety, regardless of severity (e.g., 'mild anxiety', 'occasional anxiety'), is extracted as 'Present'.",
+      "missing_value_rule": "Represent as 'Absent' if there is no mention of anxiety in the provided clinical documentation.",
+      "name": "anxiety_present",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "Clinical evidence shows patients may report mild or occasional anxiety, often linked to their medical condition or treatment.",
+      "supporting_architectures": [
+        "matched_pair_uplift"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_996226bcb15694aa4992",
+        "outer_001_card_dc51d014630461b7a40b"
+      ],
+      "value_type": "binary"
+    },
+    {
+      "categories_or_unit": [
+        "present",
+        "absent"
+      ],
+      "caveats": "The sensitivity of different imaging modalities (e.g., bone scan vs. PET/CT vs. MRI) varies; a negative result on one may not preclude the presence of metastases identified by another.",
+      "conflict_resolution": {
+        "positive_category": "present",
+        "strategy": "any_positive"
+      },
+      "description": "Presence of bone metastasis at the time of pretreatment.",
+      "feature_id": "outer_001_feature_043",
+      "measurement_definition": "Determine if there is any documentation of bone or osseous metastasis in the pretreatment record, typically extracted from radiology reports (e.g., bone scan, PET/CT, CT, MRI) or oncology assessment notes.",
+      "missing_value_rule": "Represent as null if bone metastasis is not mentioned or the documentation is too ambiguous to determine presence or absence.",
+      "name": "bone_metastasis_presence",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "Bone metastasis is a well-established clinical feature in advanced cancer staging, typically confirmed via radiographic evidence of lytic or sclerotic lesions in the skeletal system.",
+      "supporting_architectures": [
+        "embedding_clustered",
+        "tfidf_topics",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "embedding_whole_cohort",
+        "htr_neural"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_0784eb0307ad4be1e630",
+        "outer_001_card_1012b6a68b42523fb44d",
+        "outer_001_card_1ea2c046cc3c311a8759",
+        "outer_001_card_240235904d8e2cd758ee",
+        "outer_001_card_5b839ff0d066d112eebe",
+        "outer_001_card_64dc5efa43c1dbbdd9eb",
+        "outer_001_card_69923af3482237ea291a",
+        "outer_001_card_b63893e148cbad0cf728",
+        "outer_001_card_0b904e42de957536b514",
+        "outer_001_card_dc51d014630461b7a40b",
+        "outer_001_card_72dacce6f2bd33618651",
+        "outer_001_card_84334160eb349aeefd57",
+        "outer_001_card_853c08372813b68883db",
+        "outer_001_card_a13fc855f60737ec8650",
+        "outer_001_card_ab8d63f9cd4e78955748",
+        "outer_001_card_cfb0bd656268e52c440c",
+        "outer_001_card_da8c81ef86c9fdcca6d2",
+        "outer_001_card_dbcea1514589d163cceb",
+        "outer_001_card_faa1dca471f1c763af99",
+        "outer_001_card_70f181e1d196bbff2900",
+        "outer_001_card_b3de3991325522167148",
+        "outer_001_card_5aa74733762a83dbdb38",
+        "outer_001_card_b3813a9f0e6fca8adf7d",
+        "outer_001_card_ef37ae0cf473841063ac",
+        "outer_001_card_66b6637439b03de8dae3",
+        "outer_001_card_720e9d033acdd34eb3c4",
+        "outer_001_card_86968026a4cce6ff4861",
+        "outer_001_card_875ef71ffdb34a122ce2",
+        "outer_001_card_8b06b5fad71dd33124c7",
+        "outer_001_card_9064874e15fb979f858b",
+        "outer_001_card_a22938f693bdb87c3035",
+        "outer_001_card_a7a5314a1018e06dc5e5"
+      ],
+      "value_type": "binary"
+    },
+    {
+      "categories_or_unit": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "caveats": "The evidence contains fatigue data from multiple instruments (PRO-CTCAE and EORTC QLQ-C30); this ontology specifically targets the PRO-CTCAE grade as it is the standard representation of severity.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "The severity of cancer-related fatigue as measured by the PRO-CTCAE (Patient-Reported Outcomes Common Terminology Criteria for Adverse Events) scale.",
+      "feature_id": "outer_001_feature_060",
+      "measurement_definition": "Extract the numeric PRO-CTCAE grade for fatigue, typically represented as an integer from 0 (none) to 4 (very severe).",
+      "missing_value_rule": "If no PRO-CTCAE fatigue grade is explicitly documented, the value should be represented as null.",
+      "name": "cancer_related_fatigue_severity",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "The clinical text demonstrates the use of a 0-4 grading scale (PRO-CTCAE) to quantify fatigue severity, which is a standard oncology metric.",
+      "supporting_architectures": [
+        "embedding_clustered"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_04bf4f07bf19ff600667",
+        "outer_001_card_0784eb0307ad4be1e630",
+        "outer_001_card_240235904d8e2cd758ee"
+      ],
+      "value_type": "ordinal"
+    },
+    {
+      "categories_or_unit": [
+        "count"
+      ],
+      "caveats": "The count is dependent on the comprehensiveness of the documented medical history and the specific criteria used to distinguish a comorbidity from the primary diagnosis.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "maximum"
+      },
+      "description": "The total number of distinct comorbid medical conditions documented in the patient's pretreatment record.",
+      "feature_id": "outer_001_feature_082",
+      "measurement_definition": "Count the number of unique diagnosed medical conditions present in the patient record, excluding the primary diagnosis for which the patient is being treated.",
+      "missing_value_rule": "Represent as 0 if no comorbidities are documented; represent as null if the record is missing or unable to be parsed.",
+      "modeling_strategy": "continuous",
+      "name": "comorbidities",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "Comorbidity count is a standard clinical measure used to assess baseline health status and risk stratification.",
+      "supporting_architectures": [
+        "bow_r_loss"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_fa9c5e2752031d4b3ffc"
+      ],
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "present",
+        "absent"
+      ],
+      "caveats": "The ontology captures the binary presence of confusion regardless of frequency (e.g., 'intermittent') or severity.",
+      "conflict_resolution": {
+        "positive_category": "present",
+        "strategy": "any_positive"
+      },
+      "description": "Presence of confusion as a clinical symptom.",
+      "feature_id": "outer_001_feature_085",
+      "measurement_definition": "Identify if confusion is documented as a symptom in the patient's clinical record, such as in the chief complaint or history of present illness.",
+      "missing_value_rule": "Represent as 'absent' if not mentioned or explicitly denied in the record.",
+      "name": "confusion_present",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "Confusion is a standard clinical finding often reported in neurologic assessments and chief complaints.",
+      "supporting_architectures": [
+        "matched_pair_uplift"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_8e5eb3ec68fbb17c40c0"
+      ],
+      "value_type": "binary"
+    },
+    {
+      "categories_or_unit": [
+        "mg/dL"
+      ],
+      "caveats": "Some records may provide qualitative descriptors (e.g., 'Normal', 'Upper-normal') instead of or in addition to the numeric value; the numeric value must be prioritized.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "The numeric measurement of serum creatinine, used as a marker of renal function.",
+      "feature_id": "outer_001_feature_096",
+      "measurement_definition": "Extract the numeric value for serum creatinine (often abbreviated as 'Cr') from the pretreatment comprehensive metabolic panel (CMP) or renal function laboratory results.",
+      "missing_value_rule": "Represent as null if no numeric value is documented in the pretreatment record.",
+      "modeling_strategy": "continuous",
+      "name": "creatinine_level",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "Serum creatinine is a standard, widely used clinical laboratory measurement for assessing kidney function, typically reported in mg/dL in US-based clinical settings.",
+      "supporting_architectures": [
+        "neural_query_moments",
+        "bow_nuisance",
+        "embedding_clustered"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_04f34e7529cde8672aa0",
+        "outer_001_card_27b02fc135f9540676bd",
+        "outer_001_card_4693818cf6715bd311f2",
+        "outer_001_card_58af1ee9ced2bdc84576",
+        "outer_001_card_63832d3c53586fa1cf6e",
+        "outer_001_card_6485f78fc09d9e4ab98f",
+        "outer_001_card_72a86f3c1a1a2aa96925",
+        "outer_001_card_dec3bedabce4d3a54022",
+        "outer_001_card_e256c1b83342a323f2cd",
+        "outer_001_card_70f181e1d196bbff2900",
+        "outer_001_card_a12f2524fb3c772d9213",
+        "outer_001_card_b3de3991325522167148",
+        "outer_001_card_bf79176afdabf2e9929c",
+        "outer_001_card_cd74dfd3f9fbacaf8bb9",
+        "outer_001_card_cd935444c923bdbc7783",
+        "outer_001_card_d801e0bfc028b08d09d3"
+      ],
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "Present",
+        "Absent"
+      ],
+      "caveats": "Dizziness is a non-specific symptom that may encompass various clinical states including vertigo, lightheadedness, or equilibrium imbalance.",
+      "conflict_resolution": {
+        "positive_category": "Present",
+        "strategy": "any_positive"
+      },
+      "description": "Presence of dizziness in the patient prior to treatment.",
+      "feature_id": "outer_001_feature_103",
+      "measurement_definition": "Extract whether dizziness is documented as present or absent in the pretreatment clinical record.",
+      "missing_value_rule": "Represent as null if dizziness is not mentioned or the documentation is ambiguous.",
+      "name": "dizziness_present",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "Dizziness is a commonly reported clinical symptom in patient histories.",
+      "supporting_architectures": [
+        "matched_pair_uplift"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_b91a399476dd474a6ca6"
+      ],
+      "value_type": "binary"
+    },
+    {
+      "categories_or_unit": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "caveats": "The feature may be recorded as 'dyspnea' or 'shortness of breath'; both should be mapped to this feature.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "The severity grade of dyspnea (shortness of breath) as reported by the patient.",
+      "feature_id": "outer_001_feature_108",
+      "measurement_definition": "Extract the numerical severity grade (0-4) for dyspnea or shortness of breath from patient-reported outcome instruments, specifically the PRO-CTCAE scale, where 0 = None, 1 = Mild, 2 = Moderate, 3 = Severe, and 4 = Life-threatening/Disabling.",
+      "missing_value_rule": "Represent as null if the dyspnea severity grade is not documented or the PRO-CTCAE assessment is absent.",
+      "name": "dyspnea_severity",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "Dyspnea severity is measured using the standardized PRO-CTCAE ordinal grading system (0-4), providing a consistent scalar representation of symptom intensity.",
+      "supporting_architectures": [
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_semantic_retrieval_contrasts"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_8e5eb3ec68fbb17c40c0",
+        "outer_001_card_1a191fd34c8aa5247d4c",
+        "outer_001_card_3f7f8bd99c2be3f047fc",
+        "outer_001_card_6367cfd70f124503a732",
+        "outer_001_card_1d4d97e94942c634013d"
+      ],
+      "value_type": "ordinal"
+    },
+    {
+      "categories_or_unit": [
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5"
+      ],
+      "caveats": "ECOG status is a clinician-reported subjective assessment and may vary between evaluators.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "Patient functional status measured by the Eastern Cooperative Oncology Group (ECOG) scale.",
+      "feature_id": "outer_001_feature_109",
+      "measurement_definition": "Extract the numeric ECOG performance status score (typically 0-5) from the pretreatment clinical record, typically found in the physical examination or assessment sections.",
+      "missing_value_rule": "Represent as null if the ECOG status is not documented or is described ambiguously (e.g., a range like '0-1').",
+      "name": "ecog_performance_status",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "The ECOG scale is a standardized, globally recognized clinical tool used in oncology to quantify a patient's functional impairment level, where 0 represents fully active and 5 represents death.",
+      "supporting_architectures": [
+        "embedding_whole_cohort",
+        "bow_nuisance",
+        "bow_r_loss",
+        "embedding_clustered",
+        "htr_neural",
+        "matched_pair_uplift",
+        "neural_query_moments",
+        "tfidf_topics"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_04a7e1d231c4bd274d3a",
+        "outer_001_card_05a97311fe0cca275f42",
+        "outer_001_card_14994f5e8e640a956ef1",
+        "outer_001_card_4d9ea9bbe9b1a2384cee",
+        "outer_001_card_507e810b459361fdb1dc",
+        "outer_001_card_89a8ccc79e99853a3eca",
+        "outer_001_card_9acc968518fb91360aa4",
+        "outer_001_card_c4b23b552c31cf2cf007",
+        "outer_001_card_f3889524eb660a1237ad",
+        "outer_001_card_2c3a0ab559261b524196",
+        "outer_001_card_04bf4f07bf19ff600667",
+        "outer_001_card_0784eb0307ad4be1e630",
+        "outer_001_card_1ea2c046cc3c311a8759",
+        "outer_001_card_240235904d8e2cd758ee",
+        "outer_001_card_28930e753bd1b551c18d",
+        "outer_001_card_2bd856f923bce20f7df3",
+        "outer_001_card_49a16fb8ff697829575f",
+        "outer_001_card_5b839ff0d066d112eebe",
+        "outer_001_card_5e7135df4cad16ed1de7",
+        "outer_001_card_69923af3482237ea291a",
+        "outer_001_card_70f181e1d196bbff2900",
+        "outer_001_card_858a9e6c40ad1d483665",
+        "outer_001_card_a12f2524fb3c772d9213",
+        "outer_001_card_ad0f30a920af66692911",
+        "outer_001_card_b3de3991325522167148",
+        "outer_001_card_bf79176afdabf2e9929c",
+        "outer_001_card_cd74dfd3f9fbacaf8bb9",
+        "outer_001_card_cd935444c923bdbc7783",
+        "outer_001_card_cdae1903e3643864d104",
+        "outer_001_card_0aa33cc5229e82f9e420",
+        "outer_001_card_0e982e2eb1711ccea059",
+        "outer_001_card_1089c97066537aa11003",
+        "outer_001_card_1c8d252cdfdd3200c84c",
+        "outer_001_card_3cce42c2127bea6bab3f",
+        "outer_001_card_4dd91426dd27c98ccb87",
+        "outer_001_card_5ec2f12c46cf19bb7053",
+        "outer_001_card_66b6637439b03de8dae3",
+        "outer_001_card_7f3925f74d7afec48f73",
+        "outer_001_card_84870e8546088d111a44",
+        "outer_001_card_875ef71ffdb34a122ce2",
+        "outer_001_card_9064874e15fb979f858b",
+        "outer_001_card_a527dd8dd2c6a4b8a849",
+        "outer_001_card_ab67946f06a40a78a0b8",
+        "outer_001_card_be8c9654e286bae92d64",
+        "outer_001_card_da8c81ef86c9fdcca6d2",
+        "outer_001_card_dbcea1514589d163cceb",
+        "outer_001_card_fe44d8ddcfc0148ccc13",
+        "outer_001_card_2e80fc0705fe925de010",
+        "outer_001_card_88ee57e5e1def93e02a5",
+        "outer_001_card_dd4db4a0532c84115aee",
+        "outer_001_card_1ce3459a9a93b568376a",
+        "outer_001_card_8e5eb3ec68fbb17c40c0",
+        "outer_001_card_c40b909b9340709d8357",
+        "outer_001_card_20c74abde14568e280fe",
+        "outer_001_card_27b02fc135f9540676bd",
+        "outer_001_card_4693818cf6715bd311f2",
+        "outer_001_card_58af1ee9ced2bdc84576",
+        "outer_001_card_6485f78fc09d9e4ab98f",
+        "outer_001_card_018cc7a55e86c5fe31d6",
+        "outer_001_card_675574c6bd8dec47e267",
+        "outer_001_card_72dacce6f2bd33618651",
+        "outer_001_card_853c08372813b68883db",
+        "outer_001_card_932ec57fe11b3eab858c",
+        "outer_001_card_a13fc855f60737ec8650",
+        "outer_001_card_ab8d63f9cd4e78955748",
+        "outer_001_card_d82167c2474fbe0620d8",
+        "outer_001_card_121dd4bb45218ae00998",
+        "outer_001_card_a991190ba8f04efa49a7",
+        "outer_001_card_129a329e12030a20e4c4",
+        "outer_001_card_fe5c267d66f86b6c0be2"
+      ],
+      "value_type": "ordinal"
+    },
+    {
+      "categories_or_unit": [
+        "mL/min/1.73 m\u00b2"
+      ],
+      "caveats": "Creatinine clearance (CrCl) is sometimes reported instead of eGFR; while related, they are different calculations. Extraction prioritizes eGFR (specifically CKD-EPI) when both are present.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "A patient-level scalar measurement of the estimated glomerular filtration rate (eGFR), reflecting renal function.",
+      "feature_id": "outer_001_feature_125",
+      "measurement_definition": "Extract the numeric value for the estimated glomerular filtration rate (eGFR), typically reported in mL/min/1.73 m\u00b2. If the value is preceded by an approximation symbol (e.g., \u2248) or reported as 'estimated creatinine clearance' in the absence of a formal eGFR, extract the numeric value.",
+      "missing_value_rule": "Represent as null if no numeric eGFR or estimated filtration rate is documented in the pretreatment record.",
+      "modeling_strategy": "continuous",
+      "name": "estimated_glomerular_filtration_rate",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "eGFR is a standardized clinical metric used to estimate the rate of glomerular filtration based on serum creatinine and demographic factors, typically using the CKD-EPI or MDRD equations.",
+      "supporting_architectures": [
+        "htr_neural",
+        "neural_query_moments",
+        "embedding_whole_cohort",
+        "matched_pair_uplift",
+        "bow_nuisance"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_2e80fc0705fe925de010",
+        "outer_001_card_7c72af4bac024b023f5a",
+        "outer_001_card_cde3e53fbe8f56a79fc4",
+        "outer_001_card_4693818cf6715bd311f2",
+        "outer_001_card_58af1ee9ced2bdc84576",
+        "outer_001_card_6485f78fc09d9e4ab98f",
+        "outer_001_card_675574c6bd8dec47e267",
+        "outer_001_card_853c08372813b68883db",
+        "outer_001_card_cfb0bd656268e52c440c",
+        "outer_001_card_db51771a83f9b7fdd9f5",
+        "outer_001_card_5ec2f12c46cf19bb7053",
+        "outer_001_card_7f3925f74d7afec48f73",
+        "outer_001_card_86968026a4cce6ff4861",
+        "outer_001_card_9a9d8ee2d73ee912cb32",
+        "outer_001_card_a7a5314a1018e06dc5e5",
+        "outer_001_card_0aa33cc5229e82f9e420",
+        "outer_001_card_5935c2c5d1474164dfb2",
+        "outer_001_card_be8c9654e286bae92d64",
+        "outer_001_card_c011cb42b1cd23af9997",
+        "outer_001_card_c7fd7772263a6d112f41",
+        "outer_001_card_f0be02df0e074d29919c",
+        "outer_001_card_fe44d8ddcfc0148ccc13",
+        "outer_001_card_dc51d014630461b7a40b",
+        "outer_001_card_fd7151b5fe7b86c5fdd3"
+      ],
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "Present",
+        "Absent"
+      ],
+      "caveats": "Determination is based on documented medical history or the presence of lipid-lowering medications; specific biochemical lab values (e.g., LDL, Total Cholesterol) are not consistently provided in the evidence.",
+      "conflict_resolution": {
+        "positive_category": "Present",
+        "strategy": "any_positive"
+      },
+      "description": "Whether the patient has a documented diagnosis of hyperlipidemia.",
+      "feature_id": "outer_001_feature_159",
+      "measurement_definition": "Extract the presence of hyperlipidemia from the 'Past Medical History' or 'Comorbidities' sections of the patient record. The status is also considered 'Present' if the patient is prescribed a lipid-lowering medication, such as a statin (e.g., atorvastatin).",
+      "missing_value_rule": "If there is no mention of hyperlipidemia and no lipid-lowering medications are listed in the record, the value is represented as 'Absent'.",
+      "name": "hyperlipidemia_status",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "The feature is reliably documented as a comorbidity in the provided clinical texts and is strongly associated with the use of atorvastatin.",
+      "supporting_architectures": [
+        "tfidf_semantic_retrieval_contrasts",
+        "embedding_whole_cohort",
+        "neural_query_moments",
+        "tfidf_topics",
+        "bow_nuisance",
+        "embedding_clustered",
+        "htr_neural"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_f1e23fd8546d7d8c68d5",
+        "outer_001_card_04a7e1d231c4bd274d3a",
+        "outer_001_card_14994f5e8e640a956ef1",
+        "outer_001_card_4dd91426dd27c98ccb87",
+        "outer_001_card_2b4b656e6a54968c4488",
+        "outer_001_card_463641ad8288077c322e",
+        "outer_001_card_6485f78fc09d9e4ab98f",
+        "outer_001_card_a149c7af572a221359e3",
+        "outer_001_card_fcb7b7ba60b666e6a6b2",
+        "outer_001_card_a8b6b446e85a411d6045",
+        "outer_001_card_858a9e6c40ad1d483665",
+        "outer_001_card_ad0f30a920af66692911",
+        "outer_001_card_bf79176afdabf2e9929c",
+        "outer_001_card_cdae1903e3643864d104",
+        "outer_001_card_720e9d033acdd34eb3c4",
+        "outer_001_card_84870e8546088d111a44",
+        "outer_001_card_86968026a4cce6ff4861",
+        "outer_001_card_a527dd8dd2c6a4b8a849",
+        "outer_001_card_ab67946f06a40a78a0b8",
+        "outer_001_card_be8c9654e286bae92d64",
+        "outer_001_card_c1a622f6ad4968bdbac9",
+        "outer_001_card_d546e880068a177a3829",
+        "outer_001_card_df33c77d79fc8bdb8b57",
+        "outer_001_card_853c08372813b68883db",
+        "outer_001_card_a06f7db1e3c161a6bed5",
+        "outer_001_card_db51771a83f9b7fdd9f5"
+      ],
+      "value_type": "binary"
+    },
+    {
+      "categories_or_unit": [
+        "unitless"
+      ],
+      "caveats": "The ratio is dependent on the timing of the blood draw relative to disease progression or start of therapy; values may vary based on the specific laboratory's reference ranges for individual cell types.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "The ratio of the absolute neutrophil count to the absolute lymphocyte count, used as a marker of systemic inflammation.",
+      "feature_id": "outer_001_feature_228",
+      "measurement_definition": "Extract the explicitly reported neutrophil-to-lymphocyte ratio (NLR) from laboratory results. If the ratio is not explicitly provided but absolute neutrophil and lymphocyte counts are available in the CBC differential, the value is the quotient of absolute neutrophils divided by absolute lymphocytes.",
+      "missing_value_rule": "Represent as null if neither the NLR nor both necessary components (absolute neutrophils and absolute lymphocytes) are documented.",
+      "modeling_strategy": "continuous",
+      "name": "neutrophil_to_lymphocyte_ratio",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "The neutrophil-to-lymphocyte ratio is a standard clinical biomarker of inflammation used across oncology to assess prognostic outcomes.",
+      "supporting_architectures": [
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "neural_query_moments"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_d801e0bfc028b08d09d3",
+        "outer_001_card_3cce42c2127bea6bab3f",
+        "outer_001_card_7f3925f74d7afec48f73",
+        "outer_001_card_1ffcf1bdbc1f23d539e3",
+        "outer_001_card_853c08372813b68883db",
+        "outer_001_card_ab8d63f9cd4e78955748",
+        "outer_001_card_cfb0bd656268e52c440c",
+        "outer_001_card_db51771a83f9b7fdd9f5",
+        "outer_001_card_6b54cb0d1ee1eb7b5e99",
+        "outer_001_card_fdce8bb76740c6fec040"
+      ],
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "g/dL"
+      ],
+      "caveats": "Albumin levels can be influenced by the patient's hydration status, acute phase response to inflammation, and liver or kidney function.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "The concentration of albumin in the patient's serum.",
+      "feature_id": "outer_001_feature_295",
+      "measurement_definition": "Extract the numerical value for serum albumin from the pretreatment laboratory records, typically reported as part of a Comprehensive Metabolic Panel (CMP).",
+      "missing_value_rule": "Represent as null if the value is not documented or is ambiguous.",
+      "modeling_strategy": "continuous",
+      "name": "serum_albumin",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability_summary": "Serum albumin is a standard biochemical measurement used to evaluate nutritional status and systemic inflammation, typically reported in grams per deciliter.",
+      "supporting_architectures": [
+        "neural_query_moments",
+        "embedding_clustered",
+        "embedding_whole_cohort",
+        "htr_neural",
+        "matched_pair_uplift"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_04f34e7529cde8672aa0",
+        "outer_001_card_1a191fd34c8aa5247d4c",
+        "outer_001_card_27b02fc135f9540676bd",
+        "outer_001_card_4693818cf6715bd311f2",
+        "outer_001_card_58af1ee9ced2bdc84576",
+        "outer_001_card_70f181e1d196bbff2900",
+        "outer_001_card_a12f2524fb3c772d9213",
+        "outer_001_card_b3de3991325522167148",
+        "outer_001_card_cd74dfd3f9fbacaf8bb9",
+        "outer_001_card_cd935444c923bdbc7783",
+        "outer_001_card_d801e0bfc028b08d09d3",
+        "outer_001_card_1089c97066537aa11003",
+        "outer_001_card_5ec2f12c46cf19bb7053",
+        "outer_001_card_720e9d033acdd34eb3c4",
+        "outer_001_card_7f3925f74d7afec48f73",
+        "outer_001_card_84870e8546088d111a44",
+        "outer_001_card_86968026a4cce6ff4861",
+        "outer_001_card_a7a5314a1018e06dc5e5",
+        "outer_001_card_c1a622f6ad4968bdbac9",
+        "outer_001_card_2e80fc0705fe925de010",
+        "outer_001_card_cde3e53fbe8f56a79fc4",
+        "outer_001_card_dfac5d68cb9fe3aecd33",
+        "outer_001_card_dc51d014630461b7a40b",
+        "outer_001_card_675574c6bd8dec47e267",
+        "outer_001_card_84334160eb349aeefd57",
+        "outer_001_card_853c08372813b68883db",
+        "outer_001_card_932ec57fe11b3eab858c",
+        "outer_001_card_db51771a83f9b7fdd9f5"
+      ],
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "mmHg"
+      ],
+      "caveats": "Systolic blood pressure is typically recorded as part of a systolic/diastolic pair; the systolic value is the first number listed.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "The pressure in the patient's arteries during the contraction of the heart ventricle.",
+      "feature_id": "outer_001_feature_313",
+      "measurement_definition": "Extract the first numeric value (the systolic component) from the blood pressure reading (e.g., from '128/74 mmHg', extract '128') found in the physical examination or vital signs section of the pretreatment record.",
+      "missing_value_rule": "Represent as null if systolic blood pressure is not documented or if the documentation is too ambiguous to extract a numeric value.",
+      "modeling_strategy": "continuous",
+      "name": "systolic_blood_pressure",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "Blood pressure is a standard, universally measured clinical vital sign with high stability and reproducibility across clinical settings.",
+      "supporting_architectures": [
+        "embedding_whole_cohort",
+        "bow_nuisance",
+        "embedding_clustered",
+        "matched_pair_uplift",
+        "neural_query_moments"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_04a7e1d231c4bd274d3a",
+        "outer_001_card_05a97311fe0cca275f42",
+        "outer_001_card_14994f5e8e640a956ef1",
+        "outer_001_card_507e810b459361fdb1dc",
+        "outer_001_card_0e5a38411b67969ab153",
+        "outer_001_card_897c38a8aa6cb5e6dfff",
+        "outer_001_card_89a8ccc79e99853a3eca",
+        "outer_001_card_c4b23b552c31cf2cf007",
+        "outer_001_card_decf36d83cd45670e3c6",
+        "outer_001_card_1012b6a68b42523fb44d",
+        "outer_001_card_2bd856f923bce20f7df3",
+        "outer_001_card_5e7135df4cad16ed1de7",
+        "outer_001_card_f5501bcbb134d28f8a4e",
+        "outer_001_card_675574c6bd8dec47e267",
+        "outer_001_card_932ec57fe11b3eab858c",
+        "outer_001_card_a13fc855f60737ec8650",
+        "outer_001_card_cfb0bd656268e52c440c",
+        "outer_001_card_d82167c2474fbe0620d8",
+        "outer_001_card_db51771a83f9b7fdd9f5"
+      ],
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "pack-years"
+      ],
+      "caveats": "Extraction depends on the availability of the specific pack-year calculation; patients described only as 'smoker' or 'former smoker' without a quantity cannot be assigned a continuous value.",
+      "conflict_resolution": {
+        "positive_category": null,
+        "strategy": "latest"
+      },
+      "description": "Total cumulative tobacco smoking exposure measured in pack-years.",
+      "feature_id": "outer_001_feature_321",
+      "measurement_definition": "Extract the total number of pack-years of smoking history from the patient's social or medical history. If the patient is explicitly documented as a 'never smoker', the value is 0.",
+      "missing_value_rule": "Represent as null if smoking status is not mentioned, or if the patient is identified as a current or former smoker but no numeric pack-year value is provided.",
+      "modeling_strategy": "continuous",
+      "name": "tobacco_smoking_history",
+      "roles": [
+        "confounder"
+      ],
+      "stability_summary": "Smoking history is consistently recorded as pack-years in social history sections across the provided clinical notes, providing a stable numeric metric for cumulative exposure.",
+      "supporting_architectures": [
+        "embedding_whole_cohort",
+        "htr_neural",
+        "neural_query_moments",
+        "embedding_clustered",
+        "matched_pair_uplift",
+        "tfidf_semantic_retrieval_contrasts",
+        "tfidf_topics",
+        "bow_nuisance"
+      ],
+      "supporting_packet_ids": [
+        "outer_001_card_84870e8546088d111a44",
+        "outer_001_card_a22938f693bdb87c3035",
+        "outer_001_card_ab67946f06a40a78a0b8",
+        "outer_001_card_d546e880068a177a3829",
+        "outer_001_card_df33c77d79fc8bdb8b57",
+        "outer_001_card_063fb5dc9b811ecbc00e",
+        "outer_001_card_20c74abde14568e280fe",
+        "outer_001_card_27b02fc135f9540676bd",
+        "outer_001_card_2b4b656e6a54968c4488",
+        "outer_001_card_a3e18947b7a6e7988e52",
+        "outer_001_card_1012b6a68b42523fb44d",
+        "outer_001_card_5b839ff0d066d112eebe",
+        "outer_001_card_5e7135df4cad16ed1de7",
+        "outer_001_card_858a9e6c40ad1d483665",
+        "outer_001_card_cdae1903e3643864d104",
+        "outer_001_card_d801e0bfc028b08d09d3",
+        "outer_001_card_04a7e1d231c4bd274d3a",
+        "outer_001_card_05a97311fe0cca275f42",
+        "outer_001_card_14994f5e8e640a956ef1",
+        "outer_001_card_40d4bccf0e812fad54a5",
+        "outer_001_card_4d9ea9bbe9b1a2384cee",
+        "outer_001_card_507e810b459361fdb1dc",
+        "outer_001_card_996226bcb15694aa4992",
+        "outer_001_card_8c4f36e985f8943f1ed4",
+        "outer_001_card_3fce59bde730fc688940",
+        "outer_001_card_933d3da6d2ef14bbefa3",
+        "outer_001_card_a149c7af572a221359e3",
+        "outer_001_card_a991190ba8f04efa49a7",
+        "outer_001_card_eff65bb9eb57ce230e35",
+        "outer_001_card_fcb7b7ba60b666e6a6b2",
+        "outer_001_card_675574c6bd8dec47e267",
+        "outer_001_card_8f7e7281b91cf2141e2b",
+        "outer_001_card_932ec57fe11b3eab858c",
+        "outer_001_card_d82167c2474fbe0620d8",
+        "outer_001_card_db51771a83f9b7fdd9f5",
+        "outer_001_card_06147b69067f1410bdcd"
+      ],
+      "value_type": "continuous"
+    }
+  ]
+}

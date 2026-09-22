@@ -1,0 +1,63 @@
+{
+  "themes": [
+    {
+      "disagreements": "Signals are primarily concentrated in treatment prediction (predictive forest) and effect modification (r-learner, causal forest), with limited outcome main-effect evidence.",
+      "evidence_ids": [
+        "multi:outer_001_feature_064:univariable:treatment",
+        "multi:outer_001_feature_064:univariable_rlearner:effect",
+        "multi:outer_001_feature_064:predictive_forest:treatment",
+        "multi:outer_001_feature_065:univariable:effect",
+        "multi:outer_001_feature_065:univariable_rlearner:effect",
+        "multi:outer_001_feature_065:predictive_forest:treatment"
+      ],
+      "interpretation": "Molecular and tumor markers showing strong evidence of both confounding (treatment prediction) and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_064",
+        "outer_001_feature_065"
+      ],
+      "name": "Molecular and Biomarker Indicators"
+    },
+    {
+      "disagreements": "Predictive forest suggests strong treatment prediction for several features, but univariable and penalized models show inconsistent or weak outcome signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_063:penalized_main:treatment",
+        "multi:outer_001_feature_063:predictive_forest:treatment",
+        "multi:outer_001_feature_067:predictive_forest:treatment",
+        "multi:outer_001_feature_070:predictive_forest:treatment",
+        "multi:outer_001_feature_063:univariable_rlearner:effect"
+      ],
+      "interpretation": "Neuroimaging characteristics that predominantly predict treatment assignment, suggesting a confounding role.",
+      "member_feature_ids": [
+        "outer_001_feature_063",
+        "outer_001_feature_067",
+        "outer_001_feature_068",
+        "outer_001_feature_069",
+        "outer_001_feature_070"
+      ],
+      "name": "Neuroimaging Features"
+    },
+    {
+      "disagreements": "Carboplatin shows strong outcome signals but negligible treatment prediction; cefepime shows virtually no signal.",
+      "evidence_ids": [
+        "multi:outer_001_feature_061:univariable:outcome",
+        "multi:outer_001_feature_061:penalized_main:outcome",
+        "multi:outer_001_feature_061:penalized_interactions:outcome"
+      ],
+      "interpretation": "Clinical administration markers, where one acts as a strong prognostic factor and the other is non-informative.",
+      "member_feature_ids": [
+        "outer_001_feature_061",
+        "outer_001_feature_066"
+      ],
+      "name": "Clinical and Medication Factors"
+    },
+    {
+      "disagreements": "No significant signals across any modeling family.",
+      "evidence_ids": [],
+      "interpretation": "Comorbidities with no empirical evidence for a causal or prognostic role.",
+      "member_feature_ids": [
+        "outer_001_feature_062"
+      ],
+      "name": "Other Comorbidities"
+    }
+  ]
+}

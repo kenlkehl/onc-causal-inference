@@ -1,0 +1,65 @@
+{
+  "themes": [
+    {
+      "disagreements": "Signals for posterior fossa features are generally weaker than for primary tumor or systemic indicators, appearing primarily in forest-based models rather than univariable or penalized models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_261:predictive_forest:treatment",
+        "multi:outer_001_feature_262:predictive_forest:outcome",
+        "multi:outer_001_feature_262:causal_forest:effect"
+      ],
+      "interpretation": "Posterior fossa imaging features (enhancement and mass effect) show complementary signals across treatment prediction and outcome prognosis, with modest evidence for effect modification in causal forests.",
+      "member_feature_ids": [
+        "outer_001_feature_261",
+        "outer_001_feature_262"
+      ],
+      "name": "Posterior Fossa Imaging"
+    },
+    {
+      "disagreements": "Treatment and outcome signals are inconsistent across models, while the causal forest provides a more stable signal for effect modification, particularly for location.",
+      "evidence_ids": [
+        "multi:outer_001_feature_264:univariable:treatment",
+        "multi:outer_001_feature_264:causal_forest:effect",
+        "multi:outer_001_feature_265:penalized_main:outcome",
+        "multi:outer_001_feature_266:univariable_rlearner:effect"
+      ],
+      "interpretation": "Primary tumor physical characteristics (location, morphology, and size) consistently show signals for effect modification and variable levels of prognostic/predictive importance.",
+      "member_feature_ids": [
+        "outer_001_feature_264",
+        "outer_001_feature_265",
+        "outer_001_feature_266"
+      ],
+      "name": "Primary Tumor Physicality"
+    },
+    {
+      "disagreements": "Radiation therapy (263) shows weaker univariable signals compared to platinum chemotherapy (267) and specific regimens (268).",
+      "evidence_ids": [
+        "multi:outer_001_feature_267:univariable:outcome",
+        "multi:outer_001_feature_268:univariable:outcome",
+        "multi:outer_001_feature_267:univariable:treatment",
+        "multi:outer_001_feature_263:causal_forest:effect"
+      ],
+      "interpretation": "Prior systemic oncology treatments show strong evidence as both confounders (predicting treatment) and prognostic factors (predicting outcome), with complementary signals for effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_263",
+        "outer_001_feature_267",
+        "outer_001_feature_268"
+      ],
+      "name": "Prior Oncology Treatments"
+    },
+    {
+      "disagreements": "The univariable signals are exceptionally strong for both treatment and outcome, potentially masking nuanced effect modification seen in causal forests.",
+      "evidence_ids": [
+        "multi:outer_001_feature_269:univariable:treatment",
+        "multi:outer_001_feature_269:univariable:outcome",
+        "multi:outer_001_feature_270:univariable:treatment",
+        "multi:outer_001_feature_270:univariable_rlearner:effect"
+      ],
+      "interpretation": "Patient-reported symptoms (pain severity and exertional symptoms) are powerful predictors of both the treatment assigned and the final outcome, while also showing evidence for modifying the treatment effect.",
+      "member_feature_ids": [
+        "outer_001_feature_269",
+        "outer_001_feature_270"
+      ],
+      "name": "Symptomatic Burden"
+    }
+  ]
+}

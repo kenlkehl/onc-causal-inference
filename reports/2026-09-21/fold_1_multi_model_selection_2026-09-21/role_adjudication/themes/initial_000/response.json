@@ -1,0 +1,78 @@
+{
+  "themes": [
+    {
+      "disagreements": "Effect modification signals are present but moderate (support fractions ~0.4), suggesting their role as confounders may be equally prominent.",
+      "evidence_ids": [
+        "multi:outer_001_feature_007:predictive_forest:treatment",
+        "multi:outer_001_feature_007:causal_forest:effect",
+        "multi:outer_001_feature_008:predictive_forest:treatment",
+        "multi:outer_001_feature_008:penalized_main:outcome",
+        "multi:outer_001_feature_008:causal_forest:effect"
+      ],
+      "interpretation": "Measurements regarding the presence and size of adrenal nodules show consistent evidence of influence on treatment assignment, outcome prognosis, and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_007",
+        "outer_001_feature_008"
+      ],
+      "name": "Adrenal-related Indicators"
+    },
+    {
+      "disagreements": "Age is an overwhelming confounder, whereas history of AKI shows only a weak signal for effect modification and minimal prognostic value.",
+      "evidence_ids": [
+        "multi:outer_001_feature_009:univariable:treatment",
+        "multi:outer_001_feature_009:univariable:outcome",
+        "multi:outer_001_feature_005:univariable_rlearner:effect"
+      ],
+      "interpretation": "Core patient characteristics, most notably age, exhibit powerful evidence as confounders affecting both treatment and outcome.",
+      "member_feature_ids": [
+        "outer_001_feature_005",
+        "outer_001_feature_009"
+      ],
+      "name": "Patient Demographics and Comorbidities"
+    },
+    {
+      "disagreements": "ALC has negligible treatment signal but strong effect modification evidence; ANC is strongly prognostic and moderately linked to treatment.",
+      "evidence_ids": [
+        "multi:outer_001_feature_001:causal_forest:effect",
+        "multi:outer_001_feature_001:univariable_rlearner:effect",
+        "multi:outer_001_feature_002:penalized_main:outcome",
+        "multi:outer_001_feature_002:predictive_forest:treatment"
+      ],
+      "interpretation": "Absolute counts of lymphocytes and neutrophils show divergence, with lymphocytes acting as potential effect modifiers and neutrophils as confounders.",
+      "member_feature_ids": [
+        "outer_001_feature_001",
+        "outer_001_feature_002"
+      ],
+      "name": "Hematological Parameters"
+    },
+    {
+      "disagreements": "Acetaminophen administration is primarily a confounder, while adjuvant chemotherapy is a strong candidate for effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_003:univariable:outcome",
+        "multi:outer_001_feature_003:predictive_forest:treatment",
+        "multi:outer_001_feature_006:causal_forest:effect",
+        "multi:outer_001_feature_006:univariable_rlearner:effect"
+      ],
+      "interpretation": "Previous administration of medications or chemotherapy shows a split between simple confounding and heterogeneous treatment effects.",
+      "member_feature_ids": [
+        "outer_001_feature_003",
+        "outer_001_feature_006"
+      ],
+      "name": "Prior Therapeutic Interventions"
+    },
+    {
+      "disagreements": "Airway involvement is a moderate confounder/modifier; actionable molecular alterations provide very weak signals across all roles.",
+      "evidence_ids": [
+        "multi:outer_001_feature_010:predictive_forest:treatment",
+        "multi:outer_001_feature_010:predictive_forest:outcome",
+        "multi:outer_001_feature_004:univariable_rlearner:effect"
+      ],
+      "interpretation": "Indicators of disease location and genetic actionability show varied importance, with airway involvement being more prominent than molecular markers.",
+      "member_feature_ids": [
+        "outer_001_feature_004",
+        "outer_001_feature_010"
+      ],
+      "name": "Anatomic and Molecular Markers"
+    }
+  ]
+}

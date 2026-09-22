@@ -48,6 +48,26 @@ def _frame_hash(frame: pd.DataFrame) -> str:
     return _fingerprint({"columns": list(frame.columns), "values": values})
 
 
+def numerical_identity(
+    *, frame, labels, definitions, inner_splits, outcome_type, seed, policy
+):
+    """Count-search settings do not change the underlying numerical evidence."""
+    numerical_policy = policy.public_dict()
+    numerical_policy["multi_model"].pop("modifier_count", None)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "policy": numerical_policy,
+        "seed": int(seed),
+        "definitions": definitions,
+        "inner_splits": list(inner_splits),
+        "measurements_sha256": _frame_hash(frame),
+        "observed_labels_sha256": _frame_hash(labels),
+        "outcome_type": outcome_type,
+        "component_source_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
+        "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
+    }
+
+
 def _checkpoint(
     directory: Path | None, name: str, fingerprint: str, compute: Callable[[], dict[str, Any]]
 ) -> dict[str, Any]:
@@ -754,18 +774,15 @@ def select_stage2_features_multi_model(
     binary = outcome_type == "binary"
     if binary and not set(labels[outcome_column].unique()).issubset({0, 1}):
         raise ValueError("binary outcome must contain only 0 and 1")
-    identity = {
-        "schema_version": SCHEMA_VERSION,
-        "policy": policy.public_dict(),
-        "seed": int(seed),
-        "definitions": definitions,
-        "inner_splits": list(inner_splits),
-        "measurements_sha256": _frame_hash(frame),
-        "observed_labels_sha256": _frame_hash(labels),
-        "outcome_type": outcome_type,
-        "component_source_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
-        "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
-    }
+    identity = numerical_identity(
+        frame=frame,
+        labels=labels,
+        definitions=definitions,
+        inner_splits=inner_splits,
+        outcome_type=outcome_type,
+        seed=seed,
+        policy=policy,
+    )
     fingerprint = _fingerprint(identity)
     directory = Path(checkpoint_dir) / fingerprint[:20] if checkpoint_dir is not None else None
     if directory is not None:

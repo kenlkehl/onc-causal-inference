@@ -1,0 +1,227 @@
+{
+  "decisions": [
+    {
+      "cross_method_reconciliation": "Strong effect modification signals in Causal Forest (0.66) and R-learner (0.60) are complemented by a strong treatment signal (0.80) and moderate outcome signal (0.33) in the predictive forest, establishing a dual role.",
+      "evidence_against": [
+        "Low univariable outcome support (support_fraction: 0.26)"
+      ],
+      "evidence_for": [
+        "Causal Forest effect support (support_fraction: 0.66)",
+        "Univariable R-learner effect support (support_fraction: 0.60)",
+        "Predictive Forest treatment support (support_fraction: 0.80)",
+        "Predictive Forest outcome support (support_fraction: 0.33)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_001:causal_forest:effect",
+        "multi:outer_001_feature_001:univariable_rlearner:effect",
+        "multi:outer_001_feature_001:predictive_forest:treatment",
+        "multi:outer_001_feature_001:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_001",
+      "inner_fold_consistency": "Effect modification is consistent across folds 2, 3, 4 (R-learner) and 1, 2, 3, 4 (Causal Forest).",
+      "rationale": "The candidate exhibits strong signals for both treatment prediction and effect modification, and sufficient signal for outcome prognosis to qualify as a confounder.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong and consistent signals across treatment and outcome models establish a confounding role; effect modification signals are weak and inconsistent.",
+      "evidence_against": [
+        "Low Causal Forest effect support (support_fraction: 0.33)"
+      ],
+      "evidence_for": [
+        "Predictive Forest treatment support (support_fraction: 0.73)",
+        "Predictive Forest outcome support (support_fraction: 0.80)",
+        "Penalized main treatment support (support_fraction: 0.60)",
+        "Univariable outcome support (support_fraction: 0.66, p: 0.015)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_002:predictive_forest:treatment",
+        "multi:outer_001_feature_002:predictive_forest:outcome",
+        "multi:outer_001_feature_002:penalized_main:treatment",
+        "multi:outer_001_feature_002:univariable:outcome"
+      ],
+      "feature_id": "outer_001_feature_002",
+      "inner_fold_consistency": "Outcome support is highly consistent across folds 1-4.",
+      "rationale": "Consistent high-frequency support for both treatment and outcome indicates a clear confounding role.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong outcome signal combined with moderate treatment prediction suggests confounding; effect modification is not supported.",
+      "evidence_against": [
+        "Negligible Causal Forest effect support (support_fraction: 0.06)"
+      ],
+      "evidence_for": [
+        "Univariable outcome support (support_fraction: 0.86, p: 0.01)",
+        "Predictive Forest outcome support (support_fraction: 0.73)",
+        "Predictive Forest treatment support (support_fraction: 0.53)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_003:univariable:outcome",
+        "multi:outer_001_feature_003:predictive_forest:outcome",
+        "multi:outer_001_feature_003:predictive_forest:treatment"
+      ],
+      "feature_id": "outer_001_feature_003",
+      "inner_fold_consistency": "Outcome signal is robust across all folds.",
+      "rationale": "Significant association with both treatment and outcome makes this a confounder.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Insufficient signal across all modeling families to establish any causal role.",
+      "evidence_against": [
+        "Low support across treatment, outcome, and effect models (all support_fractions <= 0.26)"
+      ],
+      "evidence_for": [],
+      "evidence_ids": [
+        "multi:outer_001_feature_004:predictive_forest:treatment",
+        "multi:outer_001_feature_004:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_004",
+      "inner_fold_consistency": "Inconsistent support across folds.",
+      "rationale": "The candidate does not meet the evidence threshold for any role.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Weak treatment and outcome signals are insufficient for confounding, and the effect modification signal is moderate but lacks cross-method replication.",
+      "evidence_against": [
+        "Zero support in Predictive Forest treatment/outcome models"
+      ],
+      "evidence_for": [
+        "Univariable R-learner effect support (support_fraction: 0.46)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_005:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_005",
+      "inner_fold_consistency": "Effect signal is only present in the R-learner.",
+      "rationale": "Insufficient evidence to establish a role despite a moderate signal in one model family.",
+      "roles": [],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Strong effect modification evidence is complemented by moderate treatment and outcome signals, establishing it as both a confounder and effect modifier.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Causal Forest effect support (support_fraction: 0.73)",
+        "Univariable R-learner effect support (support_fraction: 0.73)",
+        "Predictive Forest outcome support (support_fraction: 0.53)",
+        "Predictive Forest treatment support (support_fraction: 0.46)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_006:causal_forest:effect",
+        "multi:outer_001_feature_006:univariable_rlearner:effect",
+        "multi:outer_001_feature_006:predictive_forest:outcome",
+        "multi:outer_001_feature_006:predictive_forest:treatment"
+      ],
+      "feature_id": "outer_001_feature_006",
+      "inner_fold_consistency": "Effect modification is highly consistent across folds.",
+      "rationale": "Robust evidence for effect modification and sufficient evidence for confounding.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Moderate signals across all three axes (treatment, outcome, effect) suggest a dual role.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Predictive Forest treatment support (support_fraction: 0.66)",
+        "Causal Forest effect support (support_fraction: 0.46)",
+        "Predictive Forest outcome support (support_fraction: 0.40)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_007:predictive_forest:treatment",
+        "multi:outer_001_feature_007:causal_forest:effect",
+        "multi:outer_001_feature_007:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_007",
+      "inner_fold_consistency": "Treatment signal is consistent across most folds.",
+      "rationale": "Moderate but concurrent signals for treatment, outcome, and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Strong treatment prediction and significant outcome signals indicate confounding, while moderate Causal Forest support suggests effect modification.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Predictive Forest treatment support (support_fraction: 0.73)",
+        "Penalized main outcome support (support_fraction: 0.53)",
+        "Causal Forest effect support (support_fraction: 0.40)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_008:predictive_forest:treatment",
+        "multi:outer_001_feature_008:penalized_main:outcome",
+        "multi:outer_001_feature_008:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_008",
+      "inner_fold_consistency": "Treatment prediction is strong across folds 1, 3, 4.",
+      "rationale": "Evidence supports both confounding and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Extreme signals across all treatment and outcome models demonstrate a dominant confounding role; effect modification is weak.",
+      "evidence_against": [
+        "Low Causal Forest effect support (support_fraction: 0.33)"
+      ],
+      "evidence_for": [
+        "Univariable treatment support (support_fraction: 1.0, p: 7e-26)",
+        "Univariable outcome support (support_fraction: 1.0, p: 3e-9)",
+        "Penalized main treatment support (support_fraction: 1.0)",
+        "Predictive Forest treatment support (support_fraction: 1.0)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_009:univariable:treatment",
+        "multi:outer_001_feature_009:univariable:outcome",
+        "multi:outer_001_feature_009:penalized_main:treatment",
+        "multi:outer_001_feature_009:predictive_forest:treatment"
+      ],
+      "feature_id": "outer_001_feature_009",
+      "inner_fold_consistency": "Perfect consistency (all 5 folds supported) for treatment and outcome.",
+      "rationale": "Highest magnitude of confounding evidence in the set.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Moderate treatment and outcome signals in the predictive forest are accompanied by moderate effect modification signals, suggesting a dual role.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Predictive Forest treatment support (support_fraction: 0.73)",
+        "Predictive Forest outcome support (support_fraction: 0.73)",
+        "Univariable R-learner effect support (support_fraction: 0.33)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_010:predictive_forest:treatment",
+        "multi:outer_001_feature_010:predictive_forest:outcome",
+        "multi:outer_001_feature_010:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_010",
+      "inner_fold_consistency": "Treatment and outcome signals are consistent across most folds in the forest model.",
+      "rationale": "Sufficient evidence for both confounding and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    }
+  ],
+  "summary": "The evidence reveals a strong set of confounders, most notably age (feature 009) and absolute neutrophil count (feature 002). Several indicators, including adjuvant chemotherapy (feature 006), airway involvement (feature 010), and adrenal-related metrics (features 007, 008), demonstrate dual roles as both confounders and effect modifiers."
+}

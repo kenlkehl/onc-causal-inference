@@ -1,0 +1,21 @@
+{
+  "scheduler_contract": "passed",
+  "native_replay_no_network": true,
+  "cache_resume_and_corruption_test": "passed",
+  "passes": [
+    {
+      "parallel_workers": 4,
+      "native_checkpoint_replay_required": true,
+      "role_batches": 4,
+      "themes": 2,
+      "merge_levels": 1
+    },
+    {
+      "parallel_workers": 4,
+      "native_checkpoint_replay_required": true,
+      "role_batches": 4,
+      "themes": 2,
+      "merge_levels": 1
+    }
+  ]
+}

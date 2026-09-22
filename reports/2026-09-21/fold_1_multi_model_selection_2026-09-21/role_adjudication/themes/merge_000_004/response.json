@@ -1,0 +1,140 @@
+{
+  "themes": [
+    {
+      "disagreements": "Pemetrexed (212) exhibits both confounding and modification signals, while MET amplification (214, 219), PD-L1/p40 (243, 248), and PI3K (254) are predominantly effect modifiers.",
+      "evidence_ids": [
+        "multi:outer_001_feature_212:univariable:treatment",
+        "multi:outer_001_feature_212:causal_forest:effect",
+        "multi:outer_001_feature_214:causal_forest:effect",
+        "multi:outer_001_feature_243:causal_forest:effect",
+        "multi:outer_001_feature_254:causal_forest:effect",
+        "multi:outer_001_feature_253:univariable_rlearner:effect"
+      ],
+      "interpretation": "Molecular and intracellular signaling biomarkers providing evidence for treatment heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_212",
+        "outer_001_feature_214",
+        "outer_001_feature_219",
+        "outer_001_feature_243",
+        "outer_001_feature_248",
+        "outer_001_feature_253",
+        "outer_001_feature_254"
+      ],
+      "name": "Molecular and Signaling Biomarkers"
+    },
+    {
+      "disagreements": "Metastasis location (216) and optic chiasm enhancement (235) show dual roles as confounders and modifiers, whereas meningeal thickening (213) and posterior fossa features (261, 262) are more strongly prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_216:causal_forest:effect",
+        "multi:outer_001_feature_235:penalized_interactions:effect",
+        "multi:outer_001_feature_264:causal_forest:effect",
+        "multi:outer_001_feature_251:causal_forest:effect",
+        "multi:outer_001_feature_213:predictive_forest:outcome",
+        "multi:outer_001_feature_262:causal_forest:effect"
+      ],
+      "interpretation": "Radiological and structural characteristics of the brain and primary tumor assessing prognosis and treatment interaction.",
+      "member_feature_ids": [
+        "outer_001_feature_213",
+        "outer_001_feature_216",
+        "outer_001_feature_218",
+        "outer_001_feature_235",
+        "outer_001_feature_236",
+        "outer_001_feature_251",
+        "outer_001_feature_252",
+        "outer_001_feature_255",
+        "outer_001_feature_256",
+        "outer_001_feature_257",
+        "outer_001_feature_261",
+        "outer_001_feature_262",
+        "outer_001_feature_264",
+        "outer_001_feature_265",
+        "outer_001_feature_266"
+      ],
+      "name": "Neuro-Radiological and Structural Imaging"
+    },
+    {
+      "disagreements": "Bone density (239, 240) and respiratory status (241, 242) are high-confidence confounders; systemic health markers (259, 260) show modest effect modification signals in causal forests.",
+      "evidence_ids": [
+        "multi:outer_001_feature_239:univariable:treatment",
+        "multi:outer_001_feature_241:univariable:outcome",
+        "multi:outer_001_feature_258:univariable:treatment",
+        "multi:outer_001_feature_259:causal_forest:effect",
+        "multi:outer_001_feature_260:causal_forest:effect"
+      ],
+      "interpretation": "Markers of organ-level dysfunction and general comorbidities that primarily drive treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_221",
+        "outer_001_feature_222",
+        "outer_001_feature_239",
+        "outer_001_feature_240",
+        "outer_001_feature_241",
+        "outer_001_feature_242",
+        "outer_001_feature_258",
+        "outer_001_feature_259",
+        "outer_001_feature_260"
+      ],
+      "name": "Systemic Health and Comorbidities"
+    },
+    {
+      "disagreements": "Metabolic response (215) and NYHA class (231) are credible effect modifiers, while pain severity (245), mucositis (220), and organomegaly (238) are primarily prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_215:causal_forest:effect",
+        "multi:outer_001_feature_231:causal_forest:effect",
+        "multi:outer_001_feature_245:univariable:outcome",
+        "multi:outer_001_feature_220:penalized_main:outcome",
+        "multi:outer_001_feature_238:predictive_forest:outcome"
+      ],
+      "interpretation": "Functional and symptomatic indicators of patient status reflecting either treatment heterogeneity or outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_215",
+        "outer_001_feature_220",
+        "outer_001_feature_225",
+        "outer_001_feature_226",
+        "outer_001_feature_227",
+        "outer_001_feature_229",
+        "outer_001_feature_231",
+        "outer_001_feature_238",
+        "outer_001_feature_244",
+        "outer_001_feature_245",
+        "outer_001_feature_249",
+        "outer_001_feature_250"
+      ],
+      "name": "Clinical Performance and Symptomatology"
+    },
+    {
+      "disagreements": "Systemic inflammation (228) and N-stage (230) show robust evidence for dual roles (confounder and modifier), whereas Napsin A (224) is primarily a modifier.",
+      "evidence_ids": [
+        "multi:outer_001_feature_228:causal_forest:effect",
+        "multi:outer_001_feature_228:penalized_main:outcome",
+        "multi:outer_001_feature_224:causal_forest:effect",
+        "multi:outer_001_feature_230:univariable_rlearner:effect"
+      ],
+      "interpretation": "Inflammatory and pathological markers demonstrating strong influence on both prognosis and treatment effect.",
+      "member_feature_ids": [
+        "outer_001_feature_223",
+        "outer_001_feature_224",
+        "outer_001_feature_228",
+        "outer_001_feature_230"
+      ],
+      "name": "Inflammation and Pathology"
+    },
+    {
+      "disagreements": "Palliative care status (246) is a very strong prognostic factor, while other operational and demographic features (232, 233, 234, 237) show weak or inconsistent signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_246:univariable:outcome",
+        "multi:outer_001_feature_247:univariable:treatment",
+        "multi:outer_001_feature_232:predictive_forest:treatment"
+      ],
+      "interpretation": "Care preferences and demographic factors that primarily serve as markers for severity of illness and treatment selection.",
+      "member_feature_ids": [
+        "outer_001_feature_232",
+        "outer_001_feature_233",
+        "outer_001_feature_234",
+        "outer_001_feature_237",
+        "outer_001_feature_246",
+        "outer_001_feature_247"
+      ],
+      "name": "Care Preferences and Operational Factors"
+    }
+  ]
+}

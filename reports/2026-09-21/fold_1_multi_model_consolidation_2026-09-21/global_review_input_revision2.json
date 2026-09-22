@@ -1,0 +1,43 @@
+{
+  "amendment_sha256": "8820b3facd17c6d31bdbcfdcdaa977c7a25f211cdf4cb37fdd30b977ab109a0e",
+  "common_sha256": "bd9caaec202020c96a1e2660e262a7eb5b19e29eee570cc54d68085da50dda30",
+  "context_margin_tokens": 2048,
+  "context_window_tokens": 262144,
+  "max_tokens": 100000,
+  "model": {
+    "actual_model_identity": {
+      "parent": null,
+      "revision": null,
+      "root": "nvidia/Gemma-4-31B-IT-NVFP4",
+      "served_id": "gemma4-31b"
+    },
+    "endpoint_observations": [
+      {
+        "advertised_model_ids": [
+          "gemma4-31b"
+        ],
+        "endpoint": "http://sn4622130540:8000/v1",
+        "selected_model_advertised": true,
+        "selected_model_record": {
+          "id": "gemma4-31b",
+          "parent": null,
+          "revision": null,
+          "root": "nvidia/Gemma-4-31B-IT-NVFP4"
+        }
+      }
+    ],
+    "live_endpoint_verified": true,
+    "model_family": "gemma4",
+    "role": "primary",
+    "sampling_model": "nvidia/Gemma-4-31B-IT-NVFP4",
+    "selected_model": "gemma4-31b"
+  },
+  "oracle_accessed": false,
+  "parent_selection_freeze_sha256": "e2cb1028eaf8baf71839133c56a9d711b3c2cbbe1d5f9595ce9bf2d8ee6d8282",
+  "predecessor_input_sha256": "0c368928b6b1063823eaa24fd69f76ed414d277e071f081828460bc8b15bde85",
+  "prompt_sha256": "bf51cefb6b3ffd805e6c86e9f6d43dac106e7a1039389550dbe1510709808b19",
+  "protocol_sha256": "489dda111a42e34dc3bd1428c5aaa2150bf9fb109b1ac7c392b6e30b9b076d88",
+  "reasoning_effort": "high",
+  "request_attempt_timeout": 1800,
+  "source_sha256": "ea8b37bbc6b1e98d917e1a010a21a7571a6a5615bac842ca7eb5781ba840b6f9"
+}

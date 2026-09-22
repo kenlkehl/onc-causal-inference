@@ -1,0 +1,24 @@
+{
+  "at": "2026-09-21T23:43:51.235840+00:00",
+  "action": "stop_broad_production_refit",
+  "processes": [
+    {
+      "pid": 476180,
+      "command": [
+        "/home/klkehl/thisenv/bin/python",
+        "-u",
+        "reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/run_remaining_concurrency16_2026-09-21.py"
+      ]
+    },
+    {
+      "pid": 484567,
+      "command": [
+        "/home/klkehl/thisenv/bin/python",
+        "-u",
+        "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/fit_2026-09-21.py"
+      ]
+    }
+  ],
+  "reason": "User requested consolidation; preserve numerical evidence and broad role selection. New experiment will compare broad vs compact selections with matched residuals and fit the compact production estimator.",
+  "oracle_evaluation_started": false
+}

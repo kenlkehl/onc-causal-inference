@@ -1,0 +1,13 @@
+{
+  "automatic_singleton_coverage": 352,
+  "normalization_idempotent": true,
+  "invalid_contracts_rejected": [
+    "Candidates occur in multiple proposed groups; resolve these duplicates: {\"001\": 2, \"002\": 2}",
+    "invalid group member IDs",
+    "confounders must cite treatment and outcome evidence",
+    "modifiers must cite effect evidence",
+    "modifier shortlist must contain at most 32 representatives",
+    "at most one effect_modifier representative per group; offending candidate 002, group g1"
+  ],
+  "source_sha256": "ea8b37bbc6b1e98d917e1a010a21a7571a6a5615bac842ca7eb5781ba840b6f9"
+}

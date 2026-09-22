@@ -1,0 +1,518 @@
+{
+  "input_fingerprint": "c97fc8a2a2a145c8f27cc2982f805e537ab0cdddcbe2fed40999bd003dc291d1",
+  "payload": {
+    "instructions": "Preserve all candidate IDs and distinctions. Broader parent themes organize evidence; they do not imply measurement equivalence.",
+    "maximum_output_themes": 10,
+    "required_response": {
+      "themes": [
+        {
+          "disagreements": "contradictions, weak signals, and proxy distinctions",
+          "evidence_ids": [
+            "at most 12 representative supplied modeling evidence IDs"
+          ],
+          "interpretation": "common or complementary evidence",
+          "member_feature_ids": [
+            "candidate IDs"
+          ],
+          "name": "theme"
+        }
+      ]
+    },
+    "task": "merge_stage2_multi_model_themes",
+    "themes": [
+      {
+        "disagreements": "Effect modification signals are present but moderate (support fractions ~0.4), suggesting their role as confounders may be equally prominent.",
+        "evidence_ids": [
+          "multi:outer_001_feature_007:predictive_forest:treatment",
+          "multi:outer_001_feature_007:causal_forest:effect",
+          "multi:outer_001_feature_008:predictive_forest:treatment",
+          "multi:outer_001_feature_008:penalized_main:outcome",
+          "multi:outer_001_feature_008:causal_forest:effect"
+        ],
+        "interpretation": "Measurements regarding the presence and size of adrenal nodules show consistent evidence of influence on treatment assignment, outcome prognosis, and effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_007",
+          "outer_001_feature_008"
+        ],
+        "name": "Adrenal-related Indicators"
+      },
+      {
+        "disagreements": "Age is a powerful confounder, while history of AKI, appetite status, and anthropometrics show weaker or non-replicated signals.",
+        "evidence_ids": [
+          "multi:outer_001_feature_009:univariable:treatment",
+          "multi:outer_001_feature_009:univariable:outcome",
+          "multi:outer_001_feature_005:univariable_rlearner:effect",
+          "multi:outer_001_feature_011:univariable:treatment",
+          "multi:outer_001_feature_011:univariable:outcome",
+          "multi:outer_001_feature_017:univariable:treatment",
+          "multi:outer_001_feature_017:univariable:outcome",
+          "multi:outer_001_feature_022:univariable_rlearner:effect",
+          "multi:outer_001_feature_024:predictive_forest:outcome",
+          "multi:outer_001_feature_038:predictive_forest:treatment",
+          "multi:outer_001_feature_039:predictive_forest:outcome",
+          "multi:outer_001_feature_040:causal_forest:effect"
+        ],
+        "interpretation": "Core demographics, functional status, and psychosocial indicators acting primarily as confounders or prognostic factors, with evidence for treatment-effect heterogeneity specifically for anxiety.",
+        "member_feature_ids": [
+          "outer_001_feature_005",
+          "outer_001_feature_009",
+          "outer_001_feature_011",
+          "outer_001_feature_017",
+          "outer_001_feature_022",
+          "outer_001_feature_024",
+          "outer_001_feature_038",
+          "outer_001_feature_039",
+          "outer_001_feature_040"
+        ],
+        "name": "Patient Demographics and Baseline Status"
+      },
+      {
+        "disagreements": "Strong signals for ALC and mutation status contrast with the negligible independent signal for rearrangement status and procedural metadata.",
+        "evidence_ids": [
+          "multi:outer_001_feature_001:causal_forest:effect",
+          "multi:outer_001_feature_001:univariable_rlearner:effect",
+          "multi:outer_001_feature_002:penalized_main:outcome",
+          "multi:outer_001_feature_002:predictive_forest:treatment",
+          "multi:outer_001_feature_013:causal_forest:effect",
+          "multi:outer_001_feature_014:predictive_forest:treatment",
+          "multi:outer_001_feature_032:causal_forest:effect",
+          "multi:outer_001_feature_032:penalized_main:outcome",
+          "multi:outer_001_feature_046:univariable_rlearner:effect",
+          "multi:outer_001_feature_047:univariable_rlearner:effect"
+        ],
+        "interpretation": "A group of markers showing a split between strong prognostic value (ANC), treatment-effect heterogeneity (ALC, mutation status), and weak proxies with insufficient evidence for a causal role.",
+        "member_feature_ids": [
+          "outer_001_feature_001",
+          "outer_001_feature_002",
+          "outer_001_feature_013",
+          "outer_001_feature_014",
+          "outer_001_feature_032",
+          "outer_001_feature_034",
+          "outer_001_feature_040",
+          "outer_001_feature_041",
+          "outer_001_feature_046",
+          "outer_001_feature_047"
+        ],
+        "name": "Hematological and Genomic Biomarkers"
+      },
+      {
+        "disagreements": "Acetaminophen and alcohol use are primarily confounders, while antidiabetic use is an instrument-like predictor without outcome impact.",
+        "evidence_ids": [
+          "multi:outer_001_feature_003:predictive_forest:treatment",
+          "multi:outer_001_feature_006:causal_forest:effect",
+          "multi:outer_001_feature_006:univariable_rlearner:effect",
+          "multi:outer_001_feature_012:predictive_forest:outcome",
+          "multi:outer_001_feature_018:penalized_main:outcome",
+          "multi:outer_001_feature_019:causal_forest:effect",
+          "multi:outer_001_feature_020:univariable:treatment",
+          "multi:outer_001_feature_031:predictive_forest:treatment",
+          "multi:outer_001_feature_035:univariable:treatment"
+        ],
+        "interpretation": "Prior medications and comorbidities showing varied roles as confounders, prognostic factors, or markers of heterogeneous treatment effects.",
+        "member_feature_ids": [
+          "outer_001_feature_003",
+          "outer_001_feature_006",
+          "outer_001_feature_012",
+          "outer_001_feature_018",
+          "outer_001_feature_019",
+          "outer_001_feature_020",
+          "outer_001_feature_031",
+          "outer_001_feature_035"
+        ],
+        "name": "Prior Therapeutic and Medical History"
+      },
+      {
+        "disagreements": "High-magnitude signals for intracranial lesions and bone pain contrast with the very weak signals for actionable molecular markers.",
+        "evidence_ids": [
+          "multi:outer_001_feature_010:predictive_forest:treatment",
+          "multi:outer_001_feature_004:univariable_rlearner:effect",
+          "multi:outer_001_feature_042:predictive_forest:treatment",
+          "multi:outer_001_feature_043:predictive_forest:treatment",
+          "multi:outer_001_feature_044:predictive_forest:treatment",
+          "multi:outer_001_feature_045:causal_forest:effect",
+          "multi:outer_001_feature_048:causal_forest:effect",
+          "multi:outer_001_feature_049:univariable_rlearner:effect",
+          "multi:outer_001_feature_050:univariable_rlearner:effect"
+        ],
+        "interpretation": "Indicators of disease location and lesion severity demonstrating strong prognostic importance and significant evidence of effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_004",
+          "outer_001_feature_010",
+          "outer_001_feature_042",
+          "outer_001_feature_043",
+          "outer_001_feature_044",
+          "outer_001_feature_045",
+          "outer_001_feature_048",
+          "outer_001_feature_049",
+          "outer_001_feature_050"
+        ],
+        "name": "Anatomic and Symptomatic Disease Burden"
+      },
+      {
+        "disagreements": "Strong confounding by GFR and BP contrasts with a more distinct effect modification signal for BUN in R-learners.",
+        "evidence_ids": [
+          "multi:outer_001_feature_016:univariable:treatment",
+          "multi:outer_001_feature_015:univariable_rlearner:effect",
+          "multi:outer_001_feature_016:causal_forest:effect",
+          "multi:outer_001_feature_021:univariable:treatment",
+          "multi:outer_001_feature_027:univariable:outcome",
+          "multi:outer_001_feature_033:univariable:treatment",
+          "multi:outer_001_feature_036:univariable:outcome",
+          "multi:outer_001_feature_037:causal_forest:effect"
+        ],
+        "interpretation": "Physiological and metabolic indicators that strongly predict both treatment assignment and outcome, functioning primarily as confounders.",
+        "member_feature_ids": [
+          "outer_001_feature_015",
+          "outer_001_feature_016",
+          "outer_001_feature_021",
+          "outer_001_feature_026",
+          "outer_001_feature_027",
+          "outer_001_feature_033",
+          "outer_001_feature_036",
+          "outer_001_feature_037"
+        ],
+        "name": "Physiological and Metabolic Indicators"
+      },
+      {
+        "disagreements": "Robust signals for axial structure abnormalities contrast with very weak or non-evaluable signals for atrial fibrillation.",
+        "evidence_ids": [
+          "multi:outer_001_feature_030:penalized_main:outcome",
+          "multi:outer_001_feature_030:causal_forest:effect",
+          "multi:outer_001_feature_023:univariable_rlearner:effect",
+          "multi:outer_001_feature_025:univariable_rlearner:effect"
+        ],
+        "interpretation": "Structural abnormalities and historical medical markers showing mixed evidence as potential effect modifiers or prognostic factors.",
+        "member_feature_ids": [
+          "outer_001_feature_023",
+          "outer_001_feature_025",
+          "outer_001_feature_028",
+          "outer_001_feature_029",
+          "outer_001_feature_030"
+        ],
+        "name": "Structural and Historical Findings"
+      },
+      {
+        "disagreements": "Brain metastases presence (052) and cerebral imaging (071) provide prognostic signals, while location (051), calvarium lesions (057), and brainstem signal (054) show evidence for effect modification. Conversely, features 063, 067-070 predominantly predict treatment assignment.",
+        "evidence_ids": [
+          "multi:outer_001_feature_052:univariable:outcome",
+          "multi:outer_001_feature_051:causal_forest:effect",
+          "multi:outer_001_feature_057:causal_forest:effect",
+          "multi:outer_001_feature_054:causal_forest:effect",
+          "multi:outer_001_feature_063:predictive_forest:treatment",
+          "multi:outer_001_feature_071:causal_forest:effect"
+        ],
+        "interpretation": "Structural and radiographic markers of CNS involvement, manifesting as a mix of prognostic factors, treatment confounders, and effect modifiers.",
+        "member_feature_ids": [
+          "outer_001_feature_051",
+          "outer_001_feature_052",
+          "outer_001_feature_053",
+          "outer_001_feature_054",
+          "outer_001_feature_055",
+          "outer_001_feature_057",
+          "outer_001_feature_063",
+          "outer_001_feature_067",
+          "outer_001_feature_068",
+          "outer_001_feature_069",
+          "outer_001_feature_070",
+          "outer_001_feature_071"
+        ],
+        "name": "CNS and Neuro-Imaging Characteristics"
+      },
+      {
+        "disagreements": "Total comorbidity count (082) and clinical phenotype (079) are strong confounders. Fatigue (060) and deconditioning (099) are primarily prognostic, though 099 and hemodynamics (100) also demonstrate effect modification.",
+        "evidence_ids": [
+          "multi:outer_001_feature_060:univariable:outcome",
+          "multi:outer_001_feature_082:univariable:treatment",
+          "multi:outer_001_feature_079:predictive_forest:treatment",
+          "multi:outer_001_feature_078:causal_forest:effect",
+          "multi:outer_001_feature_099:causal_forest:effect",
+          "multi:outer_001_feature_100:causal_forest:effect"
+        ],
+        "interpretation": "General health, frailty, and systemic status markers that serve as either prognostic factors or confounders, with some evidence of treatment-heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_060",
+          "outer_001_feature_062",
+          "outer_001_feature_078",
+          "outer_001_feature_079",
+          "outer_001_feature_080",
+          "outer_001_feature_082",
+          "outer_001_feature_089",
+          "outer_001_feature_093",
+          "outer_001_feature_097",
+          "outer_001_feature_099",
+          "outer_001_feature_100"
+        ],
+        "name": "Systemic Health and Comorbidity Burden"
+      },
+      {
+        "disagreements": "CMP results (084) act primarily as a confounder. CK5/6 expression (076) is a strong effect modifier. Renal markers (095, 096) and molecular markers (064, 065) show a dual role as both confounders and effect modifiers.",
+        "evidence_ids": [
+          "multi:outer_001_feature_064:predictive_forest:treatment",
+          "multi:outer_001_feature_076:univariable:effect",
+          "multi:outer_001_feature_084:univariable:treatment",
+          "multi:outer_001_feature_095:predictive_forest:treatment",
+          "multi:outer_001_feature_096:causal_forest:effect"
+        ],
+        "interpretation": "Laboratory and pathological markers including organ function and molecular expression, predominantly serving as confounders or effect modifiers.",
+        "member_feature_ids": [
+          "outer_001_feature_064",
+          "outer_001_feature_065",
+          "outer_001_feature_074",
+          "outer_001_feature_075",
+          "outer_001_feature_076",
+          "outer_001_feature_077",
+          "outer_001_feature_083",
+          "outer_001_feature_084",
+          "outer_001_feature_086",
+          "outer_001_feature_095",
+          "outer_001_feature_096"
+        ],
+        "name": "Pathological and Laboratory Markers"
+      },
+      {
+        "disagreements": "COPD markers (087, 088) are consistent confounders and prognostic factors. Confusion (085) is identified as an effect modifier, while cough productivity (091) and other neurological markers (094, 098) show weak or inconsistent signals.",
+        "evidence_ids": [
+          "multi:outer_001_feature_087:univariable:treatment",
+          "multi:outer_001_feature_088:univariable:outcome",
+          "multi:outer_001_feature_085:univariable_rlearner:effect",
+          "multi:outer_001_feature_081:univariable:outcome"
+        ],
+        "interpretation": "Respiratory health and acute neurological presentation, where COPD acts as a confounder and acute confusion suggests treatment effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_081",
+          "outer_001_feature_085",
+          "outer_001_feature_087",
+          "outer_001_feature_088",
+          "outer_001_feature_090",
+          "outer_001_feature_091",
+          "outer_001_feature_092",
+          "outer_001_feature_094",
+          "outer_001_feature_098"
+        ],
+        "name": "Respiratory and Acute Symptomology"
+      },
+      {
+        "disagreements": "Carboplatin (061) is a strong prognostic factor. Cancer diagnosis (058), calorie intake (056), and cycle count (073) primarily serve as markers for treatment assignment (confounders).",
+        "evidence_ids": [
+          "multi:outer_001_feature_058:penalized_main:treatment",
+          "multi:outer_001_feature_061:univariable:outcome",
+          "multi:outer_001_feature_073:predictive_forest:treatment",
+          "multi:outer_001_feature_056:penalized_main:treatment"
+        ],
+        "interpretation": "Clinical oncology characteristics and treatment history, exhibiting a split between prognostic value and treatment prediction.",
+        "member_feature_ids": [
+          "outer_001_feature_056",
+          "outer_001_feature_058",
+          "outer_001_feature_059",
+          "outer_001_feature_061",
+          "outer_001_feature_066",
+          "outer_001_feature_072",
+          "outer_001_feature_073"
+        ],
+        "name": "Oncology and Treatment-Related Factors"
+      },
+      {
+        "disagreements": "Varying strength of treatment prediction, with disease_status (102) showing a weaker signal than ecog_performance_status (109).",
+        "evidence_ids": [
+          "multi:outer_001_feature_109:univariable:treatment",
+          "multi:outer_001_feature_109:univariable:outcome",
+          "multi:outer_001_feature_102:penalized_main:treatment",
+          "multi:outer_001_feature_120:univariable:treatment",
+          "multi:outer_001_feature_120:univariable:outcome",
+          "multi:outer_001_feature_116:univariable:outcome",
+          "multi:outer_001_feature_117:univariable:treatment",
+          "multi:outer_001_feature_118:univariable:outcome"
+        ],
+        "interpretation": "General disease status and quality-of-life domains that strongly correlate with both treatment assignment and outcome prognosis, suggesting confounding roles.",
+        "member_feature_ids": [
+          "outer_001_feature_102",
+          "outer_001_feature_109",
+          "outer_001_feature_116",
+          "outer_001_feature_117",
+          "outer_001_feature_118",
+          "outer_001_feature_119",
+          "outer_001_feature_120"
+        ],
+        "name": "Systemic Status and Quality of Life"
+      },
+      {
+        "disagreements": "Employment status (114) is a dominant confounder, whereas emphysema (113) specifically shows strong evidence for effect modification.",
+        "evidence_ids": [
+          "multi:outer_001_feature_114:univariable:treatment",
+          "multi:outer_001_feature_114:univariable:outcome",
+          "multi:outer_001_feature_113:univariable:treatment",
+          "multi:outer_001_feature_113:causal_forest:effect",
+          "multi:outer_001_feature_150:univariable:treatment",
+          "multi:outer_001_feature_150:univariable:outcome",
+          "multi:outer_001_feature_146:univariable:effect",
+          "multi:outer_001_feature_146:predictive_forest:treatment",
+          "multi:outer_001_feature_159:univariable:treatment",
+          "multi:outer_001_feature_159:univariable:outcome",
+          "multi:outer_001_feature_160:univariable:treatment",
+          "multi:outer_001_feature_160:predictive_forest:outcome"
+        ],
+        "interpretation": "Metabolic vitals and baseline comorbidities serving as strong prognostic markers and common causes of treatment assignment.",
+        "member_feature_ids": [
+          "outer_001_feature_112",
+          "outer_001_feature_113",
+          "outer_001_feature_114",
+          "outer_001_feature_146",
+          "outer_001_feature_150",
+          "outer_001_feature_159",
+          "outer_001_feature_160"
+        ],
+        "name": "Metabolic and Comorbidity Markers"
+      },
+      {
+        "disagreements": "Dyspnea severity (108) exhibits strong evidence for both confounding and effect modification, whereas general dyspnea (106, 107) primarily shows confounding.",
+        "evidence_ids": [
+          "multi:outer_001_feature_106:univariable:outcome",
+          "multi:outer_001_feature_107:univariable:outcome",
+          "multi:outer_001_feature_108:causal_forest:effect",
+          "multi:outer_001_feature_153:univariable_rlearner:effect",
+          "multi:outer_001_feature_154:univariable_rlearner:effect",
+          "multi:outer_001_feature_155:predictive_forest:outcome",
+          "multi:outer_001_feature_156:penalized_main:treatment"
+        ],
+        "interpretation": "Respiratory and hematologic indices showing consistent prognostic importance, with graded severity providing signals for treatment heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_106",
+          "outer_001_feature_107",
+          "outer_001_feature_108",
+          "outer_001_feature_153",
+          "outer_001_feature_154",
+          "outer_001_feature_155",
+          "outer_001_feature_156"
+        ],
+        "name": "Respiratory and Hematologic Indices"
+      },
+      {
+        "disagreements": "EGFR mutation (111) shows a credible signal for effect modification and prognosis, while enzyme elevation (115) is largely uninformative.",
+        "evidence_ids": [
+          "multi:outer_001_feature_111:causal_forest:effect",
+          "multi:outer_001_feature_111:penalized_main:outcome",
+          "multi:outer_001_feature_111:univariable_rlearner:effect",
+          "multi:outer_001_feature_136:penalized_main:treatment",
+          "multi:outer_001_feature_136:causal_forest:effect",
+          "multi:outer_001_feature_138:causal_forest:effect",
+          "multi:outer_001_feature_140:causal_forest:effect",
+          "multi:outer_001_feature_142:univariable:treatment",
+          "multi:outer_001_feature_143:univariable_rlearner:effect",
+          "multi:outer_001_feature_143:causal_forest:effect"
+        ],
+        "interpretation": "Genomic and molecular markers reflecting distinct causal roles, from treatment selection (confounding) to response heterogeneity (effect modification).",
+        "member_feature_ids": [
+          "outer_001_feature_111",
+          "outer_001_feature_115",
+          "outer_001_feature_136",
+          "outer_001_feature_138",
+          "outer_001_feature_140",
+          "outer_001_feature_141",
+          "outer_001_feature_142",
+          "outer_001_feature_143"
+        ],
+        "name": "Tumor and Genomic Profiling"
+      },
+      {
+        "disagreements": "Recurrence (101) is supported by R-learners and causal forests, while dizziness (103) is supported by univariable effects; feature 139 is largely inconsistent.",
+        "evidence_ids": [
+          "multi:outer_001_feature_101:univariable_rlearner:effect",
+          "multi:outer_001_feature_101:causal_forest:effect",
+          "multi:outer_001_feature_103:univariable:effect",
+          "multi:outer_001_feature_103:causal_forest:effect",
+          "multi:outer_001_feature_122:univariable_rlearner:effect",
+          "multi:outer_001_feature_124:univariable:effect",
+          "multi:outer_001_feature_127:causal_forest:effect",
+          "multi:outer_001_feature_131:causal_forest:effect",
+          "multi:outer_001_feature_132:causal_forest:effect",
+          "multi:outer_001_feature_133:causal_forest:effect",
+          "multi:outer_001_feature_134:causal_forest:effect",
+          "multi:outer_001_feature_135:causal_forest:effect"
+        ],
+        "interpretation": "Clinical markers and family history that primarily signal treatment-heterogeneity without strong main-effect confounding.",
+        "member_feature_ids": [
+          "outer_001_feature_101",
+          "outer_001_feature_103",
+          "outer_001_feature_122",
+          "outer_001_feature_124",
+          "outer_001_feature_127",
+          "outer_001_feature_131",
+          "outer_001_feature_132",
+          "outer_001_feature_133",
+          "outer_001_feature_134",
+          "outer_001_feature_135",
+          "outer_001_feature_137",
+          "outer_001_feature_139"
+        ],
+        "name": "Clinical Effect Modifiers"
+      },
+      {
+        "disagreements": "GERD (144) is purely prognostic, whereas globe appearance (145) shows signals across all roles and head shape (148) is primarily a treatment predictor.",
+        "evidence_ids": [
+          "multi:outer_001_feature_104:predictive_forest:treatment",
+          "multi:outer_001_feature_104:predictive_forest:outcome",
+          "multi:outer_001_feature_144:predictive_forest:outcome",
+          "multi:outer_001_feature_145:predictive_forest:treatment",
+          "multi:outer_001_feature_145:causal_forest:effect",
+          "multi:outer_001_feature_148:univariable:treatment",
+          "multi:outer_001_feature_152:causal_forest:effect",
+          "multi:outer_001_feature_157:univariable_rlearner:effect",
+          "multi:outer_001_feature_158:predictive_forest:outcome",
+          "multi:outer_001_feature_151:univariable_rlearner:effect"
+        ],
+        "interpretation": "Physical examination and anatomical findings with mixed support, ranging from simple prognosis to complex effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_104",
+          "outer_001_feature_105",
+          "outer_001_feature_110",
+          "outer_001_feature_144",
+          "outer_001_feature_145",
+          "outer_001_feature_148",
+          "outer_001_feature_149",
+          "outer_001_feature_151",
+          "outer_001_feature_152",
+          "outer_001_feature_157",
+          "outer_001_feature_158"
+        ],
+        "name": "Physical and Anatomical Attributes"
+      },
+      {
+        "disagreements": "Feature 126 is a very strong treatment predictor but lacks an outcome signal, suggesting it may be an instrument rather than a confounder.",
+        "evidence_ids": [
+          "multi:outer_001_feature_121:univariable:treatment",
+          "multi:outer_001_feature_121:univariable:outcome",
+          "multi:outer_001_feature_125:univariable:treatment",
+          "multi:outer_001_feature_126:univariable:treatment",
+          "multi:outer_001_feature_147:univariable:treatment",
+          "multi:outer_001_feature_147:causal_forest:effect",
+          "multi:outer_001_feature_147:univariable_rlearner:effect"
+        ],
+        "interpretation": "Candidates exhibiting high support for treatment assignment, with varying degrees of outcome prognosis and treatment heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_121",
+          "outer_001_feature_125",
+          "outer_001_feature_126",
+          "outer_001_feature_147"
+        ],
+        "name": "Strong Treatment Drivers"
+      },
+      {
+        "disagreements": "Feature 123 shows a penalized main treatment signal, but lacks complementary outcome or effect signals.",
+        "evidence_ids": [
+          "multi:outer_001_feature_128:predictive_forest:outcome",
+          "multi:outer_001_feature_130:predictive_forest:outcome",
+          "multi:outer_001_feature_123:penalized_main:treatment"
+        ],
+        "interpretation": "Candidates with low overall support or signals primarily limited to outcome prognosis without strong treatment prediction.",
+        "member_feature_ids": [
+          "outer_001_feature_123",
+          "outer_001_feature_128",
+          "outer_001_feature_129",
+          "outer_001_feature_130"
+        ],
+        "name": "Weak or Prognostic-Only Signals"
+      }
+    ]
+  },
+  "system": "You review pretreatment candidate measurements using modeling evidence\nfrom one outer-training fold. First identify themes across candidates; then\nreconcile their roles as confounder, effect_modifier, both, or neither.\nAll evidence is fallible. No individual family, p-value, or support frequency is\na hard selection gate. A credible complementary signal can justify retention\neven when other methods shrink it away. Do not mistake correlated aliases or\nproxies for multiple independent discoveries. Themes organize evidence; they\ndo not establish equivalence, merge measurements, or transfer a role to every\ntheme member. Preserve investigator-locked roles exactly.\n\nTreatment prediction, outcome prognosis, and confounding are distinct. Discuss\nwhether a candidate could be a common cause rather than an instrument or only a\nprognostic factor. Effect modification needs treatment-heterogeneity evidence;\noutcome main-effect importance alone does not establish it. Univariable logistic\ninteractions are on the log-odds scale and unadjusted for other covariates.\nOrthogonal linear models, candidate R-learners, and causal forests assess the\nprobability/outcome scale after elastic-net nuisance adjustment. Their targets\nand biases differ. A model family is evidence, not an independent replication.\n\nUse exposure and evaluability denominators. Missing or nonconverged fits are not\nnegative votes. Repeated samples and folds overlap; support fractions are not\ncausal probabilities or formal stability-selection error guarantees. Raw and BH\np-values do not correct the upstream adaptive discovery process. Permutation\nimportance can be diluted by correlated alternatives and does not prove a\ncausal role. Compare fold consistency, methods, subsets, and conflicting facts.\nDefinitions and theme names cannot establish a role without the supplied\nempirical evidence. Never invent an oracle, data-generating process, or hidden\ntruth. Return the requested JSON and cite only supplied evidence IDs."
+}

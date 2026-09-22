@@ -1,0 +1,71 @@
+{
+  "themes": [
+    {
+      "disagreements": "smoking_abstinence_date is entirely unevaluable; smoking_status shows weaker signals than smoking_cessation_duration.",
+      "evidence_ids": [
+        "multi:outer_001_feature_306:univariable:treatment",
+        "multi:outer_001_feature_306:penalized_main:treatment",
+        "multi:outer_001_feature_307:univariable:treatment"
+      ],
+      "interpretation": "Features related to tobacco use exhibit strong evidence for treatment prediction, particularly for cessation duration.",
+      "member_feature_ids": [
+        "outer_001_feature_306",
+        "outer_001_feature_307",
+        "outer_001_feature_305"
+      ],
+      "name": "Smoking History"
+    },
+    {
+      "disagreements": "sulci_and_cisterns_appearance shows strong effect modification but lacks the strong outcome prognostic signal seen in subdural_hemorrhage.",
+      "evidence_ids": [
+        "multi:outer_001_feature_309:penalized_main:outcome",
+        "multi:outer_001_feature_304:univariable:outcome",
+        "multi:outer_001_feature_304:univariable_rlearner:effect",
+        "multi:outer_001_feature_310:causal_forest:effect"
+      ],
+      "interpretation": "Imaging features of the skull and brain show consistent importance for both outcome prognosis and treatment effect heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_304",
+        "outer_001_feature_309",
+        "outer_001_feature_310"
+      ],
+      "name": "Cranial Neuroimaging Findings"
+    },
+    {
+      "disagreements": "Signals are moderate (support fractions 0.5-0.6) and lack the high-confidence univariable p-values seen in imaging or smoking duration.",
+      "evidence_ids": [
+        "multi:outer_001_feature_302:penalized_main:outcome",
+        "multi:outer_001_feature_302:predictive_forest:treatment",
+        "multi:outer_001_feature_308:predictive_forest:treatment"
+      ],
+      "interpretation": "Biological sex and STK11 mutation status show mixed signals across treatment, outcome, and effect scales.",
+      "member_feature_ids": [
+        "outer_001_feature_302",
+        "outer_001_feature_308"
+      ],
+      "name": "Patient Demographics and Genetics"
+    },
+    {
+      "disagreements": "No support for role as a prognostic factor or treatment predictor.",
+      "evidence_ids": [
+        "multi:outer_001_feature_303:univariable_rlearner:effect"
+      ],
+      "interpretation": "Presence of skeletal compression fractures is strongly linked to treatment effect heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_303"
+      ],
+      "name": "Skeletal Manifestations"
+    },
+    {
+      "disagreements": "Low support fractions and high p-values suggest this candidate is likely non-contributory.",
+      "evidence_ids": [
+        "multi:outer_001_feature_301:predictive_forest:treatment"
+      ],
+      "interpretation": "Serum sodium demonstrates weak and inconsistent evidence across all roles.",
+      "member_feature_ids": [
+        "outer_001_feature_301"
+      ],
+      "name": "Electrolyte Balance"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# Reports, metrics, manifests, and scripts are versioned; execution logs stay local.
+*.log

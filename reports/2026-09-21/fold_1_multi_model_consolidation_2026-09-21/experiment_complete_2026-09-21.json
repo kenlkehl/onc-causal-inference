@@ -1,0 +1,30 @@
+{
+  "broad_correlation": 0.255190405025071,
+  "completed_at": "2026-09-22T00:37:52.112548+00:00",
+  "direct_recovery": {
+    "confounder": {
+      "any_role": 2,
+      "correct_role": 2,
+      "total": 5
+    },
+    "effect_modifier": {
+      "any_role": 1,
+      "correct_role": 1,
+      "total": 5
+    }
+  },
+  "final_validation": "passed",
+  "final_validation_sha256": "c66462b9e8546f9b2837fcc20e07991553b0558f3cf0bf8646c64f7a9d5395d6",
+  "matched_correlation": 0.36384259374363986,
+  "phase": "complete",
+  "predictions_freeze_sha256": "479d8172bc8de2ed2073ab764d3fb2ce24c7de9f61be3e106a5391dd04124021",
+  "production_correlation": 0.2878949708284167,
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_consolidation_2026-09-21/REPORT_2026-09-21.md",
+  "report_sha256": "89f10c3f48b580fec6597b2373d12d85b478cfdccd29d1a208e4f9d582de762b",
+  "selected_roles": {
+    "confounder": 8,
+    "effect_modifier": 8
+  },
+  "selection_freeze_sha256": "152d3d9934e41254cd71a1601e4975055c989e7ae92ec18b4eb8f7183343f975",
+  "source_repository_implementation_changed": false
+}

@@ -7748,10 +7748,16 @@ def test_aggregate_supervisor_can_revise_then_reextract_a_definition(
     ]
 
 
+@pytest.mark.parametrize("multi_model", [False, True])
 def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     tmp_path: Path,
     monkeypatch,
+    multi_model,
 ):
+    from dataclasses import replace
+
+    from oci.inference.stage2_elastic_net_selection import Stage2ElasticNetSelectionConfig
+
     dataset = pd.DataFrame(
         {
             "patient_id": ["p0", "p1", "p2", "p3"],
@@ -7790,7 +7796,10 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
             model="extractor-model",
             workers=1,
         ),
-        role_adjudication=Stage2RoleAdjudicationConfig(enabled=False),
+        role_adjudication=Stage2RoleAdjudicationConfig(enabled=multi_model),
+        statistical_selection=Stage2ElasticNetSelectionConfig(
+            selection_mode="multi_model" if multi_model else "llm_roles"
+        ),
         max_review_rounds=2,
         estimation_trees=10,
     )
@@ -7917,7 +7926,29 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
         lambda **_kwargs: {"status": "estimated_from_snapshot"},
     )
 
-    result = run_fold_analysis(
+    count_calls = []
+    if multi_model:
+        from oci.inference import stage2_modifier_count
+
+        monkeypatch.setattr(stage2_analysis, "adjudicate_stage2_roles", lambda **kw: (
+            [{**f, "roles": ["effect_modifier"]} for f in kw["definitions"]],
+            {"decisions": [{"feature_id": f["feature_id"], "roles": ["effect_modifier"]}
+                           for f in kw["definitions"]]}, {}))
+
+        def choose_constant(**kw):
+            assert kw["run_numerical"] is stage2_analysis._run_stage2_statistical_selection
+            assert kw["extracted_fit"]._oci_row_id.tolist() == [0, 1, 2]
+            assert kw["inner_splits"] == split["inner_splits"]
+            assert kw["role_policy"].enabled
+            assert kw["selected"][0]["roles"] == ["effect_modifier"]
+            assert kw["estimation_trees"] in {10, 20}
+            count_calls.append(kw["estimation_trees"])
+            report = {"status": "complete", "chosen_modifier_count": 0}
+            return [], {"decisions": [{"feature_id": definitions[0]["feature_id"], "roles": []}]}, report
+
+        monkeypatch.setattr(stage2_modifier_count, "select_modifier_count", choose_constant)
+
+    arguments = dict(
         dataset=dataset,
         definitions=definitions,
         split=split,
@@ -7936,10 +7967,19 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
         config=config,
         stage1_packets=packets,
     )
+    result = run_fold_analysis(**arguments)
 
     assert result["estimation"]["status"] == "estimated_from_snapshot"
     assert result["review_convergence"]["reused_frozen_preselection_snapshot"] is True
     assert result["review_rounds"] == 1
+    assert len(count_calls) == int(multi_model)
+    if multi_model:
+        assert result["selection"]["final_role_assignment"] == "llm_confounders_and_nested_r_loss_modifiers"
+        assert result["selection"]["modifier_count_selection"]["chosen_modifier_count"] == 0
+        run_fold_analysis(**arguments)
+        assert count_calls == [10]
+        run_fold_analysis(**{**arguments, "config": replace(config, estimation_trees=20)})
+        assert count_calls == [10, 20]
 
 
 def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_missing(

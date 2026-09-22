@@ -1,0 +1,124 @@
+{
+  "themes": [
+    {
+      "disagreements": "Brain metastases presence (052) and cerebral imaging (071) provide prognostic signals, while location (051), calvarium lesions (057), and brainstem signal (054) show evidence for effect modification. Conversely, features 063, 067-070 predominantly predict treatment assignment.",
+      "evidence_ids": [
+        "multi:outer_001_feature_052:univariable:outcome",
+        "multi:outer_001_feature_051:causal_forest:effect",
+        "multi:outer_001_feature_057:causal_forest:effect",
+        "multi:outer_001_feature_054:causal_forest:effect",
+        "multi:outer_001_feature_063:predictive_forest:treatment",
+        "multi:outer_001_feature_071:causal_forest:effect"
+      ],
+      "interpretation": "Structural and radiographic markers of CNS involvement, manifesting as a mix of prognostic factors, treatment confounders, and effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_051",
+        "outer_001_feature_052",
+        "outer_001_feature_053",
+        "outer_001_feature_054",
+        "outer_001_feature_055",
+        "outer_001_feature_057",
+        "outer_001_feature_063",
+        "outer_001_feature_067",
+        "outer_001_feature_068",
+        "outer_001_feature_069",
+        "outer_001_feature_070",
+        "outer_001_feature_071"
+      ],
+      "name": "CNS and Neuro-Imaging Characteristics"
+    },
+    {
+      "disagreements": "Total comorbidity count (082) and clinical phenotype (079) are strong confounders. Fatigue (060) and deconditioning (099) are primarily prognostic, though 099 and hemodynamics (100) also demonstrate effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_060:univariable:outcome",
+        "multi:outer_001_feature_082:univariable:treatment",
+        "multi:outer_001_feature_079:predictive_forest:treatment",
+        "multi:outer_001_feature_078:causal_forest:effect",
+        "multi:outer_001_feature_099:causal_forest:effect",
+        "multi:outer_001_feature_100:causal_forest:effect"
+      ],
+      "interpretation": "General health, frailty, and systemic status markers that serve as either prognostic factors or confounders, with some evidence of treatment-heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_060",
+        "outer_001_feature_062",
+        "outer_001_feature_078",
+        "outer_001_feature_079",
+        "outer_001_feature_080",
+        "outer_001_feature_082",
+        "outer_001_feature_089",
+        "outer_001_feature_093",
+        "outer_001_feature_097",
+        "outer_001_feature_099",
+        "outer_001_feature_100"
+      ],
+      "name": "Systemic Health and Comorbidity Burden"
+    },
+    {
+      "disagreements": "CMP results (084) act primarily as a confounder. CK5/6 expression (076) is a strong effect modifier. Renal markers (095, 096) and molecular markers (064, 065) show a dual role as both confounders and effect modifiers.",
+      "evidence_ids": [
+        "multi:outer_001_feature_064:predictive_forest:treatment",
+        "multi:outer_001_feature_076:univariable:effect",
+        "multi:outer_001_feature_084:univariable:treatment",
+        "multi:outer_001_feature_095:predictive_forest:treatment",
+        "multi:outer_001_feature_096:causal_forest:effect"
+      ],
+      "interpretation": "Laboratory and pathological markers including organ function and molecular expression, predominantly serving as confounders or effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_064",
+        "outer_001_feature_065",
+        "outer_001_feature_074",
+        "outer_001_feature_075",
+        "outer_001_feature_076",
+        "outer_001_feature_077",
+        "outer_001_feature_083",
+        "outer_001_feature_084",
+        "outer_001_feature_086",
+        "outer_001_feature_095",
+        "outer_001_feature_096"
+      ],
+      "name": "Pathological and Laboratory Markers"
+    },
+    {
+      "disagreements": "COPD markers (087, 088) are consistent confounders and prognostic factors. Confusion (085) is identified as an effect modifier, while cough productivity (091) and other neurological markers (094, 098) show weak or inconsistent signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_087:univariable:treatment",
+        "multi:outer_001_feature_088:univariable:outcome",
+        "multi:outer_001_feature_085:univariable_rlearner:effect",
+        "multi:outer_001_feature_081:univariable:outcome"
+      ],
+      "interpretation": "Respiratory health and acute neurological presentation, where COPD acts as a confounder and acute confusion suggests treatment effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_081",
+        "outer_001_feature_085",
+        "outer_001_feature_087",
+        "outer_001_feature_088",
+        "outer_001_feature_090",
+        "outer_001_feature_091",
+        "outer_001_feature_092",
+        "outer_001_feature_094",
+        "outer_001_feature_098"
+      ],
+      "name": "Respiratory and Acute Symptomology"
+    },
+    {
+      "disagreements": "Carboplatin (061) is a strong prognostic factor. Cancer diagnosis (058), calorie intake (056), and cycle count (073) primarily serve as markers for treatment assignment (confounders).",
+      "evidence_ids": [
+        "multi:outer_001_feature_058:penalized_main:treatment",
+        "multi:outer_001_feature_061:univariable:outcome",
+        "multi:outer_001_feature_073:predictive_forest:treatment",
+        "multi:outer_001_feature_056:penalized_main:treatment"
+      ],
+      "interpretation": "Clinical oncology characteristics and treatment history, exhibiting a split between prognostic value and treatment prediction.",
+      "member_feature_ids": [
+        "outer_001_feature_056",
+        "outer_001_feature_058",
+        "outer_001_feature_059",
+        "outer_001_feature_061",
+        "outer_001_feature_066",
+        "outer_001_feature_072",
+        "outer_001_feature_073"
+      ],
+      "name": "Oncology and Treatment-Related Factors"
+    }
+  ]
+}

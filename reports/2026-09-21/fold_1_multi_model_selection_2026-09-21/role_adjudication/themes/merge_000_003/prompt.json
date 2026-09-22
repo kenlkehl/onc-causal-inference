@@ -1,0 +1,324 @@
+{
+  "input_fingerprint": "30695c27fc9a97a1d3e286ef9ad12607ecc6ee7f890100dd4baac3cc09dccf9a",
+  "payload": {
+    "instructions": "Preserve all candidate IDs and distinctions. Broader parent themes organize evidence; they do not imply measurement equivalence.",
+    "maximum_output_themes": 10,
+    "required_response": {
+      "themes": [
+        {
+          "disagreements": "contradictions, weak signals, and proxy distinctions",
+          "evidence_ids": [
+            "at most 12 representative supplied modeling evidence IDs"
+          ],
+          "interpretation": "common or complementary evidence",
+          "member_feature_ids": [
+            "candidate IDs"
+          ],
+          "name": "theme"
+        }
+      ]
+    },
+    "task": "merge_stage2_multi_model_themes",
+    "themes": [
+      {
+        "disagreements": "While both demonstrate strong effect modification, feature 166 shows additional robust signals for treatment prediction and outcome prognosis, suggesting a role as both a confounder and effect modifier, whereas 165 is primarily an effect modifier.",
+        "evidence_ids": [
+          "multi:outer_001_feature_165:causal_forest:effect",
+          "multi:outer_001_feature_165:univariable_rlearner:effect",
+          "multi:outer_001_feature_166:univariable_rlearner:effect",
+          "multi:outer_001_feature_166:predictive_forest:outcome",
+          "multi:outer_001_feature_166:predictive_forest:treatment"
+        ],
+        "interpretation": "Lung lobe-specific mass findings are strong candidates for effect modification, with variable evidence for confounding.",
+        "member_feature_ids": [
+          "outer_001_feature_165",
+          "outer_001_feature_166"
+        ],
+        "name": "Lung Mass Localization"
+      },
+      {
+        "disagreements": "High consistency across candidates; both features demonstrate strong evidence for being both confounders and effect modifiers.",
+        "evidence_ids": [
+          "multi:outer_001_feature_164:causal_forest:effect",
+          "multi:outer_001_feature_164:predictive_forest:treatment",
+          "multi:outer_001_feature_168:penalized_main:treatment",
+          "multi:outer_001_feature_168:univariable_rlearner:effect"
+        ],
+        "interpretation": "Quantitative PET metrics (SUVmax and cerebellar FDG uptake) consistently appear as both confounders and effect modifiers.",
+        "member_feature_ids": [
+          "outer_001_feature_164",
+          "outer_001_feature_168"
+        ],
+        "name": "PET Quantitative Metrics"
+      },
+      {
+        "disagreements": "Significant disparity in signal strength: inhaler dosage (170) is a robust confounder and effect modifier, illicit drug use (162) is primarily a confounder, and hypothyroidism (161) provides only weak, non-robust evidence.",
+        "evidence_ids": [
+          "multi:outer_001_feature_170:univariable_rlearner:effect",
+          "multi:outer_001_feature_170:univariable:outcome",
+          "multi:outer_001_feature_162:penalized_main:outcome",
+          "multi:outer_001_feature_161:univariable_rlearner:effect"
+        ],
+        "interpretation": "Baseline health indicators and medication usage show varying degrees of importance, ranging from strong dual roles to negligible evidence.",
+        "member_feature_ids": [
+          "outer_001_feature_161",
+          "outer_001_feature_162",
+          "outer_001_feature_170"
+        ],
+        "name": "Baseline Health and Medication"
+      },
+      {
+        "disagreements": "Candidates exhibit divergent roles: feature 163 suggests a role as an effect modifier (via R-learner), while feature 167 suggests a role as a confounder (via predictive forest outcome).",
+        "evidence_ids": [
+          "multi:outer_001_feature_163:univariable_rlearner:effect",
+          "multi:outer_001_feature_167:predictive_forest:outcome"
+        ],
+        "interpretation": "The mere presence of imaging procedures (CT, MRI) provides weak and inconsistent evidence for either confounding or effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_163",
+          "outer_001_feature_167"
+        ],
+        "name": "Imaging Procedural Evidence"
+      },
+      {
+        "disagreements": "None; this is a single-candidate theme with moderate evidence across multiple roles.",
+        "evidence_ids": [
+          "multi:outer_001_feature_169:predictive_forest:treatment",
+          "multi:outer_001_feature_169:univariable_rlearner:effect"
+        ],
+        "interpretation": "The type of prior immunotherapy shows moderate evidence of acting as both a confounder and an effect modifier.",
+        "member_feature_ids": [
+          "outer_001_feature_169"
+        ],
+        "name": "Immunotherapy Specification"
+      },
+      {
+        "disagreements": "Features 171 and 172 are purely prognostic with no treatment or effect signals, whereas 173 demonstrates clear treatment prediction and effect modification.",
+        "evidence_ids": [
+          "multi:outer_001_feature_171:univariable:outcome",
+          "multi:outer_001_feature_172:univariable:outcome",
+          "multi:outer_001_feature_173:predictive_forest:treatment",
+          "multi:outer_001_feature_173:causal_forest:effect"
+        ],
+        "interpretation": "Imaging findings of orbital or cranial abnormalities showing varying levels of prognostic and causal importance.",
+        "member_feature_ids": [
+          "outer_001_feature_171",
+          "outer_001_feature_172",
+          "outer_001_feature_173"
+        ],
+        "name": "Orbital and Cranial Imaging Findings"
+      },
+      {
+        "disagreements": "Ki67 shows the strongest univariable effect signal, while KEAP1 and KRAS VAF rely more on forest-based methods for effect evidence.",
+        "evidence_ids": [
+          "multi:outer_001_feature_176:univariable:effect",
+          "multi:outer_001_feature_179:causal_forest:effect",
+          "multi:outer_001_feature_175:causal_forest:effect"
+        ],
+        "interpretation": "Molecular and proliferative biomarkers showing consistent signals for effect modification and outcome prognosis.",
+        "member_feature_ids": [
+          "outer_001_feature_175",
+          "outer_001_feature_176",
+          "outer_001_feature_179"
+        ],
+        "name": "Molecular and Pathological Biomarkers"
+      },
+      {
+        "disagreements": "Knee osteoarthritis is a dominant confounder; drug allergies are essentially noise; JVD and LDH show moderate multifaceted signals.",
+        "evidence_ids": [
+          "multi:outer_001_feature_177:univariable:treatment",
+          "multi:outer_001_feature_174:univariable:outcome",
+          "multi:outer_001_feature_180:predictive_forest:treatment"
+        ],
+        "interpretation": "General clinical and laboratory assessments with divergent roles ranging from strong confounding to no evidence.",
+        "member_feature_ids": [
+          "outer_001_feature_174",
+          "outer_001_feature_177",
+          "outer_001_feature_178",
+          "outer_001_feature_180"
+        ],
+        "name": "General Clinical and Laboratory Findings"
+      },
+      {
+        "disagreements": "Lesion size (183) demonstrates strong evidence for outcome prognosis and treatment heterogeneity, whereas lesion presence (182) lacks a meaningful prognostic signal and exhibits only weak effect modification support.",
+        "evidence_ids": [
+          "multi:outer_001_feature_182:univariable:treatment",
+          "multi:outer_001_feature_183:univariable:treatment",
+          "multi:outer_001_feature_183:causal_forest:effect"
+        ],
+        "interpretation": "Measurements focusing on the presence and magnitude of lesions, both of which show strong signals as predictors of treatment assignment.",
+        "member_feature_ids": [
+          "outer_001_feature_182",
+          "outer_001_feature_183"
+        ],
+        "name": "Lesion Attributes"
+      },
+      {
+        "disagreements": "While all three are strong treatment predictors, the evidence for effect modification varies, with line of therapy (184) showing more consistent support across families than lisinopril dose (186).",
+        "evidence_ids": [
+          "multi:outer_001_feature_184:univariable:outcome",
+          "multi:outer_001_feature_185:univariable:treatment",
+          "multi:outer_001_feature_186:univariable:treatment",
+          "multi:outer_001_feature_184:causal_forest:effect"
+        ],
+        "interpretation": "Systemic therapy markers, including line of therapy and specific medication use (lipids and lisinopril), which strongly predict treatment and often correlate with outcomes.",
+        "member_feature_ids": [
+          "outer_001_feature_184",
+          "outer_001_feature_185",
+          "outer_001_feature_186"
+        ],
+        "name": "Medical Therapy"
+      },
+      {
+        "disagreements": "Liver metastasis (188) is a strong candidate for both confounding and effect modification, while general liver function (187) shows only negligible, inconsistent signals.",
+        "evidence_ids": [
+          "multi:outer_001_feature_188:causal_forest:effect",
+          "multi:outer_001_feature_188:predictive_forest:treatment"
+        ],
+        "interpretation": "Assessments of liver health, ranging from qualitative function to the presence of metastatic disease.",
+        "member_feature_ids": [
+          "outer_001_feature_187",
+          "outer_001_feature_188"
+        ],
+        "name": "Liver Status"
+      },
+      {
+        "disagreements": "Lobectomy type (190) shows moderate signals for treatment and outcome prediction, whereas leptomeningeal enhancement (181) is purely prognostic and an effect modifier with no treatment prediction signal.",
+        "evidence_ids": [
+          "multi:outer_001_feature_181:univariable_rlearner:effect",
+          "multi:outer_001_feature_190:univariable_rlearner:effect",
+          "multi:outer_001_feature_190:causal_forest:effect"
+        ],
+        "interpretation": "Anatomical or procedural details from imaging (leptomeninges) and surgery (lobectomy type) that show significant signals for treatment heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_181",
+          "outer_001_feature_190"
+        ],
+        "name": "Surgical & Imaging Specifics"
+      },
+      {
+        "disagreements": "Strong evidence for confounding, but evidence for effect modification is weak (R-learner 5/15).",
+        "evidence_ids": [
+          "multi:outer_001_feature_189:univariable:treatment",
+          "multi:outer_001_feature_189:univariable:outcome"
+        ],
+        "interpretation": "Patient living arrangements, which serve as strong predictors for both treatment assignment and outcome prognosis.",
+        "member_feature_ids": [
+          "outer_001_feature_189"
+        ],
+        "name": "Social Context"
+      },
+      {
+        "disagreements": "Lung disease diagnosis exhibits strong treatment prediction and effect modification, whereas lung auscultation findings are primarily prognostic with minimal treatment association.",
+        "evidence_ids": [
+          "multi:outer_001_feature_194:univariable:treatment",
+          "multi:outer_001_feature_194:univariable:outcome",
+          "multi:outer_001_feature_194:causal_forest:effect",
+          "multi:outer_001_feature_191:univariable:outcome"
+        ],
+        "interpretation": "Pulmonary statuses characterized by clinical diagnosis and physical examination findings that strongly influence outcome prognosis.",
+        "member_feature_ids": [
+          "outer_001_feature_191",
+          "outer_001_feature_194"
+        ],
+        "name": "Pulmonary Comorbidity and Symptomatology"
+      },
+      {
+        "disagreements": "SUVmax and histology show moderate stability in effect modification signals, whereas cancer stage and mass morphology show negligible or inconsistent support.",
+        "evidence_ids": [
+          "multi:outer_001_feature_196:causal_forest:effect",
+          "multi:outer_001_feature_192:causal_forest:effect",
+          "multi:outer_001_feature_196:univariable_rlearner:effect"
+        ],
+        "interpretation": "Intrinsic tumor characteristics derived from imaging and pathology that may modify treatment response.",
+        "member_feature_ids": [
+          "outer_001_feature_192",
+          "outer_001_feature_193",
+          "outer_001_feature_195",
+          "outer_001_feature_196",
+          "outer_001_feature_200"
+        ],
+        "name": "Tumor Morphological and Metabolic Characteristics"
+      },
+      {
+        "disagreements": "Lymph node dissection status provides a credible signal for effect modification, while metastasis count and lymphadenopathy status lack consistent support.",
+        "evidence_ids": [
+          "multi:outer_001_feature_197:univariable_rlearner:effect",
+          "multi:outer_001_feature_197:causal_forest:effect"
+        ],
+        "interpretation": "Measurements related to the surgical or radiographic assessment of lymphatic spread.",
+        "member_feature_ids": [
+          "outer_001_feature_197",
+          "outer_001_feature_198",
+          "outer_001_feature_199"
+        ],
+        "name": "Nodal Involvement Status"
+      },
+      {
+        "disagreements": "The surgical procedure of dissection (201) is a strong treatment predictor and effect modifier, whereas the pathological status (202) provides negligible signal across all roles.",
+        "evidence_ids": [
+          "multi:outer_001_feature_201:univariable:treatment",
+          "multi:outer_001_feature_201:causal_forest:effect",
+          "multi:outer_001_feature_201:univariable_rlearner:effect"
+        ],
+        "interpretation": "Mediastinal assessment indicators, distinguishing between the act of dissection and the resulting nodal status.",
+        "member_feature_ids": [
+          "outer_001_feature_201",
+          "outer_001_feature_202"
+        ],
+        "name": "Mediastinal Assessment"
+      },
+      {
+        "disagreements": "Cisplatin (204) shows strong outcome prognosis and effect modification; gemcitabine (208) is primarily prognostic; G12C inhibitors (207) show only weak evidence of effect modification via R-learner.",
+        "evidence_ids": [
+          "multi:outer_001_feature_204:univariable:outcome",
+          "multi:outer_001_feature_204:causal_forest:effect",
+          "multi:outer_001_feature_208:predictive_forest:outcome",
+          "multi:outer_001_feature_207:univariable_rlearner:effect"
+        ],
+        "interpretation": "Systemic chemotherapy agents with varying roles in outcome prognosis and treatment effect heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_204",
+          "outer_001_feature_207",
+          "outer_001_feature_208"
+        ],
+        "name": "Systemic Chemotherapy"
+      },
+      {
+        "disagreements": "Lisinopril (209) is a clear confounder; calcium carbonate (203) acts as both a confounder and effect modifier; denosumab (205) is primarily an effect modifier; dexamethasone (206) and MET inhibitors (210) are weak or only prognostic.",
+        "evidence_ids": [
+          "multi:outer_001_feature_209:univariable:treatment",
+          "multi:outer_001_feature_209:univariable:outcome",
+          "multi:outer_001_feature_203:univariable:outcome",
+          "multi:outer_001_feature_203:causal_forest:effect",
+          "multi:outer_001_feature_205:univariable:effect"
+        ],
+        "interpretation": "Supportive, concurrent, or targeted medications exhibiting a range of confounding and effect-modifying signals.",
+        "member_feature_ids": [
+          "outer_001_feature_203",
+          "outer_001_feature_205",
+          "outer_001_feature_206",
+          "outer_001_feature_209",
+          "outer_001_feature_210"
+        ],
+        "name": "Supportive and Concurrent Medications"
+      },
+      {
+        "disagreements": "Morphine shows strong evidence across all roles, while oxycodone exhibits only weak prognostic signals and no significant treatment or effect modification evidence.",
+        "evidence_ids": [
+          "multi:outer_001_feature_217:univariable:treatment",
+          "multi:outer_001_feature_217:univariable:outcome",
+          "multi:outer_001_feature_217:causal_forest:effect",
+          "multi:outer_001_feature_211:predictive_forest:outcome"
+        ],
+        "interpretation": "Opioid-based pain management markers",
+        "member_feature_ids": [
+          "outer_001_feature_211",
+          "outer_001_feature_217"
+        ],
+        "name": "Opioid Pain Management"
+      }
+    ]
+  },
+  "system": "You review pretreatment candidate measurements using modeling evidence\nfrom one outer-training fold. First identify themes across candidates; then\nreconcile their roles as confounder, effect_modifier, both, or neither.\nAll evidence is fallible. No individual family, p-value, or support frequency is\na hard selection gate. A credible complementary signal can justify retention\neven when other methods shrink it away. Do not mistake correlated aliases or\nproxies for multiple independent discoveries. Themes organize evidence; they\ndo not establish equivalence, merge measurements, or transfer a role to every\ntheme member. Preserve investigator-locked roles exactly.\n\nTreatment prediction, outcome prognosis, and confounding are distinct. Discuss\nwhether a candidate could be a common cause rather than an instrument or only a\nprognostic factor. Effect modification needs treatment-heterogeneity evidence;\noutcome main-effect importance alone does not establish it. Univariable logistic\ninteractions are on the log-odds scale and unadjusted for other covariates.\nOrthogonal linear models, candidate R-learners, and causal forests assess the\nprobability/outcome scale after elastic-net nuisance adjustment. Their targets\nand biases differ. A model family is evidence, not an independent replication.\n\nUse exposure and evaluability denominators. Missing or nonconverged fits are not\nnegative votes. Repeated samples and folds overlap; support fractions are not\ncausal probabilities or formal stability-selection error guarantees. Raw and BH\np-values do not correct the upstream adaptive discovery process. Permutation\nimportance can be diluted by correlated alternatives and does not prove a\ncausal role. Compare fold consistency, methods, subsets, and conflicting facts.\nDefinitions and theme names cannot establish a role without the supplied\nempirical evidence. Never invent an oracle, data-generating process, or hidden\ntruth. Return the requested JSON and cite only supplied evidence IDs."
+}

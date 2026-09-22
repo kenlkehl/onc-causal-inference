@@ -1,0 +1,67 @@
+{
+  "themes": [
+    {
+      "disagreements": "Treatment signals are primarily captured by predictive forests rather than univariable models, indicating non-linear dependencies.",
+      "evidence_ids": [
+        "multi:outer_001_feature_042:univariable:outcome",
+        "multi:outer_001_feature_042:predictive_forest:treatment",
+        "multi:outer_001_feature_043:univariable:outcome",
+        "multi:outer_001_feature_043:predictive_forest:treatment",
+        "multi:outer_001_feature_044:univariable:outcome",
+        "multi:outer_001_feature_044:predictive_forest:treatment"
+      ],
+      "interpretation": "Measurements related to the presence, characteristics, and symptomatic location of bone metastases show strong prognostic signals for outcome and moderate signals for treatment prediction, suggesting roles as confounders.",
+      "member_feature_ids": [
+        "outer_001_feature_042",
+        "outer_001_feature_043",
+        "outer_001_feature_044"
+      ],
+      "name": "Skeletal Metastasis Burden"
+    },
+    {
+      "disagreements": "The magnitude of the effect modification signal is generally higher for lesion count and edema than for lesion size.",
+      "evidence_ids": [
+        "multi:outer_001_feature_048:predictive_forest:outcome",
+        "multi:outer_001_feature_048:causal_forest:effect",
+        "multi:outer_001_feature_049:univariable:outcome",
+        "multi:outer_001_feature_049:univariable_rlearner:effect",
+        "multi:outer_001_feature_050:penalized_main:outcome",
+        "multi:outer_001_feature_050:univariable_rlearner:effect"
+      ],
+      "interpretation": "Measurements of brain lesion count, size, and associated edema demonstrate strong prognostic importance and significant evidence of effect modification across multiple models (Causal Forest, R-learner).",
+      "member_feature_ids": [
+        "outer_001_feature_048",
+        "outer_001_feature_049",
+        "outer_001_feature_050"
+      ],
+      "name": "Intracranial Lesion Severity"
+    },
+    {
+      "disagreements": "Low support in univariable outcome models contrast with high support in the Causal Forest.",
+      "evidence_ids": [
+        "multi:outer_001_feature_045:causal_forest:effect",
+        "multi:outer_001_feature_045:predictive_forest:outcome"
+      ],
+      "interpretation": "Bone pain status shows weak prognostic signal but a strong signal for treatment effect heterogeneity in the Causal Forest, suggesting a primary role as an effect modifier.",
+      "member_feature_ids": [
+        "outer_001_feature_045"
+      ],
+      "name": "Symptomatic Bone Pain"
+    },
+    {
+      "disagreements": "Small fragments of support in R-learners are not corroborated by other model families.",
+      "evidence_ids": [
+        "multi:outer_001_feature_041:univariable:outcome",
+        "multi:outer_001_feature_046:univariable_rlearner:effect",
+        "multi:outer_001_feature_047:univariable_rlearner:effect"
+      ],
+      "interpretation": "Procedural markers (bolus confirmation, vaccination) and BRAF mutation status show inconsistent or weak signals across all modeling axes.",
+      "member_feature_ids": [
+        "outer_001_feature_041",
+        "outer_001_feature_046",
+        "outer_001_feature_047"
+      ],
+      "name": "Clinical/Molecular Metadata"
+    }
+  ]
+}

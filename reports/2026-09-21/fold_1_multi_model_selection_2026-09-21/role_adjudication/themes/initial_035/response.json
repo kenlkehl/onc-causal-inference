@@ -1,0 +1,21 @@
+{
+  "themes": [
+    {
+      "disagreements": "Weak, inconsistent support for treatment prediction and outcome prognosis across predictive forests; complete lack of support in univariable and penalized main/interaction models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_351:univariable_rlearner:effect",
+        "multi:outer_001_feature_351:causal_forest:effect",
+        "multi:outer_001_feature_352:univariable_rlearner:effect",
+        "multi:outer_001_feature_352:causal_forest:effect",
+        "multi:outer_001_feature_351:predictive_forest:treatment",
+        "multi:outer_001_feature_352:predictive_forest:treatment"
+      ],
+      "interpretation": "Candidates related to prior therapeutic interventions (radiation and drug dosing) exhibiting complementary signals for effect modification in R-learner and causal forest models, despite minimal evidence for main effects.",
+      "member_feature_ids": [
+        "outer_001_feature_351",
+        "outer_001_feature_352"
+      ],
+      "name": "Prior Therapeutic Interventions"
+    }
+  ]
+}

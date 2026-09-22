@@ -9938,6 +9938,11 @@ def run_fold_analysis(
         "role_adjudication_policy": config.role_adjudication.public_dict(),
         "role_adjudication_llm_model": str(getattr(config, "model", "")),
     }
+    if (
+        statistical_policy.selection_mode == "multi_model"
+        and statistical_policy.multi_model.modifier_count.enabled
+    ):
+        selection_input["modifier_count_estimation_trees"] = int(config.estimation_trees)
     selection_fingerprint = _value_fingerprint(selection_input)
     selection_report_path = selection_dir / "elastic_net_selection.json"
     selected_path = selection_dir / "selected_definitions.json"
@@ -10096,6 +10101,39 @@ def run_fold_analysis(
                     str(feature["feature_id"]) for feature in selected
                 ],
             }
+        modifier_count_report = None
+        if (
+            statistical_policy.selection_mode == "multi_model"
+            and statistical_policy.multi_model.modifier_count.enabled
+            and consolidated_definitions
+        ):
+            from .stage2_modifier_count import select_modifier_count
+
+            (
+                selected,
+                role_adjudication_report,
+                modifier_count_report,
+            ) = select_modifier_count(
+                dataset=dataset,
+                extracted_fit=consolidated_fit,
+                definitions=consolidated_definitions,
+                inner_splits=inner_splits,
+                treatment_column=treatment_column,
+                outcome_column=outcome_column,
+                outcome_type=outcome_type,
+                seed=seed,
+                policy=statistical_policy,
+                selected=selected,
+                role_report=role_adjudication_report,
+                statistical_report=elastic_net_report,
+                request_json=request_json,
+                role_policy=config.role_adjudication,
+                output_dir=selection_dir / "modifier_count",
+                numerical_checkpoint_dir=selection_dir / "multi_model",
+                model_identity=str(getattr(config, "model", "")),
+                estimation_trees=int(config.estimation_trees),
+                run_numerical=_run_stage2_statistical_selection,
+            )
         measurement_definitions = measurement_definitions_for_selected(
             selected,
             current,
@@ -10116,7 +10154,9 @@ def run_fold_analysis(
             ),
             "role_adjudication": role_adjudication_report,
             "final_role_assignment": (
-                "llm_all_evidence_adjudication"
+                "llm_confounders_and_nested_r_loss_modifiers"
+                if modifier_count_report is not None
+                else "llm_all_evidence_adjudication"
                 if consolidated_definitions and config.role_adjudication.enabled
                 else "statistical_provisional_roles"
             ),
@@ -10148,6 +10188,11 @@ def run_fold_analysis(
             "selected_latent_ids": [
                 str(item["latent_id"]) for item in latent_states
             ],
+            **(
+                {"modifier_count_selection": modifier_count_report}
+                if modifier_count_report is not None
+                else {}
+            ),
         }
         modeling_fit_frame = consolidated_fit
         _write_json(selection_report_path, selection_report)

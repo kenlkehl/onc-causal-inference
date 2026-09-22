@@ -1,0 +1,34 @@
+{
+  "candidate_count": 352,
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/role_report.json": "30197faabd3e9fbae4c704b22a140d401adc5117a1961a551e3002d660a2b6a5",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/selected_definitions.json": "e8cc9d0c914aabed0b3e4201c58d5d7cafd5d1ae7ce34495a0a5724494c4e7f1"
+  },
+  "frozen_at": "2026-09-22T01:36:14.917914+00:00",
+  "input_manifest_sha256": "63de83f2cf3902bfced5f9983f41023f2ac90a025f490f5655e3f2ac4faa5a4a",
+  "modifier_order": [
+    "outer_001_feature_228",
+    "outer_001_feature_295",
+    "outer_001_feature_103",
+    "outer_001_feature_060",
+    "outer_001_feature_085",
+    "outer_001_feature_043",
+    "outer_001_feature_022",
+    "outer_001_feature_108",
+    "outer_001_feature_204",
+    "outer_001_feature_212",
+    "outer_001_feature_052",
+    "outer_001_feature_201",
+    "outer_001_feature_032",
+    "outer_001_feature_179",
+    "outer_001_feature_214",
+    "outer_001_feature_184"
+  ],
+  "prior_oracle_exposure_acknowledged": true,
+  "roles": {
+    "both": 8,
+    "confounder": 189,
+    "effect_modifier": 16
+  },
+  "selected_count": 197
+}

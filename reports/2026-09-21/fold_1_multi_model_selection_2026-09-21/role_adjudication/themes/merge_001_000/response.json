@@ -1,0 +1,279 @@
+{
+  "themes": [
+    {
+      "disagreements": "Strong effect modification signals for mutation status and CK5/6 expression contrast with the primary confounding roles of CMP results and general enzyme elevation.",
+      "evidence_ids": [
+        "multi:outer_001_feature_001:causal_forest:effect",
+        "multi:outer_001_feature_076:univariable:effect",
+        "multi:outer_001_feature_084:univariable:treatment",
+        "multi:outer_001_feature_111:causal_forest:effect",
+        "multi:outer_001_feature_096:causal_forest:effect"
+      ],
+      "interpretation": "Genomic, pathological, and laboratory markers reflecting a spectrum from strong treatment-effect heterogeneity to primary confounding.",
+      "member_feature_ids": [
+        "outer_001_feature_001",
+        "outer_001_feature_002",
+        "outer_001_feature_013",
+        "outer_001_feature_014",
+        "outer_001_feature_032",
+        "outer_001_feature_034",
+        "outer_001_feature_041",
+        "outer_001_feature_046",
+        "outer_001_feature_047",
+        "outer_001_feature_064",
+        "outer_001_feature_065",
+        "outer_001_feature_074",
+        "outer_001_feature_075",
+        "outer_001_feature_076",
+        "outer_001_feature_077",
+        "outer_001_feature_083",
+        "outer_001_feature_084",
+        "outer_001_feature_086",
+        "outer_001_feature_095",
+        "outer_001_feature_096",
+        "outer_001_feature_111",
+        "outer_001_feature_115",
+        "outer_001_feature_136",
+        "outer_001_feature_138",
+        "outer_001_feature_140",
+        "outer_001_feature_141",
+        "outer_001_feature_142",
+        "outer_001_feature_143"
+      ],
+      "name": "Genomic and Pathological Biomarkers"
+    },
+    {
+      "disagreements": "Age, employment, and comorbidity counts are dominant confounders, while anxiety and deconditioning demonstrate evidence for effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_009:univariable:treatment",
+        "multi:outer_001_feature_082:univariable:treatment",
+        "multi:outer_001_feature_114:univariable:treatment",
+        "multi:outer_001_feature_040:causal_forest:effect",
+        "multi:outer_001_feature_109:univariable:treatment"
+      ],
+      "interpretation": "Baseline demographics, quality-of-life metrics, and systemic health indicators acting primarily as confounders or prognostic factors.",
+      "member_feature_ids": [
+        "outer_001_feature_005",
+        "outer_001_feature_009",
+        "outer_001_feature_011",
+        "outer_001_feature_017",
+        "outer_001_feature_022",
+        "outer_001_feature_024",
+        "outer_001_feature_038",
+        "outer_001_feature_039",
+        "outer_001_feature_040",
+        "outer_001_feature_060",
+        "outer_001_feature_062",
+        "outer_001_feature_078",
+        "outer_001_feature_079",
+        "outer_001_feature_080",
+        "outer_001_feature_082",
+        "outer_001_feature_089",
+        "outer_001_feature_093",
+        "outer_001_feature_097",
+        "outer_001_feature_099",
+        "outer_001_feature_100",
+        "outer_001_feature_102",
+        "outer_001_feature_109",
+        "outer_001_feature_116",
+        "outer_001_feature_117",
+        "outer_001_feature_118",
+        "outer_001_feature_119",
+        "outer_001_feature_120",
+        "outer_001_feature_112",
+        "outer_001_feature_113",
+        "outer_001_feature_114",
+        "outer_001_feature_146",
+        "outer_001_feature_150",
+        "outer_001_feature_159",
+        "outer_001_feature_160"
+      ],
+      "name": "Systemic Health and Demographics"
+    },
+    {
+      "disagreements": "High-magnitude signals for intracranial lesions and bone pain contrast with purely prognostic cerebral imaging or treatment-predictive anatomical attributes.",
+      "evidence_ids": [
+        "multi:outer_001_feature_010:predictive_forest:treatment",
+        "multi:outer_001_feature_051:causal_forest:effect",
+        "multi:outer_001_feature_052:univariable:outcome",
+        "multi:outer_001_feature_145:causal_forest:effect",
+        "multi:outer_001_feature_030:causal_forest:effect"
+      ],
+      "interpretation": "Indicators of disease location, severity, and anatomical abnormalities, manifesting as a mix of prognostic factors, confounders, and effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_004",
+        "outer_001_feature_010",
+        "outer_001_feature_042",
+        "outer_001_feature_043",
+        "outer_001_feature_044",
+        "outer_001_feature_045",
+        "outer_001_feature_048",
+        "outer_001_feature_049",
+        "outer_001_feature_050",
+        "outer_001_feature_023",
+        "outer_001_feature_025",
+        "outer_001_feature_028",
+        "outer_001_feature_029",
+        "outer_001_feature_030",
+        "outer_001_feature_051",
+        "outer_001_feature_052",
+        "outer_001_feature_053",
+        "outer_001_feature_054",
+        "outer_001_feature_055",
+        "outer_001_feature_057",
+        "outer_001_feature_063",
+        "outer_001_feature_067",
+        "outer_001_feature_068",
+        "outer_001_feature_069",
+        "outer_001_feature_070",
+        "outer_001_feature_071",
+        "outer_001_feature_104",
+        "outer_001_feature_105",
+        "outer_001_feature_110",
+        "outer_001_feature_144",
+        "outer_001_feature_145",
+        "outer_001_feature_148",
+        "outer_001_feature_149",
+        "outer_001_feature_151",
+        "outer_001_feature_152",
+        "outer_001_feature_157",
+        "outer_001_feature_158"
+      ],
+      "name": "Disease Burden and Anatomical Indicators"
+    },
+    {
+      "disagreements": "COPD is a consistent confounder and prognostic factor, whereas graded dyspnea severity and acute confusion suggest treatment-effect heterogeneity.",
+      "evidence_ids": [
+        "multi:outer_001_feature_087:univariable:treatment",
+        "multi:outer_001_feature_108:causal_forest:effect",
+        "multi:outer_001_feature_085:univariable_rlearner:effect",
+        "multi:outer_001_feature_156:penalized_main:treatment"
+      ],
+      "interpretation": "Respiratory indices and acute neurological symptoms where signal strength and graded severity often distinguish confounders from effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_081",
+        "outer_001_feature_085",
+        "outer_001_feature_087",
+        "outer_001_feature_088",
+        "outer_001_feature_090",
+        "outer_001_feature_091",
+        "outer_001_feature_092",
+        "outer_001_feature_094",
+        "outer_001_feature_098",
+        "outer_001_feature_106",
+        "outer_001_feature_107",
+        "outer_001_feature_108",
+        "outer_001_feature_153",
+        "outer_001_feature_154",
+        "outer_001_feature_155",
+        "outer_001_feature_156"
+      ],
+      "name": "Respiratory and Acute Symptomology"
+    },
+    {
+      "disagreements": "Carboplatin is a strong prognostic factor, while cancer diagnosis and cycle count primarily predict treatment assignment.",
+      "evidence_ids": [
+        "multi:outer_001_feature_061:univariable:outcome",
+        "multi:outer_001_feature_003:predictive_forest:treatment",
+        "multi:outer_001_feature_058:penalized_main:treatment",
+        "multi:outer_001_feature_073:predictive_forest:treatment"
+      ],
+      "interpretation": "Prior medications and oncology-specific treatment history showing a split between prognostic value and treatment prediction (confounding).",
+      "member_feature_ids": [
+        "outer_001_feature_003",
+        "outer_001_feature_006",
+        "outer_001_feature_012",
+        "outer_001_feature_018",
+        "outer_001_feature_019",
+        "outer_001_feature_020",
+        "outer_001_feature_031",
+        "outer_001_feature_035",
+        "outer_001_feature_056",
+        "outer_001_feature_058",
+        "outer_001_feature_059",
+        "outer_001_feature_061",
+        "outer_001_feature_066",
+        "outer_001_feature_072",
+        "outer_001_feature_073"
+      ],
+      "name": "Therapeutic and Oncology History"
+    },
+    {
+      "disagreements": "Strong confounding by GFR and BP contrasts with a more distinct effect modification signal for BUN in R-learners.",
+      "evidence_ids": [
+        "multi:outer_001_feature_016:univariable:treatment",
+        "multi:outer_001_feature_015:univariable_rlearner:effect",
+        "multi:outer_001_feature_037:causal_forest:effect"
+      ],
+      "interpretation": "Physiological and metabolic indicators that strongly predict both treatment assignment and outcome, functioning primarily as confounders.",
+      "member_feature_ids": [
+        "outer_001_feature_015",
+        "outer_001_feature_016",
+        "outer_001_feature_021",
+        "outer_001_feature_026",
+        "outer_001_feature_027",
+        "outer_001_feature_033",
+        "outer_001_feature_036",
+        "outer_001_feature_037"
+      ],
+      "name": "Physiological and Metabolic Indicators"
+    },
+    {
+      "disagreements": "Recurrence and dizziness are supported by causal forests and R-learners, whereas other clinical markers show inconsistent signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_101:causal_forest:effect",
+        "multi:outer_001_feature_103:causal_forest:effect",
+        "multi:outer_001_feature_131:causal_forest:effect"
+      ],
+      "interpretation": "Clinical markers and family history that primarily signal treatment-heterogeneity without strong main-effect confounding.",
+      "member_feature_ids": [
+        "outer_001_feature_101",
+        "outer_001_feature_103",
+        "outer_001_feature_122",
+        "outer_001_feature_124",
+        "outer_001_feature_127",
+        "outer_001_feature_131",
+        "outer_001_feature_132",
+        "outer_001_feature_133",
+        "outer_001_feature_134",
+        "outer_001_feature_135",
+        "outer_001_feature_137",
+        "outer_001_feature_139"
+      ],
+      "name": "Clinical Effect Modifiers"
+    },
+    {
+      "disagreements": "Feature 126 is a strong treatment driver without outcome signal (instrument-like), while feature 123 is limited to treatment prediction without effect signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_126:univariable:treatment",
+        "multi:outer_001_feature_147:causal_forest:effect",
+        "multi:outer_001_feature_123:penalized_main:treatment"
+      ],
+      "interpretation": "Candidates exhibiting skewed support, ranging from strong treatment predictors to weak prognostic-only signals.",
+      "member_feature_ids": [
+        "outer_001_feature_121",
+        "outer_001_feature_125",
+        "outer_001_feature_126",
+        "outer_001_feature_147",
+        "outer_001_feature_123",
+        "outer_001_feature_128",
+        "outer_001_feature_129",
+        "outer_001_feature_130"
+      ],
+      "name": "Treatment Drivers and Weak Signals"
+    },
+    {
+      "disagreements": "Moderate effect modification signals (~0.4) suggest their role as confounders may be equally prominent.",
+      "evidence_ids": [
+        "multi:outer_001_feature_007:predictive_forest:treatment",
+        "multi:outer_001_feature_008:causal_forest:effect"
+      ],
+      "interpretation": "Measurements regarding the presence and size of adrenal nodules showing consistent influence on treatment assignment, outcome prognosis, and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_007",
+        "outer_001_feature_008"
+      ],
+      "name": "Adrenal-related Indicators"
+    }
+  ]
+}

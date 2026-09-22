@@ -1,0 +1,142 @@
+{
+  "themes": [
+    {
+      "disagreements": "Strong effect modification signals in TTF1 and TMB contrast with weak signals for TP53 and tumor cell presence; TMB exhibits weaker treatment prediction than VAF.",
+      "evidence_ids": [
+        "multi:outer_001_feature_330:univariable:effect",
+        "multi:outer_001_feature_330:univariable_rlearner:effect",
+        "multi:outer_001_feature_330:causal_forest:effect",
+        "multi:outer_001_feature_324:univariable_rlearner:effect",
+        "multi:outer_001_feature_331:univariable_rlearner:effect",
+        "multi:outer_001_feature_332:predictive_forest:outcome",
+        "multi:outer_001_feature_332:causal_forest:effect",
+        "multi:outer_001_feature_333:predictive_forest:treatment",
+        "multi:outer_001_feature_334:univariable_rlearner:effect",
+        "multi:outer_001_feature_337:predictive_forest:treatment",
+        "multi:outer_001_feature_337:causal_forest:effect"
+      ],
+      "interpretation": "Molecular and pathologic tumor markers showing a mixture of prognostic value, treatment selection bias, and significant effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_323",
+        "outer_001_feature_324",
+        "outer_001_feature_330",
+        "outer_001_feature_331",
+        "outer_001_feature_332",
+        "outer_001_feature_333",
+        "outer_001_feature_334",
+        "outer_001_feature_337"
+      ],
+      "name": "Tumor Molecular and Pathologic Characteristics"
+    },
+    {
+      "disagreements": "Ventricular edema (339) lacks treatment prediction support unlike vasogenic edema and hemorrhage; who_grade lacks strong effect modification compared to ventricular size and vertebral metastasis.",
+      "evidence_ids": [
+        "multi:outer_001_feature_338:predictive_forest:outcome",
+        "multi:outer_001_feature_338:causal_forest:effect",
+        "multi:outer_001_feature_339:penalized_main:outcome",
+        "multi:outer_001_feature_339:univariable_rlearner:effect",
+        "multi:outer_001_feature_340:univariable_rlearner:effect",
+        "multi:outer_001_feature_340:causal_forest:effect",
+        "multi:outer_001_feature_341:predictive_forest:outcome",
+        "multi:outer_001_feature_342:univariable:outcome",
+        "multi:outer_001_feature_350:penalized_main:treatment",
+        "multi:outer_001_feature_341:causal_forest:effect"
+      ],
+      "interpretation": "Indicators of neuro-oncological burden and imaging markers consistently linked to outcome prognosis and treatment selection, with some evidence of effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_338",
+        "outer_001_feature_339",
+        "outer_001_feature_340",
+        "outer_001_feature_341",
+        "outer_001_feature_342",
+        "outer_001_feature_350"
+      ],
+      "name": "Neuro-Oncological Imaging and Burden"
+    },
+    {
+      "disagreements": "Strong prognostic signals for transependymal flow and weight change contrast with weaker signals for bilirubin and ulceration; visual field deficit shows only effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_326:univariable:outcome",
+        "multi:outer_001_feature_326:predictive_forest:outcome",
+        "multi:outer_001_feature_322:predictive_forest:outcome",
+        "multi:outer_001_feature_336:univariable:outcome",
+        "multi:outer_001_feature_336:causal_forest:effect",
+        "multi:outer_001_feature_335:univariable_rlearner:effect",
+        "multi:outer_001_feature_349:predictive_forest:outcome",
+        "multi:outer_001_feature_349:causal_forest:effect",
+        "multi:outer_001_feature_345:univariable_rlearner:effect",
+        "multi:outer_001_feature_347:predictive_forest:outcome",
+        "multi:outer_001_feature_348:predictive_forest:treatment",
+        "multi:outer_001_feature_344:univariable_rlearner:effect"
+      ],
+      "interpretation": "Systemic clinical, hematologic, and physical findings reflecting patient health, serving as prognostic factors or effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_322",
+        "outer_001_feature_326",
+        "outer_001_feature_335",
+        "outer_001_feature_336",
+        "outer_001_feature_344",
+        "outer_001_feature_345",
+        "outer_001_feature_347",
+        "outer_001_feature_348",
+        "outer_001_feature_349"
+      ],
+      "name": "Systemic Clinical and Physiological Status"
+    },
+    {
+      "disagreements": "Robust effect modification for Vinorelbine and prior radiation/dosing (R-learner/causal forest) contrasts with the weak confounding role of vitamin supplements.",
+      "evidence_ids": [
+        "multi:outer_001_feature_343:causal_forest:effect",
+        "multi:outer_001_feature_343:predictive_forest:outcome",
+        "multi:outer_001_feature_346:predictive_forest:treatment",
+        "multi:outer_001_feature_351:univariable_rlearner:effect",
+        "multi:outer_001_feature_351:causal_forest:effect",
+        "multi:outer_001_feature_352:univariable_rlearner:effect",
+        "multi:outer_001_feature_352:causal_forest:effect",
+        "multi:outer_001_feature_351:predictive_forest:treatment",
+        "multi:outer_001_feature_352:predictive_forest:treatment"
+      ],
+      "interpretation": "Prior pharmacological and therapeutic interventions exhibiting complementary signals for effect modification despite minimal evidence for main effects.",
+      "member_feature_ids": [
+        "outer_001_feature_343",
+        "outer_001_feature_346",
+        "outer_001_feature_351",
+        "outer_001_feature_352"
+      ],
+      "name": "Prior Therapeutic and Pharmacological History"
+    },
+    {
+      "disagreements": "Signals for treatment goals and response are fragmented across folds; thyromegaly presence shows negligible or inconsistent signaling across all roles.",
+      "evidence_ids": [
+        "multi:outer_001_feature_317:univariable_rlearner:effect",
+        "multi:outer_001_feature_328:predictive_forest:treatment",
+        "multi:outer_001_feature_329:predictive_forest:treatment",
+        "multi:outer_001_feature_327:predictive_forest:treatment",
+        "multi:outer_001_feature_325:penalized_main:treatment"
+      ],
+      "interpretation": "Treatment-related documentation and clinical markers with insufficient evidence to be identified as stable confounders or modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_317",
+        "outer_001_feature_325",
+        "outer_001_feature_327",
+        "outer_001_feature_328",
+        "outer_001_feature_329"
+      ],
+      "name": "Treatment Documentation and Inconsistent Clinical Markers"
+    },
+    {
+      "disagreements": "Consistent evidence across univariable and predictive forest models for both treatment and outcome, with no significant effect modification signal.",
+      "evidence_ids": [
+        "multi:outer_001_feature_321:univariable:treatment",
+        "multi:outer_001_feature_321:univariable:outcome",
+        "multi:outer_001_feature_321:predictive_forest:treatment",
+        "multi:outer_001_feature_321:predictive_forest:outcome"
+      ],
+      "interpretation": "Strong evidence of a common cause for both treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_321"
+      ],
+      "name": "Exposure-Related Confounding"
+    }
+  ]
+}

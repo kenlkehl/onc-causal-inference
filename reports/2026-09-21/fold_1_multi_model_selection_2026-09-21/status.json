@@ -1,0 +1,7 @@
+{
+  "phase": "superseded_by_consolidation",
+  "updated_at": "2026-09-21T23:43:51.235840+00:00",
+  "selection_frozen": true,
+  "oracle_evaluation_started": false,
+  "next_experiment": "fold_1_multi_model_consolidation_2026-09-21"
+}

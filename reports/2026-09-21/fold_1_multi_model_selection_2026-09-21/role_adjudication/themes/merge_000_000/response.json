@@ -1,0 +1,175 @@
+{
+  "themes": [
+    {
+      "disagreements": "Effect modification signals are present but moderate (support fractions ~0.4), suggesting their role as confounders may be equally prominent.",
+      "evidence_ids": [
+        "multi:outer_001_feature_007:predictive_forest:treatment",
+        "multi:outer_001_feature_007:causal_forest:effect",
+        "multi:outer_001_feature_008:predictive_forest:treatment",
+        "multi:outer_001_feature_008:penalized_main:outcome",
+        "multi:outer_001_feature_008:causal_forest:effect"
+      ],
+      "interpretation": "Measurements regarding the presence and size of adrenal nodules show consistent evidence of influence on treatment assignment, outcome prognosis, and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_007",
+        "outer_001_feature_008"
+      ],
+      "name": "Adrenal-related Indicators"
+    },
+    {
+      "disagreements": "Age is a powerful confounder, while history of AKI, appetite status, and anthropometrics show weaker or non-replicated signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_009:univariable:treatment",
+        "multi:outer_001_feature_009:univariable:outcome",
+        "multi:outer_001_feature_005:univariable_rlearner:effect",
+        "multi:outer_001_feature_011:univariable:treatment",
+        "multi:outer_001_feature_011:univariable:outcome",
+        "multi:outer_001_feature_017:univariable:treatment",
+        "multi:outer_001_feature_017:univariable:outcome",
+        "multi:outer_001_feature_022:univariable_rlearner:effect",
+        "multi:outer_001_feature_024:predictive_forest:outcome",
+        "multi:outer_001_feature_038:predictive_forest:treatment",
+        "multi:outer_001_feature_039:predictive_forest:outcome",
+        "multi:outer_001_feature_040:causal_forest:effect"
+      ],
+      "interpretation": "Core demographics, functional status, and psychosocial indicators acting primarily as confounders or prognostic factors, with evidence for treatment-effect heterogeneity specifically for anxiety.",
+      "member_feature_ids": [
+        "outer_001_feature_005",
+        "outer_001_feature_009",
+        "outer_001_feature_011",
+        "outer_001_feature_017",
+        "outer_001_feature_022",
+        "outer_001_feature_024",
+        "outer_001_feature_038",
+        "outer_001_feature_039",
+        "outer_001_feature_040"
+      ],
+      "name": "Patient Demographics and Baseline Status"
+    },
+    {
+      "disagreements": "Strong signals for ALC and mutation status contrast with the negligible independent signal for rearrangement status and procedural metadata.",
+      "evidence_ids": [
+        "multi:outer_001_feature_001:causal_forest:effect",
+        "multi:outer_001_feature_001:univariable_rlearner:effect",
+        "multi:outer_001_feature_002:penalized_main:outcome",
+        "multi:outer_001_feature_002:predictive_forest:treatment",
+        "multi:outer_001_feature_013:causal_forest:effect",
+        "multi:outer_001_feature_014:predictive_forest:treatment",
+        "multi:outer_001_feature_032:causal_forest:effect",
+        "multi:outer_001_feature_032:penalized_main:outcome",
+        "multi:outer_001_feature_046:univariable_rlearner:effect",
+        "multi:outer_001_feature_047:univariable_rlearner:effect"
+      ],
+      "interpretation": "A group of markers showing a split between strong prognostic value (ANC), treatment-effect heterogeneity (ALC, mutation status), and weak proxies with insufficient evidence for a causal role.",
+      "member_feature_ids": [
+        "outer_001_feature_001",
+        "outer_001_feature_002",
+        "outer_001_feature_013",
+        "outer_001_feature_014",
+        "outer_001_feature_032",
+        "outer_001_feature_034",
+        "outer_001_feature_040",
+        "outer_001_feature_041",
+        "outer_001_feature_046",
+        "outer_001_feature_047"
+      ],
+      "name": "Hematological and Genomic Biomarkers"
+    },
+    {
+      "disagreements": "Acetaminophen and alcohol use are primarily confounders, while antidiabetic use is an instrument-like predictor without outcome impact.",
+      "evidence_ids": [
+        "multi:outer_001_feature_003:predictive_forest:treatment",
+        "multi:outer_001_feature_006:causal_forest:effect",
+        "multi:outer_001_feature_006:univariable_rlearner:effect",
+        "multi:outer_001_feature_012:predictive_forest:outcome",
+        "multi:outer_001_feature_018:penalized_main:outcome",
+        "multi:outer_001_feature_019:causal_forest:effect",
+        "multi:outer_001_feature_020:univariable:treatment",
+        "multi:outer_001_feature_031:predictive_forest:treatment",
+        "multi:outer_001_feature_035:univariable:treatment"
+      ],
+      "interpretation": "Prior medications and comorbidities showing varied roles as confounders, prognostic factors, or markers of heterogeneous treatment effects.",
+      "member_feature_ids": [
+        "outer_001_feature_003",
+        "outer_001_feature_006",
+        "outer_001_feature_012",
+        "outer_001_feature_018",
+        "outer_001_feature_019",
+        "outer_001_feature_020",
+        "outer_001_feature_031",
+        "outer_001_feature_035"
+      ],
+      "name": "Prior Therapeutic and Medical History"
+    },
+    {
+      "disagreements": "High-magnitude signals for intracranial lesions and bone pain contrast with the very weak signals for actionable molecular markers.",
+      "evidence_ids": [
+        "multi:outer_001_feature_010:predictive_forest:treatment",
+        "multi:outer_001_feature_004:univariable_rlearner:effect",
+        "multi:outer_001_feature_042:predictive_forest:treatment",
+        "multi:outer_001_feature_043:predictive_forest:treatment",
+        "multi:outer_001_feature_044:predictive_forest:treatment",
+        "multi:outer_001_feature_045:causal_forest:effect",
+        "multi:outer_001_feature_048:causal_forest:effect",
+        "multi:outer_001_feature_049:univariable_rlearner:effect",
+        "multi:outer_001_feature_050:univariable_rlearner:effect"
+      ],
+      "interpretation": "Indicators of disease location and lesion severity demonstrating strong prognostic importance and significant evidence of effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_004",
+        "outer_001_feature_010",
+        "outer_001_feature_042",
+        "outer_001_feature_043",
+        "outer_001_feature_044",
+        "outer_001_feature_045",
+        "outer_001_feature_048",
+        "outer_001_feature_049",
+        "outer_001_feature_050"
+      ],
+      "name": "Anatomic and Symptomatic Disease Burden"
+    },
+    {
+      "disagreements": "Strong confounding by GFR and BP contrasts with a more distinct effect modification signal for BUN in R-learners.",
+      "evidence_ids": [
+        "multi:outer_001_feature_016:univariable:treatment",
+        "multi:outer_001_feature_015:univariable_rlearner:effect",
+        "multi:outer_001_feature_016:causal_forest:effect",
+        "multi:outer_001_feature_021:univariable:treatment",
+        "multi:outer_001_feature_027:univariable:outcome",
+        "multi:outer_001_feature_033:univariable:treatment",
+        "multi:outer_001_feature_036:univariable:outcome",
+        "multi:outer_001_feature_037:causal_forest:effect"
+      ],
+      "interpretation": "Physiological and metabolic indicators that strongly predict both treatment assignment and outcome, functioning primarily as confounders.",
+      "member_feature_ids": [
+        "outer_001_feature_015",
+        "outer_001_feature_016",
+        "outer_001_feature_021",
+        "outer_001_feature_026",
+        "outer_001_feature_027",
+        "outer_001_feature_033",
+        "outer_001_feature_036",
+        "outer_001_feature_037"
+      ],
+      "name": "Physiological and Metabolic Indicators"
+    },
+    {
+      "disagreements": "Robust signals for axial structure abnormalities contrast with very weak or non-evaluable signals for atrial fibrillation.",
+      "evidence_ids": [
+        "multi:outer_001_feature_030:penalized_main:outcome",
+        "multi:outer_001_feature_030:causal_forest:effect",
+        "multi:outer_001_feature_023:univariable_rlearner:effect",
+        "multi:outer_001_feature_025:univariable_rlearner:effect"
+      ],
+      "interpretation": "Structural abnormalities and historical medical markers showing mixed evidence as potential effect modifiers or prognostic factors.",
+      "member_feature_ids": [
+        "outer_001_feature_023",
+        "outer_001_feature_025",
+        "outer_001_feature_028",
+        "outer_001_feature_029",
+        "outer_001_feature_030"
+      ],
+      "name": "Structural and Historical Findings"
+    }
+  ]
+}

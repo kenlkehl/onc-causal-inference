@@ -1,0 +1,7 @@
+{
+  "all_rows_within_parent_training": true,
+  "at": "2026-09-22T12:05:19.869832+00:00",
+  "count_validation_and_outer_heldout_patients_excluded": true,
+  "family_cells_checked": 915,
+  "nested_jobs": 5
+}

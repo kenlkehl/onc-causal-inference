@@ -1,0 +1,52 @@
+{
+  "themes": [
+    {
+      "disagreements": "The extreme signals for both treatment and outcome are consistent across univariable and forest models, though penalized main effects are slightly more attenuated than univariable results.",
+      "evidence_ids": [
+        "multi:outer_001_feature_278:univariable:treatment",
+        "multi:outer_001_feature_278:univariable:outcome",
+        "multi:outer_001_feature_279:univariable:treatment",
+        "multi:outer_001_feature_279:univariable:outcome"
+      ],
+      "interpretation": "Patient-reported outcome measures (PROs) reflecting functional status strongly predict both treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_278",
+        "outer_001_feature_279"
+      ],
+      "name": "Functional Quality of Life (PROs)"
+    },
+    {
+      "disagreements": "Evidence for treatment prediction is relatively consistent (predictive forests), but signals for treatment-heterogeneity (R-learners, Causal forests) vary significantly in strength and fold consistency.",
+      "evidence_ids": [
+        "multi:outer_001_feature_276:predictive_forest:treatment",
+        "multi:outer_001_feature_275:univariable_rlearner:effect",
+        "multi:outer_001_feature_273:predictive_forest:treatment"
+      ],
+      "interpretation": "Pulmonary imaging and diagnostic markers frequently predict treatment but show limited or inconsistent main outcome effects, suggesting roles as either instruments or effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_273",
+        "outer_001_feature_274",
+        "outer_001_feature_275",
+        "outer_001_feature_276"
+      ],
+      "name": "Pulmonary Diagnostics"
+    },
+    {
+      "disagreements": "The group includes a mixture of a clear confounder (PPI), an effect modifier (Psychiatric symptoms), and a candidate showing dual signals (Pupil reactivity).",
+      "evidence_ids": [
+        "multi:outer_001_feature_271:univariable:treatment",
+        "multi:outer_001_feature_272:univariable_rlearner:effect",
+        "multi:outer_001_feature_277:causal_forest:effect",
+        "multi:outer_001_feature_280:causal_forest:effect"
+      ],
+      "interpretation": "General medical and neurological comorbidities provide heterogeneous evidence for confounding and treatment-heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_271",
+        "outer_001_feature_272",
+        "outer_001_feature_277",
+        "outer_001_feature_280"
+      ],
+      "name": "Medical and Neurological History"
+    }
+  ]
+}

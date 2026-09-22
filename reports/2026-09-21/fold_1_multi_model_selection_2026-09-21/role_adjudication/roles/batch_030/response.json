@@ -1,0 +1,204 @@
+{
+  "decisions": [
+    {
+      "cross_method_reconciliation": "Moderate signals across treatment, outcome, and effect modification are consistent across predictive forest and causal forest models.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_298:predictive_forest:treatment",
+        "multi:outer_001_feature_298:predictive_forest:outcome",
+        "multi:outer_001_feature_298:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_298:predictive_forest:treatment",
+        "multi:outer_001_feature_298:predictive_forest:outcome",
+        "multi:outer_001_feature_298:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_298",
+      "inner_fold_consistency": "Consistent support for treatment in predictive forest (11/15) and moderate support for effect in causal forest (6/15).",
+      "rationale": "Serum chloride predicts treatment assignment and outcome prognosis with moderate consistency, while causal forest evidence supports a role in treatment-effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "The overwhelming treatment prediction signal (univariable and predictive forest) is not matched by outcome signals, while the R-learner provides evidence for effect modification.",
+      "evidence_against": [
+        "multi:outer_001_feature_299:univariable:outcome"
+      ],
+      "evidence_for": [
+        "multi:outer_001_feature_299:univariable_rlearner:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_299:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_299",
+      "inner_fold_consistency": "Treatment signal is exceptionally stable (15/15 univariable); effect signal is moderate (8/15 R-learner).",
+      "rationale": "While serum creatinine is a powerful predictor of treatment, its role as a confounder is limited by weak outcome signals. However, R-learner support identifies it as an effect modifier.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Treatment and outcome signals are weak; however, the causal forest provides moderate evidence of effect modification.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_300:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_300:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_300",
+      "inner_fold_consistency": "Effect modification signal is most stable in the causal forest (8/15).",
+      "rationale": "Serum potassium shows limited prognostic or predictive utility but demonstrates consistent signal as an effect modifier in causal forest models.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Moderate evidence for treatment, outcome, and effect modification are aligned across predictive forest and causal forest.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_301:predictive_forest:treatment",
+        "multi:outer_001_feature_301:predictive_forest:outcome",
+        "multi:outer_001_feature_301:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_301:predictive_forest:treatment",
+        "multi:outer_001_feature_301:predictive_forest:outcome",
+        "multi:outer_001_feature_301:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_301",
+      "inner_fold_consistency": "Balanced support across treatment (7/15), outcome (7/15), and effect (7/15) in forest-based models.",
+      "rationale": "Serum sodium exhibits complementary signals across all three roles, justifying its classification as both a confounder and an effect modifier.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong signals for treatment and outcome are complemented by moderate causal forest support for effect modification.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_302:predictive_forest:treatment",
+        "multi:outer_001_feature_302:penalized_main:outcome",
+        "multi:outer_001_feature_302:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_302:predictive_forest:treatment",
+        "multi:outer_001_feature_302:penalized_main:outcome",
+        "multi:outer_001_feature_302:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_302",
+      "inner_fold_consistency": "Stable signals across all roles, particularly for outcome in penalized main (8/15) and effect in causal forest (8/15).",
+      "rationale": "Biological sex is a classic demographic confounder here, with evidence for both treatment/outcome prediction and treatment-effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "The absence of treatment and outcome signals contrasts sharply with high support for effect modification in the R-learner.",
+      "evidence_against": [
+        "multi:outer_001_feature_303:univariable:treatment",
+        "multi:outer_001_feature_303:univariable:outcome"
+      ],
+      "evidence_for": [
+        "multi:outer_001_feature_303:univariable_rlearner:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_303:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_303",
+      "inner_fold_consistency": "R-learner support is high and stable (12/15).",
+      "rationale": "Skeletal compression fractures do not predict treatment or outcome, but show robust evidence for treatment-effect heterogeneity via the R-learner.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Significant outcome and effect modification signals are accompanied by moderate treatment prediction.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_304:univariable:outcome",
+        "multi:outer_001_feature_304:predictive_forest:treatment",
+        "multi:outer_001_feature_304:univariable_rlearner:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_304:univariable:outcome",
+        "multi:outer_001_feature_304:predictive_forest:treatment",
+        "multi:outer_001_feature_304:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_304",
+      "inner_fold_consistency": "Strong consistency for outcome (10/15) and effect (12/15).",
+      "rationale": "The presence of skull base lytic/sclerotic lesions is a strong prognostic factor and a robust effect modifier, while also moderately influencing treatment assignment.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "No evaluable modeling evidence provided.",
+      "evidence_against": [],
+      "evidence_for": [],
+      "evidence_ids": [],
+      "feature_id": "outer_001_feature_305",
+      "inner_fold_consistency": "Insufficient data.",
+      "rationale": "Smoking abstinence date lacks any modeling support across all families.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong treatment prediction and moderate outcome and effect signals are mutually supportive.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_306:univariable:treatment",
+        "multi:outer_001_feature_306:predictive_forest:outcome",
+        "multi:outer_001_feature_306:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_306:univariable:treatment",
+        "multi:outer_001_feature_306:predictive_forest:outcome",
+        "multi:outer_001_feature_306:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_306",
+      "inner_fold_consistency": "Strong treatment support (14/15); moderate outcome (8/15) and effect (7/15) support.",
+      "rationale": "Smoking cessation duration is a primary driver of treatment selection and shows complementary evidence for prognosis and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Signals for treatment, outcome, and effect modification are present but low in magnitude, appearing consistently in a minority of folds.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_307:univariable:treatment",
+        "multi:outer_001_feature_307:predictive_forest:outcome",
+        "multi:outer_001_feature_307:univariable_rlearner:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_307:univariable:treatment",
+        "multi:outer_001_feature_307:predictive_forest:outcome",
+        "multi:outer_001_feature_307:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_307",
+      "inner_fold_consistency": "Support is consistent at roughly 40% (6/15) across all roles.",
+      "rationale": "While signals are weak, the consistent occurrence of treatment, outcome, and effect modification across models suggests a modest role as both a confounder and effect modifier.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    }
+  ],
+  "summary": "The analyzed features demonstrate a high prevalence of treatment-effect modification. Radiographic features (304) and specific patient factors (302, 306) act as dual confounders and modifiers. Serum markers exhibit a split: creatinine (299) is a powerful treatment predictor with limited confounding utility but clear effect modification, while potassium (300) acts purely as an effect modifier. Smoking status indicators (306, 307) consistently signal confounding and modification, with cessation duration providing the strongest evidence."
+}

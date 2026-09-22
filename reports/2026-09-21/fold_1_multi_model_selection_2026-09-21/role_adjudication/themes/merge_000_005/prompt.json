@@ -1,0 +1,329 @@
+{
+  "input_fingerprint": "8f5554db07999c8416d1bf226e1fbf2d7915b65a605395c5c662f9196c99713e",
+  "payload": {
+    "instructions": "Preserve all candidate IDs and distinctions. Broader parent themes organize evidence; they do not imply measurement equivalence.",
+    "maximum_output_themes": 10,
+    "required_response": {
+      "themes": [
+        {
+          "disagreements": "contradictions, weak signals, and proxy distinctions",
+          "evidence_ids": [
+            "at most 12 representative supplied modeling evidence IDs"
+          ],
+          "interpretation": "common or complementary evidence",
+          "member_feature_ids": [
+            "candidate IDs"
+          ],
+          "name": "theme"
+        }
+      ]
+    },
+    "task": "merge_stage2_multi_model_themes",
+    "themes": [
+      {
+        "disagreements": "Radiation therapy (263) shows weaker univariable signals compared to platinum chemotherapy (267) and specific regimens (268).",
+        "evidence_ids": [
+          "multi:outer_001_feature_267:univariable:outcome",
+          "multi:outer_001_feature_268:univariable:outcome",
+          "multi:outer_001_feature_267:univariable:treatment",
+          "multi:outer_001_feature_263:causal_forest:effect"
+        ],
+        "interpretation": "Prior systemic oncology treatments show strong evidence as both confounders (predicting treatment) and prognostic factors (predicting outcome), with complementary signals for effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_263",
+          "outer_001_feature_267",
+          "outer_001_feature_268"
+        ],
+        "name": "Prior Oncology Treatments"
+      },
+      {
+        "disagreements": "The univariable signals are exceptionally strong for both treatment and outcome, potentially masking nuanced effect modification seen in causal forests.",
+        "evidence_ids": [
+          "multi:outer_001_feature_269:univariable:treatment",
+          "multi:outer_001_feature_269:univariable:outcome",
+          "multi:outer_001_feature_270:univariable:treatment",
+          "multi:outer_001_feature_270:univariable_rlearner:effect"
+        ],
+        "interpretation": "Patient-reported symptoms (pain severity and exertional symptoms) are powerful predictors of both the treatment assigned and the final outcome, while also showing evidence for modifying the treatment effect.",
+        "member_feature_ids": [
+          "outer_001_feature_269",
+          "outer_001_feature_270"
+        ],
+        "name": "Symptomatic Burden"
+      },
+      {
+        "disagreements": "The extreme signals for both treatment and outcome are consistent across univariable and forest models, though penalized main effects are slightly more attenuated than univariable results.",
+        "evidence_ids": [
+          "multi:outer_001_feature_278:univariable:treatment",
+          "multi:outer_001_feature_278:univariable:outcome",
+          "multi:outer_001_feature_279:univariable:treatment",
+          "multi:outer_001_feature_279:univariable:outcome"
+        ],
+        "interpretation": "Patient-reported outcome measures (PROs) reflecting functional status strongly predict both treatment assignment and outcome prognosis.",
+        "member_feature_ids": [
+          "outer_001_feature_278",
+          "outer_001_feature_279"
+        ],
+        "name": "Functional Quality of Life (PROs)"
+      },
+      {
+        "disagreements": "Evidence for treatment prediction is relatively consistent (predictive forests), but signals for treatment-heterogeneity (R-learners, Causal forests) vary significantly in strength and fold consistency.",
+        "evidence_ids": [
+          "multi:outer_001_feature_276:predictive_forest:treatment",
+          "multi:outer_001_feature_275:univariable_rlearner:effect",
+          "multi:outer_001_feature_273:predictive_forest:treatment"
+        ],
+        "interpretation": "Pulmonary imaging and diagnostic markers frequently predict treatment but show limited or inconsistent main outcome effects, suggesting roles as either instruments or effect modifiers.",
+        "member_feature_ids": [
+          "outer_001_feature_273",
+          "outer_001_feature_274",
+          "outer_001_feature_275",
+          "outer_001_feature_276"
+        ],
+        "name": "Pulmonary Diagnostics"
+      },
+      {
+        "disagreements": "The group includes a mixture of a clear confounder (PPI), an effect modifier (Psychiatric symptoms), and a candidate showing dual signals (Pupil reactivity).",
+        "evidence_ids": [
+          "multi:outer_001_feature_271:univariable:treatment",
+          "multi:outer_001_feature_272:univariable_rlearner:effect",
+          "multi:outer_001_feature_277:causal_forest:effect",
+          "multi:outer_001_feature_280:causal_forest:effect"
+        ],
+        "interpretation": "General medical and neurological comorbidities provide heterogeneous evidence for confounding and treatment-heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_271",
+          "outer_001_feature_272",
+          "outer_001_feature_277",
+          "outer_001_feature_280"
+        ],
+        "name": "Medical and Neurological History"
+      },
+      {
+        "disagreements": "Treatment prediction is strong for radiation session count (281), while radiosurgery history (282) is primarily a strong prognostic factor.",
+        "evidence_ids": [
+          "multi:outer_001_feature_281:predictive_forest:treatment",
+          "multi:outer_001_feature_282:univariable:outcome",
+          "multi:outer_001_feature_281:causal_forest:effect",
+          "multi:outer_001_feature_282:univariable_rlearner:effect"
+        ],
+        "interpretation": "Radiation-related history shows consistent evidence for treatment heterogeneity across different modalities.",
+        "member_feature_ids": [
+          "outer_001_feature_281",
+          "outer_001_feature_282"
+        ],
+        "name": "Radiation History"
+      },
+      {
+        "disagreements": "Signals for range of motion (283) and rash presence (284) are weak and inconsistent; rash/pruritus (285) shows a more robust prognostic and heterogeneity signal.",
+        "evidence_ids": [
+          "multi:outer_001_feature_285:predictive_forest:outcome",
+          "multi:outer_001_feature_285:causal_forest:effect"
+        ],
+        "interpretation": "Cutaneous and sensory indicators vary in strength, with the combined rash/pruritus measure providing the most reliable signal.",
+        "member_feature_ids": [
+          "outer_001_feature_283",
+          "outer_001_feature_284",
+          "outer_001_feature_285"
+        ],
+        "name": "Cutaneous and Sensory Indicators"
+      },
+      {
+        "disagreements": "Respiratory rate (287) is a powerful predictor of both treatment and outcome, whereas renal function (286) primarily predicts treatment.",
+        "evidence_ids": [
+          "multi:outer_001_feature_287:univariable:treatment",
+          "multi:outer_001_feature_287:univariable:outcome",
+          "multi:outer_001_feature_286:predictive_forest:treatment"
+        ],
+        "interpretation": "Systemic vital signs and organ function show high utility for treatment prediction, with respiratory rate acting as a probable confounder.",
+        "member_feature_ids": [
+          "outer_001_feature_286",
+          "outer_001_feature_287"
+        ],
+        "name": "Systemic Vitals and Renal Function"
+      },
+      {
+        "disagreements": "RET status (289) shows stronger treatment prediction, while DWI/ADC (288) and lymphadenopathy (290) lean more toward outcome prognosis and effect modification.",
+        "evidence_ids": [
+          "multi:outer_001_feature_289:predictive_forest:treatment",
+          "multi:outer_001_feature_288:predictive_forest:outcome",
+          "multi:outer_001_feature_290:causal_forest:effect"
+        ],
+        "interpretation": "Radiological and molecular markers demonstrate moderate to strong evidence for effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_288",
+          "outer_001_feature_289",
+          "outer_001_feature_290"
+        ],
+        "name": "Radiological and Molecular Markers"
+      },
+      {
+        "disagreements": "Feature 291 shows strong treatment prediction but a weak outcome signal; feature 292 shows very low support across all roles.",
+        "evidence_ids": [
+          "multi:outer_001_feature_291:predictive_forest:treatment",
+          "multi:outer_001_feature_291:causal_forest:effect",
+          "multi:outer_001_feature_291:univariable_rlearner:effect",
+          "multi:outer_001_feature_292:predictive_forest:outcome"
+        ],
+        "interpretation": "Evidence identifies ROS1 mutation status as a strong treatment predictor and credible effect modifier, while rearrangement status remains weakly supportive across models.",
+        "member_feature_ids": [
+          "outer_001_feature_291",
+          "outer_001_feature_292"
+        ],
+        "name": "ROS1 Genetic Status"
+      },
+      {
+        "disagreements": "Relative signal strength varies: creatinine (299) and albumin (295) are dominant treatment predictors, while calcium (297) is a stronger outcome predictor.",
+        "evidence_ids": [
+          "multi:outer_001_feature_295:univariable:treatment",
+          "multi:outer_001_feature_295:univariable:outcome",
+          "multi:outer_001_feature_295:causal_forest:effect",
+          "multi:outer_001_feature_297:univariable:outcome",
+          "multi:outer_001_feature_299:univariable:treatment",
+          "multi:outer_001_feature_299:univariable_rlearner:effect",
+          "multi:outer_001_feature_300:causal_forest:effect"
+        ],
+        "interpretation": "Serum chemistry markers exhibit strong and consistent evidence for both confounding (predicting treatment and outcome) and effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_295",
+          "outer_001_feature_296",
+          "outer_001_feature_297",
+          "outer_001_feature_298",
+          "outer_001_feature_299",
+          "outer_001_feature_300"
+        ],
+        "name": "Comprehensive Metabolic Panel (CMP)"
+      },
+      {
+        "disagreements": "Feature 293 is entirely non-evaluable, whereas 294 shows a high support fraction for outcome prediction.",
+        "evidence_ids": [
+          "multi:outer_001_feature_294:predictive_forest:outcome",
+          "multi:outer_001_feature_294:causal_forest:effect"
+        ],
+        "interpretation": "Scapular metastasis is a strong outcome predictor and a credible effect modifier; RSV infection status provided no evaluable evidence.",
+        "member_feature_ids": [
+          "outer_001_feature_293",
+          "outer_001_feature_294"
+        ],
+        "name": "Clinical and Pathological Status"
+      },
+      {
+        "disagreements": "smoking_abstinence_date is entirely unevaluable; smoking_status shows weaker signals than smoking_cessation_duration.",
+        "evidence_ids": [
+          "multi:outer_001_feature_306:univariable:treatment",
+          "multi:outer_001_feature_306:penalized_main:treatment",
+          "multi:outer_001_feature_307:univariable:treatment"
+        ],
+        "interpretation": "Features related to tobacco use exhibit strong evidence for treatment prediction, particularly for cessation duration.",
+        "member_feature_ids": [
+          "outer_001_feature_306",
+          "outer_001_feature_307",
+          "outer_001_feature_305"
+        ],
+        "name": "Smoking History"
+      },
+      {
+        "disagreements": "sulci_and_cisterns_appearance shows strong effect modification but lacks the strong outcome prognostic signal seen in subdural_hemorrhage.",
+        "evidence_ids": [
+          "multi:outer_001_feature_309:penalized_main:outcome",
+          "multi:outer_001_feature_304:univariable:outcome",
+          "multi:outer_001_feature_304:univariable_rlearner:effect",
+          "multi:outer_001_feature_310:causal_forest:effect"
+        ],
+        "interpretation": "Imaging features of the skull and brain show consistent importance for both outcome prognosis and treatment effect heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_304",
+          "outer_001_feature_309",
+          "outer_001_feature_310"
+        ],
+        "name": "Cranial Neuroimaging Findings"
+      },
+      {
+        "disagreements": "Signals are moderate (support fractions 0.5-0.6) and lack the high-confidence univariable p-values seen in imaging or smoking duration.",
+        "evidence_ids": [
+          "multi:outer_001_feature_302:penalized_main:outcome",
+          "multi:outer_001_feature_302:predictive_forest:treatment",
+          "multi:outer_001_feature_308:predictive_forest:treatment"
+        ],
+        "interpretation": "Biological sex and STK11 mutation status show mixed signals across treatment, outcome, and effect scales.",
+        "member_feature_ids": [
+          "outer_001_feature_302",
+          "outer_001_feature_308"
+        ],
+        "name": "Patient Demographics and Genetics"
+      },
+      {
+        "disagreements": "No support for role as a prognostic factor or treatment predictor.",
+        "evidence_ids": [
+          "multi:outer_001_feature_303:univariable_rlearner:effect"
+        ],
+        "interpretation": "Presence of skeletal compression fractures is strongly linked to treatment effect heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_303"
+        ],
+        "name": "Skeletal Manifestations"
+      },
+      {
+        "disagreements": "Low support fractions and high p-values suggest this candidate is likely non-contributory.",
+        "evidence_ids": [
+          "multi:outer_001_feature_301:predictive_forest:treatment"
+        ],
+        "interpretation": "Serum sodium demonstrates weak and inconsistent evidence across all roles.",
+        "member_feature_ids": [
+          "outer_001_feature_301"
+        ],
+        "name": "Electrolyte Balance"
+      },
+      {
+        "disagreements": "Causal forest support for t_stage is stronger than R-learner support.",
+        "evidence_ids": [
+          "multi:outer_001_feature_311:univariable_rlearner:effect",
+          "multi:outer_001_feature_311:causal_forest:effect",
+          "multi:outer_001_feature_312:univariable_rlearner:effect",
+          "multi:outer_001_feature_312:causal_forest:effect",
+          "multi:outer_001_feature_314:causal_forest:effect"
+        ],
+        "interpretation": "Features characterizing the surgical outcome and tumor extent show consistent evidence for effect modification across R-learner and causal forest models.",
+        "member_feature_ids": [
+          "outer_001_feature_311",
+          "outer_001_feature_312",
+          "outer_001_feature_314"
+        ],
+        "name": "Surgical and Pathological Status"
+      },
+      {
+        "disagreements": "Systolic blood pressure shows near-universal support, whereas tissue thickening relies on specific model families.",
+        "evidence_ids": [
+          "multi:outer_001_feature_313:univariable:treatment",
+          "multi:outer_001_feature_313:univariable:outcome",
+          "multi:outer_001_feature_319:penalized_main:treatment",
+          "multi:outer_001_feature_319:predictive_forest:outcome"
+        ],
+        "interpretation": "Measurements of systemic physiology and localized tissue characteristics are strong predictors of both treatment assignment and outcome prognosis.",
+        "member_feature_ids": [
+          "outer_001_feature_313",
+          "outer_001_feature_319"
+        ],
+        "name": "Clinical and Physiological Baseline"
+      },
+      {
+        "disagreements": "High consistency for tiotropium contradicts the weak or fragmented signals for targeted therapy, NGS, and TKI use.",
+        "evidence_ids": [
+          "multi:outer_001_feature_318:univariable:treatment",
+          "multi:outer_001_feature_318:univariable:outcome",
+          "multi:outer_001_feature_315:univariable:effect",
+          "multi:outer_001_feature_316:univariable_rlearner:effect"
+        ],
+        "interpretation": "Prior medication and testing exhibit varying levels of importance; tiotropium use is a strong predictor of treatment and outcome, while others are weak.",
+        "member_feature_ids": [
+          "outer_001_feature_315",
+          "outer_001_feature_316",
+          "outer_001_feature_318",
+          "outer_001_feature_320"
+        ],
+        "name": "Treatment and Diagnostic History"
+      }
+    ]
+  },
+  "system": "You review pretreatment candidate measurements using modeling evidence\nfrom one outer-training fold. First identify themes across candidates; then\nreconcile their roles as confounder, effect_modifier, both, or neither.\nAll evidence is fallible. No individual family, p-value, or support frequency is\na hard selection gate. A credible complementary signal can justify retention\neven when other methods shrink it away. Do not mistake correlated aliases or\nproxies for multiple independent discoveries. Themes organize evidence; they\ndo not establish equivalence, merge measurements, or transfer a role to every\ntheme member. Preserve investigator-locked roles exactly.\n\nTreatment prediction, outcome prognosis, and confounding are distinct. Discuss\nwhether a candidate could be a common cause rather than an instrument or only a\nprognostic factor. Effect modification needs treatment-heterogeneity evidence;\noutcome main-effect importance alone does not establish it. Univariable logistic\ninteractions are on the log-odds scale and unadjusted for other covariates.\nOrthogonal linear models, candidate R-learners, and causal forests assess the\nprobability/outcome scale after elastic-net nuisance adjustment. Their targets\nand biases differ. A model family is evidence, not an independent replication.\n\nUse exposure and evaluability denominators. Missing or nonconverged fits are not\nnegative votes. Repeated samples and folds overlap; support fractions are not\ncausal probabilities or formal stability-selection error guarantees. Raw and BH\np-values do not correct the upstream adaptive discovery process. Permutation\nimportance can be diluted by correlated alternatives and does not prove a\ncausal role. Compare fold consistency, methods, subsets, and conflicting facts.\nDefinitions and theme names cannot establish a role without the supplied\nempirical evidence. Never invent an oracle, data-generating process, or hidden\ntruth. Return the requested JSON and cite only supplied evidence IDs."
+}

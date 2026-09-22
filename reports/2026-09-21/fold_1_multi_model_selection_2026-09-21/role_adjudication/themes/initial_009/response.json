@@ -1,0 +1,68 @@
+{
+  "themes": [
+    {
+      "disagreements": "Renal markers show high consistency in treatment prediction but lower, more variable support for outcome prognosis.",
+      "evidence_ids": [
+        "multi:outer_001_feature_095:univariable:treatment",
+        "multi:outer_001_feature_096:univariable:treatment",
+        "multi:outer_001_feature_095:predictive_forest:treatment",
+        "multi:outer_001_feature_096:predictive_forest:treatment",
+        "multi:outer_001_feature_095:causal_forest:effect",
+        "multi:outer_001_feature_096:causal_forest:effect"
+      ],
+      "interpretation": "Candidates measuring kidney performance demonstrate strong predictive signals for treatment assignment and moderate signals for effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_095",
+        "outer_001_feature_096"
+      ],
+      "name": "Renal Function"
+    },
+    {
+      "disagreements": "Deconditioning shows strong signals across roles, whereas CRP level evidence is weak and lacks consistency.",
+      "evidence_ids": [
+        "multi:outer_001_feature_099:univariable:outcome",
+        "multi:outer_001_feature_099:univariable_rlearner:effect",
+        "multi:outer_001_feature_099:causal_forest:effect",
+        "multi:outer_001_feature_093:penalized_main:outcome",
+        "multi:outer_001_feature_093:penalized_interactions:effect"
+      ],
+      "interpretation": "Measures of general patient health, inflammation, and infection status provide evidence for both outcome prognosis and treatment effect heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_093",
+        "outer_001_feature_097",
+        "outer_001_feature_099"
+      ],
+      "name": "Systemic and Clinical Status"
+    },
+    {
+      "disagreements": "Treatment and outcome signals are moderate, while the causal forest provides the strongest supporting signal for the effect modification role.",
+      "evidence_ids": [
+        "multi:outer_001_feature_100:predictive_forest:treatment",
+        "multi:outer_001_feature_100:predictive_forest:outcome",
+        "multi:outer_001_feature_100:causal_forest:effect"
+      ],
+      "interpretation": "Blood pressure demonstrates a moderate relationship with treatment and outcome, coupled with a strong signal for effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_100"
+      ],
+      "name": "Hemodynamics"
+    },
+    {
+      "disagreements": "Cough productivity shows a moderate outcome signal but lacks the treatment or effect signals necessary for a confounder or modifier role.",
+      "evidence_ids": [
+        "multi:outer_001_feature_091:penalized_main:outcome",
+        "multi:outer_001_feature_092:predictive_forest:treatment",
+        "multi:outer_001_feature_094:univariable_rlearner:effect",
+        "multi:outer_001_feature_098:univariable_rlearner:effect"
+      ],
+      "interpretation": "Candidate measurements of cough characteristics and cranial nerve status show minimal or inconsistent evidence across all roles.",
+      "member_feature_ids": [
+        "outer_001_feature_091",
+        "outer_001_feature_092",
+        "outer_001_feature_094",
+        "outer_001_feature_098"
+      ],
+      "name": "Cough and Neurological Markers"
+    }
+  ]
+}

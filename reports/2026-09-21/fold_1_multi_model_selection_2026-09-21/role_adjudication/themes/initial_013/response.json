@@ -1,0 +1,53 @@
+{
+  "themes": [
+    {
+      "disagreements": "Variation in the strength of treatment prediction; while all exhibit some predictive forest support, only feature_133 shows meaningful support in penalized main models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_131:causal_forest:effect",
+        "multi:outer_001_feature_132:causal_forest:effect",
+        "multi:outer_001_feature_133:penalized_main:treatment",
+        "multi:outer_001_feature_133:causal_forest:effect"
+      ],
+      "interpretation": "Family history measurements consistently emerge as candidates for effect modification, with an additional confounding signal for myocardial infarction history.",
+      "member_feature_ids": [
+        "outer_001_feature_131",
+        "outer_001_feature_132",
+        "outer_001_feature_133"
+      ],
+      "name": "Family History"
+    },
+    {
+      "disagreements": "Feature_139 exhibits only weak, inconsistent signals across all roles, contrasting with the strong effect-modification signals of fatigue and neutropenia.",
+      "evidence_ids": [
+        "multi:outer_001_feature_134:causal_forest:effect",
+        "multi:outer_001_feature_135:causal_forest:effect",
+        "multi:outer_001_feature_137:univariable_rlearner:effect",
+        "multi:outer_001_feature_139:penalized_main:outcome"
+      ],
+      "interpretation": "Clinical symptoms and toxicity markers primarily demonstrate evidence for effect modification and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_134",
+        "outer_001_feature_135",
+        "outer_001_feature_137",
+        "outer_001_feature_139"
+      ],
+      "name": "Clinical Status and Toxicity"
+    },
+    {
+      "disagreements": "FGFR1 amplification shows a distinct and stronger treatment prediction signal (penalized_main) compared to gender or contrast use.",
+      "evidence_ids": [
+        "multi:outer_001_feature_136:penalized_main:treatment",
+        "multi:outer_001_feature_136:causal_forest:effect",
+        "multi:outer_001_feature_138:causal_forest:effect",
+        "multi:outer_001_feature_140:causal_forest:effect"
+      ],
+      "interpretation": "Patient and tumor profiling features suggest a mix of confounding and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_136",
+        "outer_001_feature_138",
+        "outer_001_feature_140"
+      ],
+      "name": "Patient and Tumor Profiling"
+    }
+  ]
+}

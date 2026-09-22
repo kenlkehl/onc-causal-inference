@@ -1208,7 +1208,21 @@ or candidate-wise top-N rank. P/q values and candidate-wise rankings remain
 diagnostics. LLM annotations, when enabled, cannot change inclusion or routing,
 and annotation failures do not veto estimation. See
 [independent task selection](docs/stage2_independent_tasks.md) for the full
-procedure and artifact fields. In either mode, inner-fold p/q values describe
+procedure and artifact fields.
+
+In `selection_mode: "multi_model"`, seven modeling families inform LLM theme
+reviews and broad role assignments. Automatic modifier-count selection is
+enabled by default in this mode: each count-validation fold rebuilds the
+modeling evidence and LLM ranking using its training patients, then compares
+ranked modifier prefixes using held-out R-loss. Minimum mean R-loss chooses the
+count; a paired one-standard-error rule is optional. This step preserves all
+retained confounders and investigator-locked roles. Set
+`stage2.statistical_selection.multi_model.modifier_count.enabled: false` to
+retain the broad LLM modifier assignments. See the
+[multi-model Stage 2 procedure](docs/stage2_multi_model.md) for configuration,
+checkpointing, and the boundaries of this nested validation.
+
+In all modes, inner-fold p/q values describe
 adaptively discovered candidates; they do not establish causal identification
 or confirmatory significance for the entire pipeline.
 

@@ -1,0 +1,239 @@
+{
+  "decisions": [
+    {
+      "cross_method_reconciliation": "The candidate demonstrates consistent association with treatment (PF SF 0.4, PM SF 0.2) and outcome (PF SF 0.46, PM SF 0.13), and modest evidence for treatment heterogeneity across learners.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_141:predictive_forest:treatment",
+        "multi:outer_001_feature_141:predictive_forest:outcome",
+        "multi:outer_001_feature_141:univariable_rlearner:effect",
+        "multi:outer_001_feature_141:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_141:predictive_forest:treatment",
+        "multi:outer_001_feature_141:predictive_forest:outcome",
+        "multi:outer_001_feature_141:univariable_rlearner:effect",
+        "multi:outer_001_feature_141:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_141",
+      "inner_fold_consistency": "Mixed consistency; outcome signal is stronger in folds 2, 3, 4, and 5 for predictive forest, while effect signal is sparse.",
+      "rationale": "Signals for treatment and outcome establish confounding; supporting signals from R-learner and Causal Forest establish effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Strong effect modification signal (RL SF 0.6) and treatment association (Uni SF 0.33), but no evidence of outcome association.",
+      "evidence_against": [
+        "multi:outer_001_feature_142:univariable:outcome"
+      ],
+      "evidence_for": [
+        "multi:outer_001_feature_142:univariable_rlearner:effect",
+        "multi:outer_001_feature_142:univariable:treatment"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_142:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_142",
+      "inner_fold_consistency": "Strongly consistent effect signal in folds 2, 3, and 5.",
+      "rationale": "Strong R-learner support establishes effect modification; lack of outcome association precludes confounding.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Treatment and outcome signals found in predictive forests, with consistent effect modification signals from R-learner and Causal Forest.",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_143:predictive_forest:treatment",
+        "multi:outer_001_feature_143:predictive_forest:outcome",
+        "multi:outer_001_feature_143:univariable_rlearner:effect",
+        "multi:outer_001_feature_143:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_143:predictive_forest:treatment",
+        "multi:outer_001_feature_143:predictive_forest:outcome",
+        "multi:outer_001_feature_143:univariable_rlearner:effect",
+        "multi:outer_001_feature_143:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_143",
+      "inner_fold_consistency": "Consistent effect signals in folds 2, 3 for R-learner and 1, 4, 5 for Causal Forest.",
+      "rationale": "Association with treatment and outcome creates confounding role, and R-learner/Causal Forest support establish effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong outcome signal (PF SF 0.73) and moderate treatment association (PF SF 0.2), paired with effect signals (RL SF 0.26, CF SF 0.13).",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_144:predictive_forest:outcome",
+        "multi:outer_001_feature_144:predictive_forest:treatment",
+        "multi:outer_001_feature_144:univariable_rlearner:effect",
+        "multi:outer_001_feature_144:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_144:predictive_forest:outcome",
+        "multi:outer_001_feature_144:predictive_forest:treatment",
+        "multi:outer_001_feature_144:univariable_rlearner:effect",
+        "multi:outer_001_feature_144:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_144",
+      "inner_fold_consistency": "Strongly consistent outcome signals across almost all folds.",
+      "rationale": "Confounding is established by treatment and outcome signals; modest learner support indicates effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Significant treatment (PF SF 0.66, PM SF 0.53) and outcome (PF SF 0.53) signals, with strong effect modification support (CF SF 0.53, RL SF 0.46).",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_145:predictive_forest:treatment",
+        "multi:outer_001_feature_145:predictive_forest:outcome",
+        "multi:outer_001_feature_145:causal_forest:effect",
+        "multi:outer_001_feature_145:univariable_rlearner:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_145:predictive_forest:treatment",
+        "multi:outer_001_feature_145:predictive_forest:outcome",
+        "multi:outer_001_feature_145:causal_forest:effect",
+        "multi:outer_001_feature_145:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_145",
+      "inner_fold_consistency": "High consistency for treatment and effect signals across folds.",
+      "rationale": "Comprehensive evidence for both confounding (treatment/outcome) and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Clear treatment (PF SF 0.53) and outcome (PF SF 0.46) association, combined with strong effect modification evidence (Uni SF 0.53, RL SF 0.4, CF SF 0.4).",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_146:predictive_forest:treatment",
+        "multi:outer_001_feature_146:predictive_forest:outcome",
+        "multi:outer_001_feature_146:univariable:effect",
+        "multi:outer_001_feature_146:univariable_rlearner:effect",
+        "multi:outer_001_feature_146:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_146:predictive_forest:treatment",
+        "multi:outer_001_feature_146:predictive_forest:outcome",
+        "multi:outer_001_feature_146:univariable:effect",
+        "multi:outer_001_feature_146:univariable_rlearner:effect",
+        "multi:outer_001_feature_146:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_146",
+      "inner_fold_consistency": "Consistent support for effect modification across multiple methods.",
+      "rationale": "Strong evidence supports both confounding and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong treatment signal (Uni SF 0.93) and significant outcome signal (PI SF 0.6, PM SF 0.46), with strong effect signals (RL SF 0.66, CF SF 0.6).",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_147:univariable:treatment",
+        "multi:outer_001_feature_147:penalized_interactions:outcome",
+        "multi:outer_001_feature_147:univariable_rlearner:effect",
+        "multi:outer_001_feature_147:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_147:univariable:treatment",
+        "multi:outer_001_feature_147:penalized_interactions:outcome",
+        "multi:outer_001_feature_147:univariable_rlearner:effect",
+        "multi:outer_001_feature_147:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_147",
+      "inner_fold_consistency": "Very high consistency across all folds for treatment association.",
+      "rationale": "Extremely strong evidence for confounding and high learner support for effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong treatment association (Uni SF 0.6) and strong effect modification signal (RL SF 0.6), but zero evidence of outcome association.",
+      "evidence_against": [
+        "multi:outer_001_feature_148:univariable:outcome"
+      ],
+      "evidence_for": [
+        "multi:outer_001_feature_148:univariable:treatment",
+        "multi:outer_001_feature_148:univariable_rlearner:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_148:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_148",
+      "inner_fold_consistency": "Consistent effect signal in folds 2, 3, and 5.",
+      "rationale": "Strong R-learner support identifies effect modification; lack of outcome signal precludes confounding.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Moderate treatment (PF SF 0.6) and outcome (PF SF 0.26) signals, with weak effect signals (RL SF 0.2, CF SF 0.2).",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_149:predictive_forest:treatment",
+        "multi:outer_001_feature_149:predictive_forest:outcome",
+        "multi:outer_001_feature_149:univariable_rlearner:effect",
+        "multi:outer_001_feature_149:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_149:predictive_forest:treatment",
+        "multi:outer_001_feature_149:predictive_forest:outcome",
+        "multi:outer_001_feature_149:univariable_rlearner:effect",
+        "multi:outer_001_feature_149:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_149",
+      "inner_fold_consistency": "Treatment signals are consistent across folds; effect signals are sparse.",
+      "rationale": "Treatment and outcome associations establish confounding; learner signals support effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Very strong treatment (Uni SF 0.86) and outcome (Uni SF 1.0) signals, with support for effect modification (RL SF 0.4, CF SF 0.33).",
+      "evidence_against": [],
+      "evidence_for": [
+        "multi:outer_001_feature_150:univariable:treatment",
+        "multi:outer_001_feature_150:univariable:outcome",
+        "multi:outer_001_feature_150:univariable_rlearner:effect",
+        "multi:outer_001_feature_150:causal_forest:effect"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_150:univariable:treatment",
+        "multi:outer_001_feature_150:univariable:outcome",
+        "multi:outer_001_feature_150:univariable_rlearner:effect",
+        "multi:outer_001_feature_150:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_150",
+      "inner_fold_consistency": "Extremely high consistency for treatment and outcome across all folds.",
+      "rationale": "Strong confounding evidence combined with learner-based effect modification signals.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    }
+  ],
+  "summary": "The analyzed candidates predominantly exhibit a dual role as both confounders and effect modifiers. High-magnitude signals for heart rate and growth factor support highlight the strongest confounding evidence. Genetic mutation and head shape/trauma status emerge as pure effect modifiers due to significant R-learner support in the absence of outcome prognosis signals."
+}

@@ -1,0 +1,62 @@
+{
+  "themes": [
+    {
+      "disagreements": "Brain metastases presence (052) is a strong prognostic factor without effect modification, whereas calvarium lesions (057) and location (051) show complementary signals for effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_052:univariable:outcome",
+        "multi:outer_001_feature_053:univariable:outcome",
+        "multi:outer_001_feature_057:univariable:outcome",
+        "multi:outer_001_feature_051:causal_forest:effect",
+        "multi:outer_001_feature_057:causal_forest:effect"
+      ],
+      "interpretation": "Features describing the presence, location, and radiographic characteristics of brain metastases, showing a mix of strong prognostic signals and evidence for treatment effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_051",
+        "outer_001_feature_052",
+        "outer_001_feature_053",
+        "outer_001_feature_057"
+      ],
+      "name": "CNS Metastasis and Intracranial Involvement"
+    },
+    {
+      "disagreements": "Brainstem signal (054) has more robust support across multiple effect-estimation methods than brainstem size (055).",
+      "evidence_ids": [
+        "multi:outer_001_feature_054:causal_forest:effect",
+        "multi:outer_001_feature_055:causal_forest:effect",
+        "multi:outer_001_feature_054:univariable_rlearner:effect"
+      ],
+      "interpretation": "Evaluation of brainstem signal and size, where the primary evidence emerges in effect modification rather than main treatment or outcome effects.",
+      "member_feature_ids": [
+        "outer_001_feature_054",
+        "outer_001_feature_055"
+      ],
+      "name": "Brainstem Morphological Assessment"
+    },
+    {
+      "disagreements": "Cancer diagnosis (058) has moderate treatment-prediction support, while cancer location (059) lacks consistent signal across all roles.",
+      "evidence_ids": [
+        "multi:outer_001_feature_058:penalized_main:treatment"
+      ],
+      "interpretation": "Broad cancer diagnosis and primary location, which primarily serve as indicators of treatment assignment or exhibit no significant modeling signal.",
+      "member_feature_ids": [
+        "outer_001_feature_058",
+        "outer_001_feature_059"
+      ],
+      "name": "General Cancer Characteristics"
+    },
+    {
+      "disagreements": "Fatigue (060) is a powerful prognostic factor and candidate effect modifier, whereas calorie intake (056) is primarily associated with treatment prediction.",
+      "evidence_ids": [
+        "multi:outer_001_feature_060:univariable:outcome",
+        "multi:outer_001_feature_056:penalized_main:treatment",
+        "multi:outer_001_feature_060:causal_forest:effect"
+      ],
+      "interpretation": "Nutritional status and cancer-related fatigue, showing strong prognostic value and associations with treatment prediction.",
+      "member_feature_ids": [
+        "outer_001_feature_056",
+        "outer_001_feature_060"
+      ],
+      "name": "Patient Systemic and Symptomatic State"
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "themes": [
+    {
+      "disagreements": "While univariable and forest models show strong confounding, penalized main effects are largely shrunk, which is typical for highly correlated comorbidities.",
+      "evidence_ids": [
+        "multi:outer_001_feature_159:univariable:treatment",
+        "multi:outer_001_feature_159:univariable:outcome",
+        "multi:outer_001_feature_160:univariable:treatment",
+        "multi:outer_001_feature_160:predictive_forest:outcome"
+      ],
+      "interpretation": "Strong signals across univariable and forest models for both treatment prediction and outcome prognosis, indicating these factors are likely common causes of treatment assignment and outcome.",
+      "member_feature_ids": [
+        "outer_001_feature_159",
+        "outer_001_feature_160"
+      ],
+      "name": "Chronic Metabolic Comorbidities"
+    },
+    {
+      "disagreements": "Hematuria (154) shows a strong R-learner signal but minimal evidence for main effects on treatment or outcome, whereas hemoglobin (155) is more prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_153:univariable_rlearner:effect",
+        "multi:outer_001_feature_154:univariable_rlearner:effect",
+        "multi:outer_001_feature_155:predictive_forest:outcome",
+        "multi:outer_001_feature_156:penalized_main:treatment"
+      ],
+      "interpretation": "Measurements related to blood composition and respiratory symptoms show consistent support for effect modification and prognostic utility, often overlapping with treatment prediction.",
+      "member_feature_ids": [
+        "outer_001_feature_153",
+        "outer_001_feature_154",
+        "outer_001_feature_155",
+        "outer_001_feature_156"
+      ],
+      "name": "Hematologic and Respiratory Indices"
+    },
+    {
+      "disagreements": "HEENT status (151) is generally weak, while height (152) and hilar lymphadenopathy (158) show more robust predictive power.",
+      "evidence_ids": [
+        "multi:outer_001_feature_152:causal_forest:effect",
+        "multi:outer_001_feature_157:univariable_rlearner:effect",
+        "multi:outer_001_feature_158:predictive_forest:outcome",
+        "multi:outer_001_feature_151:univariable_rlearner:effect"
+      ],
+      "interpretation": "Features describing physical measurements and anatomical findings show mixed support, often leaning toward effect modification or prognostic value.",
+      "member_feature_ids": [
+        "outer_001_feature_151",
+        "outer_001_feature_152",
+        "outer_001_feature_157",
+        "outer_001_feature_158"
+      ],
+      "name": "Physical and Anatomic Attributes"
+    }
+  ]
+}

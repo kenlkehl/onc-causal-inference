@@ -1,0 +1,16 @@
+{
+  "at": "2026-09-21T22:45:16.669192+00:00",
+  "reason": "Independent batches are valid; increase throughput on the shared server.",
+  "previous_workers": 4,
+  "new_workers": 16,
+  "completed_reviews_preserved": 6,
+  "interrupted_request_ids": [
+    "8008d6160e2b4be099e14de0cb5ae9fa",
+    "aea9bd10d49d40b5982320f644e491ed",
+    "b8c7b5d0e30d4004b2e03d7b06df201a",
+    "e42730a7527f476983a72baae757acc8"
+  ],
+  "old_script_sha256": "e38a559947f95c00929dbbdae1cbcd01b8fd58927cca3ae0bf2aa7f6029d5be2",
+  "new_script_sha256": "eb8cb2087e22a97f8e2a4976a4584b2c1392af9632de1aa93c3cae519d1a6d86",
+  "scientific_configuration_prompts_validators_and_model_unchanged": true
+}

@@ -1,0 +1,60 @@
+{
+  "themes": [
+    {
+      "disagreements": "Cough presence (090) is a weak signal compared to the strong signals seen in COPD (087, 088). CAP presence (081) primarily predicts the outcome rather than the treatment.",
+      "evidence_ids": [
+        "multi:outer_001_feature_087:univariable:treatment",
+        "multi:outer_001_feature_087:univariable:outcome",
+        "multi:outer_001_feature_088:univariable:treatment",
+        "multi:outer_001_feature_088:univariable:outcome",
+        "multi:outer_001_feature_081:univariable:outcome"
+      ],
+      "interpretation": "Features related to chronic and acute respiratory conditions. COPD presence and severity show strong, consistent signals for both treatment prediction and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_081",
+        "outer_001_feature_087",
+        "outer_001_feature_088",
+        "outer_001_feature_090"
+      ],
+      "name": "COPD and Respiratory Health"
+    },
+    {
+      "disagreements": "Coronary artery disease (089) shows negligible signal compared to the aggregate comorbidity count (082).",
+      "evidence_ids": [
+        "multi:outer_001_feature_082:univariable:treatment",
+        "multi:outer_001_feature_082:univariable:outcome"
+      ],
+      "interpretation": "Broad measures of patient sickness. Total comorbidity count is a highly significant predictor of both treatment assignment and outcome.",
+      "member_feature_ids": [
+        "outer_001_feature_082",
+        "outer_001_feature_089"
+      ],
+      "name": "General Health and Comorbidity Burden"
+    },
+    {
+      "disagreements": "CMP results (084) strongly predict treatment but not the outcome, whereas CBC (083) and contrast concentration (086) provide little to no evidence for any role.",
+      "evidence_ids": [
+        "multi:outer_001_feature_084:univariable:treatment"
+      ],
+      "interpretation": "Qualitative and quantitative results from standard blood and imaging panels.",
+      "member_feature_ids": [
+        "outer_001_feature_083",
+        "outer_001_feature_084",
+        "outer_001_feature_086"
+      ],
+      "name": "Laboratory Diagnostics"
+    },
+    {
+      "disagreements": "Unlike the respiratory/comorbidity features, confusion presents as a signal of treatment effect heterogeneity rather than a main-effect confounder.",
+      "evidence_ids": [
+        "multi:outer_001_feature_085:univariable:effect",
+        "multi:outer_001_feature_085:univariable_rlearner:effect"
+      ],
+      "interpretation": "Assessment of current neurological state upon presentation.",
+      "member_feature_ids": [
+        "outer_001_feature_085"
+      ],
+      "name": "Acute Clinical Symptoms"
+    }
+  ]
+}

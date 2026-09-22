@@ -1,0 +1,96 @@
+{
+  "all_candidates_present_in_every_family_and_repeat": true,
+  "all_outer_and_inner_partitions_preserved": true,
+  "checkpoint_hashes_verified": 310,
+  "family_cell_counts": {
+    "causal_forest": 115,
+    "orthogonal_linear": 15,
+    "penalized_interactions": 15,
+    "penalized_main": 15,
+    "predictive_forest": 115,
+    "univariable": 15,
+    "univariable_rlearner": 15
+  },
+  "family_subset_cells": 305,
+  "nuisance_cv_nonconverged_grid_fits": 0,
+  "nuisance_fits_converged": 40,
+  "nuisance_penalties_at_grid_boundary": 4,
+  "record_status_counts": [
+    {
+      "count": 69,
+      "family": "causal_forest",
+      "status": "not_evaluable"
+    },
+    {
+      "count": 5211,
+      "family": "causal_forest",
+      "status": "ok"
+    },
+    {
+      "count": 69,
+      "family": "orthogonal_linear",
+      "status": "not_evaluable"
+    },
+    {
+      "count": 5211,
+      "family": "orthogonal_linear",
+      "status": "ok"
+    },
+    {
+      "count": 128,
+      "family": "penalized_interactions",
+      "status": "not_evaluable"
+    },
+    {
+      "count": 10432,
+      "family": "penalized_interactions",
+      "status": "ok"
+    },
+    {
+      "count": 128,
+      "family": "penalized_main",
+      "status": "not_evaluable"
+    },
+    {
+      "count": 10432,
+      "family": "penalized_main",
+      "status": "ok"
+    },
+    {
+      "count": 128,
+      "family": "predictive_forest",
+      "status": "not_evaluable"
+    },
+    {
+      "count": 10432,
+      "family": "predictive_forest",
+      "status": "ok"
+    },
+    {
+      "count": 1275,
+      "family": "univariable",
+      "status": "not_evaluable"
+    },
+    {
+      "count": 14565,
+      "family": "univariable",
+      "status": "ok"
+    },
+    {
+      "count": 69,
+      "family": "univariable_rlearner",
+      "status": "not_evaluable"
+    },
+    {
+      "count": 5211,
+      "family": "univariable_rlearner",
+      "status": "ok"
+    }
+  ],
+  "selection_effect_eligible_rows": 710,
+  "source_sha256": "6b79fcf7998049e0ba314970addc7c214bd34d6a1d9b16f60b5d5520c812c01e",
+  "statistical_evidence_sha256": "28e8918ed605bc52cbf76b1659c2fc532de4069b061f04831a282c9c45e33092",
+  "status": "passed",
+  "verified_at": "2026-09-21T23:22:56.118724+00:00",
+  "wholly_unevaluable_cells": []
+}

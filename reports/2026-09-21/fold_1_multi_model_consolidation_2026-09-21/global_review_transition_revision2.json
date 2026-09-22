@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-22T00:17:45.331805+00:00",
+  "stopped_pids": [
+    506253
+  ],
+  "reason": "Two completed responses failed exhaustive partition bookkeeping. Move unchanged-candidate singleton coverage into deterministic code, retain substantive grouping/role/citation/budget constraints, improve error details, and retain invalid responses for audit.",
+  "original_script_and_input_preserved": true,
+  "oracle_accessed": false
+}

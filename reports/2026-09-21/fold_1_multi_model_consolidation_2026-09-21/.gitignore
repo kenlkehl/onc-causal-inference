@@ -1,0 +1,3 @@
+# Keep local service state and execution logs out of the experiment snapshot.
+llm_runtime/
+*.log

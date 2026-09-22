@@ -1,0 +1,66 @@
+{
+  "themes": [
+    {
+      "disagreements": "Causal forest and R-learner show strong effect modification for BUN, while GFR and BP are more clearly confounders.",
+      "evidence_ids": [
+        "multi:outer_001_feature_033:univariable:treatment",
+        "multi:outer_001_feature_036:univariable:treatment",
+        "multi:outer_001_feature_036:univariable:outcome",
+        "multi:outer_001_feature_037:univariable:treatment",
+        "multi:outer_001_feature_037:causal_forest:effect"
+      ],
+      "interpretation": "High-confidence physiological and renal indicators that strongly predict both treatment assignment and outcome.",
+      "member_feature_ids": [
+        "outer_001_feature_033",
+        "outer_001_feature_036",
+        "outer_001_feature_037"
+      ],
+      "name": "Renal and Cardiovascular Vitals"
+    },
+    {
+      "disagreements": "Predictive forest shows strong outcome signals for weight and biopsy method, but these are not replicated in univariable or penalized models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_032:penalized_main:outcome",
+        "multi:outer_001_feature_032:causal_forest:effect",
+        "multi:outer_001_feature_034:predictive_forest:outcome",
+        "multi:outer_001_feature_040:predictive_forest:outcome"
+      ],
+      "interpretation": "Biomarkers and procedural details that appear primarily to influence prognosis or treatement response heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_032",
+        "outer_001_feature_034",
+        "outer_001_feature_040"
+      ],
+      "name": "Biomarkers and Clinical Procedures"
+    },
+    {
+      "disagreements": "Consistent moderate signals in predictive forests across anthropometrics, but lack of strong univariable significance.",
+      "evidence_ids": [
+        "multi:outer_001_feature_038:univariable:treatment",
+        "multi:outer_001_feature_038:predictive_forest:treatment",
+        "multi:outer_001_feature_039:predictive_forest:outcome",
+        "multi:outer_001_feature_040:causal_forest:effect"
+      ],
+      "interpretation": "General physical characteristics with weak-to-moderate predictive value across roles.",
+      "member_feature_ids": [
+        "outer_001_feature_038",
+        "outer_001_feature_039",
+        "outer_001_feature_040"
+      ],
+      "name": "Anthropometrics and Body State"
+    },
+    {
+      "disagreements": "Signals are generally sparse and lack cross-method consistency.",
+      "evidence_ids": [
+        "multi:outer_001_feature_031:predictive_forest:treatment",
+        "multi:outer_001_feature_035:univariable:treatment"
+      ],
+      "interpretation": "Prior medication history with insufficient evidence to establish a causal role.",
+      "member_feature_ids": [
+        "outer_001_feature_031",
+        "outer_001_feature_035"
+      ],
+      "name": "Prior Medication History"
+    }
+  ]
+}

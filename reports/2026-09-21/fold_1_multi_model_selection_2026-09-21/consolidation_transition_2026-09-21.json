@@ -1,0 +1,14 @@
+{
+  "at": "2026-09-21T23:39:06.215593+00:00",
+  "action": "pause_controller_before_oracle_evaluation",
+  "controller": {
+    "pid": 476180,
+    "command": [
+      "/home/klkehl/thisenv/bin/python",
+      "-u",
+      "reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/run_remaining_concurrency16_2026-09-21.py"
+    ]
+  },
+  "baseline_fit_child_may_continue": true,
+  "reason": "User requested further consolidation after broad 224-modifier selection; freeze consolidated selection and predictions before oracle access."
+}

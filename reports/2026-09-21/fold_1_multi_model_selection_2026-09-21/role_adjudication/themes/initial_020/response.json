@@ -1,0 +1,53 @@
+{
+  "themes": [
+    {
+      "disagreements": "The surgical procedure of dissection (201) is a strong treatment predictor and effect modifier, whereas the pathological status (202) provides negligible signal across all roles.",
+      "evidence_ids": [
+        "multi:outer_001_feature_201:univariable:treatment",
+        "multi:outer_001_feature_201:causal_forest:effect",
+        "multi:outer_001_feature_201:univariable_rlearner:effect"
+      ],
+      "interpretation": "Mediastinal assessment indicators, distinguishing between the act of dissection and the resulting nodal status.",
+      "member_feature_ids": [
+        "outer_001_feature_201",
+        "outer_001_feature_202"
+      ],
+      "name": "Mediastinal Assessment"
+    },
+    {
+      "disagreements": "Cisplatin (204) shows strong outcome prognosis and effect modification; gemcitabine (208) is primarily prognostic; G12C inhibitors (207) show only weak evidence of effect modification via R-learner.",
+      "evidence_ids": [
+        "multi:outer_001_feature_204:univariable:outcome",
+        "multi:outer_001_feature_204:causal_forest:effect",
+        "multi:outer_001_feature_208:predictive_forest:outcome",
+        "multi:outer_001_feature_207:univariable_rlearner:effect"
+      ],
+      "interpretation": "Systemic chemotherapy agents with varying roles in outcome prognosis and treatment effect heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_204",
+        "outer_001_feature_207",
+        "outer_001_feature_208"
+      ],
+      "name": "Systemic Chemotherapy"
+    },
+    {
+      "disagreements": "Lisinopril (209) is a clear confounder; calcium carbonate (203) acts as both a confounder and effect modifier; denosumab (205) is primarily an effect modifier; dexamethasone (206) and MET inhibitors (210) are weak or only prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_209:univariable:treatment",
+        "multi:outer_001_feature_209:univariable:outcome",
+        "multi:outer_001_feature_203:univariable:outcome",
+        "multi:outer_001_feature_203:causal_forest:effect",
+        "multi:outer_001_feature_205:univariable:effect"
+      ],
+      "interpretation": "Supportive, concurrent, or targeted medications exhibiting a range of confounding and effect-modifying signals.",
+      "member_feature_ids": [
+        "outer_001_feature_203",
+        "outer_001_feature_205",
+        "outer_001_feature_206",
+        "outer_001_feature_209",
+        "outer_001_feature_210"
+      ],
+      "name": "Supportive and Concurrent Medications"
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 """Lightweight scientific policy for the opt-in Stage 2 evidence ensemble."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v1"
+SCHEMA_VERSION = "stage2_multi_model_selection_v2"
 PROMPT_VERSION = "stage2_multi_model_themes_v1"
 FAMILIES = (
     "univariable",
@@ -15,6 +15,49 @@ FAMILIES = (
     "predictive_forest",
     "causal_forest",
 )
+
+
+@dataclass(frozen=True)
+class ModifierCountConfig:
+    """Nested R-loss tuning of additional, nonlocked modifier candidates."""
+
+    enabled: bool = True
+    candidate_counts: tuple[int, ...] = (0, 4, 8, 12, 16, 24, 32)
+    max_ranked_modifiers: int = 64
+    selection_rule: str = "minimum_r_loss"
+    forest_seeds: int = 3
+
+    def validate(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("multi_model.modifier_count.enabled must be boolean")
+        for name in ("max_ranked_modifiers", "forest_seeds"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"modifier_count.{name} must be a positive integer")
+        if (
+            not isinstance(self.candidate_counts, tuple)
+            or not self.candidate_counts
+            or any(
+                isinstance(k, bool) or not isinstance(k, int) or k < 0
+                for k in self.candidate_counts
+            )
+            or tuple(sorted(set(self.candidate_counts))) != self.candidate_counts
+            or self.candidate_counts[0] != 0
+            or self.candidate_counts[-1] > self.max_ranked_modifiers
+        ):
+            raise ValueError(
+                "modifier_count.candidate_counts must be sorted unique integers starting at 0 and at most max_ranked_modifiers"
+            )
+        if not isinstance(self.selection_rule, str) or self.selection_rule not in {
+            "minimum_r_loss",
+            "one_standard_error",
+        }:
+            raise ValueError(
+                "modifier_count.selection_rule must be minimum_r_loss or one_standard_error"
+            )
+
+    def public_dict(self) -> dict[str, Any]:
+        return {**asdict(self), "candidate_counts": list(self.candidate_counts)}
 
 
 @dataclass(frozen=True)
@@ -30,8 +73,14 @@ class Stage2MultiModelConfig:
     nominal_p_threshold: float = 0.05
     q_threshold: float = 0.1
     max_prompt_chars: int = 100_000
+    modifier_count: ModifierCountConfig = field(default_factory=ModifierCountConfig)
 
     def validate(self) -> None:
+        if not isinstance(self.modifier_count, ModifierCountConfig):
+            raise ValueError(
+                "multi_model.modifier_count must be a ModifierCountConfig object"
+            )
+        self.modifier_count.validate()
         for name in (
             "repeats",
             "regularization_grid_size",
@@ -47,7 +96,9 @@ class Stage2MultiModelConfig:
                     f"stage2.statistical_selection.multi_model.{name} must be positive integer"
                 )
         if self.regularization_grid_size < 3 or self.forest_trees < 4:
-            raise ValueError("multi_model requires at least 3 regularization values and 4 trees")
+            raise ValueError(
+                "multi_model requires at least 3 regularization values and 4 trees"
+            )
         if self.max_prompt_chars < 4_000:
             raise ValueError("multi_model.max_prompt_chars must be at least 4000")
         for name in ("row_fraction", "nominal_p_threshold", "q_threshold"):
@@ -66,17 +117,28 @@ class Stage2MultiModelConfig:
             or not 0 < v <= 1
             for v in self.l1_ratios
         ):
-            raise ValueError("multi_model.l1_ratios must contain finite values in (0, 1]")
+            raise ValueError(
+                "multi_model.l1_ratios must contain finite values in (0, 1]"
+            )
 
     def public_dict(self) -> dict[str, Any]:
-        return {"schema_version": SCHEMA_VERSION, **asdict(self)}
+        return {
+            "schema_version": SCHEMA_VERSION,
+            **asdict(self),
+            "modifier_count": self.modifier_count.public_dict(),
+        }
 
 
-def multi_model_config_from_mapping(value: Mapping[str, Any] | None) -> Stage2MultiModelConfig:
+def multi_model_config_from_mapping(
+    value: Mapping[str, Any] | None,
+) -> Stage2MultiModelConfig:
     if value is not None and not isinstance(value, Mapping):
         raise ValueError("stage2.statistical_selection.multi_model must be an object")
     raw = dict(value or {})
-    if raw.pop("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION:
+    if raw.pop("schema_version", SCHEMA_VERSION) not in {
+        SCHEMA_VERSION,
+        "stage2_multi_model_selection_v1",
+    }:
         raise ValueError("unsupported multi_model schema_version")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)
     if unknown:
@@ -85,6 +147,19 @@ def multi_model_config_from_mapping(value: Mapping[str, Any] | None) -> Stage2Mu
         if not isinstance(raw["l1_ratios"], (list, tuple)):
             raise ValueError("multi_model.l1_ratios must be a list")
         raw["l1_ratios"] = tuple(raw["l1_ratios"])
+    if "modifier_count" in raw:
+        count = raw["modifier_count"]
+        if not isinstance(count, Mapping):
+            raise ValueError("multi_model.modifier_count must be an object")
+        count = dict(count)
+        unknown = set(count) - set(ModifierCountConfig.__dataclass_fields__)
+        if unknown:
+            raise ValueError(f"unsupported modifier_count fields: {sorted(unknown)}")
+        if "candidate_counts" in count:
+            if not isinstance(count["candidate_counts"], (list, tuple)):
+                raise ValueError("modifier_count.candidate_counts must be a list")
+            count["candidate_counts"] = tuple(count["candidate_counts"])
+        raw["modifier_count"] = ModifierCountConfig(**count)
     result = Stage2MultiModelConfig(**raw)
     result.validate()
     return result

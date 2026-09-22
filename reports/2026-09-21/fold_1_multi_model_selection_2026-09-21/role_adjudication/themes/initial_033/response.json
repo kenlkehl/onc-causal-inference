@@ -1,0 +1,57 @@
+{
+  "themes": [
+    {
+      "disagreements": "Ventricular edema (339) shows no treatment prediction support in predictive forests, unlike vasogenic edema (338) and hemorrhage (340).",
+      "evidence_ids": [
+        "multi:outer_001_feature_338:predictive_forest:outcome",
+        "multi:outer_001_feature_338:causal_forest:effect",
+        "multi:outer_001_feature_339:penalized_main:outcome",
+        "multi:outer_001_feature_339:univariable_rlearner:effect",
+        "multi:outer_001_feature_340:univariable_rlearner:effect",
+        "multi:outer_001_feature_340:causal_forest:effect"
+      ],
+      "interpretation": "Neuroimaging markers of CNS involvement showing strong prognostic importance and significant treatment-effect heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_338",
+        "outer_001_feature_339",
+        "outer_001_feature_340"
+      ],
+      "name": "Intracranial Imaging Findings"
+    },
+    {
+      "disagreements": "TMB (334) shows strong effect modification signals but relatively weak treatment prediction compared to VAF (337); tumor cell presence (331) lacks consistent signal across models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_331:univariable_rlearner:effect",
+        "multi:outer_001_feature_332:predictive_forest:outcome",
+        "multi:outer_001_feature_332:causal_forest:effect",
+        "multi:outer_001_feature_333:predictive_forest:treatment",
+        "multi:outer_001_feature_334:univariable_rlearner:effect",
+        "multi:outer_001_feature_337:predictive_forest:treatment",
+        "multi:outer_001_feature_337:causal_forest:effect"
+      ],
+      "interpretation": "Pathologic and genetic markers exhibiting a mixture of prognostic value, treatment selection bias, and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_331",
+        "outer_001_feature_332",
+        "outer_001_feature_333",
+        "outer_001_feature_334",
+        "outer_001_feature_337"
+      ],
+      "name": "Tumor Histology and Genomics"
+    },
+    {
+      "disagreements": "Ulceration (335) lacks the strong prognostic signal seen in unintended weight change (336).",
+      "evidence_ids": [
+        "multi:outer_001_feature_336:univariable:outcome",
+        "multi:outer_001_feature_336:causal_forest:effect",
+        "multi:outer_001_feature_335:univariable_rlearner:effect"
+      ],
+      "interpretation": "Systemic markers of patient health prior to treatment with strong prognostic and effect-modifying signals.",
+      "member_feature_ids": [
+        "outer_001_feature_335",
+        "outer_001_feature_336"
+      ],
+      "name": "Clinical Systemic State"
+    }
+  ]
+}

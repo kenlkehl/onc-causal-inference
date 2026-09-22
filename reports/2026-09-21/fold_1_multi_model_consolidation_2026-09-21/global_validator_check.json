@@ -1,0 +1,11 @@
+{
+  "valid_partition_passed": true,
+  "invalid_contracts_rejected": [
+    "every candidate must occur in exactly one group",
+    "group IDs must be unique",
+    "confounders must cite treatment and outcome evidence",
+    "modifiers must cite effect evidence",
+    "modifier shortlist must contain at most 32 representatives"
+  ],
+  "source_sha256": "363226ba8142876fadd9a4e013851670b98e457c72229bd6f4a2d2c6b0800515"
+}

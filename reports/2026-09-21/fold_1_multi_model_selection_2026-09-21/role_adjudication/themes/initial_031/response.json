@@ -1,0 +1,64 @@
+{
+  "themes": [
+    {
+      "disagreements": "Causal forest support for t_stage is stronger than R-learner support.",
+      "evidence_ids": [
+        "multi:outer_001_feature_311:univariable_rlearner:effect",
+        "multi:outer_001_feature_311:causal_forest:effect",
+        "multi:outer_001_feature_312:univariable_rlearner:effect",
+        "multi:outer_001_feature_312:causal_forest:effect",
+        "multi:outer_001_feature_314:causal_forest:effect"
+      ],
+      "interpretation": "Features characterizing the surgical outcome and tumor extent show consistent evidence for effect modification across R-learner and causal forest models.",
+      "member_feature_ids": [
+        "outer_001_feature_311",
+        "outer_001_feature_312",
+        "outer_001_feature_314"
+      ],
+      "name": "Surgical and Pathological Status"
+    },
+    {
+      "disagreements": "Systolic blood pressure shows near-universal support, whereas tissue thickening relies on specific model families.",
+      "evidence_ids": [
+        "multi:outer_001_feature_313:univariable:treatment",
+        "multi:outer_001_feature_313:univariable:outcome",
+        "multi:outer_001_feature_319:penalized_main:treatment",
+        "multi:outer_001_feature_319:predictive_forest:outcome"
+      ],
+      "interpretation": "Measurements of systemic physiology and localized tissue characteristics are strong predictors of both treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_313",
+        "outer_001_feature_319"
+      ],
+      "name": "Clinical and Physiological Baseline"
+    },
+    {
+      "disagreements": "High consistency for tiotropium contradicts the weak or fragmented signals for targeted therapy, NGS, and TKI use.",
+      "evidence_ids": [
+        "multi:outer_001_feature_318:univariable:treatment",
+        "multi:outer_001_feature_318:univariable:outcome",
+        "multi:outer_001_feature_315:univariable:effect",
+        "multi:outer_001_feature_316:univariable_rlearner:effect"
+      ],
+      "interpretation": "Prior medication and testing exhibit varying levels of importance; tiotropium use is a strong predictor of treatment and outcome, while others are weak.",
+      "member_feature_ids": [
+        "outer_001_feature_315",
+        "outer_001_feature_316",
+        "outer_001_feature_318",
+        "outer_001_feature_320"
+      ],
+      "name": "Treatment and Diagnostic History"
+    },
+    {
+      "disagreements": "Minimal support in R-learner does not outweigh failures in other models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_317:univariable_rlearner:effect"
+      ],
+      "interpretation": "Thyromegaly presence shows negligible or inconsistent signaling across all roles.",
+      "member_feature_ids": [
+        "outer_001_feature_317"
+      ],
+      "name": "Thyroid Examination"
+    }
+  ]
+}

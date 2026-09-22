@@ -1,0 +1,1009 @@
+{
+  "ate_aipw": 0.04714131953122528,
+  "binary_nuisance_model": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+  "causal_forest_fit_audit": {
+    "configuration_mode": "elastic_net_nuisance_v1",
+    "configured_nuisance_parameters": {
+      "model_family": "elastic_net",
+      "outcome_model": {
+        "cv_folds": 3,
+        "l1_ratio": 0.8,
+        "max_iter": 5000,
+        "maximum_log10_c": 4.0,
+        "minimum_log10_c": -2.0,
+        "n_jobs": 1,
+        "random_state": 120042,
+        "regularization_grid_size": 16,
+        "tolerance": 0.0001
+      },
+      "outcome_model_contract": {
+        "criterion": "log_loss",
+        "discrete_outcome": true,
+        "model_class": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "outcome_type": "binary",
+        "penalty": "elastic_net",
+        "prediction_interface": "predict_proba"
+      },
+      "treatment_model": {
+        "cv_folds": 3,
+        "l1_ratio": 0.8,
+        "max_iter": 5000,
+        "maximum_log10_c": 4.0,
+        "minimum_log10_c": -2.0,
+        "n_jobs": 1,
+        "random_state": 120042,
+        "regularization_grid_size": 16,
+        "tolerance": 0.0001
+      }
+    },
+    "configured_parameters": {
+      "discrete_outcome": true,
+      "honest": true,
+      "inference": true,
+      "max_depth": null,
+      "max_features": "sqrt",
+      "min_samples_leaf": 10,
+      "n_estimators": 200,
+      "random_state": 120042,
+      "subforest_size": 4
+    },
+    "effective_nuisance_parameters": {
+      "model_family": "elastic_net",
+      "outcome_model": {
+        "cv_folds": 3,
+        "l1_ratio": 0.8,
+        "max_iter": 5000,
+        "maximum_log10_c": 4.0,
+        "minimum_log10_c": -2.0,
+        "n_jobs": 1,
+        "random_state": 120042,
+        "regularization_grid_size": 16,
+        "tolerance": 0.0001
+      },
+      "outcome_model_contract": {
+        "criterion": "log_loss",
+        "discrete_outcome": true,
+        "model_class": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+        "outcome_type": "binary",
+        "penalty": "elastic_net",
+        "prediction_interface": "predict_proba"
+      },
+      "treatment_model": {
+        "cv_folds": 3,
+        "l1_ratio": 0.8,
+        "max_iter": 5000,
+        "maximum_log10_c": 4.0,
+        "minimum_log10_c": -2.0,
+        "n_jobs": 1,
+        "random_state": 120042,
+        "regularization_grid_size": 16,
+        "tolerance": 0.0001
+      }
+    },
+    "effective_parameters": {
+      "discrete_outcome": true,
+      "honest": true,
+      "inference": true,
+      "max_depth": null,
+      "max_features": "sqrt",
+      "min_samples_leaf": 10,
+      "n_estimators": 200,
+      "random_state": 120042,
+      "subforest_size": 4
+    },
+    "fitted_nuisance_models": {
+      "outcome": [
+        {
+          "constant_prediction": null,
+          "crossfit_path": [
+            0,
+            0
+          ],
+          "effective_cv_folds": 3,
+          "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+          "fit_mode": "cross_validated",
+          "n_features": 620,
+          "optimization": {
+            "configured_max_iter": 5000,
+            "iteration_limit_reached": false,
+            "maximum_iterations_observed": 1761
+          },
+          "requested_cv_folds": 3,
+          "selected_regularization": {
+            "parameter": "C",
+            "value": 0.1584893192461114
+          }
+        },
+        {
+          "constant_prediction": null,
+          "crossfit_path": [
+            0,
+            1
+          ],
+          "effective_cv_folds": 3,
+          "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+          "fit_mode": "cross_validated",
+          "n_features": 620,
+          "optimization": {
+            "configured_max_iter": 5000,
+            "iteration_limit_reached": false,
+            "maximum_iterations_observed": 1291
+          },
+          "requested_cv_folds": 3,
+          "selected_regularization": {
+            "parameter": "C",
+            "value": 0.1584893192461114
+          }
+        }
+      ],
+      "treatment": [
+        {
+          "constant_prediction": null,
+          "crossfit_path": [
+            0,
+            0
+          ],
+          "effective_cv_folds": 3,
+          "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+          "fit_mode": "cross_validated",
+          "n_features": 620,
+          "optimization": {
+            "configured_max_iter": 5000,
+            "iteration_limit_reached": false,
+            "maximum_iterations_observed": 1359
+          },
+          "requested_cv_folds": 3,
+          "selected_regularization": {
+            "parameter": "C",
+            "value": 0.1584893192461114
+          }
+        },
+        {
+          "constant_prediction": null,
+          "crossfit_path": [
+            0,
+            1
+          ],
+          "effective_cv_folds": 3,
+          "estimator": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+          "fit_mode": "cross_validated",
+          "n_features": 620,
+          "optimization": {
+            "configured_max_iter": 5000,
+            "iteration_limit_reached": false,
+            "maximum_iterations_observed": 1316
+          },
+          "requested_cv_folds": 3,
+          "selected_regularization": {
+            "parameter": "C",
+            "value": 0.1584893192461114
+          }
+        }
+      ]
+    },
+    "operational_parameters": {
+      "n_jobs": 1
+    },
+    "outcome_model_contract": {
+      "criterion": "log_loss",
+      "discrete_outcome": true,
+      "model_class": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+      "outcome_type": "binary",
+      "penalty": "elastic_net",
+      "prediction_interface": "predict_proba"
+    },
+    "tuning_attempted": false,
+    "tuning_configured": false,
+    "tuning_failure_fell_back_to_configured_parameters": false,
+    "tuning_params": null,
+    "tuning_succeeded": null
+  },
+  "causal_forest_honest": true,
+  "causal_forest_inference": true,
+  "causal_forest_trees": 200,
+  "causal_forest_tuned": false,
+  "clipped_high_rows": 2,
+  "clipped_low_rows": 2,
+  "confidence_interval_95": [
+    -0.08988890060985866,
+    0.1841715396723092
+  ],
+  "confounders": 189,
+  "constant_effect_design": false,
+  "continuous_nuisance_model": "oci.models.elastic_net_nuisance.ElasticNetRegressor",
+  "dual_role_features_in_x_only": 8,
+  "effect_estimation_rows": 170,
+  "effect_fit_rows": 645,
+  "effect_modifiers": 16,
+  "estimand": "average_treatment_effect_in_propensity_eligible_population",
+  "features": 197,
+  "fit_rows": 800,
+  "mean_causal_forest_effect": -0.07700899677450371,
+  "mean_causal_forest_lower_95": -0.21653878148605946,
+  "mean_causal_forest_upper_95": 0.06252078793705203,
+  "mean_estimated_cate": -0.07700899677450371,
+  "model_family": "causal_forest_dml",
+  "nuisance_calibration": {
+    "eligible_heldout_outcome_factual": {
+      "auroc": 0.7460350877192983,
+      "brier_score": 0.2039036938924624,
+      "calibration_intercept": 0.15495526671142668,
+      "calibration_slope": 0.9097393793434073,
+      "calibration_status": "ok",
+      "expected_calibration_error_10_bins": 0.06989657365328986,
+      "log_loss": 0.5852292228413893,
+      "mean_prediction_error": -0.035796513285214486,
+      "mse": 0.2039036938924624,
+      "nonfinite_rows": 0,
+      "observed_mean": 0.4411764705882353,
+      "outcome_type": "binary",
+      "predicted_mean": 0.4053799573030208,
+      "reliability_bins": [
+        {
+          "lower": 0.0,
+          "observed_fraction": 0.0,
+          "predicted_mean": 0.060669908278062255,
+          "rows": 14,
+          "upper": 0.1
+        },
+        {
+          "lower": 0.1,
+          "observed_fraction": 0.2222222222222222,
+          "predicted_mean": 0.1501488986119834,
+          "rows": 27,
+          "upper": 0.2
+        },
+        {
+          "lower": 0.2,
+          "observed_fraction": 0.3333333333333333,
+          "predicted_mean": 0.2555077719385086,
+          "rows": 24,
+          "upper": 0.3
+        },
+        {
+          "lower": 0.3,
+          "observed_fraction": 0.55,
+          "predicted_mean": 0.34495093840292584,
+          "rows": 20,
+          "upper": 0.4
+        },
+        {
+          "lower": 0.4,
+          "observed_fraction": 0.42857142857142855,
+          "predicted_mean": 0.44653175956213914,
+          "rows": 21,
+          "upper": 0.5
+        },
+        {
+          "lower": 0.5,
+          "observed_fraction": 0.5416666666666666,
+          "predicted_mean": 0.5399356652302222,
+          "rows": 24,
+          "upper": 0.6
+        },
+        {
+          "lower": 0.6,
+          "observed_fraction": 0.6190476190476191,
+          "predicted_mean": 0.6431008919019304,
+          "rows": 21,
+          "upper": 0.7
+        },
+        {
+          "lower": 0.7,
+          "observed_fraction": 0.6363636363636364,
+          "predicted_mean": 0.7424400667861888,
+          "rows": 11,
+          "upper": 0.8
+        },
+        {
+          "lower": 0.8,
+          "observed_fraction": 1.0,
+          "predicted_mean": 0.8454891355789931,
+          "rows": 5,
+          "upper": 0.9
+        },
+        {
+          "lower": 0.9,
+          "observed_fraction": 1.0,
+          "predicted_mean": 0.9149868032335196,
+          "rows": 3,
+          "upper": 1.0
+        }
+      ],
+      "rows": 170,
+      "status": "ok"
+    },
+    "eligible_heldout_treatment": {
+      "auroc": 0.8145071982281284,
+      "brier_score": 0.17975716263920247,
+      "calibration_intercept": -0.05204409960707286,
+      "calibration_slope": 1.3870353913813342,
+      "calibration_status": "ok",
+      "expected_calibration_error_10_bins": 0.06587766296387829,
+      "log_loss": 0.5372342755837364,
+      "mean_prediction_error": 0.00739079895254701,
+      "mse": 0.17975716263920247,
+      "nonfinite_rows": 0,
+      "observed_mean": 0.5058823529411764,
+      "outcome_type": "binary",
+      "predicted_mean": 0.5132731518937235,
+      "reliability_bins": [
+        {
+          "lower": 0.0,
+          "observed_fraction": null,
+          "predicted_mean": null,
+          "rows": 0,
+          "upper": 0.1
+        },
+        {
+          "lower": 0.1,
+          "observed_fraction": 0.07142857142857142,
+          "predicted_mean": 0.15929499684632456,
+          "rows": 14,
+          "upper": 0.2
+        },
+        {
+          "lower": 0.2,
+          "observed_fraction": 0.21052631578947367,
+          "predicted_mean": 0.24970621830847842,
+          "rows": 19,
+          "upper": 0.3
+        },
+        {
+          "lower": 0.3,
+          "observed_fraction": 0.35714285714285715,
+          "predicted_mean": 0.34262282597532684,
+          "rows": 28,
+          "upper": 0.4
+        },
+        {
+          "lower": 0.4,
+          "observed_fraction": 0.30434782608695654,
+          "predicted_mean": 0.4598004646889933,
+          "rows": 23,
+          "upper": 0.5
+        },
+        {
+          "lower": 0.5,
+          "observed_fraction": 0.5909090909090909,
+          "predicted_mean": 0.554912201216114,
+          "rows": 22,
+          "upper": 0.6
+        },
+        {
+          "lower": 0.6,
+          "observed_fraction": 0.6190476190476191,
+          "predicted_mean": 0.6513266891114128,
+          "rows": 21,
+          "upper": 0.7
+        },
+        {
+          "lower": 0.7,
+          "observed_fraction": 0.8181818181818182,
+          "predicted_mean": 0.7383115554537479,
+          "rows": 22,
+          "upper": 0.8
+        },
+        {
+          "lower": 0.8,
+          "observed_fraction": 0.9523809523809523,
+          "predicted_mean": 0.8563930849995585,
+          "rows": 21,
+          "upper": 0.9
+        },
+        {
+          "lower": 0.9,
+          "observed_fraction": null,
+          "predicted_mean": null,
+          "rows": 0,
+          "upper": 1.0
+        }
+      ],
+      "rows": 170,
+      "status": "ok"
+    },
+    "fit_out_of_fold_outcome_factual": {
+      "auroc": 0.7683522727272727,
+      "brier_score": 0.19502118914633773,
+      "calibration_intercept": -0.03609626571159899,
+      "calibration_slope": 0.8885973067609587,
+      "calibration_status": "ok",
+      "expected_calibration_error_10_bins": 0.05756545277595425,
+      "log_loss": 0.5760748968492806,
+      "mean_prediction_error": 0.004128222807964527,
+      "mse": 0.19502118914633773,
+      "nonfinite_rows": 0,
+      "observed_mean": 0.45,
+      "outcome_type": "binary",
+      "predicted_mean": 0.4541282228079645,
+      "reliability_bins": [
+        {
+          "lower": 0.0,
+          "observed_fraction": 0.09836065573770492,
+          "predicted_mean": 0.05867898447028287,
+          "rows": 61,
+          "upper": 0.1
+        },
+        {
+          "lower": 0.1,
+          "observed_fraction": 0.26666666666666666,
+          "predicted_mean": 0.15692756705065192,
+          "rows": 75,
+          "upper": 0.2
+        },
+        {
+          "lower": 0.2,
+          "observed_fraction": 0.184,
+          "predicted_mean": 0.25300588487133013,
+          "rows": 125,
+          "upper": 0.3
+        },
+        {
+          "lower": 0.3,
+          "observed_fraction": 0.29292929292929293,
+          "predicted_mean": 0.34978212118439816,
+          "rows": 99,
+          "upper": 0.4
+        },
+        {
+          "lower": 0.4,
+          "observed_fraction": 0.4690265486725664,
+          "predicted_mean": 0.4501334966640118,
+          "rows": 113,
+          "upper": 0.5
+        },
+        {
+          "lower": 0.5,
+          "observed_fraction": 0.5813953488372093,
+          "predicted_mean": 0.5551859011609832,
+          "rows": 86,
+          "upper": 0.6
+        },
+        {
+          "lower": 0.6,
+          "observed_fraction": 0.7205882352941176,
+          "predicted_mean": 0.6481555799642741,
+          "rows": 68,
+          "upper": 0.7
+        },
+        {
+          "lower": 0.7,
+          "observed_fraction": 0.7586206896551724,
+          "predicted_mean": 0.7521642208330261,
+          "rows": 87,
+          "upper": 0.8
+        },
+        {
+          "lower": 0.8,
+          "observed_fraction": 0.7027027027027027,
+          "predicted_mean": 0.8435581706404842,
+          "rows": 74,
+          "upper": 0.9
+        },
+        {
+          "lower": 0.9,
+          "observed_fraction": 1.0,
+          "predicted_mean": 0.9293485965330134,
+          "rows": 12,
+          "upper": 1.0
+        }
+      ],
+      "rows": 800,
+      "status": "ok"
+    },
+    "fit_out_of_fold_treatment": {
+      "auroc": 0.8325538003017953,
+      "brier_score": 0.1665295707368197,
+      "calibration_intercept": -0.004425530650509139,
+      "calibration_slope": 0.9641667985587841,
+      "calibration_status": "ok",
+      "expected_calibration_error_10_bins": 0.03892223367982483,
+      "log_loss": 0.5013429030360107,
+      "mean_prediction_error": 0.001026998774923477,
+      "mse": 0.1665295707368197,
+      "nonfinite_rows": 0,
+      "observed_mean": 0.52125,
+      "outcome_type": "binary",
+      "predicted_mean": 0.5222769987749234,
+      "reliability_bins": [
+        {
+          "lower": 0.0,
+          "observed_fraction": 0.04411764705882353,
+          "predicted_mean": 0.05760888085206871,
+          "rows": 68,
+          "upper": 0.1
+        },
+        {
+          "lower": 0.1,
+          "observed_fraction": 0.16666666666666666,
+          "predicted_mean": 0.15383879169715306,
+          "rows": 84,
+          "upper": 0.2
+        },
+        {
+          "lower": 0.2,
+          "observed_fraction": 0.313953488372093,
+          "predicted_mean": 0.2493962466723807,
+          "rows": 86,
+          "upper": 0.3
+        },
+        {
+          "lower": 0.3,
+          "observed_fraction": 0.3287671232876712,
+          "predicted_mean": 0.34916586404117206,
+          "rows": 73,
+          "upper": 0.4
+        },
+        {
+          "lower": 0.4,
+          "observed_fraction": 0.4246575342465753,
+          "predicted_mean": 0.4495815066338241,
+          "rows": 73,
+          "upper": 0.5
+        },
+        {
+          "lower": 0.5,
+          "observed_fraction": 0.46875,
+          "predicted_mean": 0.5508740754479147,
+          "rows": 64,
+          "upper": 0.6
+        },
+        {
+          "lower": 0.6,
+          "observed_fraction": 0.7088607594936709,
+          "predicted_mean": 0.6542974381298857,
+          "rows": 79,
+          "upper": 0.7
+        },
+        {
+          "lower": 0.7,
+          "observed_fraction": 0.7162162162162162,
+          "predicted_mean": 0.7580902037772762,
+          "rows": 74,
+          "upper": 0.8
+        },
+        {
+          "lower": 0.8,
+          "observed_fraction": 0.8928571428571429,
+          "predicted_mean": 0.8551952920481509,
+          "rows": 112,
+          "upper": 0.9
+        },
+        {
+          "lower": 0.9,
+          "observed_fraction": 0.9080459770114943,
+          "predicted_mean": 0.9471162657068846,
+          "rows": 87,
+          "upper": 1.0
+        }
+      ],
+      "rows": 800,
+      "status": "ok"
+    },
+    "heldout_outcome_by_arm": {
+      "0": {
+        "auroc": 0.708984375,
+        "brier_score": 0.20147292018361884,
+        "calibration_intercept": -0.1477692109999036,
+        "calibration_slope": 0.7851421116760525,
+        "calibration_status": "ok",
+        "expected_calibration_error_10_bins": 0.16639611365528426,
+        "log_loss": 0.5743348846624127,
+        "mean_prediction_error": 0.004793806007774146,
+        "mse": 0.20147292018361884,
+        "nonfinite_rows": 0,
+        "observed_mean": 0.3333333333333333,
+        "outcome_type": "binary",
+        "predicted_mean": 0.33812713934110744,
+        "reliability_bins": [
+          {
+            "lower": 0.0,
+            "observed_fraction": 0.0,
+            "predicted_mean": 0.06414388597122937,
+            "rows": 9,
+            "upper": 0.1
+          },
+          {
+            "lower": 0.1,
+            "observed_fraction": 0.045454545454545456,
+            "predicted_mean": 0.14761548118106513,
+            "rows": 22,
+            "upper": 0.2
+          },
+          {
+            "lower": 0.2,
+            "observed_fraction": 0.4375,
+            "predicted_mean": 0.2508269092434449,
+            "rows": 16,
+            "upper": 0.3
+          },
+          {
+            "lower": 0.3,
+            "observed_fraction": 0.6666666666666666,
+            "predicted_mean": 0.35335936719831645,
+            "rows": 15,
+            "upper": 0.4
+          },
+          {
+            "lower": 0.4,
+            "observed_fraction": 0.2727272727272727,
+            "predicted_mean": 0.44147366829915596,
+            "rows": 11,
+            "upper": 0.5
+          },
+          {
+            "lower": 0.5,
+            "observed_fraction": 0.5,
+            "predicted_mean": 0.5368494763555423,
+            "rows": 10,
+            "upper": 0.6
+          },
+          {
+            "lower": 0.6,
+            "observed_fraction": 0.42857142857142855,
+            "predicted_mean": 0.642599447152108,
+            "rows": 7,
+            "upper": 0.7
+          },
+          {
+            "lower": 0.7,
+            "observed_fraction": 0.4,
+            "predicted_mean": 0.7338758678382824,
+            "rows": 5,
+            "upper": 0.8
+          },
+          {
+            "lower": 0.8,
+            "observed_fraction": null,
+            "predicted_mean": null,
+            "rows": 0,
+            "upper": 0.9
+          },
+          {
+            "lower": 0.9,
+            "observed_fraction": 1.0,
+            "predicted_mean": 0.9294681770496492,
+            "rows": 1,
+            "upper": 1.0
+          }
+        ],
+        "rows": 96,
+        "status": "ok"
+      },
+      "1": {
+        "auroc": 0.7668906308324,
+        "brier_score": 0.19654634688542702,
+        "calibration_intercept": 0.29621077483699854,
+        "calibration_slope": 0.939069913414652,
+        "calibration_status": "ok",
+        "expected_calibration_error_10_bins": 0.11977545421799705,
+        "log_loss": 0.5718933993422446,
+        "mean_prediction_error": -0.056801202875522074,
+        "mse": 0.19654634688542702,
+        "nonfinite_rows": 0,
+        "observed_mean": 0.5480769230769231,
+        "outcome_type": "binary",
+        "predicted_mean": 0.49127572020140103,
+        "reliability_bins": [
+          {
+            "lower": 0.0,
+            "observed_fraction": 0.0,
+            "predicted_mean": 0.05161303473441137,
+            "rows": 7,
+            "upper": 0.1
+          },
+          {
+            "lower": 0.1,
+            "observed_fraction": 0.4166666666666667,
+            "predicted_mean": 0.1619812222981465,
+            "rows": 12,
+            "upper": 0.2
+          },
+          {
+            "lower": 0.2,
+            "observed_fraction": 0.2,
+            "predicted_mean": 0.26075942892705023,
+            "rows": 10,
+            "upper": 0.3
+          },
+          {
+            "lower": 0.3,
+            "observed_fraction": 0.16666666666666666,
+            "predicted_mean": 0.33107338934516356,
+            "rows": 6,
+            "upper": 0.4
+          },
+          {
+            "lower": 0.4,
+            "observed_fraction": 0.6363636363636364,
+            "predicted_mean": 0.44905235479204575,
+            "rows": 11,
+            "upper": 0.5
+          },
+          {
+            "lower": 0.5,
+            "observed_fraction": 0.6111111111111112,
+            "predicted_mean": 0.5429019981954459,
+            "rows": 18,
+            "upper": 0.6
+          },
+          {
+            "lower": 0.6,
+            "observed_fraction": 0.7222222222222222,
+            "predicted_mean": 0.6450492080826223,
+            "rows": 18,
+            "upper": 0.7
+          },
+          {
+            "lower": 0.7,
+            "observed_fraction": 0.6363636363636364,
+            "predicted_mean": 0.756303200120576,
+            "rows": 11,
+            "upper": 0.8
+          },
+          {
+            "lower": 0.8,
+            "observed_fraction": 1.0,
+            "predicted_mean": 0.8433583912025071,
+            "rows": 7,
+            "upper": 0.9
+          },
+          {
+            "lower": 0.9,
+            "observed_fraction": 1.0,
+            "predicted_mean": 0.9120082023559911,
+            "rows": 4,
+            "upper": 1.0
+          }
+        ],
+        "rows": 104,
+        "status": "ok"
+      }
+    },
+    "heldout_outcome_factual": {
+      "auroc": 0.7603502378783277,
+      "brier_score": 0.19891110206855914,
+      "calibration_intercept": 0.12194189382636926,
+      "calibration_slope": 0.9231054929379929,
+      "calibration_status": "ok",
+      "expected_calibration_error_10_bins": 0.06759942494105639,
+      "log_loss": 0.5730653122959254,
+      "mean_prediction_error": -0.027235598611539902,
+      "mse": 0.19891110206855914,
+      "nonfinite_rows": 0,
+      "observed_mean": 0.445,
+      "outcome_type": "binary",
+      "predicted_mean": 0.41776440138846005,
+      "reliability_bins": [
+        {
+          "lower": 0.0,
+          "observed_fraction": 0.0,
+          "predicted_mean": 0.05866163855512148,
+          "rows": 16,
+          "upper": 0.1
+        },
+        {
+          "lower": 0.1,
+          "observed_fraction": 0.17647058823529413,
+          "predicted_mean": 0.15268574275179975,
+          "rows": 34,
+          "upper": 0.2
+        },
+        {
+          "lower": 0.2,
+          "observed_fraction": 0.34615384615384615,
+          "predicted_mean": 0.25464710912175464,
+          "rows": 26,
+          "upper": 0.3
+        },
+        {
+          "lower": 0.3,
+          "observed_fraction": 0.5238095238095238,
+          "predicted_mean": 0.3469919449545585,
+          "rows": 21,
+          "upper": 0.4
+        },
+        {
+          "lower": 0.4,
+          "observed_fraction": 0.45454545454545453,
+          "predicted_mean": 0.4452630115456009,
+          "rows": 22,
+          "upper": 0.5
+        },
+        {
+          "lower": 0.5,
+          "observed_fraction": 0.5714285714285714,
+          "predicted_mean": 0.5407403832526231,
+          "rows": 28,
+          "upper": 0.6
+        },
+        {
+          "lower": 0.6,
+          "observed_fraction": 0.64,
+          "predicted_mean": 0.6443632750220784,
+          "rows": 25,
+          "upper": 0.7
+        },
+        {
+          "lower": 0.7,
+          "observed_fraction": 0.5625,
+          "predicted_mean": 0.7492946587823592,
+          "rows": 16,
+          "upper": 0.8
+        },
+        {
+          "lower": 0.8,
+          "observed_fraction": 1.0,
+          "predicted_mean": 0.8433583912025071,
+          "rows": 7,
+          "upper": 0.9
+        },
+        {
+          "lower": 0.9,
+          "observed_fraction": 1.0,
+          "predicted_mean": 0.9155001972947228,
+          "rows": 5,
+          "upper": 1.0
+        }
+      ],
+      "rows": 200,
+      "status": "ok"
+    },
+    "heldout_treatment": {
+      "auroc": 0.8657852564102565,
+      "brier_score": 0.15338346484792795,
+      "calibration_intercept": -0.0508587387173829,
+      "calibration_slope": 1.4613487735221646,
+      "calibration_status": "ok",
+      "expected_calibration_error_10_bins": 0.06456264660895455,
+      "log_loss": 0.4655263191789447,
+      "mean_prediction_error": 0.004728305813968067,
+      "mse": 0.15338346484792795,
+      "nonfinite_rows": 0,
+      "observed_mean": 0.52,
+      "outcome_type": "binary",
+      "predicted_mean": 0.524728305813968,
+      "reliability_bins": [
+        {
+          "lower": 0.0,
+          "observed_fraction": 0.0,
+          "predicted_mean": 0.05843966494967589,
+          "rows": 12,
+          "upper": 0.1
+        },
+        {
+          "lower": 0.1,
+          "observed_fraction": 0.07142857142857142,
+          "predicted_mean": 0.15929499684632456,
+          "rows": 14,
+          "upper": 0.2
+        },
+        {
+          "lower": 0.2,
+          "observed_fraction": 0.21052631578947367,
+          "predicted_mean": 0.24970621830847842,
+          "rows": 19,
+          "upper": 0.3
+        },
+        {
+          "lower": 0.3,
+          "observed_fraction": 0.35714285714285715,
+          "predicted_mean": 0.34262282597532684,
+          "rows": 28,
+          "upper": 0.4
+        },
+        {
+          "lower": 0.4,
+          "observed_fraction": 0.30434782608695654,
+          "predicted_mean": 0.4598004646889933,
+          "rows": 23,
+          "upper": 0.5
+        },
+        {
+          "lower": 0.5,
+          "observed_fraction": 0.5909090909090909,
+          "predicted_mean": 0.554912201216114,
+          "rows": 22,
+          "upper": 0.6
+        },
+        {
+          "lower": 0.6,
+          "observed_fraction": 0.6190476190476191,
+          "predicted_mean": 0.6513266891114128,
+          "rows": 21,
+          "upper": 0.7
+        },
+        {
+          "lower": 0.7,
+          "observed_fraction": 0.8181818181818182,
+          "predicted_mean": 0.7383115554537479,
+          "rows": 22,
+          "upper": 0.8
+        },
+        {
+          "lower": 0.8,
+          "observed_fraction": 0.9523809523809523,
+          "predicted_mean": 0.8563930849995585,
+          "rows": 21,
+          "upper": 0.9
+        },
+        {
+          "lower": 0.9,
+          "observed_fraction": 1.0,
+          "predicted_mean": 0.943774964525806,
+          "rows": 18,
+          "upper": 1.0
+        }
+      ],
+      "rows": 200,
+      "status": "ok"
+    }
+  },
+  "nuisance_model_family": "elastic_net",
+  "outcome_nuisance_features": 197,
+  "predictions_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/production/seed_100042/predictions.csv",
+  "primary_ate_estimator": "outer_cross_fitted_aipw",
+  "propensity_clip": 0.02,
+  "propensity_max": 0.9906009338486572,
+  "propensity_min": 0.008718853250696244,
+  "propensity_overlap": {
+    "fit": {
+      "above_0_90_rows": 87,
+      "below_0_10_rows": 68,
+      "bounds_are_inclusive": true,
+      "eligible_rows": 645,
+      "excluded_above_max": 87,
+      "excluded_below_min": 68,
+      "excluded_rows": 155,
+      "max_propensity": 0.9,
+      "min_propensity": 0.1,
+      "outside_0_10_0_90_fraction": 0.19375,
+      "propensity_max": 0.9962862457208775,
+      "propensity_min": 0.004005883088614932,
+      "quantiles": {
+        "0": 0.004005883088614932,
+        "0.01": 0.01900947805586497,
+        "0.05": 0.06644767508110669,
+        "0.1": 0.11609765073463413,
+        "0.5": 0.5253234714217584,
+        "0.9": 0.9058274030822732,
+        "0.95": 0.9477895018256993,
+        "0.99": 0.9884032267111814,
+        "1": 0.9962862457208775
+      },
+      "rows": 800
+    },
+    "fit_eligibility_source": "inner_out_of_fold_external_propensity",
+    "heldout": {
+      "above_0_90_rows": 18,
+      "below_0_10_rows": 12,
+      "bounds_are_inclusive": true,
+      "eligible_rows": 170,
+      "excluded_above_max": 18,
+      "excluded_below_min": 12,
+      "excluded_rows": 30,
+      "max_propensity": 0.9,
+      "min_propensity": 0.1,
+      "outside_0_10_0_90_fraction": 0.15,
+      "propensity_max": 0.9906009338486572,
+      "propensity_min": 0.008718853250696244,
+      "quantiles": {
+        "0": 0.008718853250696244,
+        "0.01": 0.031949801924613414,
+        "0.05": 0.09208662587304285,
+        "0.1": 0.17399651422924928,
+        "0.5": 0.5295868720710222,
+        "0.9": 0.8967981583759919,
+        "0.95": 0.9322713578913164,
+        "0.99": 0.9768643669929512,
+        "1": 0.9906009338486572
+      },
+      "rows": 200
+    },
+    "heldout_eligibility_source": "outer_training_only_external_propensity"
+  },
+  "pure_confounders_in_w": 181,
+  "rows": 200,
+  "standard_error": 0.06991337762300201,
+  "treatment_nuisance_features": 189
+}

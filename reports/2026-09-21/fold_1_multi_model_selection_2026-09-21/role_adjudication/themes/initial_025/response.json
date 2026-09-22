@@ -1,0 +1,55 @@
+{
+  "themes": [
+    {
+      "disagreements": "Pituitary-specific features (255, 256, 257) lack significant support across multiple model families compared to peritumoral edema and periventricular signal abnormality.",
+      "evidence_ids": [
+        "multi:outer_001_feature_251:predictive_forest:treatment",
+        "multi:outer_001_feature_251:predictive_forest:outcome",
+        "multi:outer_001_feature_251:causal_forest:effect",
+        "multi:outer_001_feature_252:predictive_forest:outcome",
+        "multi:outer_001_feature_252:causal_forest:effect"
+      ],
+      "interpretation": "Features describing structural or signal abnormalities on neuroimaging, exhibiting varied degrees of prognostic and heterogeneity signals.",
+      "member_feature_ids": [
+        "outer_001_feature_251",
+        "outer_001_feature_252",
+        "outer_001_feature_255",
+        "outer_001_feature_256",
+        "outer_001_feature_257"
+      ],
+      "name": "Brain Radiographic Findings"
+    },
+    {
+      "disagreements": "Phospho-MET status (253) shows support only in the R-learner for effect modification, while PI3K activation (254) is supported by the Causal Forest, providing more robust evidence for the latter.",
+      "evidence_ids": [
+        "multi:outer_001_feature_254:predictive_forest:treatment",
+        "multi:outer_001_feature_254:causal_forest:effect",
+        "multi:outer_001_feature_253:univariable_rlearner:effect"
+      ],
+      "interpretation": "Biomarkers related to intracellular signaling pathways and receptor phosphorylation status.",
+      "member_feature_ids": [
+        "outer_001_feature_253",
+        "outer_001_feature_254"
+      ],
+      "name": "Molecular Signaling"
+    },
+    {
+      "disagreements": "Platelet count shows a dominant treatment prediction signal (univariable) compared to the outcome-dominant signals of pleural effusion and pneumonia.",
+      "evidence_ids": [
+        "multi:outer_001_feature_258:univariable:treatment",
+        "multi:outer_001_feature_258:causal_forest:effect",
+        "multi:outer_001_feature_259:predictive_forest:outcome",
+        "multi:outer_001_feature_259:causal_forest:effect",
+        "multi:outer_001_feature_260:predictive_forest:outcome",
+        "multi:outer_001_feature_260:causal_forest:effect"
+      ],
+      "interpretation": "General systemic markers including hematological counts and clinical diagnoses that may reflect overall patient fragility or comorbidities.",
+      "member_feature_ids": [
+        "outer_001_feature_258",
+        "outer_001_feature_259",
+        "outer_001_feature_260"
+      ],
+      "name": "Systemic Health and Clinical Status"
+    }
+  ]
+}

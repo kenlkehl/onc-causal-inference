@@ -1,0 +1,62 @@
+{
+  "themes": [
+    {
+      "disagreements": "Varying strength of treatment prediction across candidates, with disease_status (102) showing a weaker signal than ecog_performance_status (109).",
+      "evidence_ids": [
+        "multi:outer_001_feature_109:univariable:treatment",
+        "multi:outer_001_feature_109:univariable:outcome",
+        "multi:outer_001_feature_102:penalized_main:treatment"
+      ],
+      "interpretation": "General disease and performance status markers that strongly correlate with both treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_102",
+        "outer_001_feature_109"
+      ],
+      "name": "Functional and Disease Status"
+    },
+    {
+      "disagreements": "Dyspnea (106) and dyspnea_on_exertion (107) primarily show confounding signals, whereas dyspnea_severity (108) exhibits strong evidence for both confounding and effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_106:univariable:outcome",
+        "multi:outer_001_feature_107:univariable:outcome",
+        "multi:outer_001_feature_108:causal_forest:effect"
+      ],
+      "interpretation": "Respiratory symptoms showing consistent prognostic importance and treatment prediction, with graded severity providing heterogeneity signals.",
+      "member_feature_ids": [
+        "outer_001_feature_106",
+        "outer_001_feature_107",
+        "outer_001_feature_108"
+      ],
+      "name": "Respiratory Burden"
+    },
+    {
+      "disagreements": "Different primary drivers of modification: recurrence (101) is supported by R-learners and causal forests, while dizziness (103) is supported by univariable effects and causal forests.",
+      "evidence_ids": [
+        "multi:outer_001_feature_101:univariable_rlearner:effect",
+        "multi:outer_001_feature_101:causal_forest:effect",
+        "multi:outer_001_feature_103:univariable:effect",
+        "multi:outer_001_feature_103:causal_forest:effect"
+      ],
+      "interpretation": "Clinical markers that primarily signal treatment-heterogeneity without strong main-effect confounding.",
+      "member_feature_ids": [
+        "outer_001_feature_101",
+        "outer_001_feature_103"
+      ],
+      "name": "Neurological and Recurrence Markers"
+    },
+    {
+      "disagreements": "dural_sinus_patency (104) shows moderate predictive forest support for both roles, while edema (110) and dysplasia (105) remain largely unsupportive.",
+      "evidence_ids": [
+        "multi:outer_001_feature_104:predictive_forest:treatment",
+        "multi:outer_001_feature_104:predictive_forest:outcome"
+      ],
+      "interpretation": "Anatomical and pathology findings with weak or inconsistent evidence for causal roles.",
+      "member_feature_ids": [
+        "outer_001_feature_104",
+        "outer_001_feature_105",
+        "outer_001_feature_110"
+      ],
+      "name": "Anatomical and Pathology Findings"
+    }
+  ]
+}

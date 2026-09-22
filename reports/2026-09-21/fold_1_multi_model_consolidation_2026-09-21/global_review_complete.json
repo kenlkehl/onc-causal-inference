@@ -1,0 +1,8 @@
+{
+  "completed_at": "2026-09-22T00:26:01.617497+00:00",
+  "input_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_consolidation_2026-09-21/global_review_input_revision2.json",
+  "input_sha256": "bb3d20cfddbdd41153682cea9422d3f9e76d176f18f3bf1d104ea5a4b1d4a797",
+  "prompt_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_consolidation_2026-09-21/global_prompt_revision2.json",
+  "response_sha256": "a64801c18cc8ef9bd1a8b8e1d40ada77d6e795187bd3edb7d1fbbc0ee267611d",
+  "runner_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_consolidation_2026-09-21/global_review_revision2_2026-09-21.py"
+}

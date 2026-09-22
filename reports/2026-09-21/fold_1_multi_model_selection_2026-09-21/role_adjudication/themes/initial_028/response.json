@@ -1,0 +1,62 @@
+{
+  "themes": [
+    {
+      "disagreements": "Treatment prediction is strong for radiation session count (281), while radiosurgery history (282) is primarily a strong prognostic factor.",
+      "evidence_ids": [
+        "multi:outer_001_feature_281:predictive_forest:treatment",
+        "multi:outer_001_feature_282:univariable:outcome",
+        "multi:outer_001_feature_281:causal_forest:effect",
+        "multi:outer_001_feature_282:univariable_rlearner:effect"
+      ],
+      "interpretation": "Radiation-related history shows consistent evidence for treatment heterogeneity across different modalities.",
+      "member_feature_ids": [
+        "outer_001_feature_281",
+        "outer_001_feature_282"
+      ],
+      "name": "Radiation History"
+    },
+    {
+      "disagreements": "Signals for range of motion (283) and rash presence (284) are weak and inconsistent; rash/pruritus (285) shows a more robust prognostic and heterogeneity signal.",
+      "evidence_ids": [
+        "multi:outer_001_feature_285:predictive_forest:outcome",
+        "multi:outer_001_feature_285:causal_forest:effect"
+      ],
+      "interpretation": "Cutaneous and sensory indicators vary in strength, with the combined rash/pruritus measure providing the most reliable signal.",
+      "member_feature_ids": [
+        "outer_001_feature_283",
+        "outer_001_feature_284",
+        "outer_001_feature_285"
+      ],
+      "name": "Cutaneous and Sensory Indicators"
+    },
+    {
+      "disagreements": "Respiratory rate (287) is a powerful predictor of both treatment and outcome, whereas renal function (286) primarily predicts treatment.",
+      "evidence_ids": [
+        "multi:outer_001_feature_287:univariable:treatment",
+        "multi:outer_001_feature_287:univariable:outcome",
+        "multi:outer_001_feature_286:predictive_forest:treatment"
+      ],
+      "interpretation": "Systemic vital signs and organ function show high utility for treatment prediction, with respiratory rate acting as a probable confounder.",
+      "member_feature_ids": [
+        "outer_001_feature_286",
+        "outer_001_feature_287"
+      ],
+      "name": "Systemic Vitals and Renal Function"
+    },
+    {
+      "disagreements": "RET status (289) shows stronger treatment prediction, while DWI/ADC (288) and lymphadenopathy (290) lean more toward outcome prognosis and effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_289:predictive_forest:treatment",
+        "multi:outer_001_feature_288:predictive_forest:outcome",
+        "multi:outer_001_feature_290:causal_forest:effect"
+      ],
+      "interpretation": "Radiological and molecular markers demonstrate moderate to strong evidence for effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_288",
+        "outer_001_feature_289",
+        "outer_001_feature_290"
+      ],
+      "name": "Radiological and Molecular Markers"
+    }
+  ]
+}

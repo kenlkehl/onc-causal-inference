@@ -1,0 +1,73 @@
+{
+  "themes": [
+    {
+      "disagreements": "Lesion size (183) demonstrates strong evidence for outcome prognosis and treatment heterogeneity, whereas lesion presence (182) lacks a meaningful prognostic signal and exhibits only weak effect modification support.",
+      "evidence_ids": [
+        "multi:outer_001_feature_182:univariable:treatment",
+        "multi:outer_001_feature_183:univariable:treatment",
+        "multi:outer_001_feature_183:causal_forest:effect"
+      ],
+      "interpretation": "Measurements focusing on the presence and magnitude of lesions, both of which show strong signals as predictors of treatment assignment.",
+      "member_feature_ids": [
+        "outer_001_feature_182",
+        "outer_001_feature_183"
+      ],
+      "name": "Lesion Attributes"
+    },
+    {
+      "disagreements": "While all three are strong treatment predictors, the evidence for effect modification varies, with line of therapy (184) showing more consistent support across families than lisinopril dose (186).",
+      "evidence_ids": [
+        "multi:outer_001_feature_184:univariable:outcome",
+        "multi:outer_001_feature_185:univariable:treatment",
+        "multi:outer_001_feature_186:univariable:treatment",
+        "multi:outer_001_feature_184:causal_forest:effect"
+      ],
+      "interpretation": "Systemic therapy markers, including line of therapy and specific medication use (lipids and lisinopril), which strongly predict treatment and often correlate with outcomes.",
+      "member_feature_ids": [
+        "outer_001_feature_184",
+        "outer_001_feature_185",
+        "outer_001_feature_186"
+      ],
+      "name": "Medical Therapy"
+    },
+    {
+      "disagreements": "Liver metastasis (188) is a strong candidate for both confounding and effect modification, while general liver function (187) shows only negligible, inconsistent signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_188:causal_forest:effect",
+        "multi:outer_001_feature_188:predictive_forest:treatment"
+      ],
+      "interpretation": "Assessments of liver health, ranging from qualitative function to the presence of metastatic disease.",
+      "member_feature_ids": [
+        "outer_001_feature_187",
+        "outer_001_feature_188"
+      ],
+      "name": "Liver Status"
+    },
+    {
+      "disagreements": "Lobectomy type (190) shows moderate signals for treatment and outcome prediction, whereas leptomeningeal enhancement (181) is purely prognostic and an effect modifier with no treatment prediction signal.",
+      "evidence_ids": [
+        "multi:outer_001_feature_181:univariable_rlearner:effect",
+        "multi:outer_001_feature_190:univariable_rlearner:effect",
+        "multi:outer_001_feature_190:causal_forest:effect"
+      ],
+      "interpretation": "Anatomical or procedural details from imaging (leptomeninges) and surgery (lobectomy type) that show significant signals for treatment heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_181",
+        "outer_001_feature_190"
+      ],
+      "name": "Surgical & Imaging Specifics"
+    },
+    {
+      "disagreements": "Strong evidence for confounding, but evidence for effect modification is weak (R-learner 5/15).",
+      "evidence_ids": [
+        "multi:outer_001_feature_189:univariable:treatment",
+        "multi:outer_001_feature_189:univariable:outcome"
+      ],
+      "interpretation": "Patient living arrangements, which serve as strong predictors for both treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_189"
+      ],
+      "name": "Social Context"
+    }
+  ]
+}

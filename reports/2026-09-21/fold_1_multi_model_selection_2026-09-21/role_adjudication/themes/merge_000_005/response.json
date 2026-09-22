@@ -1,0 +1,205 @@
+{
+  "themes": [
+    {
+      "disagreements": "Radiation therapy (263) shows weaker univariable signals than platinum chemotherapy (267, 268); radiation session count (281) predicts treatment while radiosurgery history (282) is primarily prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_267:univariable:outcome",
+        "multi:outer_001_feature_268:univariable:outcome",
+        "multi:outer_001_feature_267:univariable:treatment",
+        "multi:outer_001_feature_263:causal_forest:effect",
+        "multi:outer_001_feature_281:predictive_forest:treatment",
+        "multi:outer_001_feature_282:univariable:outcome",
+        "multi:outer_001_feature_281:causal_forest:effect",
+        "multi:outer_001_feature_282:univariable_rlearner:effect"
+      ],
+      "interpretation": "Prior oncology and radiation treatments act as both confounders and effect modifiers, though signal strength varies by modality.",
+      "member_feature_ids": [
+        "outer_001_feature_263",
+        "outer_001_feature_267",
+        "outer_001_feature_268",
+        "outer_001_feature_281",
+        "outer_001_feature_282"
+      ],
+      "name": "Oncology and Radiation Treatment History"
+    },
+    {
+      "disagreements": "Extremely strong univariable signals for treatment and outcome in symptoms (269, 270) and PROs (278, 279) potentially mask more nuanced effect modification captured by causal forests.",
+      "evidence_ids": [
+        "multi:outer_001_feature_269:univariable:treatment",
+        "multi:outer_001_feature_269:univariable:outcome",
+        "multi:outer_001_feature_270:univariable:treatment",
+        "multi:outer_001_feature_270:univariable_rlearner:effect",
+        "multi:outer_001_feature_278:univariable:treatment",
+        "multi:outer_001_feature_278:univariable:outcome",
+        "multi:outer_001_feature_279:univariable:treatment",
+        "multi:outer_001_feature_279:univariable:outcome"
+      ],
+      "interpretation": "Symptomatic burden and functional PROs are powerful predictors of treatment assignment and outcome prognosis, with evidence for effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_269",
+        "outer_001_feature_270",
+        "outer_001_feature_278",
+        "outer_001_feature_279"
+      ],
+      "name": "Patient-Reported Burden and Function"
+    },
+    {
+      "disagreements": "Respiratory rate (287) is a strong confounder; renal function (286) primarily predicts treatment; creatinine (299) and albumin (295) dominate treatment prediction while calcium (297) predicts outcome; sodium (301) is weak.",
+      "evidence_ids": [
+        "multi:outer_001_feature_287:univariable:treatment",
+        "multi:outer_001_feature_287:univariable:outcome",
+        "multi:outer_001_feature_286:predictive_forest:treatment",
+        "multi:outer_001_feature_295:univariable:treatment",
+        "multi:outer_001_feature_295:univariable:outcome",
+        "multi:outer_001_feature_295:causal_forest:effect",
+        "multi:outer_001_feature_297:univariable:outcome",
+        "multi:outer_001_feature_299:univariable:treatment",
+        "multi:outer_001_feature_299:univariable_rlearner:effect",
+        "multi:outer_001_feature_300:causal_forest:effect",
+        "multi:outer_001_feature_301:predictive_forest:treatment",
+        "multi:outer_001_feature_313:univariable:treatment"
+      ],
+      "interpretation": "Systemic vitals and serum chemistry exhibit high utility for treatment prediction (confounding) and evidence for effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_286",
+        "outer_001_feature_287",
+        "outer_001_feature_295",
+        "outer_001_feature_296",
+        "outer_001_feature_297",
+        "outer_001_feature_298",
+        "outer_001_feature_299",
+        "outer_001_feature_300",
+        "outer_001_feature_301",
+        "outer_001_feature_313",
+        "outer_001_feature_319"
+      ],
+      "name": "Systemic Vitals and Serum Chemistry"
+    },
+    {
+      "disagreements": "Treatment prediction is consistent across pulmonary imaging (273, 276) and molecular markers (289), but evidence for treatment-heterogeneity varies in strength and fold consistency.",
+      "evidence_ids": [
+        "multi:outer_001_feature_276:predictive_forest:treatment",
+        "multi:outer_001_feature_275:univariable_rlearner:effect",
+        "multi:outer_001_feature_273:predictive_forest:treatment",
+        "multi:outer_001_feature_289:predictive_forest:treatment",
+        "multi:outer_001_feature_288:predictive_forest:outcome",
+        "multi:outer_001_feature_290:causal_forest:effect"
+      ],
+      "interpretation": "Thoracic diagnostics and radiological markers frequently predict treatment (potential instruments) and show moderate evidence for effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_273",
+        "outer_001_feature_274",
+        "outer_001_feature_275",
+        "outer_001_feature_276",
+        "outer_001_feature_288",
+        "outer_001_feature_289",
+        "outer_001_feature_290"
+      ],
+      "name": "Thoracic and Molecular Diagnostics"
+    },
+    {
+      "disagreements": "The group ranges from clear confounders (PPI 271) and modifiers (Psychiatric 272) to imaging features (304, 309, 310) which strongly predict outcome and effect heterogeneity.",
+      "evidence_ids": [
+        "multi:outer_001_feature_271:univariable:treatment",
+        "multi:outer_001_feature_272:univariable_rlearner:effect",
+        "multi:outer_001_feature_277:causal_forest:effect",
+        "multi:outer_001_feature_280:causal_forest:effect",
+        "multi:outer_001_feature_309:penalized_main:outcome",
+        "multi:outer_001_feature_304:univariable:outcome",
+        "multi:outer_001_feature_304:univariable_rlearner:effect",
+        "multi:outer_001_feature_310:causal_forest:effect"
+      ],
+      "interpretation": "Medical/neurological history and cranial neuroimaging provide heterogeneous evidence for both confounding and treatment-effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_271",
+        "outer_001_feature_272",
+        "outer_001_feature_277",
+        "outer_001_feature_280",
+        "outer_001_feature_304",
+        "outer_001_feature_309",
+        "outer_001_feature_310"
+      ],
+      "name": "Neuro-Medical History and Cranial Imaging"
+    },
+    {
+      "disagreements": "ROS1 status (291) is a strong treatment predictor and modifier, whereas rearrangement status (292) is weak; surgical status (311, 312, 314) consistently shows effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_291:predictive_forest:treatment",
+        "multi:outer_001_feature_291:causal_forest:effect",
+        "multi:outer_001_feature_291:univariable_rlearner:effect",
+        "multi:outer_001_feature_292:predictive_forest:outcome",
+        "multi:outer_001_feature_294:predictive_forest:outcome",
+        "multi:outer_001_feature_294:causal_forest:effect",
+        "multi:outer_001_feature_311:univariable_rlearner:effect",
+        "multi:outer_001_feature_311:causal_forest:effect",
+        "multi:outer_001_feature_312:univariable_rlearner:effect",
+        "multi:outer_001_feature_312:causal_forest:effect",
+        "multi:outer_001_feature_314:causal_forest:effect"
+      ],
+      "interpretation": "Genetic markers and surgical/pathological outcomes demonstrate evidence for effect modification, with varying strength across specific markers.",
+      "member_feature_ids": [
+        "outer_001_feature_291",
+        "outer_001_feature_292",
+        "outer_001_feature_293",
+        "outer_001_feature_294",
+        "outer_001_feature_311",
+        "outer_001_feature_312",
+        "outer_001_feature_314"
+      ],
+      "name": "Genetic and Surgical Pathological Status"
+    },
+    {
+      "disagreements": "Rash/pruritus (285) shows robust prognostic and heterogeneity signals, while range of motion (283) and isolated rash (284) are weak; skeletal fractures (303) only show effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_285:predictive_forest:outcome",
+        "multi:outer_001_feature_285:causal_forest:effect",
+        "multi:outer_001_feature_303:univariable_rlearner:effect"
+      ],
+      "interpretation": "Cutaneous and skeletal manifestations show mixed utility, with combined skin measures being the most reliable signals.",
+      "member_feature_ids": [
+        "outer_001_feature_283",
+        "outer_001_feature_284",
+        "outer_001_feature_285",
+        "outer_001_feature_303"
+      ],
+      "name": "Dermatologic and Musculoskeletal Status"
+    },
+    {
+      "disagreements": "Smoking cessation duration (307) shows stronger treatment prediction than smoking status (306); biological sex and STK11 (302, 308) have moderate, mixed signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_306:univariable:treatment",
+        "multi:outer_001_feature_306:penalized_main:treatment",
+        "multi:outer_001_feature_307:univariable:treatment",
+        "multi:outer_001_feature_302:penalized_main:outcome",
+        "multi:outer_001_feature_302:predictive_forest:treatment",
+        "multi:outer_001_feature_308:predictive_forest:treatment"
+      ],
+      "interpretation": "Patient demographics and tobacco history primarily serve as predictors for treatment assignment.",
+      "member_feature_ids": [
+        "outer_001_feature_302",
+        "outer_001_feature_305",
+        "outer_001_feature_306",
+        "outer_001_feature_307",
+        "outer_001_feature_308"
+      ],
+      "name": "Patient Demographics and Behavioral History"
+    },
+    {
+      "disagreements": "Tiotropium use (318) is a strong predictor of treatment and outcome, contrasting with fragmented or weak signals for TKI, NGS, and targeted therapy (315, 316, 320).",
+      "evidence_ids": [
+        "multi:outer_001_feature_318:univariable:treatment",
+        "multi:outer_001_feature_318:univariable:outcome",
+        "multi:outer_001_feature_315:univariable:effect",
+        "multi:outer_001_feature_316:univariable_rlearner:effect"
+      ],
+      "interpretation": "Prior medications and diagnostic tests show heterogeneous evidence, where specific agents (tiotropium) act as confounders and others as effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_315",
+        "outer_001_feature_316",
+        "outer_001_feature_318",
+        "outer_001_feature_320"
+      ],
+      "name": "Pharmacological and Diagnostic History"
+    }
+  ]
+}

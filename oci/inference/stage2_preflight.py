@@ -47,10 +47,25 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
             )
         if requested == "multi_model":
             from .stage2_elastic_net_selection import statistical_selection_config_from_mapping
+            from .stage2_multi_model_config import SCHEMA_VERSION
 
+            saved_multi = (saved.get("statistical_selection") or {}).get("multi_model") or {}
+            if saved_multi.get("schema_version") != SCHEMA_VERSION:
+                raise RuntimeError(
+                    "Stage 2 multi-model policy changed (automatic modifier count); "
+                    "use guarded --stage2-reselect"
+                )
             saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))
             if saved_policy.public_dict() != config.stage2.statistical_selection.public_dict():
                 raise RuntimeError("Stage 2 multi-model policy changed; use guarded --stage2-reselect")
+            if (
+                config.stage2.statistical_selection.multi_model.modifier_count.enabled
+                and saved.get("estimation_trees") != config.stage2.estimation_trees
+            ):
+                raise RuntimeError(
+                    "Stage 2 modifier-count estimation_trees changed; "
+                    "use guarded --stage2-reselect"
+                )
     for path in root.glob("outer_*/selection/elastic_net_selection.json"):
         authority = _object(path).get("selection_authority", "llm_roles")
         if authority != requested:

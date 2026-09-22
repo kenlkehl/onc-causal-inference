@@ -1,0 +1,61 @@
+{
+  "themes": [
+    {
+      "disagreements": "Oxygen saturation (241) shows extremely strong univariable signals, whereas oxygen therapy use (242) has more modest p-values.",
+      "evidence_ids": [
+        "multi:outer_001_feature_241:univariable:treatment",
+        "multi:outer_001_feature_241:univariable:outcome",
+        "multi:outer_001_feature_242:univariable:treatment",
+        "multi:outer_001_feature_242:univariable:outcome"
+      ],
+      "interpretation": "Patients with lower oxygen saturation and the use of supplemental oxygen are strongly associated with both treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_241",
+        "outer_001_feature_242"
+      ],
+      "name": "Respiratory Status and Oxygenation"
+    },
+    {
+      "disagreements": "Palliative care status (246) is a very strong prognostic factor (p=0.002), while documented wishes (247) primarily predict treatment assignment.",
+      "evidence_ids": [
+        "multi:outer_001_feature_246:univariable:treatment",
+        "multi:outer_001_feature_246:univariable:outcome",
+        "multi:outer_001_feature_247:univariable:treatment"
+      ],
+      "interpretation": "Palliative care status and the documentation of patient wishes act as markers for both treatment selection and prognosis, often reflecting severity of illness.",
+      "member_feature_ids": [
+        "outer_001_feature_246",
+        "outer_001_feature_247"
+      ],
+      "name": "Care Preferences and End-of-Life Status"
+    },
+    {
+      "disagreements": "Both show weak univariable effect signals but maintain support in Causal Forest models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_243:causal_forest:effect",
+        "multi:outer_001_feature_248:causal_forest:effect"
+      ],
+      "interpretation": "PD-L1 and p40 expression show support in causal forests, suggesting they may modify the treatment effect.",
+      "member_feature_ids": [
+        "outer_001_feature_243",
+        "outer_001_feature_248"
+      ],
+      "name": "Tumor Biomarkers"
+    },
+    {
+      "disagreements": "Pain severity (245) is a strong outcome predictor (p=0.002), while specific drug doses (244, 249) lack strong univariable evidence.",
+      "evidence_ids": [
+        "multi:outer_001_feature_245:univariable:outcome",
+        "multi:outer_001_feature_250:predictive_forest:outcome"
+      ],
+      "interpretation": "Pain severity and neuropathy grades are primarily prognostic factors for the outcome, while dose measurements show minimal consistent signal.",
+      "member_feature_ids": [
+        "outer_001_feature_244",
+        "outer_001_feature_245",
+        "outer_001_feature_249",
+        "outer_001_feature_250"
+      ],
+      "name": "Symptom Burden and Therapy Dosing"
+    }
+  ]
+}

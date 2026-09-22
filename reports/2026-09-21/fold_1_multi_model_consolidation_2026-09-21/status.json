@@ -1,0 +1,26 @@
+{
+  "broad_correlation": 0.255190405025071,
+  "completed_at": "2026-09-22T00:37:52.112548+00:00",
+  "direct_recovery": {
+    "confounder": {
+      "any_role": 2,
+      "correct_role": 2,
+      "total": 5
+    },
+    "effect_modifier": {
+      "any_role": 1,
+      "correct_role": 1,
+      "total": 5
+    }
+  },
+  "final_validation": "passed",
+  "matched_correlation": 0.36384259374363986,
+  "phase": "complete",
+  "production_correlation": 0.2878949708284167,
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_consolidation_2026-09-21/REPORT_2026-09-21.md",
+  "selected_roles": {
+    "confounder": 8,
+    "effect_modifier": 8
+  },
+  "source_repository_implementation_changed": false
+}

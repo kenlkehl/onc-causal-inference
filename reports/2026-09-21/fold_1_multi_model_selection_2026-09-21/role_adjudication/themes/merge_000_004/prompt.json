@@ -1,0 +1,338 @@
+{
+  "input_fingerprint": "7e68d933eec226506bb984bd7eb24a83322292b824c0e13b3d36a73b2f3277b9",
+  "payload": {
+    "instructions": "Preserve all candidate IDs and distinctions. Broader parent themes organize evidence; they do not imply measurement equivalence.",
+    "maximum_output_themes": 10,
+    "required_response": {
+      "themes": [
+        {
+          "disagreements": "contradictions, weak signals, and proxy distinctions",
+          "evidence_ids": [
+            "at most 12 representative supplied modeling evidence IDs"
+          ],
+          "interpretation": "common or complementary evidence",
+          "member_feature_ids": [
+            "candidate IDs"
+          ],
+          "name": "theme"
+        }
+      ]
+    },
+    "task": "merge_stage2_multi_model_themes",
+    "themes": [
+      {
+        "disagreements": "Pemetrexed displays strong confounding and modification signals, whereas MET amplification is primarily an effect modifier with minimal impact on treatment selection.",
+        "evidence_ids": [
+          "multi:outer_001_feature_212:univariable:treatment",
+          "multi:outer_001_feature_212:univariable:outcome",
+          "multi:outer_001_feature_212:causal_forest:effect",
+          "multi:outer_001_feature_214:causal_forest:effect",
+          "multi:outer_001_feature_219:causal_forest:effect"
+        ],
+        "interpretation": "Molecular targets and chemotherapy markers providing strong evidence for treatment heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_212",
+          "outer_001_feature_214",
+          "outer_001_feature_219"
+        ],
+        "name": "Tumor Molecular Markers"
+      },
+      {
+        "disagreements": "Metastasis location is a strong confounder and modifier; FLAIR hyperintensity is a modest modifier; meningeal thickening is primarily prognostic with weak signals elsewhere.",
+        "evidence_ids": [
+          "multi:outer_001_feature_216:predictive_forest:treatment",
+          "multi:outer_001_feature_216:predictive_forest:outcome",
+          "multi:outer_001_feature_216:causal_forest:effect",
+          "multi:outer_001_feature_218:causal_forest:effect",
+          "multi:outer_001_feature_213:predictive_forest:outcome"
+        ],
+        "interpretation": "Radiological markers of disease extent and location.",
+        "member_feature_ids": [
+          "outer_001_feature_213",
+          "outer_001_feature_216",
+          "outer_001_feature_218"
+        ],
+        "name": "Neuro-Radiological Findings"
+      },
+      {
+        "disagreements": "Metabolic response is a credible effect modifier; mucositis is primarily prognostic without strong evidence for confounding or modification.",
+        "evidence_ids": [
+          "multi:outer_001_feature_215:univariable_rlearner:effect",
+          "multi:outer_001_feature_215:causal_forest:effect",
+          "multi:outer_001_feature_220:penalized_main:outcome"
+        ],
+        "interpretation": "Markers of clinical and physiological response status.",
+        "member_feature_ids": [
+          "outer_001_feature_215",
+          "outer_001_feature_220"
+        ],
+        "name": "Clinical and Metabolic Status"
+      },
+      {
+        "disagreements": "High consistency across all model families for both prognosis and interaction, though permutation importance in predictive forests is lower than the strong univariable and causal forest signals.",
+        "evidence_ids": [
+          "multi:outer_001_feature_228:univariable:outcome",
+          "multi:outer_001_feature_228:penalized_main:outcome",
+          "multi:outer_001_feature_228:univariable:effect",
+          "multi:outer_001_feature_228:causal_forest:effect",
+          "multi:outer_001_feature_228:univariable_rlearner:effect",
+          "multi:outer_001_feature_228:penalized_interactions:effect"
+        ],
+        "interpretation": "Strong systemic inflammatory marker showing robust evidence for both confounding (outcome prognosis) and effect modification (treatment heterogeneity).",
+        "member_feature_ids": [
+          "outer_001_feature_228"
+        ],
+        "name": "Systemic Inflammation"
+      },
+      {
+        "disagreements": "Variable signal strength across symptoms; neurological symptoms and nausea show stronger interaction evidence (Causal Forest, R-learner) compared to night sweats and necrotic fluid.",
+        "evidence_ids": [
+          "multi:outer_001_feature_225:causal_forest:effect",
+          "multi:outer_001_feature_227:causal_forest:effect",
+          "multi:outer_001_feature_226:univariable_rlearner:effect",
+          "multi:outer_001_feature_229:predictive_forest:treatment",
+          "multi:outer_001_feature_227:univariable_rlearner:effect",
+          "multi:outer_001_feature_225:univariable_rlearner:effect"
+        ],
+        "interpretation": "Cluster of pretreatment symptomatic indicators exhibiting evidence for both treatment prediction and heterogeneity of effect.",
+        "member_feature_ids": [
+          "outer_001_feature_225",
+          "outer_001_feature_226",
+          "outer_001_feature_227",
+          "outer_001_feature_229"
+        ],
+        "name": "Clinical Symptomatology"
+      },
+      {
+        "disagreements": "Napsin A expression shows strong interaction evidence, whereas N-stage and NSCLC diagnosis signals are considerably weaker and less consistent across folds.",
+        "evidence_ids": [
+          "multi:outer_001_feature_224:univariable_rlearner:effect",
+          "multi:outer_001_feature_224:causal_forest:effect",
+          "multi:outer_001_feature_223:predictive_forest:treatment",
+          "multi:outer_001_feature_223:causal_forest:effect",
+          "multi:outer_001_feature_230:univariable_rlearner:effect"
+        ],
+        "interpretation": "Pathological and staging markers where Napsin A is a credible effect modifier, and N-stage potentially serves as both a confounder and modifier.",
+        "member_feature_ids": [
+          "outer_001_feature_223",
+          "outer_001_feature_224",
+          "outer_001_feature_230"
+        ],
+        "name": "Disease Pathology and Stage"
+      },
+      {
+        "disagreements": "Evidence is primarily driven by predictive forests; univariable signals are weak or absent for MI presence.",
+        "evidence_ids": [
+          "multi:outer_001_feature_221:predictive_forest:outcome",
+          "multi:outer_001_feature_222:predictive_forest:treatment",
+          "multi:outer_001_feature_221:causal_forest:effect"
+        ],
+        "interpretation": "General health indicators and comorbidities with moderate predictive signals, though myelosuppression exhibits more credible evidence for a dual role.",
+        "member_feature_ids": [
+          "outer_001_feature_221",
+          "outer_001_feature_222"
+        ],
+        "name": "General Health and Comorbidities"
+      },
+      {
+        "disagreements": "Causal forest support for effect modification is low for both (26% for OA, 20% for osteopenia), confirming their roles as primarily confounders rather than effect modifiers.",
+        "evidence_ids": [
+          "multi:outer_001_feature_239:univariable:treatment",
+          "multi:outer_001_feature_239:univariable:outcome",
+          "multi:outer_001_feature_240:univariable:treatment",
+          "multi:outer_001_feature_240:univariable:outcome"
+        ],
+        "interpretation": "High-confidence signals for both treatment assignment and outcome prognosis, suggesting a strong confounding role.",
+        "member_feature_ids": [
+          "outer_001_feature_239",
+          "outer_001_feature_240"
+        ],
+        "name": "Bone Density and Musculoskeletal Comorbidities"
+      },
+      {
+        "disagreements": "Optic chiasm enhancement shows strong prognostic (66%) and interaction (53%) signals, whereas optic nerve enhancement signals are weak and inconsistent across models.",
+        "evidence_ids": [
+          "multi:outer_001_feature_235:penalized_main:outcome",
+          "multi:outer_001_feature_235:penalized_interactions:effect",
+          "multi:outer_001_feature_236:univariable_rlearner:effect"
+        ],
+        "interpretation": "Radiological signals associated with the optic pathway showing a blend of prognostic importance and treatment-heterogeneity evidence.",
+        "member_feature_ids": [
+          "outer_001_feature_235",
+          "outer_001_feature_236"
+        ],
+        "name": "Optic Pathway Imaging Enhancement"
+      },
+      {
+        "disagreements": "NYHA class is primarily an effect modifier (60% Causal Forest), while organomegaly is a stronger predictor of treatment (60%) and outcome (73%), marking it as a confounder.",
+        "evidence_ids": [
+          "multi:outer_001_feature_231:causal_forest:effect",
+          "multi:outer_001_feature_238:predictive_forest:treatment",
+          "multi:outer_001_feature_238:predictive_forest:outcome"
+        ],
+        "interpretation": "Indicators of overall patient health and organ involvement, demonstrating either strong prognosis or effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_231",
+          "outer_001_feature_238"
+        ],
+        "name": "Systemic Clinical and Functional Status"
+      },
+      {
+        "disagreements": "While some features show moderate predictive forest support, these are not replicated across other model families and lack the strength to justify a specific role.",
+        "evidence_ids": [
+          "multi:outer_001_feature_232:predictive_forest:treatment",
+          "multi:outer_001_feature_233:univariable_rlearner:effect",
+          "multi:outer_001_feature_234:predictive_forest:treatment",
+          "multi:outer_001_feature_237:univariable:treatment"
+        ],
+        "interpretation": "General patient characteristics and clinical status with insufficient or contradictory evidence to establish a causal role.",
+        "member_feature_ids": [
+          "outer_001_feature_232",
+          "outer_001_feature_233",
+          "outer_001_feature_234",
+          "outer_001_feature_237"
+        ],
+        "name": "Demographic and Operational Factors"
+      },
+      {
+        "disagreements": "Oxygen saturation (241) shows extremely strong univariable signals, whereas oxygen therapy use (242) has more modest p-values.",
+        "evidence_ids": [
+          "multi:outer_001_feature_241:univariable:treatment",
+          "multi:outer_001_feature_241:univariable:outcome",
+          "multi:outer_001_feature_242:univariable:treatment",
+          "multi:outer_001_feature_242:univariable:outcome"
+        ],
+        "interpretation": "Patients with lower oxygen saturation and the use of supplemental oxygen are strongly associated with both treatment assignment and outcome prognosis.",
+        "member_feature_ids": [
+          "outer_001_feature_241",
+          "outer_001_feature_242"
+        ],
+        "name": "Respiratory Status and Oxygenation"
+      },
+      {
+        "disagreements": "Palliative care status (246) is a very strong prognostic factor (p=0.002), while documented wishes (247) primarily predict treatment assignment.",
+        "evidence_ids": [
+          "multi:outer_001_feature_246:univariable:treatment",
+          "multi:outer_001_feature_246:univariable:outcome",
+          "multi:outer_001_feature_247:univariable:treatment"
+        ],
+        "interpretation": "Palliative care status and the documentation of patient wishes act as markers for both treatment selection and prognosis, often reflecting severity of illness.",
+        "member_feature_ids": [
+          "outer_001_feature_246",
+          "outer_001_feature_247"
+        ],
+        "name": "Care Preferences and End-of-Life Status"
+      },
+      {
+        "disagreements": "Both show weak univariable effect signals but maintain support in Causal Forest models.",
+        "evidence_ids": [
+          "multi:outer_001_feature_243:causal_forest:effect",
+          "multi:outer_001_feature_248:causal_forest:effect"
+        ],
+        "interpretation": "PD-L1 and p40 expression show support in causal forests, suggesting they may modify the treatment effect.",
+        "member_feature_ids": [
+          "outer_001_feature_243",
+          "outer_001_feature_248"
+        ],
+        "name": "Tumor Biomarkers"
+      },
+      {
+        "disagreements": "Pain severity (245) is a strong outcome predictor (p=0.002), while specific drug doses (244, 249) lack strong univariable evidence.",
+        "evidence_ids": [
+          "multi:outer_001_feature_245:univariable:outcome",
+          "multi:outer_001_feature_250:predictive_forest:outcome"
+        ],
+        "interpretation": "Pain severity and neuropathy grades are primarily prognostic factors for the outcome, while dose measurements show minimal consistent signal.",
+        "member_feature_ids": [
+          "outer_001_feature_244",
+          "outer_001_feature_245",
+          "outer_001_feature_249",
+          "outer_001_feature_250"
+        ],
+        "name": "Symptom Burden and Therapy Dosing"
+      },
+      {
+        "disagreements": "Pituitary-specific features (255, 256, 257) lack significant support across multiple model families compared to peritumoral edema and periventricular signal abnormality.",
+        "evidence_ids": [
+          "multi:outer_001_feature_251:predictive_forest:treatment",
+          "multi:outer_001_feature_251:predictive_forest:outcome",
+          "multi:outer_001_feature_251:causal_forest:effect",
+          "multi:outer_001_feature_252:predictive_forest:outcome",
+          "multi:outer_001_feature_252:causal_forest:effect"
+        ],
+        "interpretation": "Features describing structural or signal abnormalities on neuroimaging, exhibiting varied degrees of prognostic and heterogeneity signals.",
+        "member_feature_ids": [
+          "outer_001_feature_251",
+          "outer_001_feature_252",
+          "outer_001_feature_255",
+          "outer_001_feature_256",
+          "outer_001_feature_257"
+        ],
+        "name": "Brain Radiographic Findings"
+      },
+      {
+        "disagreements": "Phospho-MET status (253) shows support only in the R-learner for effect modification, while PI3K activation (254) is supported by the Causal Forest, providing more robust evidence for the latter.",
+        "evidence_ids": [
+          "multi:outer_001_feature_254:predictive_forest:treatment",
+          "multi:outer_001_feature_254:causal_forest:effect",
+          "multi:outer_001_feature_253:univariable_rlearner:effect"
+        ],
+        "interpretation": "Biomarkers related to intracellular signaling pathways and receptor phosphorylation status.",
+        "member_feature_ids": [
+          "outer_001_feature_253",
+          "outer_001_feature_254"
+        ],
+        "name": "Molecular Signaling"
+      },
+      {
+        "disagreements": "Platelet count shows a dominant treatment prediction signal (univariable) compared to the outcome-dominant signals of pleural effusion and pneumonia.",
+        "evidence_ids": [
+          "multi:outer_001_feature_258:univariable:treatment",
+          "multi:outer_001_feature_258:causal_forest:effect",
+          "multi:outer_001_feature_259:predictive_forest:outcome",
+          "multi:outer_001_feature_259:causal_forest:effect",
+          "multi:outer_001_feature_260:predictive_forest:outcome",
+          "multi:outer_001_feature_260:causal_forest:effect"
+        ],
+        "interpretation": "General systemic markers including hematological counts and clinical diagnoses that may reflect overall patient fragility or comorbidities.",
+        "member_feature_ids": [
+          "outer_001_feature_258",
+          "outer_001_feature_259",
+          "outer_001_feature_260"
+        ],
+        "name": "Systemic Health and Clinical Status"
+      },
+      {
+        "disagreements": "Signals for posterior fossa features are generally weaker than for primary tumor or systemic indicators, appearing primarily in forest-based models rather than univariable or penalized models.",
+        "evidence_ids": [
+          "multi:outer_001_feature_261:predictive_forest:treatment",
+          "multi:outer_001_feature_262:predictive_forest:outcome",
+          "multi:outer_001_feature_262:causal_forest:effect"
+        ],
+        "interpretation": "Posterior fossa imaging features (enhancement and mass effect) show complementary signals across treatment prediction and outcome prognosis, with modest evidence for effect modification in causal forests.",
+        "member_feature_ids": [
+          "outer_001_feature_261",
+          "outer_001_feature_262"
+        ],
+        "name": "Posterior Fossa Imaging"
+      },
+      {
+        "disagreements": "Treatment and outcome signals are inconsistent across models, while the causal forest provides a more stable signal for effect modification, particularly for location.",
+        "evidence_ids": [
+          "multi:outer_001_feature_264:univariable:treatment",
+          "multi:outer_001_feature_264:causal_forest:effect",
+          "multi:outer_001_feature_265:penalized_main:outcome",
+          "multi:outer_001_feature_266:univariable_rlearner:effect"
+        ],
+        "interpretation": "Primary tumor physical characteristics (location, morphology, and size) consistently show signals for effect modification and variable levels of prognostic/predictive importance.",
+        "member_feature_ids": [
+          "outer_001_feature_264",
+          "outer_001_feature_265",
+          "outer_001_feature_266"
+        ],
+        "name": "Primary Tumor Physicality"
+      }
+    ]
+  },
+  "system": "You review pretreatment candidate measurements using modeling evidence\nfrom one outer-training fold. First identify themes across candidates; then\nreconcile their roles as confounder, effect_modifier, both, or neither.\nAll evidence is fallible. No individual family, p-value, or support frequency is\na hard selection gate. A credible complementary signal can justify retention\neven when other methods shrink it away. Do not mistake correlated aliases or\nproxies for multiple independent discoveries. Themes organize evidence; they\ndo not establish equivalence, merge measurements, or transfer a role to every\ntheme member. Preserve investigator-locked roles exactly.\n\nTreatment prediction, outcome prognosis, and confounding are distinct. Discuss\nwhether a candidate could be a common cause rather than an instrument or only a\nprognostic factor. Effect modification needs treatment-heterogeneity evidence;\noutcome main-effect importance alone does not establish it. Univariable logistic\ninteractions are on the log-odds scale and unadjusted for other covariates.\nOrthogonal linear models, candidate R-learners, and causal forests assess the\nprobability/outcome scale after elastic-net nuisance adjustment. Their targets\nand biases differ. A model family is evidence, not an independent replication.\n\nUse exposure and evaluability denominators. Missing or nonconverged fits are not\nnegative votes. Repeated samples and folds overlap; support fractions are not\ncausal probabilities or formal stability-selection error guarantees. Raw and BH\np-values do not correct the upstream adaptive discovery process. Permutation\nimportance can be diluted by correlated alternatives and does not prove a\ncausal role. Compare fold consistency, methods, subsets, and conflicting facts.\nDefinitions and theme names cannot establish a role without the supplied\nempirical evidence. Never invent an oracle, data-generating process, or hidden\ntruth. Return the requested JSON and cite only supplied evidence IDs."
+}

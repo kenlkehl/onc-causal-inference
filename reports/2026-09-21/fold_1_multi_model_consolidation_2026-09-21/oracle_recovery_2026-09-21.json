@@ -1,0 +1,384 @@
+{
+  "direct": [
+    {
+      "assigned_roles": {
+        "outer_001_feature_009": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_009"
+      ],
+      "candidate_names": [
+        "age"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [
+            "multi:outer_001_feature_009:predictive_forest:outcome",
+            "multi:outer_001_feature_009:predictive_forest:treatment",
+            "multi:outer_001_feature_009:univariable:outcome",
+            "multi:outer_001_feature_009:univariable:treatment"
+          ],
+          "feature_id": "outer_001_feature_009",
+          "first_pass_roles": [
+            "confounder"
+          ],
+          "group_id": "auto_singleton_009",
+          "modifier_rank": null,
+          "rationale": "Universal baseline demographic with absolute consistency across all treatment and outcome models.",
+          "roles": [
+            "confounder"
+          ],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "age",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_302": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_302"
+      ],
+      "candidate_names": [
+        "sex"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_302",
+          "first_pass_roles": [
+            "confounder",
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_302",
+          "modifier_rank": null,
+          "rationale": "Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "sex",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_109": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_109"
+      ],
+      "candidate_names": [
+        "ecog_performance_status"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [
+            "multi:outer_001_feature_109:predictive_forest:outcome",
+            "multi:outer_001_feature_109:predictive_forest:treatment",
+            "multi:outer_001_feature_109:univariable:outcome",
+            "multi:outer_001_feature_109:univariable:treatment"
+          ],
+          "feature_id": "outer_001_feature_109",
+          "first_pass_roles": [
+            "confounder",
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_109",
+          "modifier_rank": null,
+          "rationale": "Gold standard for patient fitness; consistent and strong signal in both T and Y.",
+          "roles": [
+            "confounder"
+          ],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "ECOG",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_095": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_095"
+      ],
+      "candidate_names": [
+        "creatinine_clearance"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_095",
+          "first_pass_roles": [
+            "confounder",
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_095",
+          "modifier_rank": null,
+          "rationale": "Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "creatinine clearance",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_267": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_267"
+      ],
+      "candidate_names": [
+        "prior_platinum_chemotherapy"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_267",
+          "first_pass_roles": [
+            "confounder",
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_267",
+          "modifier_rank": null,
+          "rationale": "Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "prior platinum exposure",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_192": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_192"
+      ],
+      "candidate_names": [
+        "lung_cancer_histology"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_192",
+          "first_pass_roles": [],
+          "group_id": "auto_singleton_192",
+          "modifier_rank": null,
+          "rationale": "Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "insufficient"
+        }
+      ],
+      "oracle_variable": "histology",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_032": [],
+        "outer_001_feature_111": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_032",
+        "outer_001_feature_111"
+      ],
+      "candidate_names": [
+        "biomarker_egfr_status",
+        "egfr_mutation_status"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_032",
+          "first_pass_roles": [
+            "confounder",
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_032",
+          "modifier_rank": 13,
+          "rationale": "Modifier rank 13 exceeds the training-selected prefix of 8. Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "consistent"
+        },
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_111",
+          "first_pass_roles": [
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_111",
+          "modifier_rank": null,
+          "rationale": "Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "mixed"
+        }
+      ],
+      "oracle_variable": "EGFR status",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_228": [
+          "effect_modifier"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_228"
+      ],
+      "candidate_names": [
+        "neutrophil_to_lymphocyte_ratio"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [
+            "multi:outer_001_feature_228:causal_forest:effect",
+            "multi:outer_001_feature_228:univariable_rlearner:effect"
+          ],
+          "feature_id": "outer_001_feature_228",
+          "first_pass_roles": [
+            "confounder",
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_228",
+          "modifier_rank": 1,
+          "rationale": "Highest combined magnitude across R-learner and Causal Forest; distinct inflammatory signal.",
+          "roles": [
+            "effect_modifier"
+          ],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "NLR",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_052": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_052"
+      ],
+      "candidate_names": [
+        "brain_metastases_presence"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_052",
+          "first_pass_roles": [],
+          "group_id": "auto_singleton_052",
+          "modifier_rank": 11,
+          "rationale": "Modifier rank 11 exceeds the training-selected prefix of 8. Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "brain metastasis presence",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_155": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_155"
+      ],
+      "candidate_names": [
+        "hemoglobin_level"
+      ],
+      "decisions": [
+        {
+          "consolidation_rationale": "Automatic singleton: no consolidation proposed. Empirical distinctness is not established.",
+          "evidence_ids": [],
+          "feature_id": "outer_001_feature_155",
+          "first_pass_roles": [
+            "confounder",
+            "effect_modifier"
+          ],
+          "group_id": "auto_singleton_155",
+          "modifier_rank": null,
+          "rationale": "Not retained in the final roles after global consolidation and compact-size selection.",
+          "roles": [],
+          "stability": "consistent"
+        }
+      ],
+      "oracle_variable": "hemoglobin",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    }
+  ],
+  "proxies": [
+    {
+      "assigned_roles": [],
+      "candidate_name": "gender_identity",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_140",
+      "proxy": "gender identity",
+      "related_oracle_variable": "sex"
+    },
+    {
+      "assigned_roles": [],
+      "candidate_name": "brain_lesion_count",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_049",
+      "proxy": "brain lesion count",
+      "related_oracle_variable": "brain metastasis presence"
+    },
+    {
+      "assigned_roles": [],
+      "candidate_name": "hematocrit",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_153",
+      "proxy": "hematocrit",
+      "related_oracle_variable": "hemoglobin"
+    },
+    {
+      "assigned_roles": [
+        "confounder"
+      ],
+      "candidate_name": "estimated_glomerular_filtration_rate",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_125",
+      "proxy": "eGFR",
+      "related_oracle_variable": "creatinine clearance"
+    }
+  ]
+}

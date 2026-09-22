@@ -1,0 +1,230 @@
+{
+  "decisions": [
+    {
+      "cross_method_reconciliation": "Treatment and outcome signals are weak and inconsistent across model families, with minimal support in univariable or penalized models.",
+      "evidence_against": [
+        "Low support fractions across all roles in predictive forest and univariable models"
+      ],
+      "evidence_for": [
+        "Minor support in univariable r-learner for effect modification"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_031:univariable:treatment",
+        "multi:outer_001_feature_031:univariable:outcome",
+        "multi:outer_001_feature_031:univariable:effect",
+        "multi:outer_001_feature_031:predictive_forest:treatment",
+        "multi:outer_001_feature_031:predictive_forest:outcome",
+        "multi:outer_001_feature_031:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_031",
+      "inner_fold_consistency": "Insufficient",
+      "rationale": "Signals for treatment, outcome, and effect are too sparse and weak to justify any role.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong outcome prediction (penalized main) and strong effect modification (causal forest) coexist with weak but present treatment assignment signals.",
+      "evidence_against": [
+        "Weak univariable treatment support (0.06)"
+      ],
+      "evidence_for": [
+        "Strong outcome support in penalized main (0.6)",
+        "Strong effect modification support in causal forest (0.6) and r-learner (0.4)",
+        "Presence of treatment signals in predictive forest (0.46)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_032:penalized_main:outcome",
+        "multi:outer_001_feature_032:causal_forest:effect",
+        "multi:outer_001_feature_032:univariable_rlearner:effect",
+        "multi:outer_001_feature_032:predictive_forest:treatment"
+      ],
+      "feature_id": "outer_001_feature_032",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Evidence supports the role of a confounder via signals for both outcome prognosis and treatment assignment, alongside strong treatment-effect heterogeneity.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Massive treatment prediction signal dominates; outcome prediction is strong in predictive forest, establishing confounding.",
+      "evidence_against": [
+        "Moderate effect signal in causal forest (0.33)"
+      ],
+      "evidence_for": [
+        "Maximum univariable treatment support (1.0)",
+        "Strong predictive forest outcome support (0.73)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_033:univariable:treatment",
+        "multi:outer_001_feature_033:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_033",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Strong evidence for predicting both treatment assignment and outcome.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong predictive forest signals for both treatment and outcome outweigh inconsistent univariable results.",
+      "evidence_against": [
+        "Zero support in univariable treatment and outcome models"
+      ],
+      "evidence_for": [
+        "Strong predictive forest outcome support (0.86)",
+        "Strong predictive forest treatment support (0.6)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_034:predictive_forest:treatment",
+        "multi:outer_001_feature_034:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_034",
+      "inner_fold_consistency": "Mixed",
+      "rationale": "Predictive forest provides strong evidence that biopsy method relates to both treatment assignment and outcome prognosis.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Moderate signals in predictive forest for both treatment and outcome suggest a confounding role.",
+      "evidence_against": [
+        "Lack of support in penalized main models"
+      ],
+      "evidence_for": [
+        "Predictive forest treatment support (0.46)",
+        "Predictive forest outcome support (0.46)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_035:predictive_forest:treatment",
+        "multi:outer_001_feature_035:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_035",
+      "inner_fold_consistency": "Mixed",
+      "rationale": "Signals are moderate but consistent across treatment assignment and outcome prognosis in predictive forests.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Overwhelming evidence across multiple families for both treatment and outcome prediction.",
+      "evidence_against": [
+        "Weak effect modification signals"
+      ],
+      "evidence_for": [
+        "Maximum univariable treatment support (1.0)",
+        "Maximum univariable outcome support (1.0)",
+        "Strong penalized main treatment support (0.93)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_036:univariable:treatment",
+        "multi:outer_001_feature_036:univariable:outcome",
+        "multi:outer_001_feature_036:penalized_main:treatment"
+      ],
+      "feature_id": "outer_001_feature_036",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Exceptionally strong evidence for predicting both treatment assignment and outcome prognosis.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong treatment prediction is complemented by very strong effect modification signals in causal forest and r-learners, with outcome signals present in predictive forests.",
+      "evidence_against": [
+        "Weak univariable outcome support (0.0)"
+      ],
+      "evidence_for": [
+        "Maximum univariable treatment support (1.0)",
+        "Very strong causal forest effect support (0.8)",
+        "Strong r-learner effect support (0.53)",
+        "Strong predictive forest outcome support (0.53)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_037:univariable:treatment",
+        "multi:outer_001_feature_037:causal_forest:effect",
+        "multi:outer_001_feature_037:univariable_rlearner:effect",
+        "multi:outer_001_feature_037:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_037",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Clear evidence for predicting treatment assignment and outcome prognosis, as well as effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Moderate signals for treatment, outcome, and effect across predictive and causal forests.",
+      "evidence_against": [
+        "Zero univariable outcome support"
+      ],
+      "evidence_for": [
+        "Predictive forest treatment support (0.6)",
+        "Causal forest effect support (0.46)",
+        "Predictive forest outcome support (0.46)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_038:predictive_forest:treatment",
+        "multi:outer_001_feature_038:causal_forest:effect",
+        "multi:outer_001_feature_038:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_038",
+      "inner_fold_consistency": "Mixed",
+      "rationale": "Evidence across predictive and causal forests supports roles in treatment assignment, outcome prognosis, and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Signals for treatment and outcome are moderate in predictive forest but weak or absent elsewhere; effect signal is low.",
+      "evidence_against": [
+        "Zero support in univariable and penalized models"
+      ],
+      "evidence_for": [
+        "Moderate predictive forest outcome support (0.53)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_039:predictive_forest:outcome",
+        "multi:outer_001_feature_039:predictive_forest:treatment"
+      ],
+      "feature_id": "outer_001_feature_039",
+      "inner_fold_consistency": "Insufficient",
+      "rationale": "Signals are not strong enough across diverse methods to assign a role.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong outcome prognosis in predictive forest and strong effect modification in causal forest are supported by treatment signals in predictive forest.",
+      "evidence_against": [
+        "Zero univariable treatment support"
+      ],
+      "evidence_for": [
+        "Strong predictive forest outcome support (0.73)",
+        "Strong causal forest effect support (0.6)",
+        "Predictive forest treatment support (0.4)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_040:predictive_forest:outcome",
+        "multi:outer_001_feature_040:causal_forest:effect",
+        "multi:outer_001_feature_040:predictive_forest:treatment"
+      ],
+      "feature_id": "outer_001_feature_040",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Strong evidence for predicting outcome prognosis and treatment assignment, as well as effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    }
+  ],
+  "summary": "The analysis reveals a strong group of physiological and metabolic confounders, notably blood pressure and GFR. Several candidates, including EGFR status, BUN, and body weight, exhibit a dual role as confounders and effect modifiers, supported by high causal forest and R-learner scores. Other candidates like azithromycin use and body temperature show insufficient evidence to be assigned a role."
+}

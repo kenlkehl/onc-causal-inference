@@ -1,0 +1,5 @@
+# Regenerable numerical checkpoints and live service logs stay local.
+# Frozen evidence, LLM review records, manifests, reports, and scripts are saved.
+numerical/
+llm_runtime/
+*.log

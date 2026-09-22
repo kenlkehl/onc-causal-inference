@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-22T00:27:56.873876+00:00",
+  "evaluation_source_sha256": "babacb31c24665eb3b73760196f64bed5933ca25c41f6b102338c4d2428ddd5f",
+  "oracle_used_in_fitting": false,
+  "predictions_freeze_sha256": "479d8172bc8de2ed2073ab764d3fb2ce24c7de9f61be3e106a5391dd04124021",
+  "selection_freeze_sha256": "152d3d9934e41254cd71a1601e4975055c989e7ae92ec18b4eb8f7183343f975"
+}

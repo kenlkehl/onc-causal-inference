@@ -1,0 +1,67 @@
+{
+  "themes": [
+    {
+      "disagreements": "Morphine shows strong evidence across all roles, while oxycodone exhibits only weak prognostic signals and no significant treatment or effect modification evidence.",
+      "evidence_ids": [
+        "multi:outer_001_feature_217:univariable:treatment",
+        "multi:outer_001_feature_217:univariable:outcome",
+        "multi:outer_001_feature_217:causal_forest:effect",
+        "multi:outer_001_feature_211:predictive_forest:outcome"
+      ],
+      "interpretation": "Opioid-based pain management markers",
+      "member_feature_ids": [
+        "outer_001_feature_211",
+        "outer_001_feature_217"
+      ],
+      "name": "Opioid Pain Management"
+    },
+    {
+      "disagreements": "Pemetrexed displays strong confounding and modification signals, whereas MET amplification is primarily an effect modifier with minimal impact on treatment selection.",
+      "evidence_ids": [
+        "multi:outer_001_feature_212:univariable:treatment",
+        "multi:outer_001_feature_212:univariable:outcome",
+        "multi:outer_001_feature_212:causal_forest:effect",
+        "multi:outer_001_feature_214:causal_forest:effect",
+        "multi:outer_001_feature_219:causal_forest:effect"
+      ],
+      "interpretation": "Molecular targets and chemotherapy markers providing strong evidence for treatment heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_212",
+        "outer_001_feature_214",
+        "outer_001_feature_219"
+      ],
+      "name": "Tumor Molecular Markers"
+    },
+    {
+      "disagreements": "Metastasis location is a strong confounder and modifier; FLAIR hyperintensity is a modest modifier; meningeal thickening is primarily prognostic with weak signals elsewhere.",
+      "evidence_ids": [
+        "multi:outer_001_feature_216:predictive_forest:treatment",
+        "multi:outer_001_feature_216:predictive_forest:outcome",
+        "multi:outer_001_feature_216:causal_forest:effect",
+        "multi:outer_001_feature_218:causal_forest:effect",
+        "multi:outer_001_feature_213:predictive_forest:outcome"
+      ],
+      "interpretation": "Radiological markers of disease extent and location.",
+      "member_feature_ids": [
+        "outer_001_feature_213",
+        "outer_001_feature_216",
+        "outer_001_feature_218"
+      ],
+      "name": "Neuro-Radiological Findings"
+    },
+    {
+      "disagreements": "Metabolic response is a credible effect modifier; mucositis is primarily prognostic without strong evidence for confounding or modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_215:univariable_rlearner:effect",
+        "multi:outer_001_feature_215:causal_forest:effect",
+        "multi:outer_001_feature_220:penalized_main:outcome"
+      ],
+      "interpretation": "Markers of clinical and physiological response status.",
+      "member_feature_ids": [
+        "outer_001_feature_215",
+        "outer_001_feature_220"
+      ],
+      "name": "Clinical and Metabolic Status"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "themes": [
+    {
+      "disagreements": "Causal forest support for effect modification is low for both (26% for OA, 20% for osteopenia), confirming their roles as primarily confounders rather than effect modifiers.",
+      "evidence_ids": [
+        "multi:outer_001_feature_239:univariable:treatment",
+        "multi:outer_001_feature_239:univariable:outcome",
+        "multi:outer_001_feature_240:univariable:treatment",
+        "multi:outer_001_feature_240:univariable:outcome"
+      ],
+      "interpretation": "High-confidence signals for both treatment assignment and outcome prognosis, suggesting a strong confounding role.",
+      "member_feature_ids": [
+        "outer_001_feature_239",
+        "outer_001_feature_240"
+      ],
+      "name": "Bone Density and Musculoskeletal Comorbidities"
+    },
+    {
+      "disagreements": "Optic chiasm enhancement shows strong prognostic (66%) and interaction (53%) signals, whereas optic nerve enhancement signals are weak and inconsistent across models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_235:penalized_main:outcome",
+        "multi:outer_001_feature_235:penalized_interactions:effect",
+        "multi:outer_001_feature_236:univariable_rlearner:effect"
+      ],
+      "interpretation": "Radiological signals associated with the optic pathway showing a blend of prognostic importance and treatment-heterogeneity evidence.",
+      "member_feature_ids": [
+        "outer_001_feature_235",
+        "outer_001_feature_236"
+      ],
+      "name": "Optic Pathway Imaging Enhancement"
+    },
+    {
+      "disagreements": "NYHA class is primarily an effect modifier (60% Causal Forest), while organomegaly is a stronger predictor of treatment (60%) and outcome (73%), marking it as a confounder.",
+      "evidence_ids": [
+        "multi:outer_001_feature_231:causal_forest:effect",
+        "multi:outer_001_feature_238:predictive_forest:treatment",
+        "multi:outer_001_feature_238:predictive_forest:outcome"
+      ],
+      "interpretation": "Indicators of overall patient health and organ involvement, demonstrating either strong prognosis or effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_231",
+        "outer_001_feature_238"
+      ],
+      "name": "Systemic Clinical and Functional Status"
+    },
+    {
+      "disagreements": "While some features show moderate predictive forest support, these are not replicated across other model families and lack the strength to justify a specific role.",
+      "evidence_ids": [
+        "multi:outer_001_feature_232:predictive_forest:treatment",
+        "multi:outer_001_feature_233:univariable_rlearner:effect",
+        "multi:outer_001_feature_234:predictive_forest:treatment",
+        "multi:outer_001_feature_237:univariable:treatment"
+      ],
+      "interpretation": "General patient characteristics and clinical status with insufficient or contradictory evidence to establish a causal role.",
+      "member_feature_ids": [
+        "outer_001_feature_232",
+        "outer_001_feature_233",
+        "outer_001_feature_234",
+        "outer_001_feature_237"
+      ],
+      "name": "Demographic and Operational Factors"
+    }
+  ]
+}

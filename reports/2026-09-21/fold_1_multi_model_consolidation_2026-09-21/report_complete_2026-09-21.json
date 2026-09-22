@@ -1,0 +1,8 @@
+{
+  "completed_at": "2026-09-22T00:36:11.821789+00:00",
+  "evaluation_sha256": "1de2ea28f60dd0570e7810080ac141752615091e8f02601a062c922846116970",
+  "figure_sha256": "0599ead408e2f4c538d393ca5a617399d87180ec53f297f434ff20eef2e51ef1",
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_consolidation_2026-09-21/REPORT_2026-09-21.md",
+  "report_sha256": "89f10c3f48b580fec6597b2373d12d85b478cfdccd29d1a208e4f9d582de762b",
+  "source_sha256": "6902514da95ae290bd830cf6d5db3d6237d7c776ffba373e97cdf179120d388a"
+}

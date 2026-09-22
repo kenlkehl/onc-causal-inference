@@ -1,0 +1,56 @@
+{
+  "fit": {
+    "above_0_90_rows": 119,
+    "below_0_10_rows": 89,
+    "bounds_are_inclusive": true,
+    "eligible_rows": 592,
+    "excluded_above_max": 119,
+    "excluded_below_min": 89,
+    "excluded_rows": 208,
+    "max_propensity": 0.9,
+    "min_propensity": 0.1,
+    "outside_0_10_0_90_fraction": 0.26,
+    "propensity_max": 0.9983519384877744,
+    "propensity_min": 0.0026433368436507066,
+    "quantiles": {
+      "0": 0.0026433368436507066,
+      "0.01": 0.012732470169934583,
+      "0.05": 0.04382308918005,
+      "0.1": 0.08929834168293342,
+      "0.5": 0.5248362541428313,
+      "0.9": 0.9394499023304111,
+      "0.95": 0.9667634237193471,
+      "0.99": 0.9893103323769108,
+      "1": 0.9983519384877744
+    },
+    "rows": 800
+  },
+  "fit_eligibility_source": "inner_out_of_fold_external_propensity",
+  "heldout": {
+    "above_0_90_rows": 19,
+    "below_0_10_rows": 24,
+    "bounds_are_inclusive": true,
+    "eligible_rows": 157,
+    "excluded_above_max": 19,
+    "excluded_below_min": 24,
+    "excluded_rows": 43,
+    "max_propensity": 0.9,
+    "min_propensity": 0.1,
+    "outside_0_10_0_90_fraction": 0.215,
+    "propensity_max": 0.9973730098918245,
+    "propensity_min": 0.0012575374201030307,
+    "quantiles": {
+      "0": 0.0012575374201030307,
+      "0.01": 0.0055333783565608766,
+      "0.05": 0.04310871048126939,
+      "0.1": 0.07563372275584157,
+      "0.5": 0.48860539095405586,
+      "0.9": 0.8944707213296462,
+      "0.95": 0.9481573417143493,
+      "0.99": 0.9890276452427001,
+      "1": 0.9973730098918245
+    },
+    "rows": 200
+  },
+  "heldout_eligibility_source": "outer_training_only_external_propensity"
+}

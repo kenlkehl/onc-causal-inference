@@ -1,0 +1,53 @@
+{
+  "themes": [
+    {
+      "disagreements": "Differences in signal strength between univariable and penalized models; atorvastatin_dose is a far more dominant treatment predictor than ast_level or antihypertensive_use.",
+      "evidence_ids": [
+        "multi:outer_001_feature_021:univariable:treatment",
+        "multi:outer_001_feature_026:univariable:treatment",
+        "multi:outer_001_feature_027:univariable:treatment",
+        "multi:outer_001_feature_027:univariable:outcome"
+      ],
+      "interpretation": "Cardiovascular and metabolic markers showing strong association with treatment assignment and some prognostic value, suggesting a confounding role.",
+      "member_feature_ids": [
+        "outer_001_feature_021",
+        "outer_001_feature_026",
+        "outer_001_feature_027"
+      ],
+      "name": "Cardiovascular and Metabolic Profile"
+    },
+    {
+      "disagreements": "Anxiety shows strong heterogeneity signals (R-learner/Causal Forest), while appetite status is almost exclusively a prognostic factor.",
+      "evidence_ids": [
+        "multi:outer_001_feature_022:univariable:outcome",
+        "multi:outer_001_feature_022:univariable_rlearner:effect",
+        "multi:outer_001_feature_024:univariable:outcome",
+        "multi:outer_001_feature_024:predictive_forest:outcome"
+      ],
+      "interpretation": "Psychosocial and general health indicators that influence outcome prognosis, with some evidence for treatment-effect heterogeneity for anxiety.",
+      "member_feature_ids": [
+        "outer_001_feature_022",
+        "outer_001_feature_024"
+      ],
+      "name": "Psychosocial and General Well-being"
+    },
+    {
+      "disagreements": "High variance in signal quality; axial_structure_abnormality is robust, whereas atrial_fibrillation and audiogram_status are very weak or non-evaluable.",
+      "evidence_ids": [
+        "multi:outer_001_feature_030:penalized_main:outcome",
+        "multi:outer_001_feature_030:causal_forest:effect",
+        "multi:outer_001_feature_023:univariable_rlearner:effect",
+        "multi:outer_001_feature_025:univariable_rlearner:effect"
+      ],
+      "interpretation": "Structural abnormalities and specific medical history markers showing mixed evidence, with some acting as effect modifiers or prognostic factors.",
+      "member_feature_ids": [
+        "outer_001_feature_023",
+        "outer_001_feature_025",
+        "outer_001_feature_028",
+        "outer_001_feature_029",
+        "outer_001_feature_030"
+      ],
+      "name": "Structural and Historical Medical Findings"
+    }
+  ]
+}

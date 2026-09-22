@@ -1,0 +1,53 @@
+{
+  "themes": [
+    {
+      "disagreements": "Nausea (feature 119) shows significantly weaker signals compared to the functional domains, though it retains some predictive forest support.",
+      "evidence_ids": [
+        "multi:outer_001_feature_120:univariable:treatment",
+        "multi:outer_001_feature_120:univariable:outcome",
+        "multi:outer_001_feature_116:univariable:outcome",
+        "multi:outer_001_feature_117:univariable:treatment",
+        "multi:outer_001_feature_118:univariable:outcome"
+      ],
+      "interpretation": "Candidates measuring physical, cognitive, emotional, and global health status exhibit strong and consistent signals for both treatment prediction and outcome prognosis across univariable and forest-based models.",
+      "member_feature_ids": [
+        "outer_001_feature_116",
+        "outer_001_feature_117",
+        "outer_001_feature_118",
+        "outer_001_feature_119",
+        "outer_001_feature_120"
+      ],
+      "name": "EORTC QLQ-C30 Quality of Life Domains"
+    },
+    {
+      "disagreements": "Employment status is a dominant confounder, whereas emphysema specifically shows a strong signal for effect modification via Causal Forest.",
+      "evidence_ids": [
+        "multi:outer_001_feature_114:univariable:treatment",
+        "multi:outer_001_feature_114:univariable:outcome",
+        "multi:outer_001_feature_113:univariable:treatment",
+        "multi:outer_001_feature_113:causal_forest:effect"
+      ],
+      "interpretation": "Baseline characteristics showing a mix of strong confounding (employment status) and combined confounding with treatment-heterogeneity (emphysema).",
+      "member_feature_ids": [
+        "outer_001_feature_112",
+        "outer_001_feature_113",
+        "outer_001_feature_114"
+      ],
+      "name": "Baseline Health and Demographic Status"
+    },
+    {
+      "disagreements": "EGFR mutation status has moderate support for treatment heterogeneity, but lacks the strong treatment-prediction signal seen in other confounders.",
+      "evidence_ids": [
+        "multi:outer_001_feature_111:causal_forest:effect",
+        "multi:outer_001_feature_111:penalized_main:outcome",
+        "multi:outer_001_feature_111:univariable_rlearner:effect"
+      ],
+      "interpretation": "Biomarkers with varying degrees of influence; EGFR mutation status shows a credible signal for effect modification and prognosis, whereas enzyme elevation is largely uninformative.",
+      "member_feature_ids": [
+        "outer_001_feature_111",
+        "outer_001_feature_115"
+      ],
+      "name": "Molecular and Biochemical Markers"
+    }
+  ]
+}

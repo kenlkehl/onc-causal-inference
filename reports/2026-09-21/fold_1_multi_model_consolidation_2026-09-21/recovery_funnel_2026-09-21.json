@@ -1,0 +1,209 @@
+{
+  "source": "post-freeze oracle lineage audit",
+  "variables": [
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_009": [
+          "confounder"
+        ]
+      },
+      "final_correct_role": true,
+      "final_roles": {
+        "outer_001_feature_009": [
+          "confounder"
+        ]
+      },
+      "global_review_correct_role": true,
+      "global_roles": {
+        "outer_001_feature_009": [
+          "confounder"
+        ]
+      },
+      "oracle_variable": "age",
+      "true_role": "confounder"
+    },
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_302": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "final_correct_role": false,
+      "final_roles": {
+        "outer_001_feature_302": []
+      },
+      "global_review_correct_role": false,
+      "global_roles": {
+        "outer_001_feature_302": []
+      },
+      "oracle_variable": "sex",
+      "true_role": "confounder"
+    },
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_109": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "final_correct_role": true,
+      "final_roles": {
+        "outer_001_feature_109": [
+          "confounder"
+        ]
+      },
+      "global_review_correct_role": true,
+      "global_roles": {
+        "outer_001_feature_109": [
+          "confounder"
+        ]
+      },
+      "oracle_variable": "ECOG",
+      "true_role": "confounder"
+    },
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_095": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "final_correct_role": false,
+      "final_roles": {
+        "outer_001_feature_095": []
+      },
+      "global_review_correct_role": false,
+      "global_roles": {
+        "outer_001_feature_095": []
+      },
+      "oracle_variable": "creatinine clearance",
+      "true_role": "confounder"
+    },
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_267": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "final_correct_role": false,
+      "final_roles": {
+        "outer_001_feature_267": []
+      },
+      "global_review_correct_role": false,
+      "global_roles": {
+        "outer_001_feature_267": []
+      },
+      "oracle_variable": "prior platinum exposure",
+      "true_role": "confounder"
+    },
+    {
+      "broad_correct_role": false,
+      "broad_roles": {
+        "outer_001_feature_192": []
+      },
+      "final_correct_role": false,
+      "final_roles": {
+        "outer_001_feature_192": []
+      },
+      "global_review_correct_role": false,
+      "global_roles": {
+        "outer_001_feature_192": []
+      },
+      "oracle_variable": "histology",
+      "true_role": "effect_modifier"
+    },
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_032": [
+          "confounder",
+          "effect_modifier"
+        ],
+        "outer_001_feature_111": [
+          "effect_modifier"
+        ]
+      },
+      "final_correct_role": false,
+      "final_roles": {
+        "outer_001_feature_032": [],
+        "outer_001_feature_111": []
+      },
+      "global_review_correct_role": true,
+      "global_roles": {
+        "outer_001_feature_032": [
+          "effect_modifier"
+        ],
+        "outer_001_feature_111": []
+      },
+      "oracle_variable": "EGFR status",
+      "true_role": "effect_modifier"
+    },
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_228": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "final_correct_role": true,
+      "final_roles": {
+        "outer_001_feature_228": [
+          "effect_modifier"
+        ]
+      },
+      "global_review_correct_role": true,
+      "global_roles": {
+        "outer_001_feature_228": [
+          "effect_modifier"
+        ]
+      },
+      "oracle_variable": "NLR",
+      "true_role": "effect_modifier"
+    },
+    {
+      "broad_correct_role": false,
+      "broad_roles": {
+        "outer_001_feature_052": []
+      },
+      "final_correct_role": false,
+      "final_roles": {
+        "outer_001_feature_052": []
+      },
+      "global_review_correct_role": true,
+      "global_roles": {
+        "outer_001_feature_052": [
+          "effect_modifier"
+        ]
+      },
+      "oracle_variable": "brain metastasis presence",
+      "true_role": "effect_modifier"
+    },
+    {
+      "broad_correct_role": true,
+      "broad_roles": {
+        "outer_001_feature_155": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "final_correct_role": false,
+      "final_roles": {
+        "outer_001_feature_155": []
+      },
+      "global_review_correct_role": false,
+      "global_roles": {
+        "outer_001_feature_155": []
+      },
+      "oracle_variable": "hemoglobin",
+      "true_role": "effect_modifier"
+    }
+  ]
+}

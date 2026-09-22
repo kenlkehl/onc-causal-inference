@@ -1,0 +1,228 @@
+{
+  "direct": [
+    {
+      "assigned_roles": {
+        "outer_001_feature_009": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_009"
+      ],
+      "candidate_names": [
+        "age"
+      ],
+      "oracle_variable": "age",
+      "previous_eight_correct_role": true,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_302": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_302"
+      ],
+      "candidate_names": [
+        "sex"
+      ],
+      "oracle_variable": "sex",
+      "previous_eight_correct_role": false,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_109": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_109"
+      ],
+      "candidate_names": [
+        "ecog_performance_status"
+      ],
+      "oracle_variable": "ECOG",
+      "previous_eight_correct_role": true,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_095": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_095"
+      ],
+      "candidate_names": [
+        "creatinine_clearance"
+      ],
+      "oracle_variable": "creatinine clearance",
+      "previous_eight_correct_role": false,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_267": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_267"
+      ],
+      "candidate_names": [
+        "prior_platinum_chemotherapy"
+      ],
+      "oracle_variable": "prior platinum exposure",
+      "previous_eight_correct_role": false,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_192": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_192"
+      ],
+      "candidate_names": [
+        "lung_cancer_histology"
+      ],
+      "oracle_variable": "histology",
+      "previous_eight_correct_role": false,
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_032": [
+          "confounder",
+          "effect_modifier"
+        ],
+        "outer_001_feature_111": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_032",
+        "outer_001_feature_111"
+      ],
+      "candidate_names": [
+        "biomarker_egfr_status",
+        "egfr_mutation_status"
+      ],
+      "oracle_variable": "EGFR status",
+      "previous_eight_correct_role": false,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_228": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_228"
+      ],
+      "candidate_names": [
+        "neutrophil_to_lymphocyte_ratio"
+      ],
+      "oracle_variable": "NLR",
+      "previous_eight_correct_role": true,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_052": [
+          "effect_modifier"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_052"
+      ],
+      "candidate_names": [
+        "brain_metastases_presence"
+      ],
+      "oracle_variable": "brain metastasis presence",
+      "previous_eight_correct_role": false,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_155": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_155"
+      ],
+      "candidate_names": [
+        "hemoglobin_level"
+      ],
+      "oracle_variable": "hemoglobin",
+      "previous_eight_correct_role": false,
+      "retained_in_any_role": true,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    }
+  ],
+  "prior_lineage_sha256": "32d6c5bdcc0b387c88e5fdda945c53c3674132963a3cc511647b3086f737488a",
+  "proxies": [
+    {
+      "assigned_roles": [
+        "confounder"
+      ],
+      "candidate_name": "gender_identity",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_140",
+      "proxy": "gender identity",
+      "related_oracle_variable": "sex"
+    },
+    {
+      "assigned_roles": [
+        "confounder"
+      ],
+      "candidate_name": "brain_lesion_count",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_049",
+      "proxy": "brain lesion count",
+      "related_oracle_variable": "brain metastasis presence"
+    },
+    {
+      "assigned_roles": [
+        "confounder"
+      ],
+      "candidate_name": "hematocrit",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_153",
+      "proxy": "hematocrit",
+      "related_oracle_variable": "hemoglobin"
+    },
+    {
+      "assigned_roles": [],
+      "candidate_name": "estimated_glomerular_filtration_rate",
+      "counted_as_direct_recovery": false,
+      "feature_id": "outer_001_feature_125",
+      "proxy": "eGFR",
+      "related_oracle_variable": "creatinine clearance"
+    }
+  ]
+}

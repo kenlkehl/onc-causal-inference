@@ -1,0 +1,51 @@
+{
+  "themes": [
+    {
+      "disagreements": "Features 171 and 172 are purely prognostic with no treatment or effect signals, whereas 173 demonstrates clear treatment prediction and effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_171:univariable:outcome",
+        "multi:outer_001_feature_172:univariable:outcome",
+        "multi:outer_001_feature_173:predictive_forest:treatment",
+        "multi:outer_001_feature_173:causal_forest:effect"
+      ],
+      "interpretation": "Imaging findings of orbital or cranial abnormalities showing varying levels of prognostic and causal importance.",
+      "member_feature_ids": [
+        "outer_001_feature_171",
+        "outer_001_feature_172",
+        "outer_001_feature_173"
+      ],
+      "name": "Orbital and Cranial Imaging Findings"
+    },
+    {
+      "disagreements": "Ki67 shows the strongest univariable effect signal, while KEAP1 and KRAS VAF rely more on forest-based methods for effect evidence.",
+      "evidence_ids": [
+        "multi:outer_001_feature_176:univariable:effect",
+        "multi:outer_001_feature_179:causal_forest:effect",
+        "multi:outer_001_feature_175:causal_forest:effect"
+      ],
+      "interpretation": "Molecular and proliferative biomarkers showing consistent signals for effect modification and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_175",
+        "outer_001_feature_176",
+        "outer_001_feature_179"
+      ],
+      "name": "Molecular and Pathological Biomarkers"
+    },
+    {
+      "disagreements": "Knee osteoarthritis is a dominant confounder; drug allergies are essentially noise; JVD and LDH show moderate multifaceted signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_177:univariable:treatment",
+        "multi:outer_001_feature_174:univariable:outcome",
+        "multi:outer_001_feature_180:predictive_forest:treatment"
+      ],
+      "interpretation": "General clinical and laboratory assessments with divergent roles ranging from strong confounding to no evidence.",
+      "member_feature_ids": [
+        "outer_001_feature_174",
+        "outer_001_feature_177",
+        "outer_001_feature_178",
+        "outer_001_feature_180"
+      ],
+      "name": "General Clinical and Laboratory Findings"
+    }
+  ]
+}

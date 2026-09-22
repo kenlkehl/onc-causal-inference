@@ -2031,6 +2031,12 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
             "input_temporal_scope": config.stage2.input_temporal_scope,
             "selection_consolidation": (config.stage2.selection_consolidation.scientific_dict()),
             "statistical_selection": (config.stage2.statistical_selection.public_dict()),
+            **(
+                {"modifier_count_estimation_trees": config.stage2.estimation_trees}
+                if config.stage2.statistical_selection.selection_mode == "multi_model"
+                and config.stage2.statistical_selection.multi_model.modifier_count.enabled
+                else {}
+            ),
             "review_policy": frozen_preselection_review_policy(config.stage2),
             "primary_model": config.stage2.model,
             "extraction_model": extraction_model,

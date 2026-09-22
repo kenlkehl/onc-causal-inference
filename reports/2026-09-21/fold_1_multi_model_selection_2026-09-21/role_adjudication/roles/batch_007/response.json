@@ -1,0 +1,237 @@
+{
+  "decisions": [
+    {
+      "cross_method_reconciliation": "The signal for treatment prediction and outcome prognosis is exclusively present in the predictive forest, while the univariable and penalized models show no significance. However, there is a complementary signal for effect modification from the R-learner and causal forest.",
+      "evidence_against": [
+        "Univariable treatment (p=0.61), univariable outcome (supported 0/15), and penalized models (supported 0/15) show no signal."
+      ],
+      "evidence_for": [
+        "Predictive forest supports both treatment (9/15) and outcome (12/15).",
+        "Univariable R-learner (6/15) and causal forest (5/15) provide evidence for effect modification."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_071:predictive_forest:treatment",
+        "multi:outer_001_feature_071:predictive_forest:outcome",
+        "multi:outer_001_feature_071:univariable_rlearner:effect",
+        "multi:outer_001_feature_071:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_071",
+      "inner_fold_consistency": "Mixed; predictive forest is consistent across folds, but other families are not.",
+      "rationale": "The candidate shows a modest signal for effect modification and strong predictive forest support for both treatment and outcome, although the lack of univariable significance suggests its role as a confounder is weak. The effect modification signal is the most credible complementary signal.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Predictive forest shows strong consistency for both treatment and outcome prediction. The univariable R-learner provides a strong signal for effect modification, which is partially echoed by the causal forest.",
+      "evidence_against": [
+        "Univariable models for treatment and outcome show no support."
+      ],
+      "evidence_for": [
+        "Predictive forest supports treatment (9/15) and outcome (9/15).",
+        "Univariable R-learner (8/15) and causal forest (4/15) support effect modification."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_072:predictive_forest:treatment",
+        "multi:outer_001_feature_072:predictive_forest:outcome",
+        "multi:outer_001_feature_072:univariable_rlearner:effect",
+        "multi:outer_001_feature_072:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_072",
+      "inner_fold_consistency": "Consistent in predictive forest and R-learner.",
+      "rationale": "Strong support for both treatment and outcome prediction in the predictive forest identifies it as a confounder, while the R-learner signal indicates it also acts as an effect modifier.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong evidence for outcome prognosis (univariable p=0.04) and treatment prediction (predictive forest 11/15). The causal forest provides substantial evidence for effect modification.",
+      "evidence_against": [
+        "Penalized interactions and orthogonal linear models show no effect signal."
+      ],
+      "evidence_for": [
+        "Univariable outcome signal (10/15, p=0.04).",
+        "Predictive forest treatment signal (11/15).",
+        "Causal forest effect signal (8/15)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_073:univariable:outcome",
+        "multi:outer_001_feature_073:predictive_forest:treatment",
+        "multi:outer_001_feature_073:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_073",
+      "inner_fold_consistency": "Consistent across univariable outcome and predictive forest treatment.",
+      "rationale": "The strong signals for both treatment assignment and outcome prognosis establish it as a confounder, with the causal forest providing additional evidence for effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Extremely strong and consistent signals across univariable and forest models for both treatment and outcome prediction.",
+      "evidence_against": [
+        "Causal forest effect signal is relatively weak (5/15)."
+      ],
+      "evidence_for": [
+        "Univariable treatment signal (15/15, p=0.0066).",
+        "Univariable outcome signal (12/15, p=0.0129).",
+        "Predictive forest supports both treatment (12/15) and outcome (11/15)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_074:univariable:treatment",
+        "multi:outer_001_feature_074:univariable:outcome",
+        "multi:outer_001_feature_074:predictive_forest:treatment",
+        "multi:outer_001_feature_074:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_074",
+      "inner_fold_consistency": "Highly consistent across all folds and methods.",
+      "rationale": "The robust and concordant evidence for both treatment prediction and outcome prognosis confirms its role as a confounder.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Dominant treatment prediction signal in univariable and forest models, with supporting evidence for outcome prognosis and effect modification.",
+      "evidence_against": [
+        "Causal forest effect signal is weak (2/15)."
+      ],
+      "evidence_for": [
+        "Univariable treatment signal (15/15, p=8.49e-07).",
+        "Predictive forest outcome signal (12/15).",
+        "Univariable R-learner effect signal (12/15)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_075:univariable:treatment",
+        "multi:outer_001_feature_075:predictive_forest:outcome",
+        "multi:outer_001_feature_075:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_075",
+      "inner_fold_consistency": "Strong and consistent treatment signal; mixed effect signal.",
+      "rationale": "The massive treatment signal combined with predictive forest outcome support defines it as a confounder, while the R-learner provides strong evidence for effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "The most significant signal is for effect modification, supported by univariable p-values and the causal forest, outweighing the weaker predictive forest signals for treatment and outcome.",
+      "evidence_against": [
+        "Univariable outcome signal is negligible (1/15)."
+      ],
+      "evidence_for": [
+        "Univariable effect signal (11/15, p=0.0119).",
+        "Causal forest effect signal (8/15).",
+        "Univariable R-learner effect signal (7/15)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_076:univariable:effect",
+        "multi:outer_001_feature_076:causal_forest:effect",
+        "multi:outer_001_feature_076:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_076",
+      "inner_fold_consistency": "Consistent effect modification signal across launary, R-learner, and causal forest.",
+      "rationale": "The convergence of univariable, R-learner, and causal forest evidence strongly identifies this candidate as an effect modifier.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Modest signals for treatment and outcome prognosis in the predictive forest, with a moderate signal for effect modification from the causal forest.",
+      "evidence_against": [
+        "Univariable models for treatment, outcome, and effect show no significance."
+      ],
+      "evidence_for": [
+        "Causal forest effect signal (7/15).",
+        "Predictive forest outcome signal (9/15).",
+        "Predictive forest treatment signal (7/15)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_077:causal_forest:effect",
+        "multi:outer_001_feature_077:predictive_forest:outcome",
+        "multi:outer_001_feature_077:predictive_forest:treatment"
+      ],
+      "feature_id": "outer_001_feature_077",
+      "inner_fold_consistency": "Mixed; strongest signal is in the causal forest for effect.",
+      "rationale": "While there are mixed signals, the causal forest evidence for effect modification is the most credible complementary signal relative to the univariable failures.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Strong evidence for effect modification from the causal forest and R-learner, with a complementary univariable signal for outcome prognosis.",
+      "evidence_against": [
+        "No signal in penalized or orthogonal linear models."
+      ],
+      "evidence_for": [
+        "Causal forest effect signal (11/15).",
+        "Univariable R-learner effect signal (10/15).",
+        "Univariable outcome signal (8/15, p=0.0428)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_078:causal_forest:effect",
+        "multi:outer_001_feature_078:univariable_rlearner:effect",
+        "multi:outer_001_feature_078:univariable:outcome"
+      ],
+      "feature_id": "outer_001_feature_078",
+      "inner_fold_consistency": "Strong and consistent support for effect modification across folds.",
+      "rationale": "The combination of high support in the causal forest and R-learner establishes its role as an effect modifier, with the univariable outcome signal providing additional prognostic context.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Extremely strong treatment prediction signals across univariable and forest models, with modest support for outcome prognosis.",
+      "evidence_against": [
+        "No signal for effect modification in the causal forest (0/15)."
+      ],
+      "evidence_for": [
+        "Univariable treatment signal (10/15, p=0.0339).",
+        "Predictive forest treatment signal (15/15).",
+        "Predictive forest outcome signal (6/15)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_079:univariable:treatment",
+        "multi:outer_001_feature_079:predictive_forest:treatment",
+        "multi:outer_001_feature_079:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_079",
+      "inner_fold_consistency": "Treatment signal is perfectly consistent; outcome signal is mixed.",
+      "rationale": "The very strong treatment prediction signal, combined with evidence for outcome prognosis in the predictive forest, identifies this as a confounder.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "The primary signal is for effect modification, supported by the causal forest and R-learner, with only weak signals for treatment or outcome prediction.",
+      "evidence_against": [
+        "Univariable models for treatment and outcome show no support."
+      ],
+      "evidence_for": [
+        "Causal forest effect signal (9/15).",
+        "Univariable R-learner effect signal (8/15)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_080:causal_forest:effect",
+        "multi:outer_001_feature_080:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_080",
+      "inner_fold_consistency": "Consistent across causal forest and R-learner.",
+      "rationale": "The strong and consistent signals in the causal forest and R-learner establish its role as an effect modifier.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    }
+  ],
+  "summary": "The analysis reveals a set of strong confounders, particularly those related to baseline health and oncology history (e.g., CKD stage, cholecystectomy history, clinical phenotype). A distinct group of pathological and clinical markers (e.g., CK5/6 expression, clinical decline, clinical severity score) act as effect modifiers, demonstrated by high support in causal forests and R-learners. Several features exhibit dual roles as both confounders and effect modifiers, reflecting their complex influence on both treatment assignment and the resulting outcome."
+}

@@ -1,0 +1,22 @@
+{
+  "input_manifest_sha256": "d069d07b217996dc7f0a8e974a77739eaafe424354d320e1b52bcbbdb0d46bf0",
+  "matched_forest_seeds": [
+    120042,
+    1120042,
+    2120042
+  ],
+  "oracle_read": false,
+  "production_policy": {
+    "max_propensity": 0.9,
+    "min_propensity": 0.1,
+    "propensity_clip": 0.02,
+    "trees": 200
+  },
+  "production_seeds": [
+    100042,
+    1100042,
+    2100042
+  ],
+  "selection_freeze_sha256": "e2cb1028eaf8baf71839133c56a9d711b3c2cbbe1d5f9595ce9bf2d8ee6d8282",
+  "source_sha256": "a06fafa8a16a7eae8be5ce7a03cd5b256237d936e0f346c02f2ba24edbd79358"
+}

@@ -1,0 +1,202 @@
+{
+  "decisions": [
+    {
+      "cross_method_reconciliation": "Causal forest (0.6) and univariable R-learner (0.73) provide strong, consistent evidence for effect modification, while treatment and outcome signals are weak and inconsistent.",
+      "evidence_against": [
+        "Low support for treatment prediction in univariable (p=0.717) and penalized main models."
+      ],
+      "evidence_for": [
+        "Causal forest support fraction of 0.6 (multi:outer_001_feature_190:causal_forest:effect)",
+        "Univariable R-learner support fraction of 0.73 (multi:outer_001_feature_190:univariable_rlearner:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_190:causal_forest:effect",
+        "multi:outer_001_feature_190:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_190",
+      "inner_fold_consistency": "Consistent effect modification signal across most folds in R-learner and Causal Forest.",
+      "rationale": "Strong evidence for effect modification from two distinct model families; insufficient evidence for confounding.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong outcome prognosis (univariable p < 0.001, supported 15/15) and moderate treatment prediction (univariable supported 6/15) indicate a confounder role. Effect modification signals are inconsistent.",
+      "evidence_against": [
+        "Weak and inconsistent effect modification signals (causal forest 0.466, R-learner 0.266)."
+      ],
+      "evidence_for": [
+        "Univariable outcome support of 1.0 (multi:outer_001_feature_191:univariable:outcome)",
+        "Univariable treatment support of 0.4 (multi:outer_001_feature_191:univariable:treatment)",
+        "Predictive forest outcome support fraction of 0.8 (multi:outer_001_feature_191:predictive_forest:outcome)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_191:univariable:outcome",
+        "multi:outer_001_feature_191:univariable:treatment",
+        "multi:outer_001_feature_191:predictive_forest:outcome"
+      ],
+      "feature_id": "outer_001_feature_191",
+      "inner_fold_consistency": "High consistency for outcome prediction across all folds.",
+      "rationale": "High-confidence prognostic factor with concurrent treatment prediction signals, establishing it as a confounder.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Evidence is weak across all roles; Causal Forest support (0.466) is the only notable signal, but it is insufficient to establish a role.",
+      "evidence_against": [
+        "Lack of support in univariable treatment (p=0.433) and outcome (p=0.811) models."
+      ],
+      "evidence_for": [
+        "Causal forest support fraction of 0.466 (multi:outer_001_feature_192:causal_forest:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_192:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_192",
+      "inner_fold_consistency": "Mixed/weak support across folds.",
+      "rationale": "Insufficient evidence to support any role.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Causal forest (0.466) and R-learner (0.4) suggest possible effect modification, but lack of treatment or outcome support precludes a confounder role.",
+      "evidence_against": [
+        "Univariable treatment (p=0.224) and outcome (supported 1/15) signals are weak."
+      ],
+      "evidence_for": [
+        "Causal forest support fraction of 0.466 (multi:outer_001_feature_193:causal_forest:effect)",
+        "Univariable R-learner support fraction of 0.4 (multi:outer_001_feature_193:univariable_rlearner:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_193:causal_forest:effect",
+        "multi:outer_001_feature_193:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_193",
+      "inner_fold_consistency": "Mixed support across folds.",
+      "rationale": "Signals for effect modification are too weak to be credible without complementary strong evidence.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong evidence for both confounding (treatment/outcome) and effect modification (R-learner/Causal Forest) across multiple model families.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Univariable treatment support of 1.0 (multi:outer_001_feature_194:univariable:treatment)",
+        "Univariable outcome support of 1.0 (multi:outer_001_feature_194:univariable:outcome)",
+        "Causal forest support fraction of 0.8 (multi:outer_001_feature_194:causal_forest:effect)",
+        "Univariable R-learner support fraction of 0.66 (multi:outer_001_feature_194:univariable_rlearner:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_194:univariable:treatment",
+        "multi:outer_001_feature_194:univariable:outcome",
+        "multi:outer_001_feature_194:causal_forest:effect",
+        "multi:outer_001_feature_194:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_194",
+      "inner_fold_consistency": "Highly consistent across all folds for all identified roles.",
+      "rationale": "Robut evidence for both confounding and effect modification.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Signals are generally weak; Causal Forest support is only 0.33 and Predictive Forest treatment support is 0.46, both insufficient for a formal role.",
+      "evidence_against": [
+        "Weak outcome prognosis signals (univariable p=0.684)."
+      ],
+      "evidence_for": [
+        "Causal forest support fraction of 0.33 (multi:outer_001_feature_195:causal_forest:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_195:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_195",
+      "inner_fold_consistency": "Low consistency across folds.",
+      "rationale": "Insufficient evidence to establish a role.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong evidence for effect modification (Causal Forest 0.6), while treatment and outcome signals remain weak/inconsistent.",
+      "evidence_against": [
+        "Weak outcome prognosis (univariable support 1/15)."
+      ],
+      "evidence_for": [
+        "Causal forest support fraction of 0.6 (multi:outer_001_feature_196:causal_forest:effect)",
+        "Univariable R-learner support fraction of 0.4 (multi:outer_001_feature_196:univariable_rlearner:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_196:causal_forest:effect",
+        "multi:outer_001_feature_196:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_196",
+      "inner_fold_consistency": "Consistent effect modification signal in Causal Forest.",
+      "rationale": "Causal forest evidence supports a role as an effect modifier.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong R-learner evidence (0.8) and moderate Causal Forest (0.4) and Univariable (0.4) evidence point to effect modification; confounding signals are weak.",
+      "evidence_against": [
+        "Weak treatment prediction (univariable p=0.198)."
+      ],
+      "evidence_for": [
+        "Univariable R-learner support fraction of 0.8 (multi:outer_001_feature_197:univariable_rlearner:effect)",
+        "Causal forest support fraction of 0.4 (multi:outer_001_feature_197:causal_forest:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_197:univariable_rlearner:effect",
+        "multi:outer_001_feature_197:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_197",
+      "inner_fold_consistency": "Strong consistency in R-learner folds.",
+      "rationale": "Strong evidence for effect modification from the R-learner model.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Weak evidence across all roles; Causal Forest support (0.266) and R-learner support (0.2) are insufficient.",
+      "evidence_against": [
+        "No support in univariable treatment (p=0.339) or outcome (p=0.519) models."
+      ],
+      "evidence_for": [
+        "Causal forest support fraction of 0.266 (multi:outer_001_feature_198:causal_forest:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_198:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_198",
+      "inner_fold_consistency": "Low consistency across folds.",
+      "rationale": "Insufficient evidence to support any role.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Weak signals across all models; R-learner (0.466) and treatment univariable (0.333) support is insufficient to establish a role.",
+      "evidence_against": [
+        "Low causal forest support (0.066) and weak outcome prognosis (univariable support 2/15)."
+      ],
+      "evidence_for": [
+        "Univariable R-learner support fraction of 0.466 (multi:outer_001_feature_199:univariable_rlearner:effect)"
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_199:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_199",
+      "inner_fold_consistency": "Mixed support across folds.",
+      "rationale": "Insufficient evidence to establish a role.",
+      "roles": [],
+      "stability": "insufficient"
+    }
+  ],
+  "summary": "The analysis identifies several strong candidates. Lung disease diagnosis is a robust confounder and effect modifier. Lung auscultation findings act as a confounder. Effect modification is strongly evident for lobectomy type, lung mass SUVmax, and lymph node dissection status. Other features, including lung cancer histology, stage, mass morphology, and lymph node metastasis count, lacked sufficient evidence to be assigned a role."
+}

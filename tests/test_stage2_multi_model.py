@@ -404,7 +404,10 @@ def test_mode_is_explicit_and_legacy_checkpoint_policies_are_unchanged():
 
 
 def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
-    from oci.inference.research_all_evidence_workflow import compile_config
+    from oci.inference.research_all_evidence_workflow import (
+        _stage2_reselection_policy_fingerprint,
+        compile_config,
+    )
     from oci.inference.stage2_preflight import validate_selection_resume
 
     path = (
@@ -414,6 +417,7 @@ def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
     raw = json.loads(path.read_text())
     config = compile_config(raw, config_dir=path.parent)
     assert config.stage2.statistical_selection.selection_mode == "multi_model"
+    assert config.stage2.statistical_selection.multi_model.modifier_count.enabled
     raw["stage2"]["role_adjudication"]["enabled"] = False
     with pytest.raises(ValueError, match="requires role_adjudication"):
         compile_config(raw, config_dir=path.parent)
@@ -423,6 +427,7 @@ def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
         "statistical_selection": config.stage2.statistical_selection.public_dict(),
         "min_propensity": config.stage2.min_propensity,
         "max_propensity": config.stage2.max_propensity,
+        "estimation_trees": config.stage2.estimation_trees,
     }
     (root / "config.json").write_text(json.dumps(saved))
     report_dir = root / "outer_001/selection"
@@ -431,6 +436,19 @@ def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
         json.dumps({"selection_authority": "multi_model"})
     )
     validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
+    old = json.loads(json.dumps(saved))
+    old["statistical_selection"]["multi_model"]["schema_version"] = "stage2_multi_model_selection_v1"
+    old["statistical_selection"]["multi_model"].pop("modifier_count")
+    (root / "config.json").write_text(json.dumps(old))
+    with pytest.raises(RuntimeError, match="automatic modifier count"):
+        validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
+    (root / "config.json").write_text(json.dumps(saved))
+    changed_trees = replace(config.stage2, estimation_trees=config.stage2.estimation_trees * 2)
+    with pytest.raises(RuntimeError, match="modifier-count estimation_trees changed"):
+        validate_selection_resume(SimpleNamespace(stage2=changed_trees, output_dir=tmp_path))
+    assert _stage2_reselection_policy_fingerprint(config) != _stage2_reselection_policy_fingerprint(
+        replace(config, stage2=changed_trees)
+    )
     changed = replace(
         config.stage2,
         statistical_selection=replace(

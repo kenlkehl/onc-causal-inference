@@ -1,0 +1,76 @@
+{
+  "themes": [
+    {
+      "disagreements": "While both demonstrate strong effect modification, feature 166 shows additional robust signals for treatment prediction and outcome prognosis, suggesting a role as both a confounder and effect modifier, whereas 165 is primarily an effect modifier.",
+      "evidence_ids": [
+        "multi:outer_001_feature_165:causal_forest:effect",
+        "multi:outer_001_feature_165:univariable_rlearner:effect",
+        "multi:outer_001_feature_166:univariable_rlearner:effect",
+        "multi:outer_001_feature_166:predictive_forest:outcome",
+        "multi:outer_001_feature_166:predictive_forest:treatment"
+      ],
+      "interpretation": "Lung lobe-specific mass findings are strong candidates for effect modification, with variable evidence for confounding.",
+      "member_feature_ids": [
+        "outer_001_feature_165",
+        "outer_001_feature_166"
+      ],
+      "name": "Lung Mass Localization"
+    },
+    {
+      "disagreements": "High consistency across candidates; both features demonstrate strong evidence for being both confounders and effect modifiers.",
+      "evidence_ids": [
+        "multi:outer_001_feature_164:causal_forest:effect",
+        "multi:outer_001_feature_164:predictive_forest:treatment",
+        "multi:outer_001_feature_168:penalized_main:treatment",
+        "multi:outer_001_feature_168:univariable_rlearner:effect"
+      ],
+      "interpretation": "Quantitative PET metrics (SUVmax and cerebellar FDG uptake) consistently appear as both confounders and effect modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_164",
+        "outer_001_feature_168"
+      ],
+      "name": "PET Quantitative Metrics"
+    },
+    {
+      "disagreements": "Significant disparity in signal strength: inhaler dosage (170) is a robust confounder and effect modifier, illicit drug use (162) is primarily a confounder, and hypothyroidism (161) provides only weak, non-robust evidence.",
+      "evidence_ids": [
+        "multi:outer_001_feature_170:univariable_rlearner:effect",
+        "multi:outer_001_feature_170:univariable:outcome",
+        "multi:outer_001_feature_162:penalized_main:outcome",
+        "multi:outer_001_feature_161:univariable_rlearner:effect"
+      ],
+      "interpretation": "Baseline health indicators and medication usage show varying degrees of importance, ranging from strong dual roles to negligible evidence.",
+      "member_feature_ids": [
+        "outer_001_feature_161",
+        "outer_001_feature_162",
+        "outer_001_feature_170"
+      ],
+      "name": "Baseline Health and Medication"
+    },
+    {
+      "disagreements": "Candidates exhibit divergent roles: feature 163 suggests a role as an effect modifier (via R-learner), while feature 167 suggests a role as a confounder (via predictive forest outcome).",
+      "evidence_ids": [
+        "multi:outer_001_feature_163:univariable_rlearner:effect",
+        "multi:outer_001_feature_167:predictive_forest:outcome"
+      ],
+      "interpretation": "The mere presence of imaging procedures (CT, MRI) provides weak and inconsistent evidence for either confounding or effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_163",
+        "outer_001_feature_167"
+      ],
+      "name": "Imaging Procedural Evidence"
+    },
+    {
+      "disagreements": "None; this is a single-candidate theme with moderate evidence across multiple roles.",
+      "evidence_ids": [
+        "multi:outer_001_feature_169:predictive_forest:treatment",
+        "multi:outer_001_feature_169:univariable_rlearner:effect"
+      ],
+      "interpretation": "The type of prior immunotherapy shows moderate evidence of acting as both a confounder and an effect modifier.",
+      "member_feature_ids": [
+        "outer_001_feature_169"
+      ],
+      "name": "Immunotherapy Specification"
+    }
+  ]
+}

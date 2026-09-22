@@ -1,0 +1,170 @@
+{
+  "decisions": [
+    {
+      "cross_method_reconciliation": "Insufficient evidence across treatment, outcome, and effect models to assign a role.",
+      "evidence_against": [],
+      "evidence_for": [],
+      "evidence_ids": [],
+      "feature_id": "outer_001_feature_317",
+      "inner_fold_consistency": "Insufficient",
+      "rationale": "Signals are negligible or inconsistent, with only minor support in a single fold for treatment prediction and low-score support for effect modification.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong, consistent signals for both treatment and outcome, while effect modification evidence is negligible.",
+      "evidence_against": [],
+      "evidence_for": [
+        "High support for treatment prediction in univariable (13/15) and predictive forest models.",
+        "High support for outcome prognosis in univariable (9/15) and predictive forest models."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_318:univariable:treatment",
+        "multi:outer_001_feature_318:univariable:outcome"
+      ],
+      "feature_id": "outer_001_feature_318",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Tiotropium use is a strong predictor of both treatment assignment and outcome, fitting the role of a confounder.",
+      "roles": [
+        "confounder"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Strong treatment and outcome signals combined with moderate but fold-consistent evidence of effect modification.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Robust treatment prediction in penalized main (11/15) and predictive forest models.",
+        "Strong outcome prognosis in predictive forest (10/15).",
+        "Causal forest supports effect modification in 4 out of 5 folds."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_319:penalized_main:treatment",
+        "multi:outer_001_feature_319:predictive_forest:outcome",
+        "multi:outer_001_feature_319:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_319",
+      "inner_fold_consistency": "Mixed",
+      "rationale": "Tissue thickening serves as a predictor for treatment and outcome while also demonstrating heterogeneity in treatment effect via Causal Forest evidence.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Insufficient evidence across all roles.",
+      "evidence_against": [],
+      "evidence_for": [],
+      "evidence_ids": [],
+      "feature_id": "outer_001_feature_320",
+      "inner_fold_consistency": "Insufficient",
+      "rationale": "Signals are weak and fragmented across all models, failing to meet thresholds for any role.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Extreme consistency in confounding roles, with moderate evidence for effect modification.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Universal support (15/15) for treatment and outcome prediction in univariable models.",
+        "Strong predictive forest support for both treatment and outcome.",
+        "Causal forest supports effect modification in 3 out of 5 folds."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_321:univariable:treatment",
+        "multi:outer_001_feature_321:univariable:outcome",
+        "multi:outer_001_feature_321:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_321",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Tobacco history is a primary driver of both treatment selection and outcome, and exhibits significant heterogeneity in effect.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Weak treatment and outcome signals, but highly consistent evidence for effect modification.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Causal forest supports effect modification across all 5 inner folds (9/15 support)."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_322:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_322",
+      "inner_fold_consistency": "Consistent",
+      "rationale": "Total bilirubin lacks strong confounding signals but is a consistent modifier of the treatment effect.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "consistent"
+    },
+    {
+      "cross_method_reconciliation": "Insufficient evidence to establish a stable role.",
+      "evidence_against": [],
+      "evidence_for": [],
+      "evidence_ids": [],
+      "feature_id": "outer_001_feature_323",
+      "inner_fold_consistency": "Insufficient",
+      "rationale": "Treatment signal is weak and outcome/effect signals are largely absent or insignificant.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong treatment signals and highly consistent effect modification evidence, with moderate prognostic value.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Strong treatment prediction in predictive forest (9/15).",
+        "Causal forest supports effect modification across all 5 inner folds (6/15 support).",
+        "Moderate outcome prognosis in predictive forest."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_324:predictive_forest:treatment",
+        "multi:outer_001_feature_324:predictive_forest:outcome",
+        "multi:outer_001_feature_324:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_324",
+      "inner_fold_consistency": "Mixed",
+      "rationale": "The TP53 R273H mutation status acts as both a treatment predictor/prognostic factor and a consistent effect modifier.",
+      "roles": [
+        "confounder",
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    },
+    {
+      "cross_method_reconciliation": "Insufficient evidence across all roles.",
+      "evidence_against": [],
+      "evidence_for": [],
+      "evidence_ids": [],
+      "feature_id": "outer_001_feature_325",
+      "inner_fold_consistency": "Insufficient",
+      "rationale": "TPS score shows fragmented and weak signals across treatment, outcome, and effect models.",
+      "roles": [],
+      "stability": "insufficient"
+    },
+    {
+      "cross_method_reconciliation": "Strong prognostic signal and consistent evidence for effect modification, but insufficient treatment prediction.",
+      "evidence_against": [],
+      "evidence_for": [
+        "Very strong outcome prognosis in predictive forest (13/15) and penalized main models.",
+        "Causal forest supports effect modification in 4 out of 5 folds."
+      ],
+      "evidence_ids": [
+        "multi:outer_001_feature_326:predictive_forest:outcome",
+        "multi:outer_001_feature_326:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_326",
+      "inner_fold_consistency": "Mixed",
+      "rationale": "Transependymal flow is a strong prognostic factor and an effect modifier, but lacks sufficient treatment prediction to be a confounder.",
+      "roles": [
+        "effect_modifier"
+      ],
+      "stability": "mixed"
+    }
+  ],
+  "summary": "The candidates show a split between strong pharmacological/behavioral confounders (Tiotropium, Tobacco) and pathological markers (Tissue thickening, TP53 R273H) that act as both confounders and effect modifiers. Bilirubin and Transependymal flow emerge as effect modifiers without strong confounding signals. Several markers, including thyromegaly and TPS score, lack sufficient evidence for any role."
+}

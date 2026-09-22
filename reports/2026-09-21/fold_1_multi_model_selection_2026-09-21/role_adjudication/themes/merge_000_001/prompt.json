@@ -1,0 +1,323 @@
+{
+  "input_fingerprint": "8d975089f5a64f549bb2e1dc4bb190e18392ff539173dd7d160dc3395d150a1a",
+  "payload": {
+    "instructions": "Preserve all candidate IDs and distinctions. Broader parent themes organize evidence; they do not imply measurement equivalence.",
+    "maximum_output_themes": 10,
+    "required_response": {
+      "themes": [
+        {
+          "disagreements": "contradictions, weak signals, and proxy distinctions",
+          "evidence_ids": [
+            "at most 12 representative supplied modeling evidence IDs"
+          ],
+          "interpretation": "common or complementary evidence",
+          "member_feature_ids": [
+            "candidate IDs"
+          ],
+          "name": "theme"
+        }
+      ]
+    },
+    "task": "merge_stage2_multi_model_themes",
+    "themes": [
+      {
+        "disagreements": "Brain metastases presence (052) is a strong prognostic factor without effect modification, whereas calvarium lesions (057) and location (051) show complementary signals for effect modification.",
+        "evidence_ids": [
+          "multi:outer_001_feature_052:univariable:outcome",
+          "multi:outer_001_feature_053:univariable:outcome",
+          "multi:outer_001_feature_057:univariable:outcome",
+          "multi:outer_001_feature_051:causal_forest:effect",
+          "multi:outer_001_feature_057:causal_forest:effect"
+        ],
+        "interpretation": "Features describing the presence, location, and radiographic characteristics of brain metastases, showing a mix of strong prognostic signals and evidence for treatment effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_051",
+          "outer_001_feature_052",
+          "outer_001_feature_053",
+          "outer_001_feature_057"
+        ],
+        "name": "CNS Metastasis and Intracranial Involvement"
+      },
+      {
+        "disagreements": "Brainstem signal (054) has more robust support across multiple effect-estimation methods than brainstem size (055).",
+        "evidence_ids": [
+          "multi:outer_001_feature_054:causal_forest:effect",
+          "multi:outer_001_feature_055:causal_forest:effect",
+          "multi:outer_001_feature_054:univariable_rlearner:effect"
+        ],
+        "interpretation": "Evaluation of brainstem signal and size, where the primary evidence emerges in effect modification rather than main treatment or outcome effects.",
+        "member_feature_ids": [
+          "outer_001_feature_054",
+          "outer_001_feature_055"
+        ],
+        "name": "Brainstem Morphological Assessment"
+      },
+      {
+        "disagreements": "Cancer diagnosis (058) has moderate treatment-prediction support, while cancer location (059) lacks consistent signal across all roles.",
+        "evidence_ids": [
+          "multi:outer_001_feature_058:penalized_main:treatment"
+        ],
+        "interpretation": "Broad cancer diagnosis and primary location, which primarily serve as indicators of treatment assignment or exhibit no significant modeling signal.",
+        "member_feature_ids": [
+          "outer_001_feature_058",
+          "outer_001_feature_059"
+        ],
+        "name": "General Cancer Characteristics"
+      },
+      {
+        "disagreements": "Fatigue (060) is a powerful prognostic factor and candidate effect modifier, whereas calorie intake (056) is primarily associated with treatment prediction.",
+        "evidence_ids": [
+          "multi:outer_001_feature_060:univariable:outcome",
+          "multi:outer_001_feature_056:penalized_main:treatment",
+          "multi:outer_001_feature_060:causal_forest:effect"
+        ],
+        "interpretation": "Nutritional status and cancer-related fatigue, showing strong prognostic value and associations with treatment prediction.",
+        "member_feature_ids": [
+          "outer_001_feature_056",
+          "outer_001_feature_060"
+        ],
+        "name": "Patient Systemic and Symptomatic State"
+      },
+      {
+        "disagreements": "Signals are primarily concentrated in treatment prediction (predictive forest) and effect modification (r-learner, causal forest), with limited outcome main-effect evidence.",
+        "evidence_ids": [
+          "multi:outer_001_feature_064:univariable:treatment",
+          "multi:outer_001_feature_064:univariable_rlearner:effect",
+          "multi:outer_001_feature_064:predictive_forest:treatment",
+          "multi:outer_001_feature_065:univariable:effect",
+          "multi:outer_001_feature_065:univariable_rlearner:effect",
+          "multi:outer_001_feature_065:predictive_forest:treatment"
+        ],
+        "interpretation": "Molecular and tumor markers showing strong evidence of both confounding (treatment prediction) and effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_064",
+          "outer_001_feature_065"
+        ],
+        "name": "Molecular and Biomarker Indicators"
+      },
+      {
+        "disagreements": "Predictive forest suggests strong treatment prediction for several features, but univariable and penalized models show inconsistent or weak outcome signals.",
+        "evidence_ids": [
+          "multi:outer_001_feature_063:penalized_main:treatment",
+          "multi:outer_001_feature_063:predictive_forest:treatment",
+          "multi:outer_001_feature_067:predictive_forest:treatment",
+          "multi:outer_001_feature_070:predictive_forest:treatment",
+          "multi:outer_001_feature_063:univariable_rlearner:effect"
+        ],
+        "interpretation": "Neuroimaging characteristics that predominantly predict treatment assignment, suggesting a confounding role.",
+        "member_feature_ids": [
+          "outer_001_feature_063",
+          "outer_001_feature_067",
+          "outer_001_feature_068",
+          "outer_001_feature_069",
+          "outer_001_feature_070"
+        ],
+        "name": "Neuroimaging Features"
+      },
+      {
+        "disagreements": "Carboplatin shows strong outcome signals but negligible treatment prediction; cefepime shows virtually no signal.",
+        "evidence_ids": [
+          "multi:outer_001_feature_061:univariable:outcome",
+          "multi:outer_001_feature_061:penalized_main:outcome",
+          "multi:outer_001_feature_061:penalized_interactions:outcome"
+        ],
+        "interpretation": "Clinical administration markers, where one acts as a strong prognostic factor and the other is non-informative.",
+        "member_feature_ids": [
+          "outer_001_feature_061",
+          "outer_001_feature_066"
+        ],
+        "name": "Clinical and Medication Factors"
+      },
+      {
+        "disagreements": "No significant signals across any modeling family.",
+        "evidence_ids": [],
+        "interpretation": "Comorbidities with no empirical evidence for a causal or prognostic role.",
+        "member_feature_ids": [
+          "outer_001_feature_062"
+        ],
+        "name": "Other Comorbidities"
+      },
+      {
+        "disagreements": "Clinical phenotype is a strong treatment predictor, while decline and severity score primarily show as effect modifiers.",
+        "evidence_ids": [
+          "multi:outer_001_feature_079:predictive_forest:treatment",
+          "multi:outer_001_feature_078:causal_forest:effect",
+          "multi:outer_001_feature_080:causal_forest:effect",
+          "multi:outer_001_feature_079:penalized_main:treatment"
+        ],
+        "interpretation": "General markers of clinical status and severity, manifesting as both confounders and effect modifiers.",
+        "member_feature_ids": [
+          "outer_001_feature_078",
+          "outer_001_feature_079",
+          "outer_001_feature_080"
+        ],
+        "name": "Clinical Severity and Status"
+      },
+      {
+        "disagreements": "Cycle count shows moderate support across roles but lacks the strength of the specific regimen marker.",
+        "evidence_ids": [
+          "multi:outer_001_feature_073:univariable:outcome",
+          "multi:outer_001_feature_073:predictive_forest:treatment",
+          "multi:outer_001_feature_072:predictive_forest:treatment",
+          "multi:outer_001_feature_072:predictive_forest:outcome"
+        ],
+        "interpretation": "Treatment-related history and regimen specifics.",
+        "member_feature_ids": [
+          "outer_001_feature_072",
+          "outer_001_feature_073"
+        ],
+        "name": "Treatment Regimen and Dosage"
+      },
+      {
+        "disagreements": "Strong confounding evidence for surgical history and renal stage, contrasted by a strong effect modification signal for CK5/6 expression.",
+        "evidence_ids": [
+          "multi:outer_001_feature_074:univariable:treatment",
+          "multi:outer_001_feature_075:univariable:treatment",
+          "multi:outer_001_feature_076:univariable:effect",
+          "multi:outer_001_feature_074:univariable:outcome"
+        ],
+        "interpretation": "Biomarkers and patient history including organ-specific markers and pathological expression.",
+        "member_feature_ids": [
+          "outer_001_feature_074",
+          "outer_001_feature_075",
+          "outer_001_feature_076",
+          "outer_001_feature_077"
+        ],
+        "name": "Pathological and Systemic Markers"
+      },
+      {
+        "disagreements": "Predictive forest suggests outcome importance, but univariable signals are weak.",
+        "evidence_ids": [
+          "multi:outer_001_feature_071:predictive_forest:outcome",
+          "multi:outer_001_feature_071:causal_forest:effect"
+        ],
+        "interpretation": "Neuro-imaging signal assessment.",
+        "member_feature_ids": [
+          "outer_001_feature_071"
+        ],
+        "name": "Cerebral Imaging"
+      },
+      {
+        "disagreements": "Cough presence (090) is a weak signal compared to the strong signals seen in COPD (087, 088). CAP presence (081) primarily predicts the outcome rather than the treatment.",
+        "evidence_ids": [
+          "multi:outer_001_feature_087:univariable:treatment",
+          "multi:outer_001_feature_087:univariable:outcome",
+          "multi:outer_001_feature_088:univariable:treatment",
+          "multi:outer_001_feature_088:univariable:outcome",
+          "multi:outer_001_feature_081:univariable:outcome"
+        ],
+        "interpretation": "Features related to chronic and acute respiratory conditions. COPD presence and severity show strong, consistent signals for both treatment prediction and outcome prognosis.",
+        "member_feature_ids": [
+          "outer_001_feature_081",
+          "outer_001_feature_087",
+          "outer_001_feature_088",
+          "outer_001_feature_090"
+        ],
+        "name": "COPD and Respiratory Health"
+      },
+      {
+        "disagreements": "Coronary artery disease (089) shows negligible signal compared to the aggregate comorbidity count (082).",
+        "evidence_ids": [
+          "multi:outer_001_feature_082:univariable:treatment",
+          "multi:outer_001_feature_082:univariable:outcome"
+        ],
+        "interpretation": "Broad measures of patient sickness. Total comorbidity count is a highly significant predictor of both treatment assignment and outcome.",
+        "member_feature_ids": [
+          "outer_001_feature_082",
+          "outer_001_feature_089"
+        ],
+        "name": "General Health and Comorbidity Burden"
+      },
+      {
+        "disagreements": "CMP results (084) strongly predict treatment but not the outcome, whereas CBC (083) and contrast concentration (086) provide little to no evidence for any role.",
+        "evidence_ids": [
+          "multi:outer_001_feature_084:univariable:treatment"
+        ],
+        "interpretation": "Qualitative and quantitative results from standard blood and imaging panels.",
+        "member_feature_ids": [
+          "outer_001_feature_083",
+          "outer_001_feature_084",
+          "outer_001_feature_086"
+        ],
+        "name": "Laboratory Diagnostics"
+      },
+      {
+        "disagreements": "Unlike the respiratory/comorbidity features, confusion presents as a signal of treatment effect heterogeneity rather than a main-effect confounder.",
+        "evidence_ids": [
+          "multi:outer_001_feature_085:univariable:effect",
+          "multi:outer_001_feature_085:univariable_rlearner:effect"
+        ],
+        "interpretation": "Assessment of current neurological state upon presentation.",
+        "member_feature_ids": [
+          "outer_001_feature_085"
+        ],
+        "name": "Acute Clinical Symptoms"
+      },
+      {
+        "disagreements": "Renal markers show high consistency in treatment prediction but lower, more variable support for outcome prognosis.",
+        "evidence_ids": [
+          "multi:outer_001_feature_095:univariable:treatment",
+          "multi:outer_001_feature_096:univariable:treatment",
+          "multi:outer_001_feature_095:predictive_forest:treatment",
+          "multi:outer_001_feature_096:predictive_forest:treatment",
+          "multi:outer_001_feature_095:causal_forest:effect",
+          "multi:outer_001_feature_096:causal_forest:effect"
+        ],
+        "interpretation": "Candidates measuring kidney performance demonstrate strong predictive signals for treatment assignment and moderate signals for effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_095",
+          "outer_001_feature_096"
+        ],
+        "name": "Renal Function"
+      },
+      {
+        "disagreements": "Deconditioning shows strong signals across roles, whereas CRP level evidence is weak and lacks consistency.",
+        "evidence_ids": [
+          "multi:outer_001_feature_099:univariable:outcome",
+          "multi:outer_001_feature_099:univariable_rlearner:effect",
+          "multi:outer_001_feature_099:causal_forest:effect",
+          "multi:outer_001_feature_093:penalized_main:outcome",
+          "multi:outer_001_feature_093:penalized_interactions:effect"
+        ],
+        "interpretation": "Measures of general patient health, inflammation, and infection status provide evidence for both outcome prognosis and treatment effect heterogeneity.",
+        "member_feature_ids": [
+          "outer_001_feature_093",
+          "outer_001_feature_097",
+          "outer_001_feature_099"
+        ],
+        "name": "Systemic and Clinical Status"
+      },
+      {
+        "disagreements": "Treatment and outcome signals are moderate, while the causal forest provides the strongest supporting signal for the effect modification role.",
+        "evidence_ids": [
+          "multi:outer_001_feature_100:predictive_forest:treatment",
+          "multi:outer_001_feature_100:predictive_forest:outcome",
+          "multi:outer_001_feature_100:causal_forest:effect"
+        ],
+        "interpretation": "Blood pressure demonstrates a moderate relationship with treatment and outcome, coupled with a strong signal for effect modification.",
+        "member_feature_ids": [
+          "outer_001_feature_100"
+        ],
+        "name": "Hemodynamics"
+      },
+      {
+        "disagreements": "Cough productivity shows a moderate outcome signal but lacks the treatment or effect signals necessary for a confounder or modifier role.",
+        "evidence_ids": [
+          "multi:outer_001_feature_091:penalized_main:outcome",
+          "multi:outer_001_feature_092:predictive_forest:treatment",
+          "multi:outer_001_feature_094:univariable_rlearner:effect",
+          "multi:outer_001_feature_098:univariable_rlearner:effect"
+        ],
+        "interpretation": "Candidate measurements of cough characteristics and cranial nerve status show minimal or inconsistent evidence across all roles.",
+        "member_feature_ids": [
+          "outer_001_feature_091",
+          "outer_001_feature_092",
+          "outer_001_feature_094",
+          "outer_001_feature_098"
+        ],
+        "name": "Cough and Neurological Markers"
+      }
+    ]
+  },
+  "system": "You review pretreatment candidate measurements using modeling evidence\nfrom one outer-training fold. First identify themes across candidates; then\nreconcile their roles as confounder, effect_modifier, both, or neither.\nAll evidence is fallible. No individual family, p-value, or support frequency is\na hard selection gate. A credible complementary signal can justify retention\neven when other methods shrink it away. Do not mistake correlated aliases or\nproxies for multiple independent discoveries. Themes organize evidence; they\ndo not establish equivalence, merge measurements, or transfer a role to every\ntheme member. Preserve investigator-locked roles exactly.\n\nTreatment prediction, outcome prognosis, and confounding are distinct. Discuss\nwhether a candidate could be a common cause rather than an instrument or only a\nprognostic factor. Effect modification needs treatment-heterogeneity evidence;\noutcome main-effect importance alone does not establish it. Univariable logistic\ninteractions are on the log-odds scale and unadjusted for other covariates.\nOrthogonal linear models, candidate R-learners, and causal forests assess the\nprobability/outcome scale after elastic-net nuisance adjustment. Their targets\nand biases differ. A model family is evidence, not an independent replication.\n\nUse exposure and evaluability denominators. Missing or nonconverged fits are not\nnegative votes. Repeated samples and folds overlap; support fractions are not\ncausal probabilities or formal stability-selection error guarantees. Raw and BH\np-values do not correct the upstream adaptive discovery process. Permutation\nimportance can be diluted by correlated alternatives and does not prove a\ncausal role. Compare fold consistency, methods, subsets, and conflicting facts.\nDefinitions and theme names cannot establish a role without the supplied\nempirical evidence. Never invent an oracle, data-generating process, or hidden\ntruth. Return the requested JSON and cite only supplied evidence IDs."
+}

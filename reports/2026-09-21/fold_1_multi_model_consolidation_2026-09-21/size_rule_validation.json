@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "source_sha256": "ab9d524ec1c2fa919bbd289c74fe34f4606d0812f5ea21e8a6090d6480194c85",
+  "cases": [
+    "constant/ties",
+    "clear gain",
+    "paired simplification"
+  ]
+}

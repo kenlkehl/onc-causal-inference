@@ -1,0 +1,50 @@
+{
+  "themes": [
+    {
+      "disagreements": "Lung disease diagnosis exhibits strong treatment prediction and effect modification, whereas lung auscultation findings are primarily prognostic with minimal treatment association.",
+      "evidence_ids": [
+        "multi:outer_001_feature_194:univariable:treatment",
+        "multi:outer_001_feature_194:univariable:outcome",
+        "multi:outer_001_feature_194:causal_forest:effect",
+        "multi:outer_001_feature_191:univariable:outcome"
+      ],
+      "interpretation": "Pulmonary statuses characterized by clinical diagnosis and physical examination findings that strongly influence outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_191",
+        "outer_001_feature_194"
+      ],
+      "name": "Pulmonary Comorbidity and Symptomatology"
+    },
+    {
+      "disagreements": "SUVmax and histology show moderate stability in effect modification signals, whereas cancer stage and mass morphology show negligible or inconsistent support.",
+      "evidence_ids": [
+        "multi:outer_001_feature_196:causal_forest:effect",
+        "multi:outer_001_feature_192:causal_forest:effect",
+        "multi:outer_001_feature_196:univariable_rlearner:effect"
+      ],
+      "interpretation": "Intrinsic tumor characteristics derived from imaging and pathology that may modify treatment response.",
+      "member_feature_ids": [
+        "outer_001_feature_192",
+        "outer_001_feature_193",
+        "outer_001_feature_195",
+        "outer_001_feature_196",
+        "outer_001_feature_200"
+      ],
+      "name": "Tumor Morphological and Metabolic Characteristics"
+    },
+    {
+      "disagreements": "Lymph node dissection status provides a credible signal for effect modification, while metastasis count and lymphadenopathy status lack consistent support.",
+      "evidence_ids": [
+        "multi:outer_001_feature_197:univariable_rlearner:effect",
+        "multi:outer_001_feature_197:causal_forest:effect"
+      ],
+      "interpretation": "Measurements related to the surgical or radiographic assessment of lymphatic spread.",
+      "member_feature_ids": [
+        "outer_001_feature_197",
+        "outer_001_feature_198",
+        "outer_001_feature_199"
+      ],
+      "name": "Nodal Involvement Status"
+    }
+  ]
+}

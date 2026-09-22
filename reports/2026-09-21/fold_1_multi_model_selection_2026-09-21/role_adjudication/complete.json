@@ -1,0 +1,45 @@
+{
+  "candidate_count": 352,
+  "identity": {
+    "evidence": "42da3ae3747e11562627adf845a9c6d0ef97e4b274f0c5213d2649b88e9b730c",
+    "model": {
+      "actual_model_identity": {
+        "parent": null,
+        "revision": null,
+        "root": "nvidia/Gemma-4-31B-IT-NVFP4",
+        "served_id": "gemma4-31b"
+      },
+      "endpoint_observations": [
+        {
+          "advertised_model_ids": [
+            "gemma4-31b"
+          ],
+          "endpoint": "http://sn4622130540:8000/v1",
+          "selected_model_advertised": true,
+          "selected_model_record": {
+            "id": "gemma4-31b",
+            "parent": null,
+            "revision": null,
+            "root": "nvidia/Gemma-4-31B-IT-NVFP4"
+          }
+        }
+      ],
+      "live_endpoint_verified": true,
+      "model_family": "gemma4",
+      "role": "primary",
+      "sampling_model": "nvidia/Gemma-4-31B-IT-NVFP4",
+      "selected_model": "gemma4-31b"
+    },
+    "policy": {
+      "enabled": true,
+      "max_candidates_per_request": 20,
+      "max_categories_per_feature": 40,
+      "max_description_chars": 1200,
+      "max_measurement_definition_chars": 1600
+    },
+    "prompt": "stage2_multi_model_themes_v1",
+    "source_sha256": "28f4f61a65a0e6601a43d17dd5189a02c7dc09a46697d74046e25f1285c3c94a"
+  },
+  "retained_count": 270,
+  "status": "complete"
+}

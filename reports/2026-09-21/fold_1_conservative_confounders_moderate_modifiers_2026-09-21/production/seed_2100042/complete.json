@@ -1,0 +1,16 @@
+{
+  "completed_at": "2026-09-22T01:54:20Z",
+  "input_fingerprint": "8355fcf86b4ae4b41c71c97d5e6fcfbd46e45191b05add739209111341cb8133",
+  "outcome_model_contract": {
+    "criterion": "log_loss",
+    "discrete_outcome": true,
+    "model_class": "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier",
+    "outcome_type": "binary",
+    "penalty": "elastic_net",
+    "prediction_interface": "predict_proba"
+  },
+  "outcome_type": "binary",
+  "rows": 200,
+  "schema_version": "stage2_outer_estimation_v8_calibration_overlap",
+  "status": "complete"
+}

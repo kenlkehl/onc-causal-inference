@@ -1,0 +1,63 @@
+{
+  "themes": [
+    {
+      "disagreements": "Causal forest evidence for ambulation status suggests a moderate effect signal, though the overwhelming strength of the main effects dominates the role reconciliation.",
+      "evidence_ids": [
+        "multi:outer_001_feature_011:univariable:treatment",
+        "multi:outer_001_feature_011:univariable:outcome",
+        "multi:outer_001_feature_017:univariable:treatment",
+        "multi:outer_001_feature_017:univariable:outcome"
+      ],
+      "interpretation": "Strong and consistent evidence across multiple model families for both treatment prediction and outcome prognosis, indicating a likely confounding role.",
+      "member_feature_ids": [
+        "outer_001_feature_011",
+        "outer_001_feature_017"
+      ],
+      "name": "Functional and Respiratory Baseline"
+    },
+    {
+      "disagreements": "ALT (016) exhibits a much stronger treatment prediction signal than ALP (015), yet both share similar support fractions in causal forest evidence.",
+      "evidence_ids": [
+        "multi:outer_001_feature_016:univariable:treatment",
+        "multi:outer_001_feature_015:univariable_rlearner:effect",
+        "multi:outer_001_feature_016:causal_forest:effect"
+      ],
+      "interpretation": "These candidates show moderate to strong treatment prediction signals, but weak outcome signals, with complementary evidence for treatment-heterogeneity from R-learners and Causal Forests.",
+      "member_feature_ids": [
+        "outer_001_feature_015",
+        "outer_001_feature_016"
+      ],
+      "name": "Hepatic Function Markers"
+    },
+    {
+      "disagreements": "The mutation status (013) has stronger causal forest support than the rearrangement status (014), which shows virtually no support in the same family.",
+      "evidence_ids": [
+        "multi:outer_001_feature_013:causal_forest:effect",
+        "multi:outer_001_feature_014:predictive_forest:treatment"
+      ],
+      "interpretation": "Evidence identifies mutation status as a potential effect modifier, while rearrangement status serves as a weaker, correlated proxy with negligible independent signal.",
+      "member_feature_ids": [
+        "outer_001_feature_013",
+        "outer_001_feature_014"
+      ],
+      "name": "Genomic ALK Status"
+    },
+    {
+      "disagreements": "Alcohol use (012) shows a confounder pattern, whereas antidiabetic use (020) is primarily an instrument-like predictor of treatment without outcome or effect signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_012:predictive_forest:outcome",
+        "multi:outer_001_feature_018:penalized_main:outcome",
+        "multi:outer_001_feature_019:causal_forest:effect",
+        "multi:outer_001_feature_020:univariable:treatment"
+      ],
+      "interpretation": "A diverse group where some members act as confounders (alcohol use) or purely prognostic factors (anemia type), while others show moderate evidence for effect modification (anticoagulant use).",
+      "member_feature_ids": [
+        "outer_001_feature_012",
+        "outer_001_feature_018",
+        "outer_001_feature_019",
+        "outer_001_feature_020"
+      ],
+      "name": "Comorbidities and Lifestyle Factors"
+    }
+  ]
+}

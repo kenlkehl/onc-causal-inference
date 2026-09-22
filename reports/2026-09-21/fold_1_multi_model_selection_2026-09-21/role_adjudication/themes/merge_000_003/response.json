@@ -1,0 +1,160 @@
+{
+  "themes": [
+    {
+      "disagreements": "Lesion size (183) and mass localization (166) exhibit dual roles as confounders and effect modifiers; proliferative markers (196, 197) and dissection procedure (201) are primarily effect modifiers, while others (182, 193, 195, 198, 199, 200, 202) show negligible signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_166:predictive_forest:treatment",
+        "multi:outer_001_feature_183:causal_forest:effect",
+        "multi:outer_001_feature_196:causal_forest:effect",
+        "multi:outer_001_feature_197:univariable_rlearner:effect",
+        "multi:outer_001_feature_201:causal_forest:effect",
+        "multi:outer_001_feature_165:causal_forest:effect"
+      ],
+      "interpretation": "Tumor morphological and nodal assessments ranging from negligible prognostic signals to robust dual roles in confounding and treatment heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_165",
+        "outer_001_feature_166",
+        "outer_001_feature_182",
+        "outer_001_feature_183",
+        "outer_001_feature_192",
+        "outer_001_feature_193",
+        "outer_001_feature_195",
+        "outer_001_feature_196",
+        "outer_001_feature_197",
+        "outer_001_feature_198",
+        "outer_001_feature_199",
+        "outer_001_feature_200",
+        "outer_001_feature_201",
+        "outer_001_feature_202"
+      ],
+      "name": "Tumor Morphological and Nodal Assessment"
+    },
+    {
+      "disagreements": "PET metrics (164, 168) and lobectomy type (190) demonstrate dual roles as confounders and effect modifiers; orbital/cranial findings (173) and leptomeningeal enhancement (181) are primarily effect modifiers, while others remain purely prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_164:causal_forest:effect",
+        "multi:outer_001_feature_168:univariable_rlearner:effect",
+        "multi:outer_001_feature_173:causal_forest:effect",
+        "multi:outer_001_feature_181:univariable_rlearner:effect",
+        "multi:outer_001_feature_190:causal_forest:effect"
+      ],
+      "interpretation": "Advanced radiographic imaging findings showing a spectrum from purely prognostic importance to strong treatment heterogeneity and confounding.",
+      "member_feature_ids": [
+        "outer_001_feature_164",
+        "outer_001_feature_168",
+        "outer_001_feature_171",
+        "outer_001_feature_172",
+        "outer_001_feature_173",
+        "outer_001_feature_181",
+        "outer_001_feature_190"
+      ],
+      "name": "Advanced Radiographic Imaging"
+    },
+    {
+      "disagreements": "High consistency across Ki67, KEAP1, and KRAS VAF, all showing strong signals for effect modification and outcome prognosis.",
+      "evidence_ids": [
+        "multi:outer_001_feature_176:univariable:effect",
+        "multi:outer_001_feature_179:causal_forest:effect",
+        "multi:outer_001_feature_175:causal_forest:effect"
+      ],
+      "interpretation": "Molecular and proliferative biomarkers acting as consistent indicators of treatment effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_175",
+        "outer_001_feature_176",
+        "outer_001_feature_179"
+      ],
+      "name": "Molecular and Pathological Biomarkers"
+    },
+    {
+      "disagreements": "Line of therapy (184) and calcium carbonate (203) show dual roles; cisplatin (204), denosumab (205), and G12C inhibitors (207) are primarily effect modifiers; lisinopril (209) is a clear confounder.",
+      "evidence_ids": [
+        "multi:outer_001_feature_184:causal_forest:effect",
+        "multi:outer_001_feature_204:causal_forest:effect",
+        "multi:outer_001_feature_203:causal_forest:effect",
+        "multi:outer_001_feature_209:univariable:treatment",
+        "multi:outer_001_feature_205:univariable:effect"
+      ],
+      "interpretation": "Pharmacotherapy agents with divergent roles ranging from simple confounding to complex effect modification and prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_184",
+        "outer_001_feature_185",
+        "outer_001_feature_186",
+        "outer_001_feature_203",
+        "outer_001_feature_204",
+        "outer_001_feature_205",
+        "outer_001_feature_206",
+        "outer_001_feature_207",
+        "outer_001_feature_208",
+        "outer_001_feature_209",
+        "outer_001_feature_210"
+      ],
+      "name": "Pharmacotherapy and Systemic Treatment"
+    },
+    {
+      "disagreements": "Pulmonary diagnosis (194), liver metastasis (188), and baseline health markers (170) show dual roles; illicit drug use (162) is primarily a confounder, while general liver function (187) and auscultation (191) are negligible or prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_170:univariable_rlearner:effect",
+        "multi:outer_001_feature_162:penalized_main:outcome",
+        "multi:outer_001_feature_188:causal_forest:effect",
+        "multi:outer_001_feature_194:causal_forest:effect"
+      ],
+      "interpretation": "Comorbidities and organ-specific health markers showing varying levels of confounding and treatment heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_161",
+        "outer_001_feature_162",
+        "outer_001_feature_170",
+        "outer_001_feature_187",
+        "outer_001_feature_188",
+        "outer_001_feature_191",
+        "outer_001_feature_194"
+      ],
+      "name": "Organ Function and Comorbidities"
+    },
+    {
+      "disagreements": "Knee osteoarthritis (177) is a dominant confounder, whereas other clinical assessments (174, 180) provide only weak or purely prognostic signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_177:univariable:treatment",
+        "multi:outer_001_feature_174:univariable:outcome",
+        "multi:outer_001_feature_180:predictive_forest:treatment"
+      ],
+      "interpretation": "General clinical and laboratory metrics where confounding is limited to specific markers.",
+      "member_feature_ids": [
+        "outer_001_feature_174",
+        "outer_001_feature_177",
+        "outer_001_feature_178",
+        "outer_001_feature_180"
+      ],
+      "name": "Clinical and Laboratory Metrics"
+    },
+    {
+      "disagreements": "Morphine (217) demonstrates dual roles; living arrangements (189) act as a confounder, while oxycodone (211) remains purely prognostic.",
+      "evidence_ids": [
+        "multi:outer_001_feature_189:univariable:treatment",
+        "multi:outer_001_feature_217:causal_forest:effect",
+        "multi:outer_001_feature_211:predictive_forest:outcome"
+      ],
+      "interpretation": "Social context and pain management markers with divergent roles in treatment prediction and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_189",
+        "outer_001_feature_211",
+        "outer_001_feature_217"
+      ],
+      "name": "Social and Pain Management"
+    },
+    {
+      "disagreements": "Prior immunotherapy (169) demonstrates dual roles as a confounder and effect modifier, while imaging procedures (163) are primarily effect modifiers.",
+      "evidence_ids": [
+        "multi:outer_001_feature_163:univariable_rlearner:effect",
+        "multi:outer_001_feature_167:predictive_forest:outcome",
+        "multi:outer_001_feature_169:univariable_rlearner:effect"
+      ],
+      "interpretation": "Procedural and therapy history markers providing evidence for treatment heterogeneity and confounding.",
+      "member_feature_ids": [
+        "outer_001_feature_163",
+        "outer_001_feature_167",
+        "outer_001_feature_169"
+      ],
+      "name": "Procedural and Therapy History"
+    }
+  ]
+}

@@ -1,0 +1,66 @@
+{
+  "themes": [
+    {
+      "disagreements": "Consistent evidence across univariable and predictive forest models for both treatment and outcome, with no significant effect modification signal.",
+      "evidence_ids": [
+        "multi:outer_001_feature_321:univariable:treatment",
+        "multi:outer_001_feature_321:univariable:outcome",
+        "multi:outer_001_feature_321:predictive_forest:treatment",
+        "multi:outer_001_feature_321:predictive_forest:outcome"
+      ],
+      "interpretation": "Strong evidence of a common cause for both treatment assignment and outcome prognosis.",
+      "member_feature_ids": [
+        "outer_001_feature_321"
+      ],
+      "name": "Cumulative Tobacco Exposure"
+    },
+    {
+      "disagreements": "Strong effect modification signals in TTF1 contrast with very weak or absent signals for general TP53 mutation status and specific R273H variants.",
+      "evidence_ids": [
+        "multi:outer_001_feature_330:univariable:effect",
+        "multi:outer_001_feature_330:univariable_rlearner:effect",
+        "multi:outer_001_feature_330:causal_forest:effect",
+        "multi:outer_001_feature_324:univariable_rlearner:effect"
+      ],
+      "interpretation": "Molecular markers showing differential treatment effects, particularly TTF-1 protein expression.",
+      "member_feature_ids": [
+        "outer_001_feature_323",
+        "outer_001_feature_324",
+        "outer_001_feature_330"
+      ],
+      "name": "Tumor Molecular Profiling"
+    },
+    {
+      "disagreements": "Transependymal flow shows high consistency for outcome prognosis; bilirubin provides a much weaker signal.",
+      "evidence_ids": [
+        "multi:outer_001_feature_326:univariable:outcome",
+        "multi:outer_001_feature_326:penalized_main:outcome",
+        "multi:outer_001_feature_326:predictive_forest:outcome",
+        "multi:outer_001_feature_322:predictive_forest:outcome"
+      ],
+      "interpretation": "Clinical and laboratory markers serving as prognostic factors for the outcome without significant treatment-association signals.",
+      "member_feature_ids": [
+        "outer_001_feature_322",
+        "outer_001_feature_326"
+      ],
+      "name": "Prognostic Clinical Indicators"
+    },
+    {
+      "disagreements": "Signals for treatment goals, response, and cycle frequency are fragmented across folds and models, failing to establish a stable role.",
+      "evidence_ids": [
+        "multi:outer_001_feature_328:predictive_forest:treatment",
+        "multi:outer_001_feature_329:predictive_forest:treatment",
+        "multi:outer_001_feature_327:predictive_forest:treatment",
+        "multi:outer_001_feature_325:penalized_main:treatment"
+      ],
+      "interpretation": "Treatment-related documentation and scoring metrics with insufficient evidence to be identified as confounders or modifiers.",
+      "member_feature_ids": [
+        "outer_001_feature_325",
+        "outer_001_feature_327",
+        "outer_001_feature_328",
+        "outer_001_feature_329"
+      ],
+      "name": "Treatment Context and Response"
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "broad_selection_sha256": "ee399ae5dbe7e99a2e880d792f84b75e3549b0c6af866dea996326a73a94d9ea",
+  "parallel_production_workers": 3,
+  "plan": {
+    "estimation_seeds": [
+      100042,
+      1100042,
+      2100042
+    ],
+    "matched_forest_seeds": [
+      120042,
+      1120042,
+      2120042
+    ],
+    "matched_selection_comparison": "Also use frozen original all-candidate elastic-net residuals and overlap population (720/180) with selected modifiers in X, historical sqrt forest, three seeds.",
+    "max_propensity": 0.9,
+    "min_propensity": 0.1,
+    "oracle_recovery_and_ite_evaluation": "Only after selected definitions and all new predictions have been frozen.",
+    "production": "Existing estimate_outer_fold; selected confounders for nuisance adjustment and modifiers for X; three seeds.",
+    "propensity_clip": 0.02,
+    "trees": 200
+  },
+  "selection_freeze_sha256": "152d3d9934e41254cd71a1601e4975055c989e7ae92ec18b4eb8f7183343f975",
+  "source_sha256": "87cfddd27e7711d2aabed43acf72602eebc4785a27c177360ac7963f9d3e5ecb"
+}

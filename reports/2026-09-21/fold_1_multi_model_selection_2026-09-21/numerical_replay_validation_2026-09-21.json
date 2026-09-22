@@ -1,0 +1,9 @@
+{
+  "exact_cached_report_reproduced": true,
+  "numerical_refits": 0,
+  "oracle_or_heldout_labels_read": false,
+  "report_fingerprint": "83f5876cbe26b21796b68191604ce9d702c28247fc83093b7021bd4f149297a1",
+  "source_sha256": "2b89632d653724a1f999c0e88c63005248c91dcf506ca65223e9ea0ea539f64f",
+  "status": "passed",
+  "validated_at": "2026-09-21T23:02:25.602660+00:00"
+}

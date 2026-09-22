@@ -1,0 +1,63 @@
+{
+  "themes": [
+    {
+      "disagreements": "who_grade lacks strong effect modification evidence compared to the stronger prognostic and treatment signals for ventricular size and vertebral metastasis.",
+      "evidence_ids": [
+        "multi:outer_001_feature_341:predictive_forest:outcome",
+        "multi:outer_001_feature_342:univariable:outcome",
+        "multi:outer_001_feature_350:penalized_main:treatment",
+        "multi:outer_001_feature_341:causal_forest:effect"
+      ],
+      "interpretation": "Indicators of tumor burden and neuro-oncological severity, consistently linked to outcome and treatment selection.",
+      "member_feature_ids": [
+        "outer_001_feature_341",
+        "outer_001_feature_342",
+        "outer_001_feature_350"
+      ],
+      "name": "Neuro-oncological Burden"
+    },
+    {
+      "disagreements": "Vitamin deficiency anemia shows more distributed evidence across univariable and penalized models, while WBC count is strongly captured by the predictive forest.",
+      "evidence_ids": [
+        "multi:outer_001_feature_349:predictive_forest:outcome",
+        "multi:outer_001_feature_349:causal_forest:effect",
+        "multi:outer_001_feature_345:univariable_rlearner:effect"
+      ],
+      "interpretation": "Systemic hematologic markers reflecting overall patient health and potential for treatment response modification.",
+      "member_feature_ids": [
+        "outer_001_feature_345",
+        "outer_001_feature_349"
+      ],
+      "name": "Systemic Hematologic State"
+    },
+    {
+      "disagreements": "Visual field deficit only exhibits evidence of effect modification, lacking the confounding roles seen in weight and wheezing.",
+      "evidence_ids": [
+        "multi:outer_001_feature_347:predictive_forest:outcome",
+        "multi:outer_001_feature_348:predictive_forest:treatment",
+        "multi:outer_001_feature_344:univariable_rlearner:effect"
+      ],
+      "interpretation": "General clinical physical findings and constitutional status.",
+      "member_feature_ids": [
+        "outer_001_feature_344",
+        "outer_001_feature_347",
+        "outer_001_feature_348"
+      ],
+      "name": "General Physical Findings"
+    },
+    {
+      "disagreements": "Vinorelbine administration has more robust evidence for effect modification (causal forest) than vitamin supplement use, which acts primarily as a weak confounder.",
+      "evidence_ids": [
+        "multi:outer_001_feature_343:causal_forest:effect",
+        "multi:outer_001_feature_343:predictive_forest:outcome",
+        "multi:outer_001_feature_346:predictive_forest:treatment"
+      ],
+      "interpretation": "Prior pharmacological interventions and supplementation status.",
+      "member_feature_ids": [
+        "outer_001_feature_343",
+        "outer_001_feature_346"
+      ],
+      "name": "Prior Pharmacological History"
+    }
+  ]
+}

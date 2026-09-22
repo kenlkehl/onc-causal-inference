@@ -1,0 +1,70 @@
+{
+  "themes": [
+    {
+      "disagreements": "High consistency across all model families for both prognosis and interaction, though permutation importance in predictive forests is lower than the strong univariable and causal forest signals.",
+      "evidence_ids": [
+        "multi:outer_001_feature_228:univariable:outcome",
+        "multi:outer_001_feature_228:penalized_main:outcome",
+        "multi:outer_001_feature_228:univariable:effect",
+        "multi:outer_001_feature_228:causal_forest:effect",
+        "multi:outer_001_feature_228:univariable_rlearner:effect",
+        "multi:outer_001_feature_228:penalized_interactions:effect"
+      ],
+      "interpretation": "Strong systemic inflammatory marker showing robust evidence for both confounding (outcome prognosis) and effect modification (treatment heterogeneity).",
+      "member_feature_ids": [
+        "outer_001_feature_228"
+      ],
+      "name": "Systemic Inflammation"
+    },
+    {
+      "disagreements": "Variable signal strength across symptoms; neurological symptoms and nausea show stronger interaction evidence (Causal Forest, R-learner) compared to night sweats and necrotic fluid.",
+      "evidence_ids": [
+        "multi:outer_001_feature_225:causal_forest:effect",
+        "multi:outer_001_feature_227:causal_forest:effect",
+        "multi:outer_001_feature_226:univariable_rlearner:effect",
+        "multi:outer_001_feature_229:predictive_forest:treatment",
+        "multi:outer_001_feature_227:univariable_rlearner:effect",
+        "multi:outer_001_feature_225:univariable_rlearner:effect"
+      ],
+      "interpretation": "Cluster of pretreatment symptomatic indicators exhibiting evidence for both treatment prediction and heterogeneity of effect.",
+      "member_feature_ids": [
+        "outer_001_feature_225",
+        "outer_001_feature_226",
+        "outer_001_feature_227",
+        "outer_001_feature_229"
+      ],
+      "name": "Clinical Symptomatology"
+    },
+    {
+      "disagreements": "Napsin A expression shows strong interaction evidence, whereas N-stage and NSCLC diagnosis signals are considerably weaker and less consistent across folds.",
+      "evidence_ids": [
+        "multi:outer_001_feature_224:univariable_rlearner:effect",
+        "multi:outer_001_feature_224:causal_forest:effect",
+        "multi:outer_001_feature_223:predictive_forest:treatment",
+        "multi:outer_001_feature_223:causal_forest:effect",
+        "multi:outer_001_feature_230:univariable_rlearner:effect"
+      ],
+      "interpretation": "Pathological and staging markers where Napsin A is a credible effect modifier, and N-stage potentially serves as both a confounder and modifier.",
+      "member_feature_ids": [
+        "outer_001_feature_223",
+        "outer_001_feature_224",
+        "outer_001_feature_230"
+      ],
+      "name": "Disease Pathology and Stage"
+    },
+    {
+      "disagreements": "Evidence is primarily driven by predictive forests; univariable signals are weak or absent for MI presence.",
+      "evidence_ids": [
+        "multi:outer_001_feature_221:predictive_forest:outcome",
+        "multi:outer_001_feature_222:predictive_forest:treatment",
+        "multi:outer_001_feature_221:causal_forest:effect"
+      ],
+      "interpretation": "General health indicators and comorbidities with moderate predictive signals, though myelosuppression exhibits more credible evidence for a dual role.",
+      "member_feature_ids": [
+        "outer_001_feature_221",
+        "outer_001_feature_222"
+      ],
+      "name": "General Health and Comorbidities"
+    }
+  ]
+}

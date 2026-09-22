@@ -1,0 +1,64 @@
+{
+  "themes": [
+    {
+      "disagreements": "Feature 141 shows only weak, inconsistent signals; 142 is primarily a treatment predictor; 143 is primarily an effect modifier.",
+      "evidence_ids": [
+        "multi:outer_001_feature_142:univariable:treatment",
+        "multi:outer_001_feature_143:univariable_rlearner:effect",
+        "multi:outer_001_feature_143:causal_forest:effect"
+      ],
+      "interpretation": "Genomic and molecular measurements reflecting different causal roles, from treatment selection to treatment response heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_141",
+        "outer_001_feature_142",
+        "outer_001_feature_143"
+      ],
+      "name": "Genomic Indicators"
+    },
+    {
+      "disagreements": "Heart rate (150) is a very strong confounder (Treatment q=10, Outcome q=15), whereas glucose (146) has a more balanced signal across treatment, outcome, and effect modification.",
+      "evidence_ids": [
+        "multi:outer_001_feature_150:univariable:treatment",
+        "multi:outer_001_feature_150:univariable:outcome",
+        "multi:outer_001_feature_146:univariable:effect",
+        "multi:outer_001_feature_146:predictive_forest:treatment"
+      ],
+      "interpretation": "Physiological and metabolic vitals that serve as strong prognostic and predictive markers.",
+      "member_feature_ids": [
+        "outer_001_feature_146",
+        "outer_001_feature_150"
+      ],
+      "name": "Physiological and Metabolic Vitals"
+    },
+    {
+      "disagreements": "GERD presence (144) is purely prognostic (predictive_forest outcome 0.73); globe appearance (145) shows signals for all roles; head shape (148) is primarily a treatment predictor; headache (149) is weak.",
+      "evidence_ids": [
+        "multi:outer_001_feature_144:predictive_forest:outcome",
+        "multi:outer_001_feature_145:predictive_forest:treatment",
+        "multi:outer_001_feature_145:causal_forest:effect",
+        "multi:outer_001_feature_148:univariable:treatment"
+      ],
+      "interpretation": "Physical examination and symptomatic findings with varied roles ranging from simple prognosis to complex effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_144",
+        "outer_001_feature_145",
+        "outer_001_feature_148",
+        "outer_001_feature_149"
+      ],
+      "name": "Clinical and Physical Findings"
+    },
+    {
+      "disagreements": "None; consistent strong support across treatment and effect modification models.",
+      "evidence_ids": [
+        "multi:outer_001_feature_147:univariable:treatment",
+        "multi:outer_001_feature_147:causal_forest:effect",
+        "multi:outer_001_feature_147:univariable_rlearner:effect"
+      ],
+      "interpretation": "Supportive care interventions that strongly influence treatment assignment and outcome heterogeneity.",
+      "member_feature_ids": [
+        "outer_001_feature_147"
+      ],
+      "name": "Supportive Care"
+    }
+  ]
+}

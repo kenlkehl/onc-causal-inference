@@ -1,0 +1,7 @@
+{
+  "at": "2026-09-22T01:54:41.445581+00:00",
+  "predictions_freeze_sha256": "3acfbab1c55faf6ae3d7da81c403ad530447c9a477616ee5fd2c8140da061e3c",
+  "prior_oracle_exposure_acknowledged": true,
+  "selection_freeze_sha256": "da6d21fb4b2faa67e8121c9d6f546ab008f40fcc2411607f9a7e43aff6592006",
+  "source_sha256": "a81509182aa5377c1f11e4caa3bca2adfd322ddc8516786f4d1ad65e659cd662"
+}

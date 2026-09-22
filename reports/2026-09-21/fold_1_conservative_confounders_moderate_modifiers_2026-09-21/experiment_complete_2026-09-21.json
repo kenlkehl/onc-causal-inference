@@ -1,0 +1,13 @@
+{
+  "completed_at": "2026-09-22T01:57:56.005775+00:00",
+  "figure_visually_reviewed": true,
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/REPORT_2026-09-21.md": "90f036e704ceb524384ca069b93cd14b8b81316f0c1234b8daa6f0b647ebe312",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/evaluation_2026-09-21.json": "52c3866ac15b99fd1d0a2a2bde1340e10c451d120b727d3ac60d1e50b65a2770",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/final_validation_2026-09-21.json": "25f3e757d238877810521cc08b0fc9d23d59d524e28e630c3bd0591f349c7c5d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/ite_comparison_2026-09-21.png": "31551dc9cc156fa969301bd12e3a75f0859cd93db500a88aa90be1c8bad7ffba",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/predictions_frozen_2026-09-21.json": "3acfbab1c55faf6ae3d7da81c403ad530447c9a477616ee5fd2c8140da061e3c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/report_complete_2026-09-21.json": "6d76c22d70cb60df2a5999980acc1186d7d864623c1d8b13f88cc51a124e30b6",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_conservative_confounders_moderate_modifiers_2026-09-21/selection_frozen_2026-09-21.json": "da6d21fb4b2faa67e8121c9d6f546ab008f40fcc2411607f9a7e43aff6592006"
+  }
+}

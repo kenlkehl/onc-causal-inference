@@ -1,0 +1,54 @@
+{
+  "themes": [
+    {
+      "disagreements": "Feature 291 shows strong treatment prediction but a weak outcome signal; feature 292 shows very low support across all roles.",
+      "evidence_ids": [
+        "multi:outer_001_feature_291:predictive_forest:treatment",
+        "multi:outer_001_feature_291:causal_forest:effect",
+        "multi:outer_001_feature_291:univariable_rlearner:effect",
+        "multi:outer_001_feature_292:predictive_forest:outcome"
+      ],
+      "interpretation": "Evidence identifies ROS1 mutation status as a strong treatment predictor and credible effect modifier, while rearrangement status remains weakly supportive across models.",
+      "member_feature_ids": [
+        "outer_001_feature_291",
+        "outer_001_feature_292"
+      ],
+      "name": "ROS1 Genetic Status"
+    },
+    {
+      "disagreements": "Relative signal strength varies: creatinine (299) and albumin (295) are dominant treatment predictors, while calcium (297) is a stronger outcome predictor.",
+      "evidence_ids": [
+        "multi:outer_001_feature_295:univariable:treatment",
+        "multi:outer_001_feature_295:univariable:outcome",
+        "multi:outer_001_feature_295:causal_forest:effect",
+        "multi:outer_001_feature_297:univariable:outcome",
+        "multi:outer_001_feature_299:univariable:treatment",
+        "multi:outer_001_feature_299:univariable_rlearner:effect",
+        "multi:outer_001_feature_300:causal_forest:effect"
+      ],
+      "interpretation": "Serum chemistry markers exhibit strong and consistent evidence for both confounding (predicting treatment and outcome) and effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_295",
+        "outer_001_feature_296",
+        "outer_001_feature_297",
+        "outer_001_feature_298",
+        "outer_001_feature_299",
+        "outer_001_feature_300"
+      ],
+      "name": "Comprehensive Metabolic Panel (CMP)"
+    },
+    {
+      "disagreements": "Feature 293 is entirely non-evaluable, whereas 294 shows a high support fraction for outcome prediction.",
+      "evidence_ids": [
+        "multi:outer_001_feature_294:predictive_forest:outcome",
+        "multi:outer_001_feature_294:causal_forest:effect"
+      ],
+      "interpretation": "Scapular metastasis is a strong outcome predictor and a credible effect modifier; RSV infection status provided no evaluable evidence.",
+      "member_feature_ids": [
+        "outer_001_feature_293",
+        "outer_001_feature_294"
+      ],
+      "name": "Clinical and Pathological Status"
+    }
+  ]
+}

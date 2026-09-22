@@ -1,0 +1,116 @@
+{
+  "adjudication": {
+    "endpoint": "http://sn4622130540:8000/v1",
+    "max_tokens": 100000,
+    "model": "gemma4-31b",
+    "reasoning_effort": "high"
+  },
+  "candidate_features": 352,
+  "created_at": "2026-09-21T22:11:22.076259+00:00",
+  "evaluation_plan": {
+    "estimation_seeds": [
+      100042,
+      1100042,
+      2100042
+    ],
+    "matched_forest_seeds": [
+      120042,
+      1120042,
+      2120042
+    ],
+    "matched_selection_comparison": "Also use frozen original all-candidate elastic-net residuals and overlap population (720/180) with selected modifiers in X, historical sqrt forest, three seeds.",
+    "max_propensity": 0.9,
+    "min_propensity": 0.1,
+    "oracle_recovery_and_ite_evaluation": "Only after selected definitions and all new predictions have been frozen.",
+    "production": "Existing estimate_outer_fold; selected confounders for nuisance adjustment and modifiers for X; three seeds.",
+    "propensity_clip": 0.02,
+    "trees": 200
+  },
+  "extraction_refreshed_again": false,
+  "heldout_rows": 200,
+  "input_files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/definitions.json": "2544b5eafd086725e4f6fdf213d18a65a794a8be407924d6eef27f51eb7a4101",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/heldout.pkl": "ccf6714b666f84146516c3fb344618b5c9044d59117bc4587e5fba68fa91b6dc",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/heldout_labels.parquet": "5f74f5f9572afa8cca219179f05ad750f96bc67586c4d601924b41ee461271de",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/split.json": "0dc3925822f6e75f1453ca3a52008b70dfb789cb15dd11f5d21d30d526a7bf0f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/training.pkl": "82f88ef44eb863e3cbf33bcca2081fb85e9f8a94e9b4119d353837ad6983e63f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/training_labels.parquet": "13d039c9efa5301a05b74d156ac4d10307e966dfa37e2cdc1146b6f54aa2d688"
+  },
+  "oracle_used_by_selection_or_fitting": false,
+  "outer_fold": 1,
+  "outer_heldout_used_in_selection": false,
+  "policy": {
+    "categorical_min_count": 5,
+    "coefficient_tolerance": 1e-07,
+    "internal_cv_folds": 3,
+    "l1_ratio": 0.8,
+    "max_iter": 5000,
+    "max_propensity": 0.9,
+    "maximum_log10_alpha": -1.0,
+    "min_propensity": 0.1,
+    "minimum_log10_alpha": -5.0,
+    "modifier_continuous_winsor_quantile": 0.005,
+    "modifier_one_standard_error_rule": false,
+    "modifier_ridge_alpha": 10.0,
+    "modifier_selection_rule": "any_inner_fold_union",
+    "modifier_top_n_per_inner_fold": 10,
+    "multi_model": {
+      "feature_subset_size": 32,
+      "forest_min_samples_leaf": 10,
+      "forest_trees": 200,
+      "l1_ratios": [
+        0.2,
+        0.8,
+        1.0
+      ],
+      "max_prompt_chars": 100000,
+      "nominal_p_threshold": 0.05,
+      "permutation_repeats": 3,
+      "q_threshold": 0.1,
+      "regularization_grid_size": 8,
+      "repeats": 3,
+      "row_fraction": 0.8,
+      "schema_version": "stage2_multi_model_selection_v1"
+    },
+    "nuisance_prediction_one_standard_error_rule": false,
+    "nuisance_selection_rule": "any_inner_fold_union",
+    "one_standard_error_rule": true,
+    "optimization_tolerance": 1e-06,
+    "regularization_grid_size": 16,
+    "selection_mode": "multi_model",
+    "univariable_confounder_p_value_threshold": 0.05,
+    "univariable_confounder_q_value_threshold": 0.1
+  },
+  "prior_fold_1_oracle_results_seen": true,
+  "role_policy": {
+    "enabled": true,
+    "max_candidates_per_request": 20,
+    "max_categories_per_feature": 40,
+    "max_description_chars": 1200,
+    "max_measurement_definition_chars": 1600
+  },
+  "seed": 100042,
+  "sources": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2.py": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2_analysis.py": "8ed0272a9066917b68cac35eaa5f7be597b356202f7991c7044acd5bb76149d1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_elastic_net_selection.py": "279abd82a8e688113ac31eb100369b1e1e8e8a7e7a0d434b8d33828e94945ece",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_multi_model_adjudication.py": "28f4f61a65a0e6601a43d17dd5189a02c7dc09a46697d74046e25f1285c3c94a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_multi_model_config.py": "d3f52e7dc996910306069521ea0d11e4b05ff7224050d4f1b88f68f1d62b8869",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_multi_model_selection.py": "b63fe64642c2e7449d047330407b4f196dd39aa7563d699697864b50fbf794da",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_role_adjudication.py": "53ea81964a4507bf35fdffb9552396167133cc2069601b34f939ba4125fa018c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/models/causal_forest_head.py": "0154e16dacefd77ccf775668060de0a62df4246517c4dee0ac55a989d0e39a80",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/models/elastic_net_nuisance.py": "2aa470459a08b4a71d7153e8ad93d80a50c803f491f5ea4b4c705cc5f68887c7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/refresh/outer_001/selection/input.json": "d1f793d519083087db2ffd6ed9ddb6441f6ac1ed6a3a240187331c0cc4bcb079",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs_frozen_2026-09-21.json": "d96ee2823f5575771082d747d956c593923bfa2df4959c1cc9ee1fa15451db0a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/numerical_2026-09-21.py": "97dcdd1a538653bae12701a05d63876b50c14b14d38d4dbc7c430316f2f4de70"
+  },
+  "training_rows": 800,
+  "versions": {
+    "econml": "0.16.0",
+    "numpy": "2.3.5",
+    "pandas": "3.0.5",
+    "scikit-learn": "1.6.1",
+    "scipy": "1.15.3",
+    "statsmodels": "0.14.6"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "evaluable_cells_by_family": {
+    "causal_forest": 115,
+    "orthogonal_linear": 15,
+    "penalized_interactions": 15,
+    "penalized_main": 15,
+    "predictive_forest": 115,
+    "univariable": 15,
+    "univariable_rlearner": 15
+  },
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/statistical_evidence.json": "28e8918ed605bc52cbf76b1659c2fc532de4069b061f04831a282c9c45e33092"
+  },
+  "frozen_at": "2026-09-21T22:36:16.557166+00:00",
+  "input_fingerprint": "b3a10cfd1baa5b7841993a7b51e8ef5c8ebc5ebd69c57374c283b6ab0c59a659",
+  "input_manifest_sha256": "d069d07b217996dc7f0a8e974a77739eaafe424354d320e1b52bcbbdb0d46bf0"
+}
