@@ -1,0 +1,25 @@
+{
+  "id": "04_define_ontology",
+  "title": "04. Define a measurement ontology",
+  "activation": "Core pathway; per discovered feature",
+  "sources": [
+    {
+      "path": "oci/inference/plain_handoff_stage2.py",
+      "line": 5319,
+      "function": "_operationalization_prompt",
+      "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+    }
+  ],
+  "input_status": "Invented illustrative inputs, not observed study data or results.",
+  "note": "",
+  "messages": [
+    {
+      "role": "system",
+      "content": "{\"instruction\": \"Define one clinical feature ontology from its name and supporting clinical text. Return JSON only.\", \"response\": {\"categories_or_unit\": [\"categories or one unit string\"], \"caveats\": \"remaining scientific limitations\", \"conflict_resolution\": {\"positive_category\": \"exact affirmative binary category, otherwise null\", \"strategy\": \"latest|earliest|maximum|minimum|mode|any_positive|single_or_null\"}, \"description\": \"one patient-level scalar measurement\", \"measurement_definition\": \"what to extract from the pretreatment record\", \"missing_value_rule\": \"how missing or ambiguous documentation is represented\", \"stability_summary\": \"scientific support summary without provenance identifiers\", \"value_type\": \"binary|categorical|continuous|ordinal|ambiguous\"}, \"rules\": [\"Define exactly the named scalar pretreatment measurement; do not rename, merge, or split it in this step.\", \"Determine value_type yourself from what the named feature means and how it is represented in the supplied evidence. No value type from an earlier discovery step is being provided.\", \"The evidence may contain unrelated clues; use only text that actually bears on the named feature.\", \"Specify a reproducible extraction target from a complete patient record.\", \"Do not invent an ad hoc score, formula, or index to force multiple distinct measurements into one scalar.\", \"Prefer value_type continuous, with a clinically meaningful unit when applicable, when the named feature can realistically be extracted as a numeric measurement. Use categorical or ordinal only when continuous measurement is infeasible or would misrepresent the feature.\", \"A continuous ontology may preserve a categorical or threshold report when a patient record lacks an exact number. Describe those evidence-supported fallback representations in the measurement rule; aggregate outer-training values will later determine continuous, categorical, or hybrid modeling.\", \"For categorical or ordinal variables, enumerate the extraction ontology; for continuous variables, provide the unit when applicable.\", \"For a binary variable, categories_or_unit must contain exactly two distinct extractable scalar values as separate array items.\", \"For a categorical or ordinal variable, categories_or_unit must contain at least two distinct extractable scalar values as separate array items.\", \"List each category exactly once. Categories that differ only by capitalization, punctuation, underscores, or spacing are duplicates and must not both appear.\", \"Never use a type label such as binary or categorical, or a combined phrase such as present-or-absent, as one ontology value.\", \"Define how absent, ambiguous, and conflicting documentation is represented.\", \"Choose one conflict_resolution strategy for multiple longitudinal observations: latest, earliest, maximum, minimum, mode, any_positive, or single_or_null.\", \"Use maximum or minimum only for continuous measurements. Use any_positive only for a binary ontology and provide its exact affirmative category as positive_category.\", \"Use single_or_null when conflicting supported values cannot be scientifically resolved by a reproducible patient-level rule.\", \"Return one flat JSON object with every response field shown below; measurement_definition and missing_value_rule are required nonempty strings.\"], \"task\": \"Define the extraction ontology for the named candidate clinical feature. Decide its value type, allowed values or unit, and measurement rule from the candidate name and readable supporting clinical evidence.\"}"
+    },
+    {
+      "role": "user",
+      "content": "{\"candidate_feature_name\": \"serum_creatinine\", \"supporting_evidence\": [\"2025-01-01 pretreatment lab: serum creatinine 1.0 mg/dL. 2025-01-10 pretreatment lab: serum creatinine 1.2 mg/dL. CT documents emphysema.\"]}"
+    }
+  ]
+}

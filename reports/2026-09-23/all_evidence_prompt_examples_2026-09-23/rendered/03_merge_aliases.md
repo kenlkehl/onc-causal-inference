@@ -1,0 +1,78 @@
+# 03. Consolidate candidate names before extraction
+
+**Unabridged current template, with invented miniature inputs. No LLM was called.**
+
+Activation: Core pathway; repeated bounded partitions
+
+
+
+Source: [_global_candidate_pool_prompt](/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2.py:5020)
+
+## System message
+
+```text
+Consolidate aliases without filtering any features. Return JSON only.
+```
+
+## User message
+
+```json
+{
+  "features": [
+    {
+      "descriptions": [
+        "Serum creatinine concentration."
+      ],
+      "name": "creatinine_level"
+    },
+    {
+      "descriptions": [
+        "Documented emphysema."
+      ],
+      "name": "emphysema"
+    },
+    {
+      "descriptions": [
+        "Serum creatinine concentration."
+      ],
+      "name": "serum_creatinine"
+    }
+  ],
+  "job": "consolidate_stage2_candidate_pool",
+  "response": {
+    "merge_directives": [
+      {
+        "inputs": [
+          "all exact supplied names in one alias family, including a reused output name"
+        ],
+        "output": "one snake_case canonical feature name"
+      }
+    ]
+  },
+  "rules": [
+    "Every name absent from merge_directives will be retained unchanged; do not restate unchanged features.",
+    "This is merge-only ontology consolidation, not feature filtering or quality review. Never exclude or drop a supplied feature.",
+    "Each merge directive must contain at least two exact names from features.",
+    "Treat merge_directives as a disjoint partition of alias families within this batch, not as sequential rename operations: return exactly one directive for each complete supplied alias family and never chain or split one family across directives.",
+    "Each directive's inputs must list every exact supplied feature name in that alias family within this batch, including the selected canonical name when output reuses a supplied feature name.",
+    "An output that equals a supplied feature name is valid only when that exact name appears in the same directive's inputs; it must not be an input of another directive or an unchanged feature.",
+    "Use each feature name at most once across all merge inputs.",
+    "Merge spelling variants, abbreviations, synonymous clinical names, and all clearly equivalent representations of the same underlying measurement.",
+    "A general measurement name, its quantitative score, a thresholded or coarsened status, a named category, and a name containing one observed value belong together when they can all be represented by one underlying patient variable.",
+    "Prefer an information-preserving underlying measurement name over a threshold, category, or observed value encoded in one candidate name.",
+    "When a value-encoded or awkward alias has a clear underlying measurement in this batch, merge it into that measurement; otherwise retain it unchanged.",
+    "Judge alias families jointly across this entire batch; do not require a direct lexical match between every pair of members in one family.",
+    "Do not merge merely related but independently varying variables, a diagnosis with a related laboratory value, a broad concept with one independently varying component, different anatomical sites, different biomarkers, or different timepoints.",
+    "Merge only true semantic aliases of the same atomic clinical variable. Inputs are aliases only when they identify the same measured dimension and can share one extraction ontology without discarding an independently varying component.",
+    "Every merge output must itself be atomic: one patient-level value under one coherent ontology.",
+    "The canonical output name must identify the exact clinical dimension shared by every merge input. It must not broaden them into a parent domain, umbrella, inventory, profile, or composite construct.",
+    "Never introduce a broader name merely to make related candidates appear mergeable. Clinical relatedness, correlation, shared anatomy, shared domain, or membership in the same assessment does not establish semantic equivalence.",
+    "Do not merge constituent variables that can vary independently. If no precise atomic target is common to every input, retain the inputs unchanged.",
+    "Differences that encode only values, categories, thresholds, units, spelling, abbreviations, or reporting formats may still represent aliases of one underlying variable. Preserve the measured dimension without encoding a particular observed value in the canonical name.",
+    "The output must be one concise snake_case canonical name for the exact consolidated measurement. It may reuse the best input name or provide a clearer equivalent name.",
+    "When semantic equivalence is uncertain, do not merge the features.",
+    "Return only exact supplied feature names in merge inputs. Return no internal IDs, provenance, definitions, explanations, unchanged feature names, or exclusion list."
+  ],
+  "task": "Review this alphabetically adjacent batch of interpreted candidate features. Partition semantic aliases and equivalent representations of each underlying patient-level measurement within the supplied batch. Every supplied feature must survive this pass either unchanged or as an input to exactly one merge. Later rounds will use new deterministic partitions of the consolidated candidates."
+}
+```

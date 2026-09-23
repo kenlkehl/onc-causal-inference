@@ -1,0 +1,7 @@
+{
+  "pid": 1704828,
+  "at": "2026-09-23T11:28:37.522155+00:00",
+  "command": "synthesize.py",
+  "resume": "review_resume.json",
+  "note": "Resume with all outstanding validation issues in one feedback message; original data, criteria, and total review budget preserved."
+}

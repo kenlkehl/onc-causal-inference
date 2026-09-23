@@ -1,0 +1,10 @@
+{
+  "completed_utc": "2026-09-23T13:04:44.730958+00:00",
+  "state": "complete",
+  "actual_model": "gpt-6-sol",
+  "cli_version": "0.156.1",
+  "fallback_used": false,
+  "selected_modifiers": 14,
+  "oracle_modifiers_recovered": 1,
+  "new_estimator_fit": false
+}

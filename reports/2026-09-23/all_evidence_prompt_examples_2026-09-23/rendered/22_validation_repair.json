@@ -1,0 +1,21 @@
+{
+  "id": "22_validation_repair",
+  "title": "22. Repair a response using the exact validation error",
+  "activation": "Shared transport: schema/validation failure",
+  "sources": [
+    {
+      "path": "oci/inference/plain_handoff_stage2.py",
+      "line": 3274,
+      "function": "_repair_message",
+      "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+    }
+  ],
+  "input_status": "Invented illustrative inputs, not observed study data or results.",
+  "note": "Appended to the original task context and available failed-response feedback; this is not a standalone extraction prompt.",
+  "messages": [
+    {
+      "role": "user",
+      "content": "The previous JSON failed validation. Correct this exact error: ValueError: missing required feature serum_creatinine in row 1. Return one corrected JSON object only."
+    }
+  ]
+}

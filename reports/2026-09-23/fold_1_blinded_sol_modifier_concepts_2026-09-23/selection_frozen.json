@@ -1,0 +1,37 @@
+{
+  "frozen_utc": "2026-09-23T13:00:37.281174+00:00",
+  "model": "gpt-6-sol",
+  "reasoning_effort": "high",
+  "candidates": 217,
+  "concepts": 58,
+  "decisions": {
+    "retain": 11,
+    "uncertain": 14,
+    "exclude": 33
+  },
+  "selected_modifiers": 14,
+  "event_item_types": {
+    "error": 2,
+    "agent_message": 1
+  },
+  "tool_events": 0,
+  "oracle_or_previous_review_supplied": false,
+  "files_sha256": {
+    "blinded_input.json": "905881c4f2016b8b80cfb891eac271633eecdfb04202050834bc5cd8a2b8ab92",
+    "review_prompt.txt": "4650c582b581926282f58396247e822d2c398b7e8de8dc10f2564d2a1bd3f8e3",
+    "response_schema.json": "451a5f65721743319fb3ff6deeb93574ff1c6fc4c5b2fe736fc2f19d403f4dee",
+    "input_manifest.json": "4e672b9e9ddc86d88c9c4fd08b8555c8911f6286163f050ff79437ecc5aa9543",
+    "isolation_probe.json": "c44f9752d1caa11cb1ee83544cb6e0a8e7189194693b8b3d3da8f446dfb024ad",
+    "run_review.py": "dc8bbac19caf5124f4e4c25d511b4acd08981447a57654699b7189f0035b3bd7",
+    "freeze_review.py": "a5be901f123cb22c6bdb8ec8860e7eded25aa7f347c7e4953b1623eb88c4190c",
+    "validate_response.py": "bdf4c47330688ddbea3d6a731085c074e7bb1de48c118941b9183886489ac563",
+    "review_launch.json": "7e6b2687f540ac82aaec5e79d026e70388be0d05c65a2495a579b18e601f8bdf",
+    "review_complete.json": "eb887b4b6f27406991ba55b7e0208d2a1bb8e2c20cb933c44396d4a9512ed40f",
+    "review_response.txt": "64687f499effbba40d1ad6d49e4e483f70289d4bee823281a8925d55dc578b8e",
+    "review_events.jsonl": "f66e56bc8148b475449f17b9d4b3c2d1104a0b67dc29a280427ef24beb0b01cf",
+    "review_stderr.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "concept_response.json": "98e1daf57fe7ab31b2626843bbc70a386ade25d3df6504711cce03857bce769f",
+    "selected_modifiers.json": "664b779fdf055df62597a705e64243544df9a72a64ffe5e5bd9ffb7a48ec09d0",
+    "selected_modifiers.csv": "a186edd7f819c0e7a5e5b4d03b3b03bb33758be973120ed4cd14932aadb58303"
+  }
+}

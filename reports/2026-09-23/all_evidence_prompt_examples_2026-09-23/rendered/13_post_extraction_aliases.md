@@ -1,0 +1,498 @@
+# 13. Check extracted measurements for lossless alias consolidation
+
+**Unabridged current template, with invented miniature inputs. No LLM was called.**
+
+Activation: Optional: sequential_consolidation.enabled
+
+Default configuration class has enabled=False; some experiment/config files explicitly enable it. 'Latents' is a schema term here: the prompt forbids inventing broader concepts.
+
+Source: [_decision_messages](/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_sequential_consolidation.py:1226)
+
+## System message
+
+```text
+You are performing alias consolidation of already extracted pretreatment clinical variables before statistical feature selection. Treatment and outcome are intentionally unavailable. Replacement is allowed only for alternate encodings or duplicate fields that mean the same measurement: the same clinical attribute, same entity, same time scope, same granularity, and compatible scale. Do not invent broader latent concepts. A general category and a subtype or site-specific category are not aliases. A condition and its treatment, a test and its result, related domains of an instrument, different biomarkers, different anatomic sites, and component versus total measurements are not aliases. High association is necessary but never sufficient. The canonical output must preserve all nonmissing information from every source, apart from synonymous category labels, and must preserve all-source missingness as null. If there is any doubt, leave the variables unchanged. Never assign causal roles. Return one JSON object and no prose outside it.
+```
+
+## User message
+
+```json
+{
+  "active_candidate_count": 3,
+  "allowed_feature_ids": [
+    "example_creatinine",
+    "example_creatinine_alias"
+  ],
+  "equivalence_policy": {
+    "minimum_pairwise_association": 0.85
+  },
+  "features": [
+    {
+      "categories_or_unit": [
+        "mg/dL"
+      ],
+      "derived_structured_latent": false,
+      "description": "Serum creatinine concentration.",
+      "direct_source_feature_ids": [],
+      "display_name": "serum_creatinine",
+      "embedding_cosine_similarity_to_pivot": 1.0,
+      "feature_id": "example_creatinine",
+      "measurement_definition": "Latest documented pretreatment serum creatinine, in mg/dL; preserve a reported threshold if no exact number exists.",
+      "missing_value_rule": "Null if unreported or unresolved.",
+      "name": "serum_creatinine",
+      "observed_outer_training_summary": {
+        "distinct_observed_values": 4,
+        "most_common_values": [
+          {
+            "count": 1,
+            "value": "0.8"
+          },
+          {
+            "count": 1,
+            "value": "1.0"
+          },
+          {
+            "count": 1,
+            "value": "1.2"
+          },
+          {
+            "count": 1,
+            "value": "1.4"
+          }
+        ],
+        "nonmissing": 4,
+        "nonmissing_fraction": 1.0,
+        "numeric_range": {
+          "maximum": 1.4,
+          "median": 1.1,
+          "minimum": 0.8
+        },
+        "rows": 4
+      },
+      "protected_explicit_feature": false,
+      "value_type": "continuous"
+    },
+    {
+      "categories_or_unit": [
+        "mg/dL"
+      ],
+      "derived_structured_latent": false,
+      "description": "Serum creatinine concentration.",
+      "direct_source_feature_ids": [],
+      "display_name": "creatinine_level",
+      "embedding_cosine_similarity_to_pivot": 0.98,
+      "feature_id": "example_creatinine_alias",
+      "measurement_definition": "Latest documented pretreatment serum creatinine, in mg/dL; preserve a reported threshold if no exact number exists.",
+      "missing_value_rule": "Null if unreported or unresolved.",
+      "name": "creatinine_level",
+      "observed_outer_training_summary": {
+        "distinct_observed_values": 4,
+        "most_common_values": [
+          {
+            "count": 1,
+            "value": "0.8"
+          },
+          {
+            "count": 1,
+            "value": "1.0"
+          },
+          {
+            "count": 1,
+            "value": "1.2"
+          },
+          {
+            "count": 1,
+            "value": "1.4"
+          }
+        ],
+        "nonmissing": 4,
+        "nonmissing_fraction": 1.0,
+        "numeric_range": {
+          "maximum": 1.4,
+          "median": 1.1,
+          "minimum": 0.8
+        },
+        "rows": 4
+      },
+      "protected_explicit_feature": false,
+      "value_type": "continuous"
+    }
+  ],
+  "instructions": {
+    "association_requirement": "Every source pair must have evaluable outer-training association at least 0.850. Association never overrides a semantic or granularity mismatch. If any pair is unevaluable or below threshold, leave the cluster unchanged.",
+    "decision": "Choose action='leave_unchanged' with latents=[] or action='replace_with_latents' with one or more disjoint latent proposals.",
+    "equivalence_only": "Every pair of sources in a proposal must be genuinely interchangeable measurements, not merely correlated, predictive of one another, members of a shared hierarchy, or evidence for a broader concept. Do not merge a broad feature with a narrower subtype, component, location, severity band, drug, procedure, assay, or manifestation. Do not create any-use, any-disease, any-site, burden, maximum, mean, count, score, or other rollup variables.",
+    "information_preservation": "Use kind='categorical_rule'. All sources and the output must have the same value_type and information granularity. Continuous sources must use the same unit and may only be coalesced; nonnumeric values that violate a continuous source ontology are treated as missing and the next valid alias is used. Where two sources are nonmissing on the same training row, their numeric values (or their canonical categorical values after recoding) must agree; a first-source-wins rule is never allowed to hide a conflict. Categorical, binary, or ordinal aliases may be coalesced only when their category vocabularies are identical. Synonymous categorical vocabularies may use a case rule with a canonical union: map every declared category from each source exactly once, never collapse two categories from the same source, and include no output category that is unreachable from all sources. Binary and ordinal scales must still map one-to-one onto the complete output scale. A case rule may use only eq/in and must use else=null. Never turn missingness into 'No', 'Absent', zero, or a reference category. Do not reject otherwise equivalent nominal aliases merely because one declared vocabulary is a lossless subset of another or uses synonymous spelling variants.",
+    "ontology": "Declared categories must cover every possible nonmissing rule output. The output must be a canonical name for the exact shared measurement, not a more general parent concept.",
+    "pivot_requirement": "If replacing, exactly one of the disjoint proposals must include the pivot.",
+    "protected_features": "Never include a protected explicit feature as a source.",
+    "required_latent_fields": [
+      "kind",
+      "source_feature_ids",
+      "label",
+      "description",
+      "rationale",
+      "measurement_definition",
+      "missing_value_rule",
+      "output_type (categorical_rule only)",
+      "categories_or_unit (categorical_rule only)",
+      "expression (categorical_rule only)"
+    ],
+    "schema_escape_hatch": "If uncertain, or if you cannot satisfy the schema exactly, return action='leave_unchanged' with a nonempty rationale and latents=[]."
+  },
+  "job": "sequential_stage2_candidate_consolidation",
+  "neighbor_count": 1,
+  "pairwise_associations": [
+    {
+      "association": 1.0,
+      "association_kind": "illustrative_numeric_association",
+      "details": {},
+      "evaluable": true,
+      "left_feature_id": "example_creatinine",
+      "missingness_absolute_phi": null,
+      "missingness_jaccard": null,
+      "n_pairwise_complete": 4,
+      "right_feature_id": "example_creatinine_alias",
+      "signed_association": 1.0
+    }
+  ],
+  "pivot_feature_id": "example_creatinine",
+  "response_json_schema": {
+    "$defs": {
+      "condition": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "enum": [
+              "example_creatinine",
+              "example_creatinine_alias"
+            ],
+            "type": "string"
+          },
+          "operator": {
+            "enum": [
+              "eq",
+              "in"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "string",
+              "number",
+              "boolean",
+              "null"
+            ]
+          },
+          "values": {
+            "items": {
+              "type": [
+                "string",
+                "number",
+                "boolean",
+                "null"
+              ]
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature_id",
+          "operator"
+        ],
+        "type": "object"
+      },
+      "expression": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "feature_ids": {
+                "items": {
+                  "enum": [
+                    "example_creatinine",
+                    "example_creatinine_alias"
+                  ],
+                  "type": "string"
+                },
+                "minItems": 2,
+                "type": "array",
+                "uniqueItems": true
+              },
+              "op": {
+                "const": "coalesce"
+              }
+            },
+            "required": [
+              "op",
+              "feature_ids"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "cases": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "then": {
+                      "type": [
+                        "string",
+                        "number",
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "when": {
+                      "$ref": "#/$defs/condition"
+                    }
+                  },
+                  "required": [
+                    "when",
+                    "then"
+                  ],
+                  "type": "object"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "else": {
+                "type": "null"
+              },
+              "op": {
+                "const": "case"
+              }
+            },
+            "required": [
+              "op",
+              "cases",
+              "else"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "latent": {
+        "additionalProperties": false,
+        "properties": {
+          "categories_or_unit": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "description": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "expression": {
+            "$ref": "#/$defs/expression"
+          },
+          "kind": {
+            "const": "categorical_rule"
+          },
+          "label": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "measurement_definition": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "missing_value_rule": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "output_type": {
+            "enum": [
+              "binary",
+              "categorical",
+              "ordinal",
+              "continuous"
+            ],
+            "type": "string"
+          },
+          "rationale": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_feature_ids": {
+            "items": {
+              "enum": [
+                "example_creatinine",
+                "example_creatinine_alias"
+              ],
+              "type": "string"
+            },
+            "minItems": 2,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "kind",
+          "source_feature_ids",
+          "label",
+          "description",
+          "rationale",
+          "measurement_definition",
+          "missing_value_rule",
+          "output_type",
+          "categories_or_unit",
+          "expression"
+        ],
+        "type": "object"
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "oneOf": [
+      {
+        "properties": {
+          "action": {
+            "const": "leave_unchanged"
+          },
+          "latents": {
+            "maxItems": 0
+          }
+        }
+      },
+      {
+        "properties": {
+          "action": {
+            "const": "replace_with_latents"
+          },
+          "latents": {
+            "maxItems": 2,
+            "minItems": 1
+          }
+        }
+      }
+    ],
+    "properties": {
+      "action": {
+        "enum": [
+          "leave_unchanged",
+          "replace_with_latents"
+        ],
+        "type": "string"
+      },
+      "latents": {
+        "items": {
+          "$ref": "#/$defs/latent"
+        },
+        "maxItems": 2,
+        "type": "array"
+      },
+      "rationale": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "action",
+      "rationale",
+      "latents"
+    ],
+    "type": "object"
+  },
+  "schema_version": "illustrative_step",
+  "step": 1,
+  "valid_structural_examples": {
+    "categorical_rule": {
+      "action": "replace_with_latents",
+      "latents": [
+        {
+          "categories_or_unit": [
+            "mg/dL"
+          ],
+          "description": "Canonical representation of two equivalent source fields.",
+          "expression": {
+            "feature_ids": [
+              "example_creatinine",
+              "example_creatinine_alias"
+            ],
+            "op": "coalesce"
+          },
+          "kind": "categorical_rule",
+          "label": "Example canonical alias",
+          "measurement_definition": "Use the first documented value among the equivalent source fields.",
+          "missing_value_rule": "Return null when every equivalent source field is missing.",
+          "output_type": "continuous",
+          "rationale": "The sources are the same measurement with identical granularity, compatible encoding, and pairwise association above the required threshold.",
+          "source_feature_ids": [
+            "example_creatinine",
+            "example_creatinine_alias"
+          ]
+        }
+      ],
+      "rationale": "Structural example only; use replacement only for empirically concordant aliases with exactly the same meaning and granularity."
+    },
+    "leave_unchanged": {
+      "action": "leave_unchanged",
+      "latents": [],
+      "rationale": "No defensible schema-valid consolidation is supported; retain the original variables."
+    },
+    "rule_expressions": {
+      "coalesce_identically_encoded_aliases": {
+        "feature_ids": [
+          "example_creatinine",
+          "example_creatinine_alias"
+        ],
+        "op": "coalesce"
+      },
+      "lossless_synonymous_category_union_recode": {
+        "cases": [
+          {
+            "then": "Canonical label A",
+            "when": {
+              "feature_id": "example_creatinine",
+              "operator": "eq",
+              "value": "Source label A"
+            }
+          },
+          {
+            "then": "Canonical label B",
+            "when": {
+              "feature_id": "example_creatinine",
+              "operator": "eq",
+              "value": "Source label B"
+            }
+          },
+          {
+            "then": "Canonical label C",
+            "when": {
+              "feature_id": "example_creatinine",
+              "operator": "eq",
+              "value": "Source-only label C"
+            }
+          },
+          {
+            "then": "Canonical label A",
+            "when": {
+              "feature_id": "example_creatinine_alias",
+              "operator": "eq",
+              "value": "Synonymous label A"
+            }
+          },
+          {
+            "then": "Canonical label B",
+            "when": {
+              "feature_id": "example_creatinine_alias",
+              "operator": "eq",
+              "value": "Synonymous label B"
+            }
+          }
+        ],
+        "else": null,
+        "op": "case"
+      }
+    }
+  }
+}
+```

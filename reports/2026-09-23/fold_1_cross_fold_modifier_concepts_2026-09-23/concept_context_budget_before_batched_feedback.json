@@ -1,0 +1,9 @@
+{
+  "at": "2026-09-23T11:07:06.839443+00:00",
+  "context_margin_tokens": 4096,
+  "initial_output_ceiling": 97010,
+  "logical_request_timeout_seconds": 7200.0,
+  "model_context_tokens": 262144,
+  "prompt_tokens": 161038,
+  "request_attempt_timeout_seconds": 3600.0
+}

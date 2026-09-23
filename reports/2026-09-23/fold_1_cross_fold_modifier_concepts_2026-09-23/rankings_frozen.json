@@ -1,0 +1,20 @@
+{
+  "all_native_replays_verified": true,
+  "all_original_prefixes_preserved": true,
+  "at": "2026-09-23T11:06:38.573840+00:00",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_modifier_ranking.py": "3a79c9200fcff152e4cbcf930658b1adfa3c887460b8d068a76db2deb9dc6793",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/definitions.json": "2544b5eafd086725e4f6fdf213d18a65a794a8be407924d6eef27f51eb7a4101",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/count_result.json": "fc623933aa171eed6b7e748fa1d8cc7e152cb42b79f7a805b2d8bba5bee21b55",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/PROTOCOL_2026-09-23.md": "5fdb6d27842d29d0ccf8eb597527c54b12811e48d0db9d416d6238fcef1ba3e9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/common.py": "c50ac4ad83ce801e84bda784a3889945606fddd25c10642f0aa6e565595d6493",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/extend_rankings.py": "bc2edbe6909bdf501ccc45cdc5472044145771566fcec54f5f95544805c8ea8c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/fold_rankings/fold_001.json": "5cc7f6f5b1ce754881964bfe5ca8c3c09acb24593bc25b7421034df321550bb9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/fold_rankings/fold_002.json": "5588495ba04210d578972a9313734862a884ea40bbb0794d9153b37c3baa2daf",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/fold_rankings/fold_003.json": "976f7e69d25c9f983e83253da4564deff01dda0b8c7c8ef14e3c4a39a49adceb",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/fold_rankings/fold_004.json": "0152e5de9a4dcb27f76c95fb0109b9158053eee484e51b510bba11058e4c0af0",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/fold_rankings/fold_005.json": "c83266531dce3713da7f102c199ceb742300ebec883c613fad77c00f73163c42"
+  },
+  "folds": 5,
+  "n_per_fold": 100
+}

@@ -1,0 +1,9 @@
+{
+  "verified_utc": "2026-09-23T12:58:33.784696+00:00",
+  "input_candidate_count": 217,
+  "same_system_and_payload_as_gemma": true,
+  "oracle_or_prior_model_output_in_review_packet": false,
+  "cli_version": "0.156.1",
+  "old_client_fresh_catalog_probe_failed": true,
+  "new_client_probe_succeeded": true
+}

@@ -1,0 +1,25 @@
+{
+  "id": "07_page_observations",
+  "title": "07. Extract source-grounded page observations",
+  "activation": "Alternate oversized-record/page path in shared extraction code",
+  "sources": [
+    {
+      "path": "oci/inference/plain_handoff_stage2_analysis.py",
+      "line": 1847,
+      "function": "_page_extraction_prompt",
+      "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+    }
+  ],
+  "input_status": "Invented illustrative inputs, not observed study data or results.",
+  "note": "Later cross-page reconciliation applies the declared conflict rule in code; it is not a separate LLM prompt.",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You extract all supported clinical variable observations with exact source provenance. Return JSON only."
+    },
+    {
+      "role": "user",
+      "content": "{\"features\": [{\"accepted_representations\": \"one JSON number, or one documented categorical/threshold string when the numeric measurement is unavailable\", \"categories_or_unit\": [\"mg/dL\"], \"conflict_resolution\": {\"dated_observations_precede_undated\": true, \"positive_category\": null, \"source_order_tie_breaker\": \"last\", \"strategy\": \"latest\", \"strategy_source\": \"explicit_ontology\"}, \"description\": \"Serum creatinine concentration.\", \"measurement_definition\": \"Latest documented pretreatment serum creatinine, in mg/dL; preserve a reported threshold if no exact number exists.\", \"missing_value_rule\": \"Null if unreported or unresolved.\", \"name\": \"serum_creatinine\", \"value_type\": \"continuous\"}, {\"categories_or_unit\": [\"Present\", \"Absent\"], \"conflict_resolution\": {\"dated_observations_precede_undated\": true, \"positive_category\": null, \"source_order_tie_breaker\": \"last\", \"strategy\": \"latest\", \"strategy_source\": \"explicit_ontology\"}, \"description\": \"Documented emphysema.\", \"measurement_definition\": \"Explicit pretreatment documentation of emphysema presence or absence.\", \"missing_value_rule\": \"Null if unreported; silence is not absence.\", \"name\": \"emphysema\", \"value_type\": \"binary\"}], \"job\": \"extract_stage2_patient_variable_observations\", \"patient\": {\"row_id\": 1, \"text\": \"2025-01-01 pretreatment lab: serum creatinine 1.0 mg/dL. 2025-01-10 pretreatment lab: serum creatinine 1.2 mg/dL. CT documents emphysema.\"}, \"response\": {\"rows\": [{\"observations\": [{\"evidence\": \"exact quote from patient.text\", \"evidence_end\": \"zero-based exclusive integer\", \"evidence_start\": \"zero-based inclusive integer\", \"feature_name\": \"one supplied feature name\", \"recorded_at\": \"ISO-8601 date/time, year-month, year, or null\", \"recorded_at_end\": \"exclusive integer or null\", \"recorded_at_evidence\": \"exact source date/time quote or null\", \"recorded_at_start\": \"inclusive integer or null\", \"value\": \"one supported scalar value\"}], \"row_id\": \"the supplied integer row_id\"}]}, \"rules\": [\"Use only the supplied clinical-text page for this patient.\", \"Return every distinct explicitly supported observation for every supplied feature; do not collapse conflicting or repeated longitudinal values.\", \"conflict_resolution is applied later by deterministic code. Do not apply it within this page and do not discard an otherwise supported observation because another value is newer, earlier, larger, smaller, or more frequent.\", \"Do not return an observation when the page does not support a nonmissing value.\", \"Each value must be one scalar. For closed ontologies, use one declared category exactly.\", \"For each observation, quote a short exact contiguous evidence substring from patient.text.\", \"evidence_start and evidence_end are zero-based Python-style character offsets into patient.text, with evidence_end exclusive.\", \"Set recorded_at only when a date or time explicitly governs that observation, such as an encounter, specimen, measurement, or result date.\", \"When recorded_at is set, normalize it to ISO-8601 and provide the exact source date text plus its offsets. Do not borrow an unrelated date.\", \"Use null for recorded_at and recorded_at_evidence when no governing date is explicit on this page.\", \"Return an empty observations array when no supplied feature has supported evidence on this page.\"]}"
+    }
+  ]
+}

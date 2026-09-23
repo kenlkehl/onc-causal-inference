@@ -1,0 +1,1010 @@
+{
+  "concepts": [
+    {
+      "concept_id": "systemic_inflammation_nlr",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_228:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_228:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Derived ratio sensitive to neutrophil/lymphocyte fluctuations.",
+      "member_feature_ids": [
+        "outer_001_feature_228"
+      ],
+      "modifier_rationale": "Highest consistency in ranks and strongest support across all models.",
+      "name": "Systemic Inflammation (NLR)",
+      "relationship_summary": "Single measurement of inflammatory ratio.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_228",
+          "reason": "Most empirically supported modifier in the dataset."
+        }
+      ]
+    },
+    {
+      "concept_id": "renal_function_status",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_096:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Different proxies (Creatinine, CrCl, eGFR) may capture slightly different functional aspects.",
+      "member_feature_ids": [
+        "outer_001_feature_033",
+        "outer_001_feature_095",
+        "outer_001_feature_096",
+        "outer_001_feature_125",
+        "outer_001_feature_286",
+        "outer_001_feature_299"
+      ],
+      "modifier_rationale": "Strong recurrence of renal function proxies in top-100 lists across all folds.",
+      "name": "Renal Function Status",
+      "relationship_summary": "Creatinine is the primary proxy; GFR/CrCl are complementary.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_096",
+          "reason": "Most consistent proxy across provided evidence."
+        }
+      ]
+    },
+    {
+      "concept_id": "kras_g12c_variant_burden",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_179:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "VAF is only applicable to mutation-positive patients.",
+      "member_feature_ids": [
+        "outer_001_feature_179"
+      ],
+      "modifier_rationale": "Consistent recurrence (ranks 9-55) and positive causal forest scores.",
+      "name": "KRAS G12C Variant Burden",
+      "relationship_summary": "Specific quantitative measure of G12C variant burden.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_179",
+          "reason": "Direct measurement of KRAS G12C VAF."
+        }
+      ]
+    },
+    {
+      "concept_id": "lung_adenocarcinoma_marker",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_330:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Binary IHC expression depends on staining thresholds.",
+      "member_feature_ids": [
+        "outer_001_feature_330"
+      ],
+      "modifier_rationale": "Extremely strong recurrence (ranks 2-48) and high univariable scores.",
+      "name": "Lung Adenocarcinoma Marker",
+      "relationship_summary": "Direct IHC proxy for TTF-1 expression.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_330",
+          "reason": "Strongest available marker for this histological concept."
+        }
+      ]
+    },
+    {
+      "concept_id": "prior_platinum_exposure",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_267:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Evidence is split between specific (cisplatin) and general (platinum) indicators.",
+      "member_feature_ids": [
+        "outer_001_feature_204",
+        "outer_001_feature_267"
+      ],
+      "modifier_rationale": "High recurrence and strong univariable support across all folds.",
+      "name": "Prior Platinum Exposure",
+      "relationship_summary": "Cisplatin is a specific proxy for general platinum exposure.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_267",
+          "reason": "More inclusive and empirically supported measure of platinum exposure."
+        }
+      ]
+    },
+    {
+      "concept_id": "distant_visceral_metastasis",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_188:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Evidence is heavily weighted toward liver metastases.",
+      "member_feature_ids": [
+        "outer_001_feature_007",
+        "outer_001_feature_008",
+        "outer_001_feature_188",
+        "outer_001_feature_216"
+      ],
+      "modifier_rationale": "Strong recurrence for liver metastasis, especially in fold 4 (rank 5).",
+      "name": "Distant Visceral Metastasis",
+      "relationship_summary": "Liver metastasis is the primary proxy for visceral burden.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_188",
+          "reason": "Highest recurrence and strongest support among visceral candidates."
+        }
+      ]
+    },
+    {
+      "concept_id": "intracranial_hemorrhage_burden",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_122:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_340:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Anatomical location of bleed may influence clinical effect.",
+      "member_feature_ids": [
+        "outer_001_feature_122",
+        "outer_001_feature_173",
+        "outer_001_feature_309",
+        "outer_001_feature_340"
+      ],
+      "modifier_rationale": "Strong recurrence of hemorrhage markers in top-100 lists across all folds.",
+      "name": "Intracranial Hemorrhage Burden",
+      "relationship_summary": "Different bleed locations act as proxies for overall hemorrhage burden.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_122",
+          "reason": "Strongest univariable and recurrent support among hemorrhage features."
+        }
+      ]
+    },
+    {
+      "concept_id": "dyspnea_severity",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_108:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "PRO-CTCAE scores may have recall bias.",
+      "member_feature_ids": [
+        "outer_001_feature_106",
+        "outer_001_feature_108"
+      ],
+      "modifier_rationale": "Exceptional recurrence (ranks 1-50) and consistent R-learner gains.",
+      "name": "Dyspnea Severity",
+      "relationship_summary": "Numeric grades provide a more precise proxy than binary presence.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_108",
+          "reason": "Captures severity grade, showing stronger empirical support."
+        }
+      ]
+    },
+    {
+      "concept_id": "cellular_proliferation_index",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_176:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Ki-67 can have high inter-observer variability.",
+      "member_feature_ids": [
+        "outer_001_feature_176"
+      ],
+      "modifier_rationale": "Consistent recurrence (ranks 4-89) and strong univariable support.",
+      "name": "Cellular Proliferation Index",
+      "relationship_summary": "Standard proliferative index measure.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_176",
+          "reason": "Direct measurement of proliferation."
+        }
+      ]
+    },
+    {
+      "concept_id": "white_blood_cell_count",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_349:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "WBC count is non-specific and affected by corticosteroids.",
+      "member_feature_ids": [
+        "outer_001_feature_349"
+      ],
+      "modifier_rationale": "Strong recurrence (ranks 4-66) and positive causal forest scores across all folds.",
+      "name": "White Blood Cell Count",
+      "relationship_summary": "Direct measurement of total leucocyte count.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_349",
+          "reason": "Highly recurrent proxy for baseline immune status."
+        }
+      ]
+    },
+    {
+      "concept_id": "met_gene_amplification",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_214:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Potential for intra-tumor heterogeneity of amplification.",
+      "member_feature_ids": [
+        "outer_001_feature_214"
+      ],
+      "modifier_rationale": "Consistent recurrence (ranks 10-56) and penalized interaction support.",
+      "name": "MET Gene Amplification",
+      "relationship_summary": "Direct measure of MET amplification.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_214",
+          "reason": "Direct genomic measure of the concept."
+        }
+      ]
+    },
+    {
+      "concept_id": "cognitive_confusion_status",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_085:univariable",
+          "inner_folds": [
+            1,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Confusion is a subjective clinical finding.",
+      "member_feature_ids": [
+        "outer_001_feature_085"
+      ],
+      "modifier_rationale": "High recurrence (ranks 17-29) and strong univariable support.",
+      "name": "Cognitive Confusion Status",
+      "relationship_summary": "Direct proxy for acute cognitive impairment.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_085",
+          "reason": "Strongest empirical support for neurocognitive state."
+        }
+      ]
+    },
+    {
+      "concept_id": "chronic_lung_disease",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_194:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3
+          ]
+        }
+      ],
+      "limitations": "Broad category encompassing multiple distinct pulmonary pathologies.",
+      "member_feature_ids": [
+        "outer_001_feature_010",
+        "outer_001_feature_087",
+        "outer_001_feature_088",
+        "outer_001_feature_113",
+        "outer_001_feature_194"
+      ],
+      "modifier_rationale": "Strong recurrence for lung disease and emphysema with high univariable support.",
+      "name": "Chronic Lung Disease",
+      "relationship_summary": "General diagnosis is the umbrella; COPD/emphysema are facets.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_194",
+          "reason": "Broadest and most recurrent proxy for pulmonary dysfunction."
+        }
+      ]
+    },
+    {
+      "concept_id": "pulmonary_nodularity",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_276:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            5
+          ]
+        }
+      ],
+      "limitations": "Binary indicator does not distinguish benign from malignant nodules.",
+      "member_feature_ids": [
+        "outer_001_feature_275",
+        "outer_001_feature_276"
+      ],
+      "modifier_rationale": "Strong recurrence (ranks 6-73) in multiple folds.",
+      "name": "Pulmonary Nodularity",
+      "relationship_summary": "Nodules are a more specific proxy than general pulmonary lesions.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_276",
+          "reason": "More recurrent and supported than general lesion indicators."
+        }
+      ]
+    },
+    {
+      "concept_id": "radiation_therapy_burden",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_281:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      ],
+      "limitations": "Session count omits total dose and targeted anatomy.",
+      "member_feature_ids": [
+        "outer_001_feature_263",
+        "outer_001_feature_280",
+        "outer_001_feature_281",
+        "outer_001_feature_351"
+      ],
+      "modifier_rationale": "Consistent recurrence of radiation history and session counts.",
+      "name": "Radiation Therapy Burden",
+      "relationship_summary": "Session count is a quantitative proxy for radiation burden.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_281",
+          "reason": "Quantitative measure with stronger univariable support than binary flags."
+        }
+      ]
+    },
+    {
+      "concept_id": "lymph_node_dissection_status",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_197:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "LND status is dependent on surgical approach and intent.",
+      "member_feature_ids": [
+        "outer_001_feature_197",
+        "outer_001_feature_201"
+      ],
+      "modifier_rationale": "Consistent recurrence (ranks 33-94) across all folds.",
+      "name": "Lymph Node Dissection Status",
+      "relationship_summary": "General LND status is the primary proxy; mediastinal LND is a facet.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_197",
+          "reason": "Most inclusive and consistently recurrent measure of LND."
+        }
+      ]
+    },
+    {
+      "concept_id": "anemia_burden",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_153:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Hematocrit/Hemoglobin can be affected by acute fluid shifts.",
+      "member_feature_ids": [
+        "outer_001_feature_153",
+        "outer_001_feature_155"
+      ],
+      "modifier_rationale": "Strong recurrence of hematocrit (ranks 2-48) and consistent causal forest support.",
+      "name": "Anemia Burden",
+      "relationship_summary": "Hematocrit and hemoglobin are nearly identical proxies.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_153",
+          "reason": "Stronger recurrence in top-100 lists than hemoglobin."
+        }
+      ]
+    },
+    {
+      "concept_id": "targeted_therapy_exposure",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_315:univariable",
+          "inner_folds": [
+            1,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Heterogeneous group of agents with different mechanisms.",
+      "member_feature_ids": [
+        "outer_001_feature_315",
+        "outer_001_feature_320"
+      ],
+      "modifier_rationale": "Strong recurrence (ranks 34-83) and univariable support.",
+      "name": "Targeted Therapy Exposure",
+      "relationship_summary": "TKI use is a specific subset of targeted therapy.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_315",
+          "reason": "More inclusive representative of targeted therapy exposure."
+        }
+      ]
+    },
+    {
+      "concept_id": "baseline_glucose_level",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_146:univariable",
+          "inner_folds": [
+            1,
+            4
+          ]
+        }
+      ],
+      "limitations": "Single measurements may not reflect chronic glycemic control.",
+      "member_feature_ids": [
+        "outer_001_feature_146"
+      ],
+      "modifier_rationale": "Significant recurrence (ranks 3-21) and strong univariable support.",
+      "name": "Baseline Glucose Level",
+      "relationship_summary": "Single measurement of serum glucose.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_146",
+          "reason": "Direct measurement of glucose levels."
+        }
+      ]
+    },
+    {
+      "concept_id": "pneumonia_burden",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_260:univariable",
+          "inner_folds": [
+            1,
+            2
+          ]
+        }
+      ],
+      "limitations": "Pneumonia can be a baseline comorbidity or a treatment complication.",
+      "member_feature_ids": [
+        "outer_001_feature_260"
+      ],
+      "modifier_rationale": "Strong recurrence in fold 1 (rank 18) with high univariable scores.",
+      "name": "Pneumonia Burden",
+      "relationship_summary": "Binary indicator of pneumonia diagnosis.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_260",
+          "reason": "Direct measure of pneumonia presence."
+        }
+      ]
+    },
+    {
+      "concept_id": "skeletal_compression_burden",
+      "decision": "retain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_303:univariable",
+          "inner_folds": [
+            1,
+            3,
+            4
+          ]
+        }
+      ],
+      "limitations": "Asymptomatic fractures may be missed on standard imaging.",
+      "member_feature_ids": [
+        "outer_001_feature_044",
+        "outer_001_feature_045",
+        "outer_001_feature_303"
+      ],
+      "modifier_rationale": "Strong recurrence of compression fractures (ranks 17-51) and high univariable support.",
+      "name": "Skeletal Compression Burden",
+      "relationship_summary": "Compression fractures are a specific radiographic proxy for skeletal burden.",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_303",
+          "reason": "Strongest empirical evidence among skeletal candidates."
+        }
+      ]
+    },
+    {
+      "concept_id": "overall_performance_status",
+      "decision": "uncertain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_109:univariable",
+          "inner_folds": [
+            3
+          ]
+        }
+      ],
+      "limitations": "ECOG scores can be inconsistently documented.",
+      "member_feature_ids": [
+        "outer_001_feature_078",
+        "outer_001_feature_079",
+        "outer_001_feature_099",
+        "outer_001_feature_109"
+      ],
+      "modifier_rationale": "Moderate recurrence; evidence fragmented across different assessments.",
+      "name": "Overall Performance Status",
+      "relationship_summary": "ECOG is the primary proxy; deconditioning and clinical decline are related.",
+      "representatives": []
+    },
+    {
+      "concept_id": "growth_factor_support",
+      "decision": "uncertain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_147:univariable",
+          "inner_folds": [
+            1
+          ]
+        }
+      ],
+      "limitations": "Use of growth factors is often a response to neutropenia toxicity.",
+      "member_feature_ids": [
+        "outer_001_feature_147"
+      ],
+      "modifier_rationale": "Recurrence exists, but support is inconsistent across folds.",
+      "name": "Growth Factor Support",
+      "relationship_summary": "Direct measure of G-CSF/filgrastim use.",
+      "representatives": []
+    },
+    {
+      "concept_id": "tumor_mutational_burden",
+      "decision": "uncertain",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_334:univariable",
+          "inner_folds": [
+            2,
+            3
+          ]
+        }
+      ],
+      "limitations": "Categorical reporting may lose granularity.",
+      "member_feature_ids": [
+        "outer_001_feature_334"
+      ],
+      "modifier_rationale": "Recurrent but primarily univariable and inconsistent.",
+      "name": "Tumor Mutational Burden",
+      "relationship_summary": "Categorical proxy for genomic instability.",
+      "representatives": []
+    },
+    {
+      "concept_id": "genomic_molecular_profile",
+      "decision": "exclude",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_004:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Low recurrence for individual markers outside of KRAS/MET.",
+      "member_feature_ids": [
+        "outer_001_feature_004",
+        "outer_001_feature_013",
+        "outer_001_feature_064",
+        "outer_001_feature_111",
+        "outer_001_feature_141",
+        "outer_001_feature_142",
+        "outer_001_feature_143",
+        "outer_001_feature_219",
+        "outer_001_feature_254",
+        "outer_001_feature_289",
+        "outer_001_feature_324",
+        "outer_001_feature_337"
+      ],
+      "modifier_rationale": "These markers failed to show consistent recurrence across folds.",
+      "name": "Genomic and Molecular Profile",
+      "relationship_summary": "Collection of various genomic and molecular markers.",
+      "representatives": []
+    },
+    {
+      "concept_id": "histologic_pathology_features",
+      "decision": "exclude",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_076:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Low recurrence for histological markers outside of TTF-1.",
+      "member_feature_ids": [
+        "outer_001_feature_076",
+        "outer_001_feature_077",
+        "outer_001_feature_192",
+        "outer_001_feature_224",
+        "outer_001_feature_243",
+        "outer_001_feature_319",
+        "outer_001_feature_332"
+      ],
+      "modifier_rationale": "Lack of consistent empirical support across folds.",
+      "name": "Histologic and Pathology Features",
+      "relationship_summary": "Collection of IHC and histological grading features.",
+      "representatives": []
+    },
+    {
+      "concept_id": "neuroimaging_characteristics",
+      "decision": "exclude",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_048:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Fragmented evidence for brain lesions without hemorrhage.",
+      "member_feature_ids": [
+        "outer_001_feature_048",
+        "outer_001_feature_049",
+        "outer_001_feature_050",
+        "outer_001_feature_052",
+        "outer_001_feature_053",
+        "outer_001_feature_054",
+        "outer_001_feature_055",
+        "outer_001_feature_104",
+        "outer_001_feature_137",
+        "outer_001_feature_213",
+        "outer_001_feature_235",
+        "outer_001_feature_251",
+        "outer_001_feature_252",
+        "outer_001_feature_338",
+        "outer_001_feature_341"
+      ],
+      "modifier_rationale": "Lack of consistency across folds for non-hemorrhagic brain features.",
+      "name": "Neuroimaging Characteristics",
+      "relationship_summary": "Various brain structure and lesion characteristics.",
+      "representatives": []
+    },
+    {
+      "concept_id": "treatment_history_miscellaneous",
+      "decision": "exclude",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_006:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Weak statistical support for these specific treatment proxies.",
+      "member_feature_ids": [
+        "outer_001_feature_006",
+        "outer_001_feature_061",
+        "outer_001_feature_072",
+        "outer_001_feature_073",
+        "outer_001_feature_184",
+        "outer_001_feature_190",
+        "outer_001_feature_203",
+        "outer_001_feature_205",
+        "outer_001_feature_212",
+        "outer_001_feature_249",
+        "outer_001_feature_311",
+        "outer_001_feature_312",
+        "outer_001_feature_343"
+      ],
+      "modifier_rationale": "Lack of cross-fold recurrence.",
+      "name": "Treatment History Miscellaneous",
+      "relationship_summary": "Various chemotherapy and surgical treatment details.",
+      "representatives": []
+    },
+    {
+      "concept_id": "patient_baseline_and_comorbidities",
+      "decision": "exclude",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_001:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Extremely high dimensionality with very low consistency across folds.",
+      "member_feature_ids": [
+        "outer_001_feature_001",
+        "outer_001_feature_009",
+        "outer_001_feature_012",
+        "outer_001_feature_019",
+        "outer_001_feature_021",
+        "outer_001_feature_022",
+        "outer_001_feature_023",
+        "outer_001_feature_024",
+        "outer_001_feature_030",
+        "outer_001_feature_034",
+        "outer_001_feature_042",
+        "outer_001_feature_043",
+        "outer_001_feature_056",
+        "outer_001_feature_057",
+        "outer_001_feature_060",
+        "outer_001_feature_065",
+        "outer_001_feature_075",
+        "outer_001_feature_080",
+        "outer_001_feature_082",
+        "outer_001_feature_083",
+        "outer_001_feature_086",
+        "outer_001_feature_089",
+        "outer_001_feature_090",
+        "outer_001_feature_091",
+        "outer_001_feature_092",
+        "outer_001_feature_101",
+        "outer_001_feature_103",
+        "outer_001_feature_114",
+        "outer_001_feature_116",
+        "outer_001_feature_117",
+        "outer_001_feature_118",
+        "outer_001_feature_119",
+        "outer_001_feature_120",
+        "outer_001_feature_121",
+        "outer_001_feature_123",
+        "outer_001_feature_124",
+        "outer_001_feature_127",
+        "outer_001_feature_129",
+        "outer_001_feature_130",
+        "outer_001_feature_131",
+        "outer_001_feature_132",
+        "outer_001_feature_133",
+        "outer_001_feature_134",
+        "outer_001_feature_135",
+        "outer_001_feature_145",
+        "outer_001_feature_148",
+        "outer_001_feature_158",
+        "outer_001_feature_159",
+        "outer_001_feature_161",
+        "outer_001_feature_164",
+        "outer_001_feature_165",
+        "outer_001_feature_166",
+        "outer_001_feature_168",
+        "outer_001_feature_170",
+        "outer_001_feature_174",
+        "outer_001_feature_177",
+        "outer_001_feature_180",
+        "outer_001_feature_183",
+        "outer_001_feature_185",
+        "outer_001_feature_193",
+        "outer_001_feature_196",
+        "outer_001_feature_200",
+        "outer_001_feature_215",
+        "outer_001_feature_217",
+        "outer_001_feature_221",
+        "outer_001_feature_225",
+        "outer_001_feature_226",
+        "outer_001_feature_229",
+        "outer_001_feature_231",
+        "outer_001_feature_233",
+        "outer_001_feature_238",
+        "outer_001_feature_246",
+        "outer_001_feature_247",
+        "outer_001_feature_250",
+        "outer_001_feature_258",
+        "outer_001_feature_259",
+        "outer_001_feature_261",
+        "outer_001_feature_264",
+        "outer_001_feature_266",
+        "outer_001_feature_270",
+        "outer_001_feature_272",
+        "outer_001_feature_278",
+        "outer_001_feature_279",
+        "outer_001_feature_284",
+        "outer_001_feature_290",
+        "outer_001_feature_294",
+        "outer_001_feature_321",
+        "outer_001_feature_322",
+        "outer_001_feature_329",
+        "outer_001_feature_336",
+        "outer_001_feature_342",
+        "outer_001_feature_344",
+        "outer_001_feature_345",
+        "outer_001_feature_346",
+        "outer_001_feature_347",
+        "outer_001_feature_348",
+        "outer_001_feature_350",
+        "outer_001_feature_352",
+        "outer_001_feature_314"
+      ],
+      "modifier_rationale": "No consistent recurrence of these features across folds.",
+      "name": "Patient Baseline and Comorbidities",
+      "relationship_summary": "Broad collection of demographic and comorbid features.",
+      "representatives": []
+    },
+    {
+      "concept_id": "general_vitals_and_metabolites",
+      "decision": "exclude",
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_015:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ],
+      "limitations": "Lack of recurrence and weak support across all models.",
+      "member_feature_ids": [
+        "outer_001_feature_015",
+        "outer_001_feature_026",
+        "outer_001_feature_036",
+        "outer_001_feature_037",
+        "outer_001_feature_038",
+        "outer_001_feature_040",
+        "outer_001_feature_100",
+        "outer_001_feature_150",
+        "outer_001_feature_152",
+        "outer_001_feature_241",
+        "outer_001_feature_287",
+        "outer_001_feature_295",
+        "outer_001_feature_296",
+        "outer_001_feature_297",
+        "outer_001_feature_298",
+        "outer_001_feature_300",
+        "outer_001_feature_301",
+        "outer_001_feature_313"
+      ],
+      "modifier_rationale": "These features failed to show consistent recurrence in top-100 lists.",
+      "name": "General Vitals and Metabolites",
+      "relationship_summary": "Baseline physiological measurements.",
+      "representatives": []
+    }
+  ],
+  "overall_interpretation": "The most robust modifiers identified across training folds relate to systemic inflammation (NLR), renal function, genomic markers (KRAS G12C, MET), and specific pulmonary symptoms (dyspnea, nodules). Prior treatment history, specifically platinum exposure and surgical lymph node dissection, also surfaces as a strong modifier. Most other physiological and demographic markers lacked consistency across folds."
+}

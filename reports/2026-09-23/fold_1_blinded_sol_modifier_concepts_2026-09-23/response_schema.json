@@ -1,0 +1,110 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "overall_interpretation": {
+      "type": "string"
+    },
+    "concepts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "concept_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "relationship_summary": {
+            "type": "string"
+          },
+          "modifier_rationale": {
+            "type": "string"
+          },
+          "limitations": {
+            "type": "string"
+          },
+          "member_feature_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "decision": {
+            "type": "string",
+            "enum": [
+              "retain",
+              "uncertain",
+              "exclude"
+            ]
+          },
+          "representatives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "feature_id": {
+                  "type": "string"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "feature_id",
+                "reason"
+              ]
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "evidence_id": {
+                  "type": "string"
+                },
+                "inner_folds": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "enum": [
+                      1,
+                      2,
+                      3,
+                      4,
+                      5
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "evidence_id",
+                "inner_folds"
+              ]
+            }
+          }
+        },
+        "required": [
+          "concept_id",
+          "name",
+          "relationship_summary",
+          "modifier_rationale",
+          "limitations",
+          "member_feature_ids",
+          "decision",
+          "representatives",
+          "evidence"
+        ]
+      }
+    }
+  },
+  "required": [
+    "overall_interpretation",
+    "concepts"
+  ]
+}

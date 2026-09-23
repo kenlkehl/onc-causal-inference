@@ -1,0 +1,84 @@
+# 12. Supervise extraction ontology using aggregate diagnostics
+
+**Unabridged current template, with invented miniature inputs. No LLM was called.**
+
+Activation: Core training extraction/supervision loop
+
+Aggregate diagnostic values here are a miniature invented fixture.
+
+Source: [_aggregate_ontology_supervisor_prompt](/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2_analysis.py:7432)
+
+## System message
+
+```text
+You supervise extraction ontologies using aggregate small-model outputs. You cannot select features or causal roles. Return JSON only.
+```
+
+## User message
+
+```json
+{
+  "aggregate_extraction_summary": {
+    "dominant_value_fraction": 0.625,
+    "feature_id": "example_emphysema",
+    "most_common_values": {
+      "Absent": 3,
+      "Present": 5
+    },
+    "name": "emphysema",
+    "nonmissing": 8,
+    "nonmissing_fraction": 0.8,
+    "rows": 10,
+    "unique_nonmissing": 2
+  },
+  "aggregate_validation_failures": [
+    {
+      "allowed_categories": [
+        "Present",
+        "Absent"
+      ],
+      "example_values": [
+        "present on CT",
+        "positive"
+      ],
+      "failure_kind": "invalid_category",
+      "patient_count": 3,
+      "reason": "Repeated returned values are outside the declared categories."
+    }
+  ],
+  "feature": {
+    "categories_or_unit": [
+      "Present",
+      "Absent"
+    ],
+    "description": "Documented emphysema.",
+    "feature_id": "example_emphysema",
+    "measurement_definition": "Explicit pretreatment documentation of emphysema presence or absence.",
+    "missing_value_rule": "Null if unreported; silence is not absence.",
+    "name": "emphysema",
+    "value_type": "binary"
+  },
+  "information_boundary": "Only aggregate extraction values and validation failures from outer-training patients are supplied. No patient text, treatment values, outcome values, causal-role evidence, model performance, or p-values are supplied.",
+  "job": "review_stage2_small_model_extraction_ontology",
+  "response": {
+    "action": "keep|revise",
+    "categories_or_unit": [
+      "required for revise"
+    ],
+    "description": "required for revise",
+    "measurement_definition": "required for revise",
+    "missing_value_rule": "required for revise",
+    "reason": "schema-quality rationale",
+    "value_type": "binary|categorical|continuous|ordinal; required for revise"
+  },
+  "rules": [
+    "Return keep unless the aggregates demonstrate a correctable extraction-schema mismatch.",
+    "You may revise only description, value_type, categories_or_unit, measurement_definition, and missing_value_rule.",
+    "Never add, drop, split, merge, or rename a feature and never infer or change a causal role.",
+    "A revision must remain one reusable pretreatment patient-level scalar variable.",
+    "Do not optimize for association with treatment or outcome; neither is available.",
+    "For binary variables return exactly two distinct scalar categories; for categorical or ordinal variables return at least two.",
+    "Return JSON only."
+  ]
+}
+```

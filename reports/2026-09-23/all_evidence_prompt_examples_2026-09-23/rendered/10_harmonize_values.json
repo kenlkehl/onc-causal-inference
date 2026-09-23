@@ -1,0 +1,25 @@
+{
+  "id": "10_harmonize_values",
+  "title": "10. Harmonize mixed numeric and text values",
+  "activation": "Conditional: mixed training representations",
+  "sources": [
+    {
+      "path": "oci/inference/plain_handoff_stage2_analysis.py",
+      "line": 4510,
+      "function": "_harmonization_prompt",
+      "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+    }
+  ],
+  "input_status": "Invented illustrative inputs, not observed study data or results.",
+  "note": "",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You harmonize mixed representations of one clinical variable into a loss-aware, machine-readable ontology. Return JSON only."
+    },
+    {
+      "role": "user",
+      "content": "{\"feature\": {\"categories_or_unit\": [\"mg/dL\"], \"description\": \"Serum creatinine concentration.\", \"feature_id\": \"example_creatinine\", \"measurement_definition\": \"Latest documented pretreatment serum creatinine, in mg/dL; preserve a reported threshold if no exact number exists.\", \"missing_value_rule\": \"Null if unreported or unresolved.\", \"name\": \"serum_creatinine\"}, \"information_boundary\": \"The values and summaries come only from outer-training patients. No treatment, outcome, held-out text, or held-out values are supplied.\", \"job\": \"harmonize_stage2_mixed_numeric_and_categorical_values\", \"observed_training_representations\": {\"categorical_count\": 2, \"categorical_values\": [{\"count\": 1, \"raw_value\": \"<1.0\"}, {\"count\": 1, \"raw_value\": \"high\"}], \"numeric_count\": 2, \"numeric_max\": 1.2, \"numeric_min\": 0.8, \"numeric_quantiles\": [{\"probability\": 0.0, \"value\": 0.8}, {\"probability\": 1.0, \"value\": 1.2}]}, \"prior_plan_to_extend_or_replace\": null, \"response_schema\": {\"canonical_categories\": [\"empty for continuous; at least two strings for categorical\"], \"categorical_value_map\": [{\"canonical_value\": \"finite number/null for continuous; canonical category/null for categorical\", \"raw_value\": \"one exact observed text token\"}], \"numeric_bin_rules\": [{\"canonical_value\": \"canonical category\", \"lower_bound\": \"number or null\", \"lower_inclusive\": \"boolean\", \"upper_bound\": \"number or null\", \"upper_inclusive\": \"boolean\"}], \"reason\": \"concise scientific rationale\", \"target_representation\": \"continuous or categorical\"}, \"rules\": [\"Choose one common modeling representation for every observed value.\", \"Use target_representation=continuous only when every nonnumeric token has an unambiguous exact numeric meaning in the feature's stated unit. Do not invent midpoints for ranges, inequalities, or qualitative labels.\", \"Otherwise use target_representation=categorical. Define clinically coherent canonical categories, map every exact observed text token, and supply ordered, exhaustive, nonoverlapping numeric bins.\", \"For categorical numeric bins, the first lower_bound and final upper_bound must be null. Adjacent bins must share a boundary with exactly one side inclusive.\", \"Map an unusable text token to null rather than guessing.\", \"This is generic value harmonization. Base the plan only on the supplied feature definition and observed representations.\"]}"
+    }
+  ]
+}

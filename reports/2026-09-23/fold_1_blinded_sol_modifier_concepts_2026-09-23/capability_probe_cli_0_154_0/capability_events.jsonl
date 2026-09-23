@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a0ce35-ab23-7a42-b4a0-072bf1bd2f0a"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Under-development features enabled: skip_host_skill_discovery. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /home/klkehl/.codex/config.toml."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Model metadata for `gpt-6-sol` not found. Defaulting to fallback metadata; this can degrade performance and cause issues."}}
+{"type":"turn.started"}
+{"type":"error","message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account.\"}}"}
+{"type":"turn.failed","error":{"message":"{\"type\":\"error\",\"status\":400,\"error\":{\"type\":\"invalid_request_error\",\"message\":\"The 'gpt-6-sol' model is not supported when using Codex with a ChatGPT account.\"}}"}}

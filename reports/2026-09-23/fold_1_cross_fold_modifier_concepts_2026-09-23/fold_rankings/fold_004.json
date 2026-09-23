@@ -1,0 +1,1258 @@
+{
+  "identity": {
+    "evidence": "d83e2f32526ba62dab7ed36deb19fc3c1d00ed97fcba3000a35e49c7d7f49986",
+    "model": "gemma4-31b",
+    "role_policy": {
+      "enabled": true,
+      "max_candidates_per_request": 20,
+      "max_categories_per_feature": 40,
+      "max_description_chars": 1200,
+      "max_measurement_definition_chars": 1600
+    },
+    "source_sha256": "3a79c9200fcff152e4cbcf930658b1adfa3c887460b8d068a76db2deb9dc6793",
+    "version": "stage2_modifier_ranking_v1"
+  },
+  "inner_fold": 4,
+  "locked_feature_ids": [],
+  "maximum": 100,
+  "native_replay_verified": true,
+  "numerical_evidence_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_4/statistical_evidence.json",
+  "numerical_evidence_sha256": "468e5b8c190dbf4e1679a7f24d90ae3de399499f7e934ed604bf47488cf94f70",
+  "original_prefix_preserved": true,
+  "ranking": [
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_228:univariable:effect",
+        "multi:outer_001_feature_228:univariable_rlearner:effect",
+        "multi:outer_001_feature_228:causal_forest:effect",
+        "multi:outer_001_feature_228:penalized_interactions:effect",
+        "multi:outer_001_feature_228:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_228",
+      "rationale": "Strongest overall effect signal; lead of List 2 with high causal forest split importance (0.267) and R-learner gain."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_082:univariable:effect",
+        "multi:outer_001_feature_082:univariable_rlearner:effect",
+        "multi:outer_001_feature_082:causal_forest:effect",
+        "multi:outer_001_feature_082:penalized_interactions:effect",
+        "multi:outer_001_feature_082:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_082",
+      "rationale": "Strong effect signal and lead of List 1; high causal forest consistency (8/9)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_146:univariable:effect",
+        "multi:outer_001_feature_146:univariable_rlearner:effect",
+        "multi:outer_001_feature_146:causal_forest:effect",
+        "multi:outer_001_feature_146:penalized_interactions:effect",
+        "multi:outer_001_feature_146:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_146",
+      "rationale": "Strong univariable effect signal, maintaining relative order from List 1."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_103:univariable:effect",
+        "multi:outer_001_feature_103:univariable_rlearner:effect",
+        "multi:outer_001_feature_103:causal_forest:effect",
+        "multi:outer_001_feature_103:penalized_interactions:effect",
+        "multi:outer_001_feature_103:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_103",
+      "rationale": "Moderate univariable effect signal, maintaining relative order from List 1."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_188:univariable:effect",
+        "multi:outer_001_feature_188:univariable_rlearner:effect",
+        "multi:outer_001_feature_188:causal_forest:effect",
+        "multi:outer_001_feature_188:penalized_interactions:effect",
+        "multi:outer_001_feature_188:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_188",
+      "rationale": "Strong causal forest signal, following 103 to preserve relative order in List 1."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_024:univariable:effect",
+        "multi:outer_001_feature_024:univariable_rlearner:effect",
+        "multi:outer_001_feature_024:causal_forest:effect",
+        "multi:outer_001_feature_024:penalized_interactions:effect",
+        "multi:outer_001_feature_024:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_024",
+      "rationale": "Weak effect modification signal, maintaining relative order from List 1."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_037:univariable:effect",
+        "multi:outer_001_feature_037:univariable_rlearner:effect",
+        "multi:outer_001_feature_037:causal_forest:effect",
+        "multi:outer_001_feature_037:penalized_interactions:effect",
+        "multi:outer_001_feature_037:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_037",
+      "rationale": "Weak effect signal, concluding List 1."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_006:penalized_interactions:effect",
+        "multi:outer_001_feature_006:orthogonal_linear:effect",
+        "multi:outer_001_feature_006:univariable_rlearner:effect",
+        "multi:outer_001_feature_006:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_006",
+      "rationale": "Interleaved merge priority. Low effect modification signal; limited support in penalized interactions and causal forest."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_330:univariable:effect",
+        "multi:outer_001_feature_330:penalized_interactions:effect",
+        "multi:outer_001_feature_330:orthogonal_linear:effect",
+        "multi:outer_001_feature_330:univariable_rlearner:effect",
+        "multi:outer_001_feature_330:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_330",
+      "rationale": "Interleaved merge priority. Moderate evidence for effect modification from univariable and causal forest models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_057:univariable:effect",
+        "multi:outer_001_feature_057:penalized_interactions:effect",
+        "multi:outer_001_feature_057:orthogonal_linear:effect",
+        "multi:outer_001_feature_057:univariable_rlearner:effect",
+        "multi:outer_001_feature_057:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_057",
+      "rationale": "Interleaved merge priority. Mixed signals; univariable evidence shows some support, while forest models are weaker."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_249:penalized_interactions:effect",
+        "multi:outer_001_feature_249:orthogonal_linear:effect",
+        "multi:outer_001_feature_249:univariable_rlearner:effect",
+        "multi:outer_001_feature_249:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_249",
+      "rationale": "Interleaved merge priority. Weak effect modification signal; primarily limited to the R-learner."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_049:univariable:effect",
+        "multi:outer_001_feature_049:penalized_interactions:effect",
+        "multi:outer_001_feature_049:orthogonal_linear:effect",
+        "multi:outer_001_feature_049:univariable_rlearner:effect",
+        "multi:outer_001_feature_049:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_049",
+      "rationale": "Interleaved merge priority. Strong effect modification evidence based on univariable, R-learner, and causal forest signals."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_216:univariable:effect",
+        "multi:outer_001_feature_216:penalized_interactions:effect",
+        "multi:outer_001_feature_216:orthogonal_linear:effect",
+        "multi:outer_001_feature_216:univariable_rlearner:effect",
+        "multi:outer_001_feature_216:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_216",
+      "rationale": "Interleaved merge priority. Strong evidence for effect modification, particularly in univariable and causal forest models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_127:univariable:effect",
+        "multi:outer_001_feature_127:penalized_interactions:effect",
+        "multi:outer_001_feature_127:orthogonal_linear:effect",
+        "multi:outer_001_feature_127:univariable_rlearner:effect",
+        "multi:outer_001_feature_127:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_127",
+      "rationale": "Interleaved merge priority. Consistent support in causal forest and R-learner models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_267:univariable:effect",
+        "multi:outer_001_feature_267:penalized_interactions:effect",
+        "multi:outer_001_feature_267:orthogonal_linear:effect",
+        "multi:outer_001_feature_267:univariable_rlearner:effect",
+        "multi:outer_001_feature_267:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_267",
+      "rationale": "Interleaved merge priority. Strong and consistent modification signals across multiple model types."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_113:univariable:effect",
+        "multi:outer_001_feature_113:penalized_interactions:effect",
+        "multi:outer_001_feature_113:orthogonal_linear:effect",
+        "multi:outer_001_feature_113:univariable_rlearner:effect",
+        "multi:outer_001_feature_113:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_113",
+      "rationale": "Interleaved merge priority. Strong, consistent effect modification support from R-learner and causal forest."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_204:univariable:effect",
+        "multi:outer_001_feature_204:penalized_interactions:effect",
+        "multi:outer_001_feature_204:orthogonal_linear:effect",
+        "multi:outer_001_feature_204:univariable_rlearner:effect",
+        "multi:outer_001_feature_204:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_204",
+      "rationale": "Interleaved merge priority. Moderate effect modification signal; redundant proxy for platinum chemotherapy."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_165:univariable:effect",
+        "multi:outer_001_feature_165:penalized_interactions:effect",
+        "multi:outer_001_feature_165:orthogonal_linear:effect",
+        "multi:outer_001_feature_165:univariable_rlearner:effect",
+        "multi:outer_001_feature_165:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_165",
+      "rationale": "Interleaved merge priority. Moderate support in causal forest and R-learner, but weak univariable signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_190:causal_forest:effect",
+        "multi:outer_001_feature_190:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_190",
+      "rationale": "Moderate consistency across the R-learner (7/9) and causal forest (6/9) models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_264:univariable:effect",
+        "multi:outer_001_feature_264:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_264",
+      "rationale": "Moderate balance of univariable effect signal (3/9 support) and causal forest consistency (6/9 support)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_122:causal_forest:effect",
+        "multi:outer_001_feature_122:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_122",
+      "rationale": "Moderate consistency in R-learner (7/9) and causal forest (5/9) models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_226:causal_forest:effect",
+        "multi:outer_001_feature_226:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_226",
+      "rationale": "Strong consistency in causal forest (7/9 support) combined with a notable univariable effect signal (3/9 support)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_108:causal_forest:effect",
+        "multi:outer_001_feature_108:univariable_rlearner:effect",
+        "multi:outer_001_feature_108:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_108",
+      "rationale": "High consistency in causal forest (8/9 support) and univariable R-learner (6/9), with additional support from the orthogonal linear effect model."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_281:univariable:effect",
+        "multi:outer_001_feature_281:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_281",
+      "rationale": "Consistent causal forest support (6/9) and strong univariable effect magnitude (3/9 support)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_203:causal_forest:effect",
+        "multi:outer_001_feature_203:univariable_rlearner:effect",
+        "multi:outer_001_feature_203:penalized_interactions:effect"
+      ],
+      "feature_id": "outer_001_feature_203",
+      "rationale": "Strong and consistent evidence across effect-specific metrics: 9/9 support in R-learner and 7/9 in causal forest."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_332:univariable:effect",
+        "multi:outer_001_feature_332:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_332",
+      "rationale": "Consistent causal forest support (6/9) and strong univariable effect signal (3/9 support)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_033:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_033",
+      "rationale": "Evidence is primarily prognostic; minimal support for effect modification across models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_076:causal_forest:effect",
+        "multi:outer_001_feature_076:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_076",
+      "rationale": "Moderate consistency in R-learner (8/9) and causal forest (5/9), but lacks univariable effect signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_085:univariable:effect",
+        "multi:outer_001_feature_085:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_085",
+      "rationale": "Strong R-learner and univariable effect signals, but zero support in the causal forest model."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_053:univariable_rlearner:effect",
+        "multi:outer_001_feature_053:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_053",
+      "rationale": "Shows moderate consistency in the univariable R-learner (supported in 7/9 folds) and causal forest (5/9 folds), though univariable effect signal is absent."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_348:univariable:effect",
+        "multi:outer_001_feature_348:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_348",
+      "rationale": "Demonstrates strong consistency in the univariable R-learner (supported in all 9/9 folds) and moderate support in univariable effect models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_004:univariable:effect",
+        "multi:outer_001_feature_004:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_004",
+      "rationale": "Strong effect modification signal in univariable models (median p=0.037, supported 5/9 folds) and supported by the univariable R-learner."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_303:univariable_rlearner:effect",
+        "multi:outer_001_feature_303:penalized_interactions:effect"
+      ],
+      "feature_id": "outer_001_feature_303",
+      "rationale": "High consistency in the univariable R-learner (supported 8/9 folds) and evidence of effect modification in penalized interaction models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_089:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_089",
+      "rationale": "Supported primarily by the univariable R-learner (8/9 folds), but lacks corroborating signals in other effect models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_338:causal_forest:effect",
+        "multi:outer_001_feature_338:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_338",
+      "rationale": "Strong support in the causal forest (8/9 folds) and moderate support in the univariable R-learner (6/9 folds)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_155:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_155",
+      "rationale": "Causal forest supports effect modification in 6/9 folds, but other models show weak or inconsistent signals."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_309:causal_forest:effect",
+        "multi:outer_001_feature_309:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_309",
+      "rationale": "Supported by causal forest (6/9 folds) and univariable R-learner (5/9 folds), but lacks univariable effect signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_001:univariable:effect",
+        "multi:outer_001_feature_001:causal_forest:effect",
+        "multi:outer_001_feature_001:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_001",
+      "rationale": "Consistent evidence across univariable effect (3/9), causal forest (6/9), and univariable R-learner (4/9) models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_312:univariable:effect",
+        "multi:outer_001_feature_312:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_312",
+      "rationale": "Strong causal forest support (7/9 folds) and moderate univariable effect signal (2/9 folds)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_135:univariable_rlearner:effect",
+        "multi:outer_001_feature_135:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_135",
+      "rationale": "Moderate support from univariable R-learner (6/9) and causal forest (5/9) with no univariable effect signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_184:causal_forest:effect",
+        "multi:outer_001_feature_184:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_184",
+      "rationale": "Consistent support in Causal Forest (6/9 folds) and R-learner (6/9 folds), although R-learner mean score is negative."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_168:causal_forest:effect",
+        "multi:outer_001_feature_168:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_168",
+      "rationale": "Strong Causal Forest support (6/9 folds) and a positive mean score (4.56e-05)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_183:causal_forest:effect",
+        "multi:outer_001_feature_183:univariable_rlearner:effect",
+        "multi:outer_001_feature_183:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_183",
+      "rationale": "High Causal Forest split importance (0.1047) despite low mean score; supported in univariable effect models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_114:causal_forest:effect",
+        "multi:outer_001_feature_114:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_114",
+      "rationale": "Causal Forest support in 6/9 folds, though the mean score is very low (1.43e-05)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_064:causal_forest:effect",
+        "multi:outer_001_feature_064:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_064",
+      "rationale": "Consistent effect signal across Causal Forest (5/9 folds) and R-learner (6/9 folds)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_137:causal_forest:effect",
+        "multi:outer_001_feature_137:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_137",
+      "rationale": "Strong Causal Forest support (6/9 folds) with a positive mean score (9.41e-05)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_250:causal_forest:effect",
+        "multi:outer_001_feature_250:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_250",
+      "rationale": "Lowest quality candidate with negative or contradictory effect signals across Causal Forest (mean_score -5.39e-07) and R-learner (mean_score -0.00178)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_101:causal_forest:effect",
+        "multi:outer_001_feature_101:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_101",
+      "rationale": "Weak effect signal; Causal Forest (mean_score 2.08e-05, 5/9 support) and R-learner (mean_score 0.00087, 6/9 support) are marginally positive but lack magnitude."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_134:causal_forest:effect",
+        "multi:outer_001_feature_134:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_134",
+      "rationale": "Contradictory evidence; Causal Forest suggests a positive effect (9.25e-05, 5/9 support), but R-learner suggests a negative effect (-0.00051, 5/9 support)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_060:causal_forest:effect",
+        "multi:outer_001_feature_060:univariable_rlearner:effect",
+        "multi:outer_001_feature_060:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_060",
+      "rationale": "Redundant proxy for fatigue (feature_134). Evidence is similarly contradictory between Causal Forest (2.82e-05, 5/9) and R-learner (-0.00104, 4/9)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_324:causal_forest:effect",
+        "multi:outer_001_feature_324:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_324",
+      "rationale": "Consistent but moderate effect signal; Causal Forest (8.37e-05, 6/9 support) and R-learner (1.79e-05, 5/9 support) are both positive."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_224:causal_forest:effect",
+        "multi:outer_001_feature_224:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_224",
+      "rationale": "Strong, balanced effect signal; Causal Forest (0.00013, 6/9 support) and R-learner (0.00032, 6/9 support) provide complementary, positive evidence."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_352:univariable_rlearner:effect",
+        "multi:outer_001_feature_352:univariable:effect",
+        "multi:outer_001_feature_352:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_352",
+      "rationale": "Strong R-learner gain (0.00053, 7/9) and univariable effect support (3/9), but zero support in Causal Forest, indicating a lack of consensus across modeling families."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_052:causal_forest:effect",
+        "multi:outer_001_feature_052:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_052",
+      "rationale": "Consistent effect modification evidence; Causal Forest (9.02e-05, 4/9) and R-learner (0.00018, 6/9) are both positive and stable."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_214:causal_forest:effect",
+        "multi:outer_001_feature_214:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_214",
+      "rationale": "High magnitude Causal Forest signal (0.00018, 7/9), but contradictory R-learner signal (-0.00167, 3/9), reducing overall confidence."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_054:univariable_rlearner:effect",
+        "multi:outer_001_feature_054:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_054",
+      "rationale": "High fold consistency in R-learner (0.00036, 8/9 support) complemented by positive Causal Forest evidence (4.90e-05, 4/9)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_050:causal_forest:effect",
+        "multi:outer_001_feature_050:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_050",
+      "rationale": "Very high consistency and stability across both effect models; Causal Forest (7.08e-05, 6/9) and R-learner (0.00018, 6/9) are both positive."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_315:univariable_rlearner:effect",
+        "multi:outer_001_feature_315:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_315",
+      "rationale": "Interleaving List 2 head. High consistency in R-learner effect support (fraction 1.0)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_111:causal_forest:effect",
+        "multi:outer_001_feature_111:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_111",
+      "rationale": "Interleaving List 1 head. Moderate causal forest support fraction (0.55)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_217:causal_forest:effect",
+        "multi:outer_001_feature_217:univariable_rlearner:effect",
+        "multi:outer_001_feature_217:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_217",
+      "rationale": "Preserving relative order in List 2. Consistent effect signals across causal forest, R-learner, and univariable models."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_164:univariable_rlearner:effect",
+        "multi:outer_001_feature_164:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_164",
+      "rationale": "Preserving relative order in List 1. Strong R-learner support fraction (0.88)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_319:univariable_rlearner:effect",
+        "multi:outer_001_feature_319:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_319",
+      "rationale": "Preserving relative order in List 2. High R-learner support fraction (0.88)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_173:causal_forest:effect",
+        "multi:outer_001_feature_173:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_173",
+      "rationale": "Preserving relative order in List 1. High causal forest support fraction (0.88)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_215:causal_forest:effect",
+        "multi:outer_001_feature_215:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_215",
+      "rationale": "Preserving relative order in List 2. Strong causal forest support (fraction 0.77)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_036:causal_forest:effect",
+        "multi:outer_001_feature_036:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_036",
+      "rationale": "Preserving relative order in List 1. Moderate causal forest support fraction (0.44)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_349:univariable_rlearner:effect",
+        "multi:outer_001_feature_349:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_349",
+      "rationale": "Preserving relative order in List 2. Moderate effect signals in R-learner (0.44) and causal forest (0.33)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_158:univariable_rlearner:effect",
+        "multi:outer_001_feature_158:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_158",
+      "rationale": "Preserving relative order in List 1. Strong R-learner support fraction (0.66)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_284:univariable_rlearner:effect",
+        "multi:outer_001_feature_284:univariable:effect"
+      ],
+      "feature_id": "outer_001_feature_284",
+      "rationale": "Preserving relative order in List 2. Effect signal primarily driven by R-learner support."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_263:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_263",
+      "rationale": "Strongest evidence with highest causal forest split importance (0.043) and consistent fold support."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_077:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_077",
+      "rationale": "Moderate effect modification evidence (CF 0.020); placed early to maintain relative order of List 1."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_311:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_311",
+      "rationale": "Weak to moderate evidence (CF 0.016); must precede other List 2 elements."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_221:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_221",
+      "rationale": "Strong evidence (CF 0.034), ranked according to List 2 relative order."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_340:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_340",
+      "rationale": "Moderate evidence (CF 0.018), ranked according to List 2 relative order."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_212:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_212",
+      "rationale": "Very strong evidence (CF 0.040), ranked according to List 2 relative order."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_296:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_296",
+      "rationale": "Moderate evidence (CF 0.019), final element of List 2."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_123:univariable_rlearner:effect",
+        "multi:outer_001_feature_123:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_123",
+      "rationale": "Moderate R-learner consistency (support fraction 0.66) and mean score (0.0005), though causal forest signal is very weak."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_030:univariable_rlearner:effect",
+        "multi:outer_001_feature_030:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_030",
+      "rationale": "Strong R-learner consistency (support fraction 1.0) with a higher mean score (0.0010) than the preceding candidate."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_161:univariable:effect",
+        "multi:outer_001_feature_161:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_161",
+      "rationale": "Significant univariable effect signal (median p=0.08) and moderate R-learner consistency (support fraction 0.66)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_073:univariable_rlearner:effect",
+        "multi:outer_001_feature_073:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_073",
+      "rationale": "Moderate R-learner consistency (support fraction 0.66) and mean score (0.0006), with some causal forest support."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_130:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_130",
+      "rationale": "Weak effect signal; primarily supported by causal forest (support fraction 0.66), but R-learner signal is negligible."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_007:causal_forest:effect",
+        "multi:outer_001_feature_007:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_007",
+      "rationale": "Weak effect signal; supported by causal forest (support fraction 0.66), but R-learner mean score is negative."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_192:univariable:effect",
+        "multi:outer_001_feature_192:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_192",
+      "rationale": "Moderate effect modification signal with support from univariable tests (3/9 folds) and causal forest (4/9 folds)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_279:univariable_rlearner:effect",
+        "multi:outer_001_feature_279:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_279",
+      "rationale": "Moderate signal consistency in the causal forest (5/9 folds), though R-learner support is limited."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_090:univariable_rlearner:effect",
+        "multi:outer_001_feature_090:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_090",
+      "rationale": "Strong effect modification evidence, particularly from the R-learner with high fold consistency (8/9 folds supported)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_334:univariable_rlearner:effect",
+        "multi:outer_001_feature_334:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_334",
+      "rationale": "Moderate consistency in causal forest (5/9 folds) and R-learner (5/9 folds), though the absolute signal magnitude is low."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_251:penalized_interactions:effect",
+        "multi:outer_001_feature_251:univariable_rlearner:effect",
+        "multi:outer_001_feature_251:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_251",
+      "rationale": "High signal across multiple models, with a consistent R-learner gain (6/9 folds) and causal forest support (4/9 folds)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_125:univariable_rlearner:effect",
+        "multi:outer_001_feature_125:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_125",
+      "rationale": "Low effect modification signal relative to strong prognostic and treatment main effects."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_301:univariable_rlearner:effect",
+        "multi:outer_001_feature_301:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_301",
+      "rationale": "Moderate consistency in the causal forest (5/9 folds), but lower overall signal magnitude."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_176:univariable:effect",
+        "multi:outer_001_feature_176:penalized_interactions:effect",
+        "multi:outer_001_feature_176:univariable_rlearner:effect",
+        "multi:outer_001_feature_176:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_176",
+      "rationale": "Weak and contradictory evidence; positive penalized interaction signal is offset by a negative causal forest score."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_008:univariable_rlearner:effect",
+        "multi:outer_001_feature_008:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_008",
+      "rationale": "Moderate evidence for effect modification from the causal forest (5/9 folds) and R-learner (4/9 folds)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_278:univariable_rlearner:effect",
+        "multi:outer_001_feature_278:causal_forest:effect"
+      ],
+      "feature_id": "outer_001_feature_278",
+      "rationale": "Moderate consistency in the causal forest (4/9 folds), similar to the role function score."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_205:univariable:effect",
+        "multi:outer_001_feature_205:penalized_interactions:effect",
+        "multi:outer_001_feature_205:orthogonal_linear:effect",
+        "multi:outer_001_feature_205:univariable_rlearner:effect"
+      ],
+      "feature_id": "outer_001_feature_205",
+      "rationale": "Strongest evidence overall, with high univariable significance (p=0.032) and complete consistency in R-learner gains (9/9 folds)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_096:causal_forest:effect",
+        "multi:outer_001_feature_096:univariable_rlearner:effect",
+        "multi:outer_001_feature_096:univariable:effect",
+        "multi:outer_001_feature_096:penalized_interactions:effect",
+        "multi:outer_001_feature_096:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_096",
+      "rationale": "High causal forest importance (0.068) and strong univariable treatment signal; serves as a redundant proxy for creatinine clearance."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_026:causal_forest:effect",
+        "multi:outer_001_feature_026:univariable_rlearner:effect",
+        "multi:outer_001_feature_026:univariable:effect",
+        "multi:outer_001_feature_026:penalized_interactions:effect",
+        "multi:outer_001_feature_026:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_026",
+      "rationale": "Moderate causal forest importance (0.039) and supportive univariable treatment signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_095:causal_forest:effect",
+        "multi:outer_001_feature_095:univariable_rlearner:effect",
+        "multi:outer_001_feature_095:univariable:effect",
+        "multi:outer_001_feature_095:penalized_interactions:effect",
+        "multi:outer_001_feature_095:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_095",
+      "rationale": "Strong causal forest importance (0.090) and very high univariable treatment signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_225:causal_forest:effect",
+        "multi:outer_001_feature_225:univariable_rlearner:effect",
+        "multi:outer_001_feature_225:univariable:effect",
+        "multi:outer_001_feature_225:penalized_interactions:effect",
+        "multi:outer_001_feature_225:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_225",
+      "rationale": "Low causal forest importance (0.018), but shows positive held-out R-loss gain (0.0002)."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_196:causal_forest:effect",
+        "multi:outer_001_feature_196:univariable_rlearner:effect",
+        "multi:outer_001_feature_196:univariable:effect",
+        "multi:outer_001_feature_196:penalized_interactions:effect",
+        "multi:outer_001_feature_196:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_196",
+      "rationale": "Significant causal forest effect importance (0.058) and moderate predictive forest outcome signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_321:causal_forest:effect",
+        "multi:outer_001_feature_321:univariable_rlearner:effect",
+        "multi:outer_001_feature_321:univariable:effect",
+        "multi:outer_001_feature_321:penalized_interactions:effect",
+        "multi:outer_001_feature_321:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_321",
+      "rationale": "Moderate causal forest importance (0.035); evidence dominated by strong prognostic signals."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_254:causal_forest:effect",
+        "multi:outer_001_feature_254:univariable_rlearner:effect",
+        "multi:outer_001_feature_254:univariable:effect",
+        "multi:outer_001_feature_254:penalized_interactions:effect",
+        "multi:outer_001_feature_254:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_254",
+      "rationale": "Moderate causal forest importance (0.042) and predictive forest treatment signal."
+    },
+    {
+      "evidence_ids": [
+        "multi:outer_001_feature_252:causal_forest:effect",
+        "multi:outer_001_feature_252:univariable_rlearner:effect",
+        "multi:outer_001_feature_252:univariable:effect",
+        "multi:outer_001_feature_252:penalized_interactions:effect",
+        "multi:outer_001_feature_252:orthogonal_linear:effect"
+      ],
+      "feature_id": "outer_001_feature_252",
+      "rationale": "Low causal forest importance (0.009), despite high observed univariable R-learner gain."
+    }
+  ],
+  "reviewed_candidate_ids": [
+    "outer_001_feature_001",
+    "outer_001_feature_002",
+    "outer_001_feature_003",
+    "outer_001_feature_004",
+    "outer_001_feature_005",
+    "outer_001_feature_006",
+    "outer_001_feature_007",
+    "outer_001_feature_008",
+    "outer_001_feature_009",
+    "outer_001_feature_010",
+    "outer_001_feature_011",
+    "outer_001_feature_012",
+    "outer_001_feature_013",
+    "outer_001_feature_014",
+    "outer_001_feature_015",
+    "outer_001_feature_016",
+    "outer_001_feature_017",
+    "outer_001_feature_018",
+    "outer_001_feature_019",
+    "outer_001_feature_020",
+    "outer_001_feature_021",
+    "outer_001_feature_022",
+    "outer_001_feature_023",
+    "outer_001_feature_024",
+    "outer_001_feature_025",
+    "outer_001_feature_026",
+    "outer_001_feature_027",
+    "outer_001_feature_028",
+    "outer_001_feature_029",
+    "outer_001_feature_030",
+    "outer_001_feature_031",
+    "outer_001_feature_032",
+    "outer_001_feature_033",
+    "outer_001_feature_034",
+    "outer_001_feature_035",
+    "outer_001_feature_036",
+    "outer_001_feature_037",
+    "outer_001_feature_038",
+    "outer_001_feature_039",
+    "outer_001_feature_040",
+    "outer_001_feature_041",
+    "outer_001_feature_042",
+    "outer_001_feature_043",
+    "outer_001_feature_044",
+    "outer_001_feature_045",
+    "outer_001_feature_046",
+    "outer_001_feature_047",
+    "outer_001_feature_048",
+    "outer_001_feature_049",
+    "outer_001_feature_050",
+    "outer_001_feature_051",
+    "outer_001_feature_052",
+    "outer_001_feature_053",
+    "outer_001_feature_054",
+    "outer_001_feature_055",
+    "outer_001_feature_056",
+    "outer_001_feature_057",
+    "outer_001_feature_058",
+    "outer_001_feature_059",
+    "outer_001_feature_060",
+    "outer_001_feature_061",
+    "outer_001_feature_062",
+    "outer_001_feature_063",
+    "outer_001_feature_064",
+    "outer_001_feature_065",
+    "outer_001_feature_066",
+    "outer_001_feature_067",
+    "outer_001_feature_068",
+    "outer_001_feature_069",
+    "outer_001_feature_070",
+    "outer_001_feature_071",
+    "outer_001_feature_072",
+    "outer_001_feature_073",
+    "outer_001_feature_074",
+    "outer_001_feature_075",
+    "outer_001_feature_076",
+    "outer_001_feature_077",
+    "outer_001_feature_078",
+    "outer_001_feature_079",
+    "outer_001_feature_080",
+    "outer_001_feature_081",
+    "outer_001_feature_082",
+    "outer_001_feature_083",
+    "outer_001_feature_084",
+    "outer_001_feature_085",
+    "outer_001_feature_086",
+    "outer_001_feature_087",
+    "outer_001_feature_088",
+    "outer_001_feature_089",
+    "outer_001_feature_090",
+    "outer_001_feature_091",
+    "outer_001_feature_092",
+    "outer_001_feature_093",
+    "outer_001_feature_094",
+    "outer_001_feature_095",
+    "outer_001_feature_096",
+    "outer_001_feature_097",
+    "outer_001_feature_098",
+    "outer_001_feature_099",
+    "outer_001_feature_100",
+    "outer_001_feature_101",
+    "outer_001_feature_102",
+    "outer_001_feature_103",
+    "outer_001_feature_104",
+    "outer_001_feature_105",
+    "outer_001_feature_106",
+    "outer_001_feature_107",
+    "outer_001_feature_108",
+    "outer_001_feature_109",
+    "outer_001_feature_110",
+    "outer_001_feature_111",
+    "outer_001_feature_112",
+    "outer_001_feature_113",
+    "outer_001_feature_114",
+    "outer_001_feature_115",
+    "outer_001_feature_116",
+    "outer_001_feature_117",
+    "outer_001_feature_118",
+    "outer_001_feature_119",
+    "outer_001_feature_120",
+    "outer_001_feature_121",
+    "outer_001_feature_122",
+    "outer_001_feature_123",
+    "outer_001_feature_124",
+    "outer_001_feature_125",
+    "outer_001_feature_126",
+    "outer_001_feature_127",
+    "outer_001_feature_128",
+    "outer_001_feature_129",
+    "outer_001_feature_130",
+    "outer_001_feature_131",
+    "outer_001_feature_132",
+    "outer_001_feature_133",
+    "outer_001_feature_134",
+    "outer_001_feature_135",
+    "outer_001_feature_136",
+    "outer_001_feature_137",
+    "outer_001_feature_138",
+    "outer_001_feature_139",
+    "outer_001_feature_140",
+    "outer_001_feature_141",
+    "outer_001_feature_142",
+    "outer_001_feature_143",
+    "outer_001_feature_144",
+    "outer_001_feature_145",
+    "outer_001_feature_146",
+    "outer_001_feature_147",
+    "outer_001_feature_148",
+    "outer_001_feature_149",
+    "outer_001_feature_150",
+    "outer_001_feature_151",
+    "outer_001_feature_152",
+    "outer_001_feature_153",
+    "outer_001_feature_154",
+    "outer_001_feature_155",
+    "outer_001_feature_156",
+    "outer_001_feature_157",
+    "outer_001_feature_158",
+    "outer_001_feature_159",
+    "outer_001_feature_160",
+    "outer_001_feature_161",
+    "outer_001_feature_162",
+    "outer_001_feature_163",
+    "outer_001_feature_164",
+    "outer_001_feature_165",
+    "outer_001_feature_166",
+    "outer_001_feature_167",
+    "outer_001_feature_168",
+    "outer_001_feature_169",
+    "outer_001_feature_170",
+    "outer_001_feature_171",
+    "outer_001_feature_172",
+    "outer_001_feature_173",
+    "outer_001_feature_174",
+    "outer_001_feature_175",
+    "outer_001_feature_176",
+    "outer_001_feature_177",
+    "outer_001_feature_178",
+    "outer_001_feature_179",
+    "outer_001_feature_180",
+    "outer_001_feature_181",
+    "outer_001_feature_182",
+    "outer_001_feature_183",
+    "outer_001_feature_184",
+    "outer_001_feature_185",
+    "outer_001_feature_186",
+    "outer_001_feature_187",
+    "outer_001_feature_188",
+    "outer_001_feature_189",
+    "outer_001_feature_190",
+    "outer_001_feature_191",
+    "outer_001_feature_192",
+    "outer_001_feature_193",
+    "outer_001_feature_194",
+    "outer_001_feature_195",
+    "outer_001_feature_196",
+    "outer_001_feature_197",
+    "outer_001_feature_198",
+    "outer_001_feature_199",
+    "outer_001_feature_200",
+    "outer_001_feature_201",
+    "outer_001_feature_202",
+    "outer_001_feature_203",
+    "outer_001_feature_204",
+    "outer_001_feature_205",
+    "outer_001_feature_206",
+    "outer_001_feature_207",
+    "outer_001_feature_208",
+    "outer_001_feature_209",
+    "outer_001_feature_210",
+    "outer_001_feature_211",
+    "outer_001_feature_212",
+    "outer_001_feature_213",
+    "outer_001_feature_214",
+    "outer_001_feature_215",
+    "outer_001_feature_216",
+    "outer_001_feature_217",
+    "outer_001_feature_218",
+    "outer_001_feature_219",
+    "outer_001_feature_220",
+    "outer_001_feature_221",
+    "outer_001_feature_222",
+    "outer_001_feature_223",
+    "outer_001_feature_224",
+    "outer_001_feature_225",
+    "outer_001_feature_226",
+    "outer_001_feature_227",
+    "outer_001_feature_228",
+    "outer_001_feature_229",
+    "outer_001_feature_230",
+    "outer_001_feature_231",
+    "outer_001_feature_232",
+    "outer_001_feature_233",
+    "outer_001_feature_234",
+    "outer_001_feature_235",
+    "outer_001_feature_236",
+    "outer_001_feature_237",
+    "outer_001_feature_238",
+    "outer_001_feature_239",
+    "outer_001_feature_240",
+    "outer_001_feature_241",
+    "outer_001_feature_242",
+    "outer_001_feature_243",
+    "outer_001_feature_244",
+    "outer_001_feature_245",
+    "outer_001_feature_246",
+    "outer_001_feature_247",
+    "outer_001_feature_248",
+    "outer_001_feature_249",
+    "outer_001_feature_250",
+    "outer_001_feature_251",
+    "outer_001_feature_252",
+    "outer_001_feature_253",
+    "outer_001_feature_254",
+    "outer_001_feature_255",
+    "outer_001_feature_256",
+    "outer_001_feature_257",
+    "outer_001_feature_258",
+    "outer_001_feature_259",
+    "outer_001_feature_260",
+    "outer_001_feature_261",
+    "outer_001_feature_262",
+    "outer_001_feature_263",
+    "outer_001_feature_264",
+    "outer_001_feature_265",
+    "outer_001_feature_266",
+    "outer_001_feature_267",
+    "outer_001_feature_268",
+    "outer_001_feature_269",
+    "outer_001_feature_270",
+    "outer_001_feature_271",
+    "outer_001_feature_272",
+    "outer_001_feature_273",
+    "outer_001_feature_274",
+    "outer_001_feature_275",
+    "outer_001_feature_276",
+    "outer_001_feature_277",
+    "outer_001_feature_278",
+    "outer_001_feature_279",
+    "outer_001_feature_280",
+    "outer_001_feature_281",
+    "outer_001_feature_282",
+    "outer_001_feature_283",
+    "outer_001_feature_284",
+    "outer_001_feature_285",
+    "outer_001_feature_286",
+    "outer_001_feature_287",
+    "outer_001_feature_288",
+    "outer_001_feature_289",
+    "outer_001_feature_290",
+    "outer_001_feature_291",
+    "outer_001_feature_292",
+    "outer_001_feature_293",
+    "outer_001_feature_294",
+    "outer_001_feature_295",
+    "outer_001_feature_296",
+    "outer_001_feature_297",
+    "outer_001_feature_298",
+    "outer_001_feature_299",
+    "outer_001_feature_300",
+    "outer_001_feature_301",
+    "outer_001_feature_302",
+    "outer_001_feature_303",
+    "outer_001_feature_304",
+    "outer_001_feature_305",
+    "outer_001_feature_306",
+    "outer_001_feature_307",
+    "outer_001_feature_308",
+    "outer_001_feature_309",
+    "outer_001_feature_310",
+    "outer_001_feature_311",
+    "outer_001_feature_312",
+    "outer_001_feature_313",
+    "outer_001_feature_314",
+    "outer_001_feature_315",
+    "outer_001_feature_316",
+    "outer_001_feature_317",
+    "outer_001_feature_318",
+    "outer_001_feature_319",
+    "outer_001_feature_320",
+    "outer_001_feature_321",
+    "outer_001_feature_322",
+    "outer_001_feature_323",
+    "outer_001_feature_324",
+    "outer_001_feature_325",
+    "outer_001_feature_326",
+    "outer_001_feature_327",
+    "outer_001_feature_328",
+    "outer_001_feature_329",
+    "outer_001_feature_330",
+    "outer_001_feature_331",
+    "outer_001_feature_332",
+    "outer_001_feature_333",
+    "outer_001_feature_334",
+    "outer_001_feature_335",
+    "outer_001_feature_336",
+    "outer_001_feature_337",
+    "outer_001_feature_338",
+    "outer_001_feature_339",
+    "outer_001_feature_340",
+    "outer_001_feature_341",
+    "outer_001_feature_342",
+    "outer_001_feature_343",
+    "outer_001_feature_344",
+    "outer_001_feature_345",
+    "outer_001_feature_346",
+    "outer_001_feature_347",
+    "outer_001_feature_348",
+    "outer_001_feature_349",
+    "outer_001_feature_350",
+    "outer_001_feature_351",
+    "outer_001_feature_352"
+  ],
+  "schema_version": "stage2_modifier_ranking_v1",
+  "scoring_rows": 160,
+  "training_rows": 640
+}

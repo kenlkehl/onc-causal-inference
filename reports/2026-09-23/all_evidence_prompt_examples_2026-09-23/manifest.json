@@ -1,0 +1,365 @@
+{
+  "date": "2026-09-23",
+  "git_commit": "568ef7aca4b87a5ca4eed55b4f384302f17cbb08",
+  "scope": "Current prompt templates plus explicitly labeled optional, alternative, and experimental variants",
+  "no_model_calls": true,
+  "examples": [
+    {
+      "id": "01_discover",
+      "title": "01. Discover atomic clinical features",
+      "activation": "Core pathway",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2.py",
+          "line": 3795,
+          "function": "_interpretation_prompt",
+          "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "02_audit_unmapped",
+      "title": "02. Audit evidence left uncited",
+      "activation": "Conditional: initial discovery leaves an evidence item uncited",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2.py",
+          "line": 3835,
+          "function": "_rejected_packet_audit_prompt",
+          "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "03_merge_aliases",
+      "title": "03. Consolidate candidate names before extraction",
+      "activation": "Core pathway; repeated bounded partitions",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2.py",
+          "line": 5020,
+          "function": "_global_candidate_pool_prompt",
+          "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "04_define_ontology",
+      "title": "04. Define a measurement ontology",
+      "activation": "Core pathway; per discovered feature",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2.py",
+          "line": 5319,
+          "function": "_operationalization_prompt",
+          "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "05_extract_patient",
+      "title": "05. Extract one patient's values",
+      "activation": "Training and heldout extraction; same template",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 1720,
+          "function": "_extraction_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "06_serial_chunk",
+      "title": "06. Update extraction with the next record chunk",
+      "activation": "Conditional: serial long-record extraction",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 1775,
+          "function": "_serial_extraction_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "07_page_observations",
+      "title": "07. Extract source-grounded page observations",
+      "activation": "Alternate oversized-record/page path in shared extraction code",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 1847,
+          "function": "_page_extraction_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "Later cross-page reconciliation applies the declared conflict rule in code; it is not a separate LLM prompt."
+    },
+    {
+      "id": "08_map_categories",
+      "title": "08. Normalize an out-of-ontology categorical value",
+      "activation": "Conditional: extracted categorical values violate declared categories",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 1213,
+          "function": "_category_ontology_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "09_refine_ontology",
+      "title": "09. Refine a schema after repeated extraction failures",
+      "activation": "Conditional: repeated feature-attributable training extraction failures",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 7304,
+          "function": "_ontology_refinement_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "10_harmonize_values",
+      "title": "10. Harmonize mixed numeric and text values",
+      "activation": "Conditional: mixed training representations",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 4510,
+          "function": "_harmonization_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "11_extend_value_map",
+      "title": "11. Extend a frozen map for new training text values",
+      "activation": "Conditional: new training tokens during incremental extraction",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 4585,
+          "function": "_harmonization_delta_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "The sample threshold is invented solely to demonstrate the template, not a clinical recommendation."
+    },
+    {
+      "id": "12_supervise_ontology",
+      "title": "12. Supervise extraction ontology using aggregate diagnostics",
+      "activation": "Core training extraction/supervision loop",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2_analysis.py",
+          "line": 7432,
+          "function": "_aggregate_ontology_supervisor_prompt",
+          "sha256": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "Aggregate diagnostic values here are a miniature invented fixture."
+    },
+    {
+      "id": "13_post_extraction_aliases",
+      "title": "13. Check extracted measurements for lossless alias consolidation",
+      "activation": "Optional: sequential_consolidation.enabled",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_sequential_consolidation.py",
+          "line": 1226,
+          "function": "_decision_messages",
+          "sha256": "7c03aefe176de4e2cb67a1ba945f73adea0d352eb34b6715d1129497fd6300d0"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "Default configuration class has enabled=False; some experiment/config files explicitly enable it. 'Latents' is a schema term here: the prompt forbids inventing broader concepts."
+    },
+    {
+      "id": "14_default_roles",
+      "title": "14. Adjudicate roles in the llm_roles mode",
+      "activation": "Alternative selection branch: llm_roles",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_role_adjudication.py",
+          "line": 553,
+          "function": "_role_request_payload",
+          "sha256": "53ea81964a4507bf35fdffb9552396167133cc2069601b34f939ba4125fa018c"
+        },
+        {
+          "path": "oci/inference/stage2_role_adjudication.py",
+          "line": 362,
+          "function": "build_stage2_role_evidence",
+          "sha256": "53ea81964a4507bf35fdffb9552396167133cc2069601b34f939ba4125fa018c"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "Unsupplied statistical results are empty/null in this small fixture, not negative study results."
+    },
+    {
+      "id": "15_model_themes",
+      "title": "15. Review multi-model evidence for themes",
+      "activation": "Multi-model selection branch",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_multi_model_adjudication.py",
+          "line": 350,
+          "function": "adjudicate_multi_model_roles.theme_payload",
+          "sha256": "d383f81b70d68c63d7257f0dd61509cdc9ff6be2b52157a044928c1d091225df"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "16_merge_themes",
+      "title": "16. Merge theme summaries across batches",
+      "activation": "Conditional: multi-model themes exceed the request batch limit",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_multi_model_adjudication.py",
+          "line": 396,
+          "function": "adjudicate_multi_model_roles.merge_payload",
+          "sha256": "d383f81b70d68c63d7257f0dd61509cdc9ff6be2b52157a044928c1d091225df"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "17_model_roles",
+      "title": "17. Assign roles using multi-model evidence and themes",
+      "activation": "Multi-model selection branch",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_multi_model_adjudication.py",
+          "line": 434,
+          "function": "adjudicate_multi_model_roles.role_payload",
+          "sha256": "d383f81b70d68c63d7257f0dd61509cdc9ff6be2b52157a044928c1d091225df"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "18_rank_modifiers",
+      "title": "18. Rank modifier candidates",
+      "activation": "Multi-model branch with cross-validated modifier-count selection",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_modifier_ranking.py",
+          "line": 132,
+          "function": "rank_modifier_candidates.payload",
+          "sha256": "3a79c9200fcff152e4cbcf930658b1adfa3c887460b8d068a76db2deb9dc6793"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "19_merge_rankings",
+      "title": "19. Interleave ordered modifier lists",
+      "activation": "Conditional: ranking spans multiple batches",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_modifier_ranking.py",
+          "line": 132,
+          "function": "rank_modifier_candidates.payload",
+          "sha256": "3a79c9200fcff152e4cbcf930658b1adfa3c887460b8d068a76db2deb9dc6793"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "20_advisory_roles",
+      "title": "20. Annotate numerically selected roles without changing selection",
+      "activation": "Alternative selection branch: independent_tasks, with LLM annotation enabled",
+      "sources": [
+        {
+          "path": "oci/inference/stage2_role_adjudication.py",
+          "line": 553,
+          "function": "_role_request_payload",
+          "sha256": "53ea81964a4507bf35fdffb9552396167133cc2069601b34f939ba4125fa018c"
+        },
+        {
+          "path": "oci/inference/stage2_taskwise_annotation.py",
+          "line": 70,
+          "function": "annotation-only payload modification",
+          "sha256": "cb410a9b52d39ebbd3eb85ace6b2fadf2feebefa698edfb85570ed4ec48075b9"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": ""
+    },
+    {
+      "id": "21_cross_fold_concepts",
+      "title": "21. Experimental global cross-fold concept review",
+      "activation": "Experimental report-level pass; not integrated into the production pathway",
+      "sources": [
+        {
+          "path": "reports/2026-09-23/fold_1_blinded_sol_modifier_concepts_2026-09-23/blinded_input.json",
+          "line": 1,
+          "function": "saved experiment system and user payload",
+          "sha256": "905881c4f2016b8b80cfb891eac271633eecdfb04202050834bc5cd8a2b8ab92"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "Exact system, instructions, response schema, and design metadata from the saved experiment; invented two-candidate payload. The actual 217-candidate request remains in blinded_input.json."
+    },
+    {
+      "id": "22_validation_repair",
+      "title": "22. Repair a response using the exact validation error",
+      "activation": "Shared transport: schema/validation failure",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2.py",
+          "line": 3274,
+          "function": "_repair_message",
+          "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "Appended to the original task context and available failed-response feedback; this is not a standalone extraction prompt."
+    },
+    {
+      "id": "23_length_repair",
+      "title": "23. Repair an overlong response",
+      "activation": "Shared transport: completion length exceeded",
+      "sources": [
+        {
+          "path": "oci/inference/plain_handoff_stage2.py",
+          "line": 3274,
+          "function": "_repair_message",
+          "sha256": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a"
+        }
+      ],
+      "input_status": "Invented illustrative inputs, not observed study data or results.",
+      "note": "Preserve required records and fields; shorten redundant content. Example error text is invented."
+    }
+  ]
+}

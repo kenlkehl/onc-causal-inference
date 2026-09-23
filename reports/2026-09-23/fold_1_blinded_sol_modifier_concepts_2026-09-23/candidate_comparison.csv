@@ -1,0 +1,218 @@
+feature_id,name,ranks,folds_in_top100,sol_selected,gemma_selected,sol_concept,sol_decision,gemma_concept,gemma_decision
+outer_001_feature_001,absolute_lymphocyte_count,"[14, 20, None, 38, 3]",4,False,False,Circulating leukocyte balance,retain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_004,actionable_molecular_alterations,"[None, None, 42, 32, None]",2,False,False,Broad molecular alteration status,exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_006,adjuvant_chemotherapy_administered,"[90, 66, None, 8, 31]",4,False,False,Prior platinum chemotherapy exposure,retain,Treatment History Miscellaneous,exclude
+outer_001_feature_007,adrenal_metastasis_presence,"[94, None, None, 81, 72]",3,False,False,Adrenal metastatic findings,exclude,Distant Visceral Metastasis,retain
+outer_001_feature_008,adrenal_nodule_size,"[None, None, None, 90, 36]",2,False,False,Adrenal metastatic findings,exclude,Distant Visceral Metastasis,retain
+outer_001_feature_009,age,"[None, None, 46, None, None]",1,False,False,Demographics and social exposures,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_010,airway_involvement,"[None, 42, 99, None, 70]",3,False,False,Primary lung tumor location and masses,uncertain,Chronic Lung Disease,retain
+outer_001_feature_012,alcohol_use,"[None, None, None, None, 76]",1,False,False,Demographics and social exposures,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_013,alk_mutation_status,"[None, None, 82, None, None]",1,False,False,"EGFR, ALK, and RET alteration status",exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_015,alkaline_phosphatase_level,"[None, None, 60, None, None]",1,False,False,Liver-related laboratory measurements,exclude,General Vitals and Metabolites,exclude
+outer_001_feature_019,anticoagulant_use,"[None, 34, 71, None, None]",2,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_021,antihypertensive_use,"[54, None, None, None, None]",1,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_022,anxiety_present,"[33, None, 3, None, 14]",3,False,False,Documented anxiety and psychiatric symptoms,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_023,appendectomy_history,"[None, 100, None, None, None]",1,False,False,Prior surgery and resection details,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_024,appetite_status,"[49, 63, None, 6, 64]",4,False,False,Nutrition and body mass,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_026,ast_level,"[None, None, 67, 94, None]",2,False,False,Liver-related laboratory measurements,exclude,General Vitals and Metabolites,exclude
+outer_001_feature_030,axial_structure_abnormality,"[68, None, None, 77, None]",2,False,False,Other neuroimaging findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_033,biomarker_fgfr_status,"[None, 27, 15, 27, None]",3,False,False,Renal filtration and nitrogen burden,retain,Renal Function Status,retain
+outer_001_feature_034,biopsy_method,"[30, 86, 91, None, 78]",4,False,False,Diagnostic and assay procedure details,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_036,blood_pressure,"[None, None, 74, 65, None]",2,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,General Vitals and Metabolites,exclude
+outer_001_feature_037,blood_urea_nitrogen,"[9, 98, 44, 7, 8]",5,True,False,Renal filtration and nitrogen burden,retain,General Vitals and Metabolites,exclude
+outer_001_feature_038,bmi,"[99, 91, 56, None, None]",3,False,False,Nutrition and body mass,exclude,General Vitals and Metabolites,exclude
+outer_001_feature_040,body_weight,"[73, None, None, None, None]",1,False,False,Nutrition and body mass,exclude,General Vitals and Metabolites,exclude
+outer_001_feature_042,bone_lesion_characteristics,"[None, None, 38, None, 74]",2,False,False,Osseous metastatic involvement,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_043,bone_metastasis_presence,"[None, 79, 39, None, 30]",3,False,False,Osseous metastatic involvement,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_044,bone_pain_location,"[None, 72, 17, None, 61]",3,False,False,Bone pain and skeletal complications,uncertain,Skeletal Compression Burden,retain
+outer_001_feature_045,bone_pain_status,"[None, 68, 25, None, 68]",3,False,False,Bone pain and skeletal complications,uncertain,Skeletal Compression Burden,retain
+outer_001_feature_048,brain_edema_status,"[None, None, 23, None, 35]",2,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_049,brain_lesion_count,"[None, 19, None, 12, None]",2,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_050,brain_lesion_size,"[None, None, None, 57, None]",1,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_052,brain_metastases_presence,"[None, None, 43, 54, None]",2,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_053,brain_structure_enhancement,"[19, 93, None, 30, None]",3,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_054,brainstem_signal,"[None, 61, None, 56, None]",2,False,False,Other neuroimaging findings,exclude,Neuroimaging Characteristics,exclude
+outer_001_feature_055,brainstem_size,"[None, 64, None, None, None]",1,False,False,Other neuroimaging findings,exclude,Neuroimaging Characteristics,exclude
+outer_001_feature_056,calorie_intake,"[None, None, None, None, 94]",1,False,False,Nutrition and body mass,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_057,calvarium_lytic_sclerotic_lesions,"[66, 90, 22, 10, None]",4,False,False,Osseous metastatic involvement,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_060,cancer_related_fatigue_severity,"[32, None, None, 50, 16]",3,False,False,Reported fatigue severity,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_061,carboplatin_administered,"[38, None, None, None, None]",1,False,False,Prior platinum chemotherapy exposure,retain,Treatment History Miscellaneous,exclude
+outer_001_feature_064,cdkn2a_mutation_status,"[71, 10, 41, 45, 66]",5,False,False,CDKN2A loss,uncertain,Genomic and Molecular Profile,exclude
+outer_001_feature_065,cea_level,"[20, 7, None, None, None]",2,False,False,Serum tumor-associated markers,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_072,chemotherapy_cycle_count,"[None, None, 88, None, None]",1,False,False,Prior platinum chemotherapy exposure,retain,Treatment History Miscellaneous,exclude
+outer_001_feature_073,chemotherapy_regimen,"[None, None, 73, 79, None]",2,False,False,Prior platinum chemotherapy exposure,retain,Treatment History Miscellaneous,exclude
+outer_001_feature_075,chronic_kidney_disease_stage,"[None, None, 69, None, None]",1,False,False,Renal filtration and nitrogen burden,retain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_076,ck5_6_expression,"[29, 9, 7, 28, 4]",5,True,False,Tumor histology and lineage staining,retain,Histologic and Pathology Features,exclude
+outer_001_feature_077,ck7_expression,"[None, None, None, 70, 65]",2,False,False,Tumor histology and lineage staining,retain,Histologic and Pathology Features,exclude
+outer_001_feature_078,clinical_decline,"[75, None, None, None, None]",1,False,False,Clinician-rated performance and general condition,uncertain,Overall Performance Status,uncertain
+outer_001_feature_079,clinical_phenotype,"[None, None, 58, None, None]",1,False,False,Clinician-rated performance and general condition,uncertain,Overall Performance Status,uncertain
+outer_001_feature_080,clinical_severity_score,"[52, None, None, None, None]",1,False,False,Clinician-rated performance and general condition,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_082,comorbidities,"[None, 75, 54, 2, None]",3,False,False,Clinician-rated performance and general condition,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_083,complete_blood_count_result,"[None, None, 95, None, 59]",2,False,False,Other CBC abnormalities and marrow toxicity,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_085,confusion_present,"[25, None, 26, 29, 17]",4,False,True,Pretreatment neurologic symptoms,retain,Cognitive Confusion Status,retain
+outer_001_feature_086,contrast_agent_concentration,"[None, None, None, None, 93]",1,False,False,Diagnostic and assay procedure details,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_087,copd_presence,"[86, 31, None, None, None]",2,False,False,Obstructive lung disease and emphysema,retain,Chronic Lung Disease,retain
+outer_001_feature_088,copd_severity,"[None, 38, None, None, None]",1,False,False,Obstructive lung disease and emphysema,retain,Chronic Lung Disease,retain
+outer_001_feature_089,coronary_artery_disease,"[77, 22, None, 34, None]",3,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_090,cough_presence,"[None, 70, 80, 84, None]",3,False,False,Cough and wheezing,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_091,cough_productivity,"[None, None, 45, None, None]",1,False,False,Cough and wheezing,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_092,cough_severity,"[None, 83, None, None, 52]",2,False,False,Cough and wheezing,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_095,creatinine_clearance,"[5, 8, 24, 95, 18]",5,True,False,Renal filtration and nitrogen burden,retain,Renal Function Status,retain
+outer_001_feature_096,creatinine_level,"[7, 12, 16, 93, 53]",5,False,True,Renal filtration and nitrogen burden,retain,Renal Function Status,retain
+outer_001_feature_099,deconditioning,"[None, 32, 63, None, None]",2,False,False,Clinician-rated performance and general condition,uncertain,Overall Performance Status,uncertain
+outer_001_feature_100,diastolic_blood_pressure,"[None, None, 77, None, 71]",2,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,General Vitals and Metabolites,exclude
+outer_001_feature_101,disease_recurrence,"[None, 74, 97, 48, 26]",4,False,False,Disease response and recurrence records,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_103,dizziness_present,"[None, 21, 12, 4, 96]",4,True,False,Pretreatment neurologic symptoms,retain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_104,dural_sinus_patency,"[None, None, 84, None, 90]",2,False,False,Other neuroimaging findings,exclude,Neuroimaging Characteristics,exclude
+outer_001_feature_106,dyspnea,"[None, 88, None, None, 67]",2,False,False,Reported dyspnea severity,retain,Dyspnea Severity,retain
+outer_001_feature_108,dyspnea_severity,"[1, 17, 5, 23, 50]",5,True,True,Reported dyspnea severity,retain,Dyspnea Severity,retain
+outer_001_feature_109,ecog_performance_status,"[None, 49, 11, None, None]",2,False,False,Clinician-rated performance and general condition,uncertain,Overall Performance Status,uncertain
+outer_001_feature_111,egfr_mutation_status,"[None, None, None, 59, None]",1,False,False,"EGFR, ALK, and RET alteration status",exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_113,emphysema,"[50, 52, None, 16, 6]",4,True,False,Obstructive lung disease and emphysema,retain,Chronic Lung Disease,retain
+outer_001_feature_114,employment_status,"[44, None, 62, 44, None]",3,False,False,Demographics and social exposures,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_116,eortc_qlq_c30_cognitive_function,"[57, None, 65, None, 57]",3,False,False,Patient-reported quality of life and functioning,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_117,eortc_qlq_c30_emotional_function,"[67, None, None, None, 92]",2,False,False,Patient-reported quality of life and functioning,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_118,eortc_qlq_c30_global_health,"[None, 50, 89, None, 51]",3,False,False,Patient-reported quality of life and functioning,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_119,eortc_qlq_c30_nausea,"[None, None, 81, None, None]",1,False,False,Reported nausea,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_120,eortc_qlq_c30_physical_function,"[None, 51, None, None, 75]",2,False,False,Patient-reported quality of life and functioning,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_121,eortc_qlq_c30_social_function,"[None, None, None, None, 49]",1,False,False,Patient-reported quality of life and functioning,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_122,epidural_hemorrhage,"[None, 29, 1, 21, 15]",4,False,True,Intracranial hemorrhage and extra-axial collections,uncertain,Intracranial Hemorrhage Burden,retain
+outer_001_feature_123,erythema_presence,"[None, None, None, 76, None]",1,False,False,Skin redness and rash,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_124,esophagitis,"[76, 6, 59, None, None]",3,False,False,Other physical and local findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_125,estimated_glomerular_filtration_rate,"[41, 14, 93, 87, 84]",5,False,False,Renal filtration and nitrogen burden,retain,Renal Function Status,retain
+outer_001_feature_127,extra_axial_fluid_collection,"[69, None, 61, 14, None]",3,False,False,Intracranial hemorrhage and extra-axial collections,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_129,extremity_exam_findings,"[None, None, 78, None, None]",1,False,False,Other physical and local findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_130,family_history_of_breast_cancer,"[None, None, 87, 80, None]",2,False,False,Family history,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_131,family_history_of_colon_cancer,"[None, 24, None, None, None]",1,False,False,Family history,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_132,family_history_of_lung_cancer,"[39, None, 83, None, None]",2,False,False,Family history,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_133,family_history_of_myocardial_infarction,"[None, 97, None, None, None]",1,False,False,Family history,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_134,fatigue,"[None, 81, None, 49, 47]",3,False,False,Reported fatigue severity,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_135,febrile_neutropenia_presence,"[None, 57, None, 40, None]",2,False,False,Other CBC abnormalities and marrow toxicity,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_137,focal_intra_axial_lesion,"[None, None, 52, 46, 82]",3,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_141,gene_amplification_status,"[74, None, 100, None, None]",2,False,False,Broad molecular alteration status,exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_142,genetic_mutation_status,"[28, None, None, None, None]",1,False,False,Broad molecular alteration status,exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_143,genomic_dna_input_amount,"[None, None, 57, None, None]",1,False,False,Diagnostic and assay procedure details,exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_145,globe_appearance,"[None, None, 27, None, None]",1,False,False,Other neuroimaging findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_146,glucose_level,"[21, None, None, 3, None]",2,False,True,Glucose and serum electrolytes,uncertain,Baseline Glucose Level,retain
+outer_001_feature_147,growth_factor_support_use,"[12, 99, None, None, 95]",3,False,False,Prior platinum chemotherapy exposure,retain,Growth Factor Support,uncertain
+outer_001_feature_148,head_shape_and_trauma_status,"[92, None, None, None, None]",1,False,False,Other physical and local findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_150,heart_rate,"[3, None, 85, None, None]",2,False,False,Pretreatment heart rate,exclude,General Vitals and Metabolites,exclude
+outer_001_feature_152,height,"[None, None, None, None, 73]",1,False,False,Nutrition and body mass,exclude,General Vitals and Metabolites,exclude
+outer_001_feature_153,hematocrit,"[None, 36, 48, None, 2]",3,False,True,Other CBC abnormalities and marrow toxicity,uncertain,Anemia Burden,retain
+outer_001_feature_155,hemoglobin_level,"[None, None, None, 36, 48]",2,False,False,Other CBC abnormalities and marrow toxicity,uncertain,Anemia Burden,retain
+outer_001_feature_158,hilar_lymphadenopathy_presence,"[None, None, None, 67, None]",1,False,False,Primary lung tumor location and masses,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_159,hyperlipidemia_status,"[11, None, 86, None, None]",2,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_161,hypothyroidism_presence,"[None, None, None, 78, None]",1,False,False,Hypothyroidism,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_164,imaging_finding_cerebellar_fdg_uptake,"[None, None, None, 61, None]",1,False,False,Other neuroimaging findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_165,imaging_finding_right_lower_lobe_mass,"[13, None, 50, 18, 63]",4,False,False,Primary lung tumor location and masses,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_166,imaging_finding_upper_lobe_mass,"[97, 48, 36, None, 86]",4,False,False,Primary lung tumor location and masses,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_168,imaging_pet_suv_max,"[84, None, None, 42, 19]",3,False,False,PET tumor uptake,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_170,inhaler_usage_dosage,"[None, None, 34, None, None]",1,False,False,Obstructive lung disease and emphysema,retain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_173,intracranial_hemorrhage,"[96, 53, None, 63, 80]",4,False,False,Intracranial hemorrhage and extra-axial collections,uncertain,Intracranial Hemorrhage Burden,retain
+outer_001_feature_174,jugular_venous_distention_presence,"[None, 59, None, None, None]",1,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_176,ki67_proliferation_index,"[42, 4, 30, 89, 7]",5,True,True,Ki-67 proliferation index,retain,Cellular Proliferation Index,retain
+outer_001_feature_177,knee_osteoarthritis_presence,"[88, None, None, None, None]",1,False,False,Bone pain and skeletal complications,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_179,kras_g12c_variant_allele_frequency,"[22, 40, 9, None, 55]",4,True,True,KRAS G12C variant allele frequency,retain,KRAS G12C Variant Burden,retain
+outer_001_feature_180,ldh_level,"[None, 85, None, None, 97]",2,False,False,Serum tumor-associated markers,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_183,lesion_size,"[None, 5, 28, 43, 27]",4,False,False,Primary tumor and nonspecific lesion size,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_184,line_of_therapy,"[None, 55, None, 41, None]",2,False,False,Treatment line and oncology management phase,exclude,Treatment History Miscellaneous,exclude
+outer_001_feature_185,lipid_lowering_therapy_use,"[40, None, None, None, None]",1,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_188,liver_metastasis_presence,"[46, 92, 32, 5, 69]",5,True,True,Liver metastatic involvement,retain,Distant Visceral Metastasis,retain
+outer_001_feature_190,lobectomy_type,"[31, 77, None, 19, None]",3,False,False,Prior surgery and resection details,uncertain,Treatment History Miscellaneous,exclude
+outer_001_feature_192,lung_cancer_histology,"[53, 47, None, 82, 91]",4,False,False,Tumor histology and lineage staining,retain,Histologic and Pathology Features,exclude
+outer_001_feature_193,lung_cancer_stage,"[None, 95, None, None, 88]",2,False,False,Overall stage and distribution of metastases,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_194,lung_disease_diagnosis,"[27, 26, 37, None, None]",3,False,True,Obstructive lung disease and emphysema,retain,Chronic Lung Disease,retain
+outer_001_feature_196,lung_mass_suvmax,"[62, None, None, 97, None]",2,False,False,PET tumor uptake,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_197,lymph_node_dissection_status,"[63, 45, 94, None, 33]",4,False,True,Prior surgery and resection details,uncertain,Lymph Node Dissection Status,retain
+outer_001_feature_200,m_stage,"[None, 62, None, None, None]",1,False,False,Overall stage and distribution of metastases,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_201,mediastinal_lymph_node_dissection_performed,"[None, 44, None, None, 25]",2,False,False,Prior surgery and resection details,uncertain,Lymph Node Dissection Status,retain
+outer_001_feature_203,medication_calcium_carbonate,"[None, 82, None, 25, None]",2,False,False,Other medications and treatment doses,exclude,Treatment History Miscellaneous,exclude
+outer_001_feature_204,medication_cisplatin,"[65, 16, 96, 17, 23]",5,False,False,Prior platinum chemotherapy exposure,retain,Prior Platinum Exposure,retain
+outer_001_feature_205,medication_denosumab,"[95, 43, None, 92, None]",3,False,False,Bone-modifying treatment,uncertain,Treatment History Miscellaneous,exclude
+outer_001_feature_212,medication_pemetrexed,"[None, 76, 92, 74, 21]",4,False,False,Prior platinum chemotherapy exposure,retain,Treatment History Miscellaneous,exclude
+outer_001_feature_213,meningeal_thickening,"[None, None, None, None, 54]",1,False,False,Other neuroimaging findings,exclude,Neuroimaging Characteristics,exclude
+outer_001_feature_214,met_amplification_status,"[26, 56, 10, 55, 42]",5,True,True,MET amplification,retain,MET Gene Amplification,retain
+outer_001_feature_215,metabolic_response,"[None, None, 79, 64, None]",2,False,False,Disease response and recurrence records,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_216,metastasis_location,"[89, None, 35, 13, None]",3,False,False,Overall stage and distribution of metastases,exclude,Distant Visceral Metastasis,retain
+outer_001_feature_217,morphine_administered,"[None, None, 33, 60, None]",2,False,False,Other medications and treatment doses,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_219,msi_status,"[None, None, None, None, 83]",1,False,False,MSI and tumor mutational burden,exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_221,myelosuppression,"[61, None, None, 72, None]",2,False,False,Other CBC abnormalities and marrow toxicity,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_224,napsin_a_expression,"[82, 13, None, 52, 11]",4,False,False,Tumor histology and lineage staining,retain,Histologic and Pathology Features,exclude
+outer_001_feature_225,nausea_severity,"[None, 71, None, 96, None]",2,False,False,Reported nausea,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_226,necrotic_fluid_presence,"[None, 80, None, 22, 37]",3,False,False,Other physical and local findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_228,neutrophil_to_lymphocyte_ratio,"[2, 1, 2, 1, 1]",5,True,True,Circulating leukocyte balance,retain,Systemic Inflammation (NLR),retain
+outer_001_feature_229,night_sweats,"[60, None, None, None, None]",1,False,False,Documented pneumonia and systemic symptoms,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_231,nyha_class,"[None, 87, 90, None, 79]",3,False,False,"Respiratory rate, oxygenation, and NYHA class",exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_233,oncology_management_status,"[78, None, None, None, None]",1,False,False,Treatment line and oncology management phase,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_235,optic_chiasm_enhancement,"[None, None, 31, None, 62]",2,False,False,Other neuroimaging findings,exclude,Neuroimaging Characteristics,exclude
+outer_001_feature_238,organomegaly_presence,"[None, None, None, None, 58]",1,False,False,Other physical and local findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_241,oxygen_saturation,"[100, None, None, None, None]",1,False,False,"Respiratory rate, oxygenation, and NYHA class",exclude,General Vitals and Metabolites,exclude
+outer_001_feature_243,p40_expression,"[None, 46, None, None, 41]",2,False,False,Tumor histology and lineage staining,retain,Histologic and Pathology Features,exclude
+outer_001_feature_246,palliative_care_status,"[85, None, None, None, None]",1,False,False,Palliative care and documented wishes,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_247,patient_wishes,"[None, None, 70, None, None]",1,False,False,Palliative care and documented wishes,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_249,pembrolizumab_dose,"[None, None, None, 11, None]",1,False,False,Other medications and treatment doses,exclude,Treatment History Miscellaneous,exclude
+outer_001_feature_250,peripheral_neuropathy_grade,"[None, 60, 13, 47, None]",3,False,False,Peripheral neuropathy grade,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_251,peritumoral_edema,"[70, None, None, 86, None]",2,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_252,periventricular_signal_abnormality,"[10, None, None, 100, None]",2,False,False,Other neuroimaging findings,exclude,Neuroimaging Characteristics,exclude
+outer_001_feature_254,pi3k_pathway_activation,"[None, None, 75, 99, 13]",3,False,False,PI3K pathway activation,exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_258,platelet_count,"[None, 41, None, None, None]",1,False,False,Other CBC abnormalities and marrow toxicity,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_259,pleural_effusion,"[80, None, None, None, None]",1,False,False,Other physical and local findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_260,pneumonia_diagnosis,"[18, None, None, None, None]",1,False,True,Documented pneumonia and systemic symptoms,exclude,Pneumonia Burden,retain
+outer_001_feature_261,posterior_fossa_enhancement,"[None, None, 29, None, None]",1,False,False,Other neuroimaging findings,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_263,previous_radiation_therapy,"[93, None, None, 69, None]",2,False,False,Prior radiation therapy,exclude,Radiation Therapy Burden,retain
+outer_001_feature_264,primary_tumor_location,"[None, 89, None, 20, None]",2,False,False,Primary lung tumor location and masses,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_266,primary_tumor_size,"[None, 65, None, None, None]",1,False,False,Primary tumor and nonspecific lesion size,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_267,prior_platinum_chemotherapy,"[24, 3, None, 15, 46]",4,True,True,Prior platinum chemotherapy exposure,retain,Prior Platinum Exposure,retain
+outer_001_feature_270,progressive_exertional_symptoms,"[None, None, None, None, 43]",1,False,False,Reported dyspnea severity,retain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_272,psychiatric_symptom_presence,"[None, None, 14, None, 45]",2,False,False,Documented anxiety and psychiatric symptoms,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_275,pulmonary_lesion_presence,"[98, 84, 68, None, 44]",4,False,False,Primary lung tumor location and masses,uncertain,Pulmonary Nodularity,retain
+outer_001_feature_276,pulmonary_nodules_presence,"[6, 73, None, None, 20]",3,False,True,Primary lung tumor location and masses,uncertain,Pulmonary Nodularity,retain
+outer_001_feature_278,qlq_c30_physical_function,"[None, None, None, 91, 10]",2,False,False,Patient-reported quality of life and functioning,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_279,qlq_c30_role_function,"[None, None, 76, 83, 9]",3,False,False,Patient-reported quality of life and functioning,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_280,radiation_therapy_history,"[64, 28, None, None, None]",2,False,False,Prior radiation therapy,exclude,Radiation Therapy Burden,retain
+outer_001_feature_281,radiation_therapy_session_count,"[None, 23, 72, 24, None]",3,False,True,Prior radiation therapy,exclude,Radiation Therapy Burden,retain
+outer_001_feature_284,rash_presence,"[None, None, None, 68, None]",1,False,False,Skin redness and rash,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_286,renal_function_status,"[16, 78, None, None, 29]",3,False,False,Renal filtration and nitrogen burden,retain,Renal Function Status,retain
+outer_001_feature_287,respiratory_rate,"[None, None, None, None, 87]",1,False,False,"Respiratory rate, oxygenation, and NYHA class",exclude,General Vitals and Metabolites,exclude
+outer_001_feature_289,ret_rearrangement_status,"[None, None, 18, None, None]",1,False,False,"EGFR, ALK, and RET alteration status",exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_290,retroperitoneal_lymphadenopathy_presence,"[None, None, 55, None, None]",1,False,False,Overall stage and distribution of metastases,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_294,scapular_metastasis,"[55, None, None, None, None]",1,False,False,Osseous metastatic involvement,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_295,serum_albumin,"[None, 37, None, None, None]",1,False,False,Nutrition and body mass,exclude,General Vitals and Metabolites,exclude
+outer_001_feature_296,serum_bicarbonate,"[None, None, None, 75, None]",1,False,False,Glucose and serum electrolytes,uncertain,General Vitals and Metabolites,exclude
+outer_001_feature_297,serum_calcium,"[None, None, 49, None, None]",1,False,False,Glucose and serum electrolytes,uncertain,General Vitals and Metabolites,exclude
+outer_001_feature_298,serum_chloride,"[34, None, None, None, None]",1,False,False,Glucose and serum electrolytes,uncertain,General Vitals and Metabolites,exclude
+outer_001_feature_299,serum_creatinine,"[91, 25, None, None, 40]",3,False,False,Renal filtration and nitrogen burden,retain,Renal Function Status,retain
+outer_001_feature_300,serum_potassium,"[8, None, None, None, None]",1,False,False,Glucose and serum electrolytes,uncertain,General Vitals and Metabolites,exclude
+outer_001_feature_301,serum_sodium,"[None, None, None, 88, None]",1,False,False,Glucose and serum electrolytes,uncertain,General Vitals and Metabolites,exclude
+outer_001_feature_303,skeletal_compression_fracture,"[17, None, 51, 33, None]",3,False,True,Bone pain and skeletal complications,uncertain,Skeletal Compression Burden,retain
+outer_001_feature_309,subdural_hemorrhage,"[None, None, 21, 37, None]",2,False,False,Intracranial hemorrhage and extra-axial collections,uncertain,Intracranial Hemorrhage Burden,retain
+outer_001_feature_311,surgical_margin_status,"[72, 33, None, 71, None]",3,False,False,Prior surgery and resection details,uncertain,Treatment History Miscellaneous,exclude
+outer_001_feature_312,surgical_procedure,"[45, 96, None, 39, 39]",4,False,False,Prior surgery and resection details,uncertain,Treatment History Miscellaneous,exclude
+outer_001_feature_313,systolic_blood_pressure,"[None, None, 47, None, None]",1,False,False,"Cardiovascular disease, medicines, and blood pressure",exclude,General Vitals and Metabolites,exclude
+outer_001_feature_314,t_stage,"[None, 58, None, None, None]",1,False,False,Overall stage and distribution of metastases,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_315,targeted_therapy_use,"[83, None, None, 58, 34]",3,False,True,Prior targeted therapy,exclude,Targeted Therapy Exposure,retain
+outer_001_feature_319,tissue_thickening,"[81, None, None, 62, None]",2,False,False,Other physical and local findings,exclude,Histologic and Pathology Features,exclude
+outer_001_feature_320,tki_therapy_use,"[None, None, 40, None, 99]",2,False,False,Prior targeted therapy,exclude,Targeted Therapy Exposure,retain
+outer_001_feature_321,tobacco_smoking_history,"[None, None, 53, 98, None]",2,False,False,Demographics and social exposures,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_322,total_bilirubin,"[43, None, None, None, None]",1,False,False,Liver-related laboratory measurements,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_324,tp53_r273h_mutation_status,"[23, 54, 20, 51, None]",4,False,False,TP53 R273H mutation,exclude,Genomic and Molecular Profile,exclude
+outer_001_feature_329,treatment_response,"[None, 69, None, None, None]",1,False,False,Disease response and recurrence records,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_330,ttf1_expression,"[48, 2, 8, 9, 38]",5,True,True,Tumor histology and lineage staining,retain,Lung Adenocarcinoma Marker,retain
+outer_001_feature_332,tumor_differentiation,"[None, None, None, 26, None]",1,False,False,Tumor differentiation and WHO grade,exclude,Histologic and Pathology Features,exclude
+outer_001_feature_334,tumor_mutational_burden,"[15, 15, None, 85, 100]",4,False,False,MSI and tumor mutational burden,exclude,Tumor Mutational Burden,uncertain
+outer_001_feature_336,unintended_weight_change,"[58, None, None, None, None]",1,False,False,Nutrition and body mass,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_337,variant_allele_frequency,"[35, None, None, None, 89]",2,False,False,KRAS G12C variant allele frequency,retain,Genomic and Molecular Profile,exclude
+outer_001_feature_338,vasogenic_edema_presence,"[47, 18, None, 35, 22]",4,False,False,Intracranial lesion burden and associated edema,uncertain,Neuroimaging Characteristics,exclude
+outer_001_feature_340,ventricular_hemorrhage,"[87, 30, 4, 73, 12]",5,False,False,Intracranial hemorrhage and extra-axial collections,uncertain,Intracranial Hemorrhage Burden,retain
+outer_001_feature_341,ventricular_size,"[51, None, None, None, 56]",2,False,False,Other neuroimaging findings,exclude,Neuroimaging Characteristics,exclude
+outer_001_feature_342,vertebral_metastasis_presence,"[37, 39, 66, None, 24]",4,False,False,Osseous metastatic involvement,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_343,vinorelbine_administered,"[56, None, None, None, 77]",2,False,False,Prior platinum chemotherapy exposure,retain,Treatment History Miscellaneous,exclude
+outer_001_feature_344,visual_field_deficit,"[79, None, None, None, 81]",2,False,False,Pretreatment neurologic symptoms,retain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_345,vitamin_deficiency_anemia,"[59, None, 19, None, 85]",3,False,False,Other CBC abnormalities and marrow toxicity,uncertain,Patient Baseline and Comorbidities,exclude
+outer_001_feature_346,vitamin_supplement_use,"[None, 35, None, None, None]",1,False,False,Other medications and treatment doses,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_347,weight,"[36, 94, None, None, 28]",3,False,False,Nutrition and body mass,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_348,wheezing_presence,"[None, None, None, 31, None]",1,False,False,Cough and wheezing,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_349,white_blood_cell_count,"[4, 11, 6, 66, 5]",5,True,True,Circulating leukocyte balance,retain,White Blood Cell Count,retain
+outer_001_feature_350,who_grade,"[None, None, 98, None, 98]",2,False,False,Tumor differentiation and WHO grade,exclude,Patient Baseline and Comorbidities,exclude
+outer_001_feature_351,whole_brain_radiation_therapy,"[None, 67, 64, None, 60]",3,False,False,Prior radiation therapy,exclude,Radiation Therapy Burden,retain
+outer_001_feature_352,zoledronic_acid_dose_frequency,"[None, None, None, 53, 32]",2,False,False,Bone-modifying treatment,uncertain,Patient Baseline and Comorbidities,exclude

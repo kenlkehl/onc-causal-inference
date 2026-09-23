@@ -1,0 +1,73 @@
+# 09. Refine a schema after repeated extraction failures
+
+**Unabridged current template, with invented miniature inputs. No LLM was called.**
+
+Activation: Conditional: repeated feature-attributable training extraction failures
+
+
+
+Source: [_ontology_refinement_prompt](/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2_analysis.py:7304)
+
+## System message
+
+```text
+You refine one clinical extraction ontology from repeated validation failures on training patients. Return JSON only.
+```
+
+## User message
+
+```json
+{
+  "feature": {
+    "categories_or_unit": [
+      "Present",
+      "Absent"
+    ],
+    "description": "Documented emphysema.",
+    "feature_id": "example_emphysema",
+    "measurement_definition": "Explicit pretreatment documentation of emphysema presence or absence.",
+    "missing_value_rule": "Null if unreported; silence is not absence.",
+    "name": "emphysema",
+    "value_type": "binary"
+  },
+  "information_boundary": "These aggregate diagnostics come only from outer-training patients. No held-out patient text, treatment, or outcome is supplied.",
+  "job": "refine_stage2_feature_ontology_from_repeated_extraction_failures",
+  "repeated_failure_patterns": [
+    {
+      "allowed_categories": [
+        "Present",
+        "Absent"
+      ],
+      "example_values": [
+        "present on CT",
+        "positive"
+      ],
+      "failure_kind": "invalid_category",
+      "patient_count": 3,
+      "reason": "Repeated returned values are outside the declared categories."
+    }
+  ],
+  "response": {
+    "action": "keep|revise",
+    "categories_or_unit": [
+      "required for revise; empty only for unitless continuous"
+    ],
+    "description": "required for revise",
+    "measurement_definition": "required for revise",
+    "missing_value_rule": "required for revise",
+    "reason": "why the ontology is retained or changed",
+    "value_type": "binary|categorical|continuous|ordinal; required for revise"
+  },
+  "rules": [
+    "Refine only the supplied feature's extraction ontology; do not rename, merge, split, add, or drop a feature and do not change its causal roles.",
+    "The example values are prior model outputs that failed validation, not verified patient facts.",
+    "Use revise only when the repeated failures identify a correctable mismatch in value type, closed categories or unit, measurement definition, or missing-value rule.",
+    "Use keep when the current ontology is already appropriate and the failures do not justify a change.",
+    "A revised ontology must still define exactly one reusable patient-level scalar measurement.",
+    "Prefer a numeric continuous ontology when the named measurement is realistically extractable as one number; include one unit when applicable.",
+    "For binary variables return exactly two distinct extractable scalar categories; for categorical or ordinal variables return at least two.",
+    "Do not blindly add every failed output as a category; choose a stable, reproducible ontology and clarify how source documentation maps to it.",
+    "Return JSON only."
+  ]
+}
+```

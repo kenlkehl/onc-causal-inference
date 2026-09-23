@@ -1,0 +1,53 @@
+{
+  "frozen_hashes_verified": true,
+  "minimum_supplied_per_fold_median_univariable_q": 0.3,
+  "first_response_passed_validator": true,
+  "repair_calls": 0,
+  "tool_events": 0,
+  "usage": {
+    "input_tokens": 145675,
+    "cached_input_tokens": 0,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 19715,
+    "reasoning_output_tokens": 2330
+  },
+  "candidate_coverage": 217,
+  "representatives_in_at_least_four_top100_lists": 14,
+  "new_candidates_recurrence": {
+    "blood_urea_nitrogen": [
+      9,
+      98,
+      44,
+      7,
+      8
+    ],
+    "ck5_6_expression": [
+      29,
+      9,
+      7,
+      28,
+      4
+    ],
+    "creatinine_clearance": [
+      5,
+      8,
+      24,
+      95,
+      18
+    ],
+    "dizziness_present": [
+      null,
+      21,
+      12,
+      4,
+      96
+    ],
+    "emphysema": [
+      50,
+      52,
+      null,
+      16,
+      6
+    ]
+  }
+}

@@ -1,0 +1,246 @@
+{
+  "model": "gpt-6-sol",
+  "candidate_union_size": 217,
+  "sol_concepts": 58,
+  "gemma_concepts": 30,
+  "sol_decisions": {
+    "retain": 11,
+    "uncertain": 14,
+    "exclude": 33
+  },
+  "gemma_decisions": {
+    "retain": 21,
+    "uncertain": 3,
+    "exclude": 6
+  },
+  "sol_selected": 14,
+  "gemma_selected": 21,
+  "intersection": 9,
+  "union": 26,
+  "jaccard": 0.34615384615384615,
+  "shared": [
+    {
+      "feature_id": "outer_001_feature_108",
+      "name": "dyspnea_severity"
+    },
+    {
+      "feature_id": "outer_001_feature_176",
+      "name": "ki67_proliferation_index"
+    },
+    {
+      "feature_id": "outer_001_feature_179",
+      "name": "kras_g12c_variant_allele_frequency"
+    },
+    {
+      "feature_id": "outer_001_feature_188",
+      "name": "liver_metastasis_presence"
+    },
+    {
+      "feature_id": "outer_001_feature_214",
+      "name": "met_amplification_status"
+    },
+    {
+      "feature_id": "outer_001_feature_228",
+      "name": "neutrophil_to_lymphocyte_ratio"
+    },
+    {
+      "feature_id": "outer_001_feature_267",
+      "name": "prior_platinum_chemotherapy"
+    },
+    {
+      "feature_id": "outer_001_feature_330",
+      "name": "ttf1_expression"
+    },
+    {
+      "feature_id": "outer_001_feature_349",
+      "name": "white_blood_cell_count"
+    }
+  ],
+  "sol_only": [
+    {
+      "feature_id": "outer_001_feature_037",
+      "name": "blood_urea_nitrogen"
+    },
+    {
+      "feature_id": "outer_001_feature_076",
+      "name": "ck5_6_expression"
+    },
+    {
+      "feature_id": "outer_001_feature_095",
+      "name": "creatinine_clearance"
+    },
+    {
+      "feature_id": "outer_001_feature_103",
+      "name": "dizziness_present"
+    },
+    {
+      "feature_id": "outer_001_feature_113",
+      "name": "emphysema"
+    }
+  ],
+  "gemma_only": [
+    {
+      "feature_id": "outer_001_feature_085",
+      "name": "confusion_present"
+    },
+    {
+      "feature_id": "outer_001_feature_096",
+      "name": "creatinine_level"
+    },
+    {
+      "feature_id": "outer_001_feature_122",
+      "name": "epidural_hemorrhage"
+    },
+    {
+      "feature_id": "outer_001_feature_146",
+      "name": "glucose_level"
+    },
+    {
+      "feature_id": "outer_001_feature_153",
+      "name": "hematocrit"
+    },
+    {
+      "feature_id": "outer_001_feature_194",
+      "name": "lung_disease_diagnosis"
+    },
+    {
+      "feature_id": "outer_001_feature_197",
+      "name": "lymph_node_dissection_status"
+    },
+    {
+      "feature_id": "outer_001_feature_260",
+      "name": "pneumonia_diagnosis"
+    },
+    {
+      "feature_id": "outer_001_feature_276",
+      "name": "pulmonary_nodules_presence"
+    },
+    {
+      "feature_id": "outer_001_feature_281",
+      "name": "radiation_therapy_session_count"
+    },
+    {
+      "feature_id": "outer_001_feature_303",
+      "name": "skeletal_compression_fracture"
+    },
+    {
+      "feature_id": "outer_001_feature_315",
+      "name": "targeted_therapy_use"
+    }
+  ],
+  "sol_largest_groups": [
+    {
+      "name": "Other neuroimaging findings",
+      "decision": "exclude",
+      "size": 11
+    },
+    {
+      "name": "Prior platinum chemotherapy exposure",
+      "decision": "retain",
+      "size": 9
+    },
+    {
+      "name": "Cardiovascular disease, medicines, and blood pressure",
+      "decision": "exclude",
+      "size": 9
+    },
+    {
+      "name": "Renal filtration and nitrogen burden",
+      "decision": "retain",
+      "size": 8
+    },
+    {
+      "name": "Intracranial lesion burden and associated edema",
+      "decision": "uncertain",
+      "size": 8
+    },
+    {
+      "name": "Nutrition and body mass",
+      "decision": "exclude",
+      "size": 8
+    },
+    {
+      "name": "Primary lung tumor location and masses",
+      "decision": "uncertain",
+      "size": 7
+    },
+    {
+      "name": "Patient-reported quality of life and functioning",
+      "decision": "exclude",
+      "size": 7
+    },
+    {
+      "name": "Other CBC abnormalities and marrow toxicity",
+      "decision": "uncertain",
+      "size": 7
+    },
+    {
+      "name": "Other physical and local findings",
+      "decision": "exclude",
+      "size": 7
+    }
+  ],
+  "gemma_largest_groups": [
+    {
+      "name": "Patient Baseline and Comorbidities",
+      "decision": "exclude",
+      "size": 99
+    },
+    {
+      "name": "General Vitals and Metabolites",
+      "decision": "exclude",
+      "size": 18
+    },
+    {
+      "name": "Neuroimaging Characteristics",
+      "decision": "exclude",
+      "size": 15
+    },
+    {
+      "name": "Treatment History Miscellaneous",
+      "decision": "exclude",
+      "size": 13
+    },
+    {
+      "name": "Genomic and Molecular Profile",
+      "decision": "exclude",
+      "size": 12
+    },
+    {
+      "name": "Histologic and Pathology Features",
+      "decision": "exclude",
+      "size": 7
+    },
+    {
+      "name": "Renal Function Status",
+      "decision": "retain",
+      "size": 6
+    },
+    {
+      "name": "Chronic Lung Disease",
+      "decision": "retain",
+      "size": 5
+    },
+    {
+      "name": "Distant Visceral Metastasis",
+      "decision": "retain",
+      "size": 4
+    },
+    {
+      "name": "Intracranial Hemorrhage Burden",
+      "decision": "retain",
+      "size": 4
+    }
+  ],
+  "sol_representative_recurrence": {
+    "4": 4,
+    "5": 10
+  },
+  "gemma_representative_recurrence": {
+    "4": 5,
+    "5": 8,
+    "3": 6,
+    "2": 1,
+    "1": 1
+  }
+}

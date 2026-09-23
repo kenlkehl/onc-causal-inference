@@ -1,0 +1,19 @@
+{
+  "completed_utc": "2026-09-23T13:04:44.730958+00:00",
+  "state": "complete",
+  "actual_model": "gpt-6-sol",
+  "cli_version": "0.156.1",
+  "fallback_used": false,
+  "selected_modifiers": 14,
+  "oracle_modifiers_recovered": 1,
+  "new_estimator_fit": false,
+  "files_sha256": {
+    "REPORT_2026-09-23.md": "3607aa6c454bf451f0b6af79942ba08e6f9bb5ed072ecc40061e0e4a0a2b8010",
+    "MODEL_ACCESS_DIAGNOSIS_2026-09-23.md": "5e28286f4318c82a45a620fa03c02fc15265d83d2f746b626a6485c81c3bd78a",
+    "comparison.json": "7d3f7f86e85b8612d19a4eb098dcf4eefa27f6ba8457f102a8c0b6126d987f5d",
+    "oracle_recovery.json": "6f6f83bd436c96fbafb6ef2c02e19004748be2286b61e35fd7c6cf0ca3fcff2b",
+    "assessment_checks.json": "4ccc5a9fc1fca63fbeb2107fe0c4d948aab270cb67430b4510b8c0235e566863",
+    "candidate_comparison.csv": "0203a80cef6db8cd392e589e545e313a1469aa5afd9b2ca4344aeb78f54cd4d6",
+    "selection_frozen.json": "441b4a98e61185c9784764080e5d47a26df7f633f1f19645d3c3c28119f07a47"
+  }
+}

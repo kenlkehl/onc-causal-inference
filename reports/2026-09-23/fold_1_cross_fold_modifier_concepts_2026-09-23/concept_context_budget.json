@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-23T11:29:05.333110+00:00",
+  "completed_responses_before_this_call": 4,
+  "context_margin_tokens": 4096,
+  "initial_output_ceiling": 87372,
+  "logical_request_timeout_seconds": 5882.023418,
+  "model_context_tokens": 262144,
+  "prompt_tokens": 170676,
+  "remaining_response_repairs": 11,
+  "request_attempt_timeout_seconds": 3600.0
+}

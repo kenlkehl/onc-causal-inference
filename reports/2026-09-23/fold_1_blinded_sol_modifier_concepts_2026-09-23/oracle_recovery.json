@@ -1,0 +1,205 @@
+{
+  "at": "2026-09-23T13:04:44.575120+00:00",
+  "mapping_sha256": "d5a24b7444f4d947f8f36a6842cefb7d454bd13bc027a26e32a92e9d7f5f164a",
+  "mapping_source": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/oracle_recovery.json",
+  "direct": [
+    {
+      "oracle_variable": "age",
+      "true_role": "confounder",
+      "candidate_ids": [
+        "outer_001_feature_009"
+      ],
+      "selected_as_modifier": [],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [
+        "outer_001_feature_009"
+      ],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_009",
+          "name": "Demographics and social exposures",
+          "decision": "exclude"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "sex",
+      "true_role": "confounder",
+      "candidate_ids": [
+        "outer_001_feature_302"
+      ],
+      "selected_as_modifier": [],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [
+        "outer_001_feature_302"
+      ],
+      "containing_concepts": []
+    },
+    {
+      "oracle_variable": "ECOG",
+      "true_role": "confounder",
+      "candidate_ids": [
+        "outer_001_feature_109"
+      ],
+      "selected_as_modifier": [],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [
+        "outer_001_feature_109"
+      ],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_109",
+          "name": "Clinician-rated performance and general condition",
+          "decision": "uncertain"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "creatinine clearance",
+      "true_role": "confounder",
+      "candidate_ids": [
+        "outer_001_feature_095"
+      ],
+      "selected_as_modifier": [
+        "outer_001_feature_095"
+      ],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [
+        "outer_001_feature_095"
+      ],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_095",
+          "name": "Renal filtration and nitrogen burden",
+          "decision": "retain"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "prior platinum exposure",
+      "true_role": "confounder",
+      "candidate_ids": [
+        "outer_001_feature_267"
+      ],
+      "selected_as_modifier": [
+        "outer_001_feature_267"
+      ],
+      "gemma_selected_as_modifier": [
+        "outer_001_feature_267"
+      ],
+      "retained_as_confounder": [
+        "outer_001_feature_267"
+      ],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_267",
+          "name": "Prior platinum chemotherapy exposure",
+          "decision": "retain"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "histology",
+      "true_role": "effect_modifier",
+      "candidate_ids": [
+        "outer_001_feature_192"
+      ],
+      "selected_as_modifier": [],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_192",
+          "name": "Tumor histology and lineage staining",
+          "decision": "retain"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "EGFR status",
+      "true_role": "effect_modifier",
+      "candidate_ids": [
+        "outer_001_feature_032",
+        "outer_001_feature_111"
+      ],
+      "selected_as_modifier": [],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [
+        "outer_001_feature_032"
+      ],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_111",
+          "name": "EGFR, ALK, and RET alteration status",
+          "decision": "exclude"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "NLR",
+      "true_role": "effect_modifier",
+      "candidate_ids": [
+        "outer_001_feature_228"
+      ],
+      "selected_as_modifier": [
+        "outer_001_feature_228"
+      ],
+      "gemma_selected_as_modifier": [
+        "outer_001_feature_228"
+      ],
+      "retained_as_confounder": [
+        "outer_001_feature_228"
+      ],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_228",
+          "name": "Circulating leukocyte balance",
+          "decision": "retain"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "brain metastasis presence",
+      "true_role": "effect_modifier",
+      "candidate_ids": [
+        "outer_001_feature_052"
+      ],
+      "selected_as_modifier": [],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_052",
+          "name": "Intracranial lesion burden and associated edema",
+          "decision": "uncertain"
+        }
+      ]
+    },
+    {
+      "oracle_variable": "hemoglobin",
+      "true_role": "effect_modifier",
+      "candidate_ids": [
+        "outer_001_feature_155"
+      ],
+      "selected_as_modifier": [],
+      "gemma_selected_as_modifier": [],
+      "retained_as_confounder": [
+        "outer_001_feature_155"
+      ],
+      "containing_concepts": [
+        {
+          "feature_id": "outer_001_feature_155",
+          "name": "Other CBC abnormalities and marrow toxicity",
+          "decision": "uncertain"
+        }
+      ]
+    }
+  ],
+  "direct_oracle_modifiers_recovered": 1,
+  "oracle_modifier_total": 5,
+  "direct_oracle_confounders_preserved": 5,
+  "oracle_confounder_total": 5,
+  "confounder_count": 189,
+  "modifier_count": 14,
+  "note": "Direct recovery uses the unchanged pre-existing identity mapping; proxies are not counted as direct recovery. No estimator was fit."
+}

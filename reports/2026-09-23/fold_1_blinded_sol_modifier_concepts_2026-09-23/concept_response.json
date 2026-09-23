@@ -1,0 +1,2712 @@
+{
+  "overall_interpretation": "The clearest recurring modifier signal is pretreatment neutrophil-to-lymphocyte ratio. Several other concepts recur through distinct measurements, especially renal function, patient-reported dyspnea, tumor lineage markers, selected molecular findings, and prior platinum exposure. Their evidence is less consistent across methods. No cited univariable interaction has a compelling adjusted q-value, and the five overlapping splits are not independent replications. These are candidates for a later effect model, not demonstrated causal modifiers or evidence of improved causal estimation. Treatment history and response variables require particular care with timing.",
+  "concepts": [
+    {
+      "concept_id": "systemic_inflammation",
+      "name": "Circulating leukocyte balance",
+      "relationship_summary": "Neutrophil-to-lymphocyte ratio measures relative cell balance; absolute lymphocyte and total white blood cell counts are related but distinct facets.",
+      "modifier_rationale": "The ratio ranks first or second in every fold and has consistent forest, penalized interaction, and mostly R-learner support. White blood cell count has weaker complementary adjusted evidence; lymphocyte count alone is less consistent.",
+      "limitations": "Univariable q-values remain high. Correlated blood counts and overlapping splits limit claims of independent support.",
+      "member_feature_ids": [
+        "outer_001_feature_001",
+        "outer_001_feature_228",
+        "outer_001_feature_349"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_228",
+          "reason": "The explicitly reported or CBC-derived ratio directly captures the repeatedly supported leukocyte balance."
+        },
+        {
+          "feature_id": "outer_001_feature_349",
+          "reason": "Total white blood cell count captures absolute leukocyte abundance, which the ratio does not, and has its own adjusted signal."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_228:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_228:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_228:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_349:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_349:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_001:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "renal_function",
+      "name": "Renal filtration and nitrogen burden",
+      "relationship_summary": "Creatinine clearance, eGFR, and the mislabeled GFR feature are related filtration measures. Features 096, 286, and 299 are aliases for serum creatinine. BUN and CKD stage are distinct facets.",
+      "modifier_rationale": "Filtration and BUN measures recur across folds. Creatinine clearance and BUN have repeated positive forest evidence, while serum creatinine aliases show less agreement with R-learners and orthogonal linear models.",
+      "limitations": "Feature 033 is named as an FGFR biomarker but defined as GFR; its definition governs interpretation. eGFR feature 125 may also extract estimated creatinine clearance, blurring distinctions. Renal measures are correlated.",
+      "member_feature_ids": [
+        "outer_001_feature_033",
+        "outer_001_feature_037",
+        "outer_001_feature_075",
+        "outer_001_feature_095",
+        "outer_001_feature_096",
+        "outer_001_feature_125",
+        "outer_001_feature_286",
+        "outer_001_feature_299"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_095",
+          "reason": "Pretreatment creatinine clearance is a specified filtration measurement with repeated forest support and avoids the naming ambiguity of feature 033."
+        },
+        {
+          "feature_id": "outer_001_feature_037",
+          "reason": "BUN provides a distinct nitrogen-burden measurement with repeated forest support and some univariable and R-learner support."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_095:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_095:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_037:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_037:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_096:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_125:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "dyspnea",
+      "name": "Reported dyspnea severity",
+      "relationship_summary": "Features 106 and 108 measure similar severity, but 108 requires a PRO-CTCAE grade whereas 106 also maps clinical descriptions. Progressive exertional symptoms are an indirect, broader proxy.",
+      "modifier_rationale": "The PRO-CTCAE grade has repeated forest, orthogonal linear, and R-learner support across folds. The broader dyspnea measure shows substantially weaker adjusted support.",
+      "limitations": "The PRO grade can be missing when no questionnaire was completed. Neither univariable adjusted q-values nor the broader symptom measure corroborate a simple log-odds interaction.",
+      "member_feature_ids": [
+        "outer_001_feature_106",
+        "outer_001_feature_108",
+        "outer_001_feature_270"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_108",
+          "reason": "The specified patient-reported 0\u20134 grade is the precise measurement carrying the recurring adjusted signal."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_108:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_108:orthogonal_linear",
+          "inner_folds": [
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_108:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_106:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "tumor_lineage",
+      "name": "Tumor histology and lineage staining",
+      "relationship_summary": "Histology is a diagnostic category; CK5/6 and p40 reflect squamous differentiation, while TTF-1, Napsin A, and CK7 reflect related but nonidentical glandular-lineage staining.",
+      "modifier_rationale": "CK5/6 and TTF-1 recur prominently with forest and univariable evidence. Napsin A provides supporting recurrence in the glandular facet; CK7, p40, and broad histology have less consistent adjusted evidence.",
+      "limitations": "Stains are correlated with histology and with whether particular tests were ordered. Univariable q-values are not persuasive after adjustment.",
+      "member_feature_ids": [
+        "outer_001_feature_076",
+        "outer_001_feature_077",
+        "outer_001_feature_192",
+        "outer_001_feature_224",
+        "outer_001_feature_243",
+        "outer_001_feature_330"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_076",
+          "reason": "CK5/6 directly measures the squamous-lineage facet and has recurring own-feature evidence."
+        },
+        {
+          "feature_id": "outer_001_feature_330",
+          "reason": "TTF-1 supplies a complementary glandular-lineage facet with recurring own-feature evidence; adding Napsin A would be more redundant."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_076:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_076:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_330:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_330:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_224:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_192:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "kras_g12c_vaf",
+      "name": "KRAS G12C variant allele frequency",
+      "relationship_summary": "Feature 179 is specific to KRAS G12C; feature 337 is a generic variant allele frequency and only an indirect proxy.",
+      "modifier_rationale": "The KRAS-specific measure recurs with forest and penalized interaction evidence; the generic VAF measure does not reproduce that pattern.",
+      "limitations": "Feature 179 is null for wild-type, untested, or unquantified tumors, so its measured population is selected. Univariable evidence is weak.",
+      "member_feature_ids": [
+        "outer_001_feature_179",
+        "outer_001_feature_337"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_179",
+          "reason": "It retains the mutation-specific meaning of the recurring signal; generic VAF could refer to another variant."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_179:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_179:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_337:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "met_amplification",
+      "name": "MET amplification",
+      "relationship_summary": "A specific gene amplification result; generic amplification status is an indirect proxy and is assigned to the broader molecular-status concept.",
+      "modifier_rationale": "MET status has repeated positive forest importance and orthogonal linear support, especially in fold 3.",
+      "limitations": "Univariable evidence is weak and molecular testing availability may select patients.",
+      "member_feature_ids": [
+        "outer_001_feature_214"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_214",
+          "reason": "It directly identifies MET amplification and has its own recurring adjusted evidence."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_214:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_214:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_214:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "proliferation",
+      "name": "Ki-67 proliferation index",
+      "relationship_summary": "A numeric tumor proliferation measurement, distinct from descriptive differentiation or WHO grade.",
+      "modifier_rationale": "Ki-67 recurs in every top-100 list and has forest, penalized interaction, and some orthogonal support.",
+      "limitations": "Univariable q-values are high and the magnitude and direction of heterogeneity are not established.",
+      "member_feature_ids": [
+        "outer_001_feature_176"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_176",
+          "reason": "It is the existing quantitative proliferation measurement carrying the recurring signal."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_176:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_176:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_176:orthogonal_linear",
+          "inner_folds": [
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "platinum_history",
+      "name": "Prior platinum chemotherapy exposure",
+      "relationship_summary": "Feature 267 explicitly describes prior platinum therapy. Cisplatin and carboplatin are agent-specific facets; regimen, pemetrexed, cycles, and adjuvant therapy describe related but different treatment history.",
+      "modifier_rationale": "Prior platinum and cisplatin recur with penalized interaction and some forest evidence. The prior-platinum measure has the clearest pretreatment timing.",
+      "limitations": "Treatment choice and line of therapy may confound apparent modification. Feature 204 mixes prior administration with regimen mentions, while feature 061 also counts prescription or mention as administration.",
+      "member_feature_ids": [
+        "outer_001_feature_006",
+        "outer_001_feature_061",
+        "outer_001_feature_072",
+        "outer_001_feature_073",
+        "outer_001_feature_147",
+        "outer_001_feature_204",
+        "outer_001_feature_212",
+        "outer_001_feature_267",
+        "outer_001_feature_343"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_267",
+          "reason": "It directly specifies platinum exposure before the current treatment context; the agent-specific proxies reinforce this history but have less secure timing or narrower coverage."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_267:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_267:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_204:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_061:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "obstructive_lung",
+      "name": "Obstructive lung disease and emphysema",
+      "relationship_summary": "COPD diagnosis and severity, emphysema, broad lung-disease diagnosis, and inhaler dose are related but distinct facets or indirect care proxies.",
+      "modifier_rationale": "Emphysema has more consistent forest and R-learner support than COPD diagnosis or severity. Broad lung disease has some weaker corroboration.",
+      "limitations": "Emphysema is coded absent when unmentioned, so imaging and documentation patterns may affect it. COPD evidence is inconsistent.",
+      "member_feature_ids": [
+        "outer_001_feature_087",
+        "outer_001_feature_088",
+        "outer_001_feature_113",
+        "outer_001_feature_170",
+        "outer_001_feature_194"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_113",
+          "reason": "Documented emphysema is the facet with the clearest repeated own-feature adjusted evidence."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_113:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_113:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_087:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_194:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "neurologic_symptoms",
+      "name": "Pretreatment neurologic symptoms",
+      "relationship_summary": "Dizziness and confusion are distinct symptoms; visual-field deficit is a focal neurologic facet.",
+      "modifier_rationale": "Dizziness has recurring forest evidence and an univariable signal in several folds. Confusion has strong R-learner support but failed or uneven univariable evaluability and no forest support.",
+      "limitations": "Symptom documentation and rare categories may shape these results. The evidence does not justify treating all neurologic symptoms as interchangeable.",
+      "member_feature_ids": [
+        "outer_001_feature_085",
+        "outer_001_feature_103",
+        "outer_001_feature_344"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_103",
+          "reason": "Dizziness is a specific pretreatment symptom with the most complementary evidence in this concept."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_103:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_103:univariable",
+          "inner_folds": [
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_085:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_085:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "liver_metastasis",
+      "name": "Liver metastatic involvement",
+      "relationship_summary": "A site-specific distant metastasis measurement, distinct from global stage or a list of metastatic locations.",
+      "modifier_rationale": "Liver metastasis appears across all folds with forest support and a localized orthogonal signal.",
+      "limitations": "Univariable evidence is mixed and site-specific disease burden may reflect prognosis or treatment selection.",
+      "member_feature_ids": [
+        "outer_001_feature_188"
+      ],
+      "decision": "retain",
+      "representatives": [
+        {
+          "feature_id": "outer_001_feature_188",
+          "reason": "It directly records pretreatment liver metastatic involvement and has its own cross-fold evidence."
+        }
+      ],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_188:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_188:orthogonal_linear",
+          "inner_folds": [
+            4
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_188:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "brain_hemorrhage",
+      "name": "Intracranial hemorrhage and extra-axial collections",
+      "relationship_summary": "Ventricular, epidural, and subdural hemorrhages are distinct sites; intracranial hemorrhage is a broad umbrella, while extra-axial fluid collection also includes nonhemorrhagic fluid.",
+      "modifier_rationale": "Ventricular hemorrhage has repeated orthogonal and penalized support; epidural hemorrhage has forest and R-learner support in several folds. Results differ by site and method.",
+      "limitations": "Univariable fits for several hemorrhage measures are entirely unevaluable; this is missing evidence rather than a negative vote. Rare findings and imaging selection make representative selection premature.",
+      "member_feature_ids": [
+        "outer_001_feature_122",
+        "outer_001_feature_127",
+        "outer_001_feature_173",
+        "outer_001_feature_309",
+        "outer_001_feature_340"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_340:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_340:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_122:causal_forest",
+          "inner_folds": [
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_173:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "skeletal_metastasis",
+      "name": "Osseous metastatic involvement",
+      "relationship_summary": "Bone metastasis is the broad measure; vertebral, scapular, and calvarial findings are site-specific facets, and lesion morphology describes appearance.",
+      "modifier_rationale": "Several skeletal proxies recur, but their adjusted signals are inconsistent and do not converge on a single measurement.",
+      "limitations": "Site-specific null values often mean a site was not reported. Recurrence of related imaging terms alone does not establish modification.",
+      "member_feature_ids": [
+        "outer_001_feature_042",
+        "outer_001_feature_043",
+        "outer_001_feature_057",
+        "outer_001_feature_294",
+        "outer_001_feature_342"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_043:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_057:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_342:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "skeletal_symptoms",
+      "name": "Bone pain and skeletal complications",
+      "relationship_summary": "Pain presence and pain location are different symptom facets; compression fracture is a structural complication, and knee osteoarthritis is a distinct possible pain source.",
+      "modifier_rationale": "Compression fracture has repeated R-learner support, while bone pain measures are weaker and location lacks meaningful R-learner support.",
+      "limitations": "These measurements cannot be substituted for one another, and the apparent fracture signal is not corroborated by univariable interaction evidence.",
+      "member_feature_ids": [
+        "outer_001_feature_044",
+        "outer_001_feature_045",
+        "outer_001_feature_177",
+        "outer_001_feature_303"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_303:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_044:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_045:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "brain_lesion_burden",
+      "name": "Intracranial lesion burden and associated edema",
+      "relationship_summary": "Metastasis presence, lesion count and size, focal lesions, enhancement, and edema measure different aspects of intracranial disease.",
+      "modifier_rationale": "Lesion count and some imaging facets recur, but forest, orthogonal, and univariable evidence does not consistently identify the same aspect.",
+      "limitations": "Imaging availability, indication, and whether a lesion is metastatic are unresolved for some proxies.",
+      "member_feature_ids": [
+        "outer_001_feature_048",
+        "outer_001_feature_049",
+        "outer_001_feature_050",
+        "outer_001_feature_052",
+        "outer_001_feature_053",
+        "outer_001_feature_137",
+        "outer_001_feature_251",
+        "outer_001_feature_338"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_049:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_052:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_338:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "neuroimaging_other",
+      "name": "Other neuroimaging findings",
+      "relationship_summary": "Brainstem signal and size, dural sinus patency, ocular and optic findings, cerebellar uptake, meningeal and periventricular findings, posterior fossa enhancement, and ventricular size are distinct imaging findings grouped by their neuroimaging source.",
+      "modifier_rationale": "Signals are isolated to particular methods or folds and do not support one coherent biological modifier within this source group.",
+      "limitations": "The members are not aliases. Many are rarely mentioned or poorly evaluable; no representative can stand for all findings.",
+      "member_feature_ids": [
+        "outer_001_feature_030",
+        "outer_001_feature_054",
+        "outer_001_feature_055",
+        "outer_001_feature_104",
+        "outer_001_feature_145",
+        "outer_001_feature_164",
+        "outer_001_feature_213",
+        "outer_001_feature_235",
+        "outer_001_feature_252",
+        "outer_001_feature_261",
+        "outer_001_feature_341"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_235:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_235:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_054:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_341:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "adrenal_disease",
+      "name": "Adrenal metastatic findings",
+      "relationship_summary": "Metastasis presence and adrenal nodule size are different facets; nodule size does not itself establish metastasis.",
+      "modifier_rationale": "Both recur modestly with forest evidence, but other methods give little support.",
+      "limitations": "Size is null if no nodule is documented and can represent benign findings.",
+      "member_feature_ids": [
+        "outer_001_feature_007",
+        "outer_001_feature_008"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_007:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_008:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "tumor_size",
+      "name": "Primary tumor and nonspecific lesion size",
+      "relationship_summary": "Primary tumor size is specific to the lung primary; lesion size does not specify lesion type and is only an indirect proxy.",
+      "modifier_rationale": "Nonspecific lesion size has recurrent univariable and forest signals, but the specifically defined primary tumor size does not corroborate them.",
+      "limitations": "The lesion-size extraction target is ambiguous, so its recurrence does not justify substituting it for primary tumor size.",
+      "member_feature_ids": [
+        "outer_001_feature_183",
+        "outer_001_feature_266"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_183:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_266:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "tumor_location",
+      "name": "Primary lung tumor location and masses",
+      "relationship_summary": "Primary tumor lobe is a location category; right lower-lobe and upper-lobe masses are site-specific imaging proxies. Pulmonary lesions and nodules are broader findings, while airway involvement and hilar nodes describe different local extent.",
+      "modifier_rationale": "Right lower-lobe mass shows recurring forest evidence, but primary tumor location and other lobe findings do not consistently agree.",
+      "limitations": "A mass or nodule need not be the primary tumor; broad pulmonary-lesion presence is especially nonspecific.",
+      "member_feature_ids": [
+        "outer_001_feature_010",
+        "outer_001_feature_158",
+        "outer_001_feature_165",
+        "outer_001_feature_166",
+        "outer_001_feature_264",
+        "outer_001_feature_275",
+        "outer_001_feature_276"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_165:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_264:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_275:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "tumor_pet_activity",
+      "name": "PET tumor uptake",
+      "relationship_summary": "Primary lung mass SUVmax is specific; the general PET SUVmax may instead refer to the most metabolic lesion.",
+      "modifier_rationale": "The two measures have scattered forest results without complementary interaction evidence.",
+      "limitations": "Different lesions can define the maxima, and PET availability may select patients.",
+      "member_feature_ids": [
+        "outer_001_feature_168",
+        "outer_001_feature_196"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_168:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_196:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "cancer_extent",
+      "name": "Overall stage and distribution of metastases",
+      "relationship_summary": "Overall lung stage, T and M components, named metastatic locations, and retroperitoneal nodes describe different aspects of extent.",
+      "modifier_rationale": "These candidates recur in lists, but adjusted effect evidence is limited or inconsistent.",
+      "limitations": "A single metastatic-location category can omit simultaneous sites; stage may mix clinical and pathologic timing.",
+      "member_feature_ids": [
+        "outer_001_feature_193",
+        "outer_001_feature_200",
+        "outer_001_feature_216",
+        "outer_001_feature_290",
+        "outer_001_feature_314"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_193:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_216:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_200:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "performance",
+      "name": "Clinician-rated performance and general condition",
+      "relationship_summary": "ECOG is a defined performance scale; clinical decline, phenotype, severity, deconditioning, and comorbidity count are related but less specific facets.",
+      "modifier_rationale": "ECOG has a localized univariable signal, and deconditioning has penalized signals, but adjusted evidence does not converge.",
+      "limitations": "General condition can reflect prognosis and clinician documentation rather than treatment-effect modification.",
+      "member_feature_ids": [
+        "outer_001_feature_078",
+        "outer_001_feature_079",
+        "outer_001_feature_080",
+        "outer_001_feature_082",
+        "outer_001_feature_099",
+        "outer_001_feature_109"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_109:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_099:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_082:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "patient_reported_function",
+      "name": "Patient-reported quality of life and functioning",
+      "relationship_summary": "Physical function features 120 and 278 are near aliases. Global health, role, social, cognitive, and emotional function are separate questionnaire domains.",
+      "modifier_rationale": "Several domains recur in candidate lists, but orthogonal and penalized interactions are uniformly absent and R-learner gains are weak.",
+      "limitations": "Questionnaire timing and completion can vary. Recurrence across correlated domains does not establish a shared modifier.",
+      "member_feature_ids": [
+        "outer_001_feature_116",
+        "outer_001_feature_117",
+        "outer_001_feature_118",
+        "outer_001_feature_120",
+        "outer_001_feature_121",
+        "outer_001_feature_278",
+        "outer_001_feature_279"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_120:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_278:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_279:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "nutrition_body_mass",
+      "name": "Nutrition and body mass",
+      "relationship_summary": "Appetite, calorie intake, serum albumin, unintentional weight loss, BMI, height, and the near-aliases body weight and weight measure different nutritional or anthropometric facets.",
+      "modifier_rationale": "Individual members recur, but adjusted signals do not converge on a specific facet.",
+      "limitations": "Weight loss is null when explicitly denied, and appetite wording may include resumed intake after treatment.",
+      "member_feature_ids": [
+        "outer_001_feature_024",
+        "outer_001_feature_038",
+        "outer_001_feature_040",
+        "outer_001_feature_056",
+        "outer_001_feature_152",
+        "outer_001_feature_295",
+        "outer_001_feature_336",
+        "outer_001_feature_347"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_024:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_295:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_347:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "fatigue",
+      "name": "Reported fatigue severity",
+      "relationship_summary": "Features 060 and 134 are near aliases for a 0\u20134 fatigue grade, although 134 also maps descriptive terms.",
+      "modifier_rationale": "Both recur in lists, but adjusted interaction and forest evidence is limited and inconsistent.",
+      "limitations": "PRO grades and mapped clinical descriptions may have different missingness and timing.",
+      "member_feature_ids": [
+        "outer_001_feature_060",
+        "outer_001_feature_134"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_060:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_134:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "nausea",
+      "name": "Reported nausea",
+      "relationship_summary": "QLQ-C30 nausea score and CTCAE nausea severity are distinct instruments for the same symptom.",
+      "modifier_rationale": "Both have weak adjusted and univariable evidence despite occasional candidate-list recurrence.",
+      "limitations": "Symptom assessments may occur during treatment; baseline timing needs verification.",
+      "member_feature_ids": [
+        "outer_001_feature_119",
+        "outer_001_feature_225"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_119:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_225:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "mental_health",
+      "name": "Documented anxiety and psychiatric symptoms",
+      "relationship_summary": "Anxiety is specific; the psychiatric-symptom indicator is a broader indirect proxy.",
+      "modifier_rationale": "Anxiety has repeated nominal univariable findings and limited orthogonal support, whereas broad psychiatric symptoms do not corroborate a consistent adjusted signal.",
+      "limitations": "Anxiety is coded absent when unmentioned, so documentation can drive apparent differences. Univariable q-values are high.",
+      "member_feature_ids": [
+        "outer_001_feature_022",
+        "outer_001_feature_272"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_022:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_022:orthogonal_linear",
+          "inner_folds": [
+            2,
+            3
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_272:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "other_blood_counts",
+      "name": "Other CBC abnormalities and marrow toxicity",
+      "relationship_summary": "CBC interpretation, hematocrit, hemoglobin, platelets, myelosuppression, febrile neutropenia, and vitamin-deficiency anemia are distinct blood or toxicity facets.",
+      "modifier_rationale": "CBC interpretation and hematocrit have isolated penalized signals, but specific numeric blood measures and clinical toxicity labels do not align.",
+      "limitations": "Some toxicity labels may refer to prior chemotherapy effects rather than untreated baseline state.",
+      "member_feature_ids": [
+        "outer_001_feature_083",
+        "outer_001_feature_135",
+        "outer_001_feature_153",
+        "outer_001_feature_155",
+        "outer_001_feature_221",
+        "outer_001_feature_258",
+        "outer_001_feature_345"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_083:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_155:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_153:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "liver_laboratories",
+      "name": "Liver-related laboratory measurements",
+      "relationship_summary": "ALP, AST, and bilirubin are distinct laboratory facets; none is an alias of another.",
+      "modifier_rationale": "An isolated ALP univariable finding is not supported by the other liver tests or adjusted methods.",
+      "limitations": "These tests can reflect multiple conditions, including metastatic disease and noncancer illness.",
+      "member_feature_ids": [
+        "outer_001_feature_015",
+        "outer_001_feature_026",
+        "outer_001_feature_322"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_015:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_026:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "metabolic_laboratories",
+      "name": "Glucose and serum electrolytes",
+      "relationship_summary": "Glucose, bicarbonate, calcium, chloride, potassium, and sodium are different metabolic measurements, grouped by laboratory panel rather than interchangeability.",
+      "modifier_rationale": "Glucose has a localized univariable interaction; the other measures do not corroborate a recurring concept-level modifier.",
+      "limitations": "This source grouping contains separate physiology. No single representative would measure all members.",
+      "member_feature_ids": [
+        "outer_001_feature_146",
+        "outer_001_feature_296",
+        "outer_001_feature_297",
+        "outer_001_feature_298",
+        "outer_001_feature_300",
+        "outer_001_feature_301"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_146:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_146:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_296:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "cardiovascular",
+      "name": "Cardiovascular disease, medicines, and blood pressure",
+      "relationship_summary": "Systolic features 036 and 313 are aliases; diastolic pressure, CAD, antihypertensive and anticoagulant use, hyperlipidemia, lipid-lowering therapy, and jugular distention are distinct facets.",
+      "modifier_rationale": "Candidate-list recurrence is broad, but adjusted effect evidence is weak or inconsistent across these facets.",
+      "limitations": "Feature 159 treats statin use as hyperlipidemia, overlapping feature 185. Medication use can reflect prescribing choices.",
+      "member_feature_ids": [
+        "outer_001_feature_019",
+        "outer_001_feature_021",
+        "outer_001_feature_036",
+        "outer_001_feature_089",
+        "outer_001_feature_100",
+        "outer_001_feature_159",
+        "outer_001_feature_174",
+        "outer_001_feature_185",
+        "outer_001_feature_313"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_036:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_159:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_185:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "cough",
+      "name": "Cough and wheezing",
+      "relationship_summary": "Cough presence, productivity, and severity are distinct symptom facets; wheezing is a related respiratory finding.",
+      "modifier_rationale": "Productivity has an isolated orthogonal signal, while the broader cough measures and wheezing offer little corroboration.",
+      "limitations": "Productivity and severity are only defined among documented cough presentations.",
+      "member_feature_ids": [
+        "outer_001_feature_090",
+        "outer_001_feature_091",
+        "outer_001_feature_092",
+        "outer_001_feature_348"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_091:orthogonal_linear",
+          "inner_folds": [
+            3
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_090:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_348:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "respiratory_vitals",
+      "name": "Respiratory rate, oxygenation, and NYHA class",
+      "relationship_summary": "Respiratory rate and oxygen saturation are distinct vital signs; NYHA class is a heart-failure functional scale rather than a direct pulmonary measure.",
+      "modifier_rationale": "These measures recur in lists but lack consistent adjusted effect evidence.",
+      "limitations": "Oxygen saturation extraction discards whether supplemental oxygen was in use, limiting interpretation.",
+      "member_feature_ids": [
+        "outer_001_feature_231",
+        "outer_001_feature_241",
+        "outer_001_feature_287"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_241:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_287:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_231:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "infection_inflammation",
+      "name": "Documented pneumonia and systemic symptoms",
+      "relationship_summary": "Pneumonia and night sweats are different clinical findings, linked only as possible inflammatory presentations.",
+      "modifier_rationale": "Pneumonia shows one nominal univariable finding without sustained adjusted support; night sweats show little evidence.",
+      "limitations": "The broad link does not make the members interchangeable.",
+      "member_feature_ids": [
+        "outer_001_feature_229",
+        "outer_001_feature_260"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_260:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_229:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "other_molecular_status",
+      "name": "Broad molecular alteration status",
+      "relationship_summary": "Actionability, any mutation, and any amplification are broad but different molecular summaries.",
+      "modifier_rationale": "Some nominal signals appear for actionability, but forest evidence is absent or weak for these broad summaries.",
+      "limitations": "They conflate genes with different mechanisms and depend on test coverage and actionability classification.",
+      "member_feature_ids": [
+        "outer_001_feature_004",
+        "outer_001_feature_141",
+        "outer_001_feature_142"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_004:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_141:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_142:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "targetable_gene_status",
+      "name": "EGFR, ALK, and RET alteration status",
+      "relationship_summary": "These are three separate gene results grouped by their specific molecular-testing role; they are not aliases.",
+      "modifier_rationale": "None shows a consistent adjusted heterogeneity pattern across methods.",
+      "limitations": "The ALK and RET univariable interactions are entirely unevaluable, which supplies no negative vote.",
+      "member_feature_ids": [
+        "outer_001_feature_013",
+        "outer_001_feature_111",
+        "outer_001_feature_289"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_013:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_111:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_289:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "cdkn2a",
+      "name": "CDKN2A loss",
+      "relationship_summary": "A specific tumor deletion status, distinct from general mutation or amplification.",
+      "modifier_rationale": "It recurs across candidate lists but adjusted evidence is modest and localized.",
+      "limitations": "The definition may classify absence from a findings table as wild-type, which could depend on assay reporting.",
+      "member_feature_ids": [
+        "outer_001_feature_064"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_064:orthogonal_linear",
+          "inner_folds": [
+            2
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_064:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "pi3k",
+      "name": "PI3K pathway activation",
+      "relationship_summary": "A specific pathway status inferred from PIK3CA findings or explicit reporting.",
+      "modifier_rationale": "A late forest signal is not corroborated by the other methods.",
+      "limitations": "Mutation inference and explicit pathway assessment may not be equivalent.",
+      "member_feature_ids": [
+        "outer_001_feature_254"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_254:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_254:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "tp53",
+      "name": "TP53 R273H mutation",
+      "relationship_summary": "A specific TP53 variant result.",
+      "modifier_rationale": "Candidate-list recurrence exceeds its interaction support; forest and univariable results are inconsistent.",
+      "limitations": "The feature is null when TP53 is reported without variant-level detail.",
+      "member_feature_ids": [
+        "outer_001_feature_324"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_324:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_324:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "mutation_load",
+      "name": "MSI and tumor mutational burden",
+      "relationship_summary": "MSI and categorical tumor mutational burden are distinct genomic measures related to mutation processes.",
+      "modifier_rationale": "TMB has modest forest recurrence but little corroborating interaction evidence; MSI univariable fits are unevaluable.",
+      "limitations": "One measure cannot stand in for the other, and test availability may differ.",
+      "member_feature_ids": [
+        "outer_001_feature_219",
+        "outer_001_feature_334"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_334:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_219:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "tumor_markers",
+      "name": "Serum tumor-associated markers",
+      "relationship_summary": "CEA and LDH are distinct laboratory markers, not aliases.",
+      "modifier_rationale": "CEA has nominal univariable findings in two folds, but forest and R-learner evidence conflicts; LDH is weak.",
+      "limitations": "Prognostic associations could explain candidate recurrence without modification.",
+      "member_feature_ids": [
+        "outer_001_feature_065",
+        "outer_001_feature_180"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_065:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_065:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_180:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "differentiation_grade",
+      "name": "Tumor differentiation and WHO grade",
+      "relationship_summary": "Descriptive differentiation and WHO grade are related pathology grades but have different definitions.",
+      "modifier_rationale": "A few isolated penalized signals lack corroboration.",
+      "limitations": "WHO grade is entirely unevaluable in univariable interactions here.",
+      "member_feature_ids": [
+        "outer_001_feature_332",
+        "outer_001_feature_350"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_332:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_350:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "prior_surgery",
+      "name": "Prior surgery and resection details",
+      "relationship_summary": "Any surgery, lobectomy type, node dissection, mediastinal dissection, and margin status describe different aspects of prior procedures. Appendectomy is an unrelated surgical-history indicator.",
+      "modifier_rationale": "Node dissection has recurring penalized and R-learner signals, but general surgery, lobectomy, and margin measures offer mixed corroboration.",
+      "limitations": "The node-dissection features have different missing-value rules, and feature 201 is entirely unevaluable univariably. Prior treatment selection and stage may drive apparent effects.",
+      "member_feature_ids": [
+        "outer_001_feature_023",
+        "outer_001_feature_190",
+        "outer_001_feature_197",
+        "outer_001_feature_201",
+        "outer_001_feature_311",
+        "outer_001_feature_312"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_197:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_201:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_312:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "radiation_history",
+      "name": "Prior radiation therapy",
+      "relationship_summary": "Features 263 and 280 are near aliases with different missingness rules; session count is a dose-history facet and whole-brain radiation is site-specific.",
+      "modifier_rationale": "The history indicators have mixed forest results; session count has isolated orthogonal signals without broad agreement.",
+      "limitations": "Whole-brain radiation is linked to brain disease, and session count is observed only for documented treatment.",
+      "member_feature_ids": [
+        "outer_001_feature_263",
+        "outer_001_feature_280",
+        "outer_001_feature_281",
+        "outer_001_feature_351"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_280:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_281:orthogonal_linear",
+          "inner_folds": [
+            1,
+            4
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_351:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "bone_support",
+      "name": "Bone-modifying treatment",
+      "relationship_summary": "Denosumab use and zoledronic-acid dosing frequency are different treatment facets.",
+      "modifier_rationale": "Denosumab has repeated nominal univariable and R-learner evidence, whereas zoledronic-acid frequency does not corroborate it.",
+      "limitations": "Use may follow bone metastasis or skeletal risk, and treatment timing relative to the index treatment is ambiguous.",
+      "member_feature_ids": [
+        "outer_001_feature_205",
+        "outer_001_feature_352"
+      ],
+      "decision": "uncertain",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_205:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_205:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_352:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "targeted_treatment",
+      "name": "Prior targeted therapy",
+      "relationship_summary": "Any targeted therapy and TKI therapy overlap, but TKI is a narrower treatment class.",
+      "modifier_rationale": "Signals are mostly penalized or nominal univariable, without forest corroboration.",
+      "limitations": "Prescribed and received therapy may be conflated, and timing relative to the index treatment requires confirmation.",
+      "member_feature_ids": [
+        "outer_001_feature_315",
+        "outer_001_feature_320"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_315:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_315:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_320:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "treatment_phase",
+      "name": "Treatment line and oncology management phase",
+      "relationship_summary": "Line of therapy and management status capture different aspects of the clinical treatment phase.",
+      "modifier_rationale": "Neither has sustained complementary interaction evidence.",
+      "limitations": "Current and most recent regimen can differ; management phase may already reflect response or disease course.",
+      "member_feature_ids": [
+        "outer_001_feature_184",
+        "outer_001_feature_233"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_184:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_233:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "response_recurrence",
+      "name": "Disease response and recurrence records",
+      "relationship_summary": "Metabolic response and overall treatment response are related response measurements; disease recurrence is a distinct disease-course event.",
+      "modifier_rationale": "Recurrence has adjusted model signals but its univariable fit is entirely unevaluable. Response measures have weak modification evidence.",
+      "limitations": "These may occur after the index treatment. A record calling them pretreatment does not establish that they precede the treatment whose effect is modeled.",
+      "member_feature_ids": [
+        "outer_001_feature_101",
+        "outer_001_feature_215",
+        "outer_001_feature_329"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_101:orthogonal_linear",
+          "inner_folds": [
+            2,
+            3
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_101:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_215:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_329:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "care_preferences",
+      "name": "Palliative care and documented wishes",
+      "relationship_summary": "Palliative-care status and documented treatment wishes describe different care-context facets.",
+      "modifier_rationale": "Neither has consistent adjusted interaction support.",
+      "limitations": "These may reflect advanced disease, clinician decisions, or documentation intensity.",
+      "member_feature_ids": [
+        "outer_001_feature_246",
+        "outer_001_feature_247"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_246:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_247:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "supportive_medicines",
+      "name": "Other medications and treatment doses",
+      "relationship_summary": "Calcium carbonate, vitamins, morphine, and pembrolizumab dose are distinct exposures grouped only as medication-record measurements.",
+      "modifier_rationale": "Isolated penalized or orthogonal signals do not converge on a shared modifier.",
+      "limitations": "This is a source grouping, not an interchangeable clinical construct. Pembrolizumab dose may be part of the treatment being compared.",
+      "member_feature_ids": [
+        "outer_001_feature_203",
+        "outer_001_feature_217",
+        "outer_001_feature_249",
+        "outer_001_feature_346"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_249:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_203:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_346:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "peripheral_neuropathy",
+      "name": "Peripheral neuropathy grade",
+      "relationship_summary": "A specific graded symptom or toxicity measurement.",
+      "modifier_rationale": "Some penalized interaction selections are not corroborated by univariable or orthogonal evidence.",
+      "limitations": "Neuropathy may be a prior-treatment toxicity, so baseline timing and treatment history matter.",
+      "member_feature_ids": [
+        "outer_001_feature_250"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_250:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_250:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "social_exposure",
+      "name": "Demographics and social exposures",
+      "relationship_summary": "Age, employment, tobacco pack-years, and alcohol drinks per week are distinct background measurements.",
+      "modifier_rationale": "They recur as candidate variables but show little complementary effect-modification evidence.",
+      "limitations": "Association with treatment choice or prognosis would not establish modification.",
+      "member_feature_ids": [
+        "outer_001_feature_009",
+        "outer_001_feature_012",
+        "outer_001_feature_114",
+        "outer_001_feature_321"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_009:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_114:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_321:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "family_history",
+      "name": "Family history",
+      "relationship_summary": "Breast, colon, and lung cancer history and myocardial-infarction history are different familial conditions.",
+      "modifier_rationale": "No site has consistent adjusted heterogeneity evidence.",
+      "limitations": "Some members have limited univariable evaluability and different definitions of an undocumented negative.",
+      "member_feature_ids": [
+        "outer_001_feature_130",
+        "outer_001_feature_131",
+        "outer_001_feature_132",
+        "outer_001_feature_133"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_131:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_133:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "procedural_metadata",
+      "name": "Diagnostic and assay procedure details",
+      "relationship_summary": "Biopsy method, imaging contrast concentration, and genomic DNA input describe different diagnostic procedures.",
+      "modifier_rationale": "Occasional model selections are not corroborated across methods or clinically coherent as a shared modifier.",
+      "limitations": "These measurements can identify testing workflows and sites rather than patient biology.",
+      "member_feature_ids": [
+        "outer_001_feature_034",
+        "outer_001_feature_086",
+        "outer_001_feature_143"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_034:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_143:penalized_interactions",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "other_exam_findings",
+      "name": "Other physical and local findings",
+      "relationship_summary": "Extremity examination, head shape, organomegaly, pleural effusion, tissue thickening, necrotic fluid, and esophagitis are distinct findings grouped by clinical examination or imaging documentation.",
+      "modifier_rationale": "Isolated nominal or model-specific signals do not converge on one modifier.",
+      "limitations": "These findings have different causes and should not be treated as substitutes.",
+      "member_feature_ids": [
+        "outer_001_feature_124",
+        "outer_001_feature_129",
+        "outer_001_feature_148",
+        "outer_001_feature_226",
+        "outer_001_feature_238",
+        "outer_001_feature_259",
+        "outer_001_feature_319"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_124:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_259:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_226:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "skin_findings",
+      "name": "Skin redness and rash",
+      "relationship_summary": "Erythema and rash are related but distinct skin findings.",
+      "modifier_rationale": "Neither has sustained complementary evidence of effect modification.",
+      "limitations": "Both may reflect prior treatment or reporting practices despite appearing in pretreatment records.",
+      "member_feature_ids": [
+        "outer_001_feature_123",
+        "outer_001_feature_284"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_123:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_284:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "hypothyroidism",
+      "name": "Hypothyroidism",
+      "relationship_summary": "A specific endocrine diagnosis inferred from diagnosis, medication, or laboratory documentation.",
+      "modifier_rationale": "Some univariable suggestions are unsupported by forest, orthogonal, and penalized interaction evidence.",
+      "limitations": "The definition codes unmentioned disease as absent and mixes direct diagnosis with treatment proxies.",
+      "member_feature_ids": [
+        "outer_001_feature_161"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_161:univariable",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_161:causal_forest",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "concept_id": "heart_rate",
+      "name": "Pretreatment heart rate",
+      "relationship_summary": "A single vital-sign measurement.",
+      "modifier_rationale": "An early R-learner signal is not sustained across folds or supported by other methods.",
+      "limitations": "Heart rate may reflect transient illness or measurement context.",
+      "member_feature_ids": [
+        "outer_001_feature_150"
+      ],
+      "decision": "exclude",
+      "representatives": [],
+      "evidence": [
+        {
+          "evidence_id": "crossfold:outer_001_feature_150:univariable_rlearner",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        },
+        {
+          "evidence_id": "crossfold:outer_001_feature_150:orthogonal_linear",
+          "inner_folds": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      ]
+    }
+  ]
+}

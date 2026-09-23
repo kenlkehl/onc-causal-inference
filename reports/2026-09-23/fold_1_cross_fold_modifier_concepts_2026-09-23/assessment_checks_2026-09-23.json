@@ -1,0 +1,348 @@
+{
+  "at": "2026-09-23T11:40:19.531560+00:00",
+  "excluded_candidates_in_at_least_four_folds": [
+    {
+      "concept": "Genomic and Molecular Profile",
+      "feature_id": "outer_001_feature_064",
+      "folds": 5,
+      "llm_rationale": "These markers failed to show consistent recurrence across folds.",
+      "name": "cdkn2a_mutation_status",
+      "ranks": [
+        71,
+        10,
+        41,
+        45,
+        66
+      ]
+    },
+    {
+      "concept": "Genomic and Molecular Profile",
+      "feature_id": "outer_001_feature_324",
+      "folds": 4,
+      "llm_rationale": "These markers failed to show consistent recurrence across folds.",
+      "name": "tp53_r273h_mutation_status",
+      "ranks": [
+        23,
+        54,
+        20,
+        51,
+        null
+      ]
+    },
+    {
+      "concept": "Histologic and Pathology Features",
+      "feature_id": "outer_001_feature_076",
+      "folds": 5,
+      "llm_rationale": "Lack of consistent empirical support across folds.",
+      "name": "ck5_6_expression",
+      "ranks": [
+        29,
+        9,
+        7,
+        28,
+        4
+      ]
+    },
+    {
+      "concept": "Histologic and Pathology Features",
+      "feature_id": "outer_001_feature_192",
+      "folds": 4,
+      "llm_rationale": "Lack of consistent empirical support across folds.",
+      "name": "lung_cancer_histology",
+      "ranks": [
+        53,
+        47,
+        null,
+        82,
+        91
+      ]
+    },
+    {
+      "concept": "Histologic and Pathology Features",
+      "feature_id": "outer_001_feature_224",
+      "folds": 4,
+      "llm_rationale": "Lack of consistent empirical support across folds.",
+      "name": "napsin_a_expression",
+      "ranks": [
+        82,
+        13,
+        null,
+        52,
+        11
+      ]
+    },
+    {
+      "concept": "Neuroimaging Characteristics",
+      "feature_id": "outer_001_feature_338",
+      "folds": 4,
+      "llm_rationale": "Lack of consistency across folds for non-hemorrhagic brain features.",
+      "name": "vasogenic_edema_presence",
+      "ranks": [
+        47,
+        18,
+        null,
+        35,
+        22
+      ]
+    },
+    {
+      "concept": "Treatment History Miscellaneous",
+      "feature_id": "outer_001_feature_006",
+      "folds": 4,
+      "llm_rationale": "Lack of cross-fold recurrence.",
+      "name": "adjuvant_chemotherapy_administered",
+      "ranks": [
+        90,
+        66,
+        null,
+        8,
+        31
+      ]
+    },
+    {
+      "concept": "Treatment History Miscellaneous",
+      "feature_id": "outer_001_feature_212",
+      "folds": 4,
+      "llm_rationale": "Lack of cross-fold recurrence.",
+      "name": "medication_pemetrexed",
+      "ranks": [
+        null,
+        76,
+        92,
+        74,
+        21
+      ]
+    },
+    {
+      "concept": "Treatment History Miscellaneous",
+      "feature_id": "outer_001_feature_312",
+      "folds": 4,
+      "llm_rationale": "Lack of cross-fold recurrence.",
+      "name": "surgical_procedure",
+      "ranks": [
+        45,
+        96,
+        null,
+        39,
+        39
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_001",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "absolute_lymphocyte_count",
+      "ranks": [
+        14,
+        20,
+        null,
+        38,
+        3
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_024",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "appetite_status",
+      "ranks": [
+        49,
+        63,
+        null,
+        6,
+        64
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_034",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "biopsy_method",
+      "ranks": [
+        30,
+        86,
+        91,
+        null,
+        78
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_057",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "calvarium_lytic_sclerotic_lesions",
+      "ranks": [
+        66,
+        90,
+        22,
+        10,
+        null
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_101",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "disease_recurrence",
+      "ranks": [
+        null,
+        74,
+        97,
+        48,
+        26
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_103",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "dizziness_present",
+      "ranks": [
+        null,
+        21,
+        12,
+        4,
+        96
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_165",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "imaging_finding_right_lower_lobe_mass",
+      "ranks": [
+        13,
+        null,
+        50,
+        18,
+        63
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_166",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "imaging_finding_upper_lobe_mass",
+      "ranks": [
+        97,
+        48,
+        36,
+        null,
+        86
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_183",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "lesion_size",
+      "ranks": [
+        null,
+        5,
+        28,
+        43,
+        27
+      ]
+    },
+    {
+      "concept": "Patient Baseline and Comorbidities",
+      "feature_id": "outer_001_feature_342",
+      "folds": 4,
+      "llm_rationale": "No consistent recurrence of these features across folds.",
+      "name": "vertebral_metastasis_presence",
+      "ranks": [
+        37,
+        39,
+        66,
+        null,
+        24
+      ]
+    },
+    {
+      "concept": "General Vitals and Metabolites",
+      "feature_id": "outer_001_feature_037",
+      "folds": 5,
+      "llm_rationale": "These features failed to show consistent recurrence in top-100 lists.",
+      "name": "blood_urea_nitrogen",
+      "ranks": [
+        9,
+        98,
+        44,
+        7,
+        8
+      ]
+    }
+  ],
+  "generated_report_hash_verified": true,
+  "input_union": 217,
+  "largest_excluded_concept": {
+    "members": 99,
+    "name": "Patient Baseline and Comorbidities"
+  },
+  "response_history": [
+    {
+      "concepts": 25,
+      "covered_candidates": 67,
+      "file": "raw_response_001.json",
+      "same_selected_set_as_final": true,
+      "selected_modifiers": 21,
+      "sha256": "e94b19225b204d380166ba1649377d24ffb389c51a7497a79fe21762e608013e"
+    },
+    {
+      "concepts": 25,
+      "covered_candidates": 67,
+      "file": "raw_response_002.json",
+      "same_selected_set_as_final": true,
+      "selected_modifiers": 21,
+      "sha256": "3039098cd62549c69d0acee423aa760125e14e9f013e74e0f93ca45c295ee9fe"
+    },
+    {
+      "concepts": 25,
+      "covered_candidates": 67,
+      "file": "raw_response_003.json",
+      "same_selected_set_as_final": true,
+      "selected_modifiers": 21,
+      "sha256": "a784a54efc3022cf728afcca1d6137c8cadfeccd19e88c725f7006a6b44fa73b"
+    },
+    {
+      "concepts": 30,
+      "covered_candidates": 211,
+      "file": "raw_response_004.json",
+      "same_selected_set_as_final": true,
+      "selected_modifiers": 21,
+      "sha256": "dd4e5eff1e4e7c4767bf9b5dda5b9e2a85ad4555a5e18e33bd50bc64a710a4dc"
+    },
+    {
+      "concepts": 30,
+      "covered_candidates": 217,
+      "file": "raw_response_005.json",
+      "same_selected_set_as_final": true,
+      "selected_modifiers": 21,
+      "sha256": "1018a2131cf90c022cf587132ba205879a2ea5cc37ba906758e36b34f832fb26"
+    }
+  ],
+  "retained_concept_frequency_distribution": {
+    "1": 1,
+    "2": 1,
+    "4": 6,
+    "5": 13
+  },
+  "selection_files_verified": true,
+  "selection_sha256": "470744e2f67b6746dd646dbd5eba499963d018daa3c15e487e7fff1a3b7b65eb",
+  "top100_frequency_distribution": {
+    "1": 73,
+    "2": 61,
+    "3": 42,
+    "4": 26,
+    "5": 15
+  }
+}

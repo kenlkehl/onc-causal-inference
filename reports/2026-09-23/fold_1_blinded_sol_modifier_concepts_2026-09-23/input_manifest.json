@@ -1,0 +1,21 @@
+{
+  "created_utc": "2026-09-23T12:17:21.994163+00:00",
+  "requested_model": "gpt-6-sol",
+  "source_prompt_sha256": "841cb6b61c7c69648896e60ae7a808629779d2ef70b975b9d7d3cd4df807fe1a",
+  "blinded_input_sha256": "905881c4f2016b8b80cfb891eac271633eecdfb04202050834bc5cd8a2b8ab92",
+  "review_prompt_sha256": "4650c582b581926282f58396247e822d2c398b7e8de8dc10f2564d2a1bd3f8e3",
+  "candidate_count": 217,
+  "top_n_per_fold": 100,
+  "isolation_directory": "/tmp/blinded-modifier-review-z26zebxw",
+  "intended_blinding": "OS mount namespace with no repository, reports, source datasets, conversation history, or previous review; same candidate definitions and numerical evidence; tool use disabled where supported and explicitly prohibited. Output structurally validated and hashed before oracle comparison.",
+  "prior_result_supplied": false,
+  "oracle_supplied": false,
+  "review_model": "gpt-6-sol",
+  "review_model_status": "capability_probe_succeeded_cli_0_156_1",
+  "fallback_model_authorized": "gpt-5.6-sol",
+  "fallback_authorization": "User: First try to figure out why I don\u2019t have gpt 6 sol which was released yesterday. Then if unable use 5.6",
+  "temporary_cli_install": "/tmp/codex-01561-probe-f7_3j_p0",
+  "codex_binary": "/tmp/codex-01561-probe-f7_3j_p0/node_modules/@openai/codex-linux-x64/vendor/x86_64-unknown-linux-musl/bin/codex",
+  "cli_version": "0.156.1",
+  "codex_binary_sha256": "0b2e9301d6100dddda3b9d5c80ebaeaa3a2f1962388f2f36f6b96a9f08b1f33f"
+}

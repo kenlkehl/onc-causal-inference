@@ -1,0 +1,262 @@
+{
+  "at": "2026-09-23T11:34:19.920749+00:00",
+  "direct": [
+    {
+      "candidate_ids": [
+        "outer_001_feature_009"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "exclude",
+          "name": "Patient Baseline and Comorbidities"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_009"
+      ],
+      "oracle_variable": "age",
+      "retained_as_confounder": [
+        "outer_001_feature_009"
+      ],
+      "selected_as_modifier": [],
+      "true_role": "confounder"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_302"
+      ],
+      "containing_concepts": [],
+      "in_top100_union": [],
+      "oracle_variable": "sex",
+      "retained_as_confounder": [
+        "outer_001_feature_302"
+      ],
+      "selected_as_modifier": [],
+      "true_role": "confounder"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_109"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "uncertain",
+          "name": "Overall Performance Status"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_109"
+      ],
+      "oracle_variable": "ECOG",
+      "retained_as_confounder": [
+        "outer_001_feature_109"
+      ],
+      "selected_as_modifier": [],
+      "true_role": "confounder"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_095"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "retain",
+          "name": "Renal Function Status"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_095"
+      ],
+      "oracle_variable": "creatinine clearance",
+      "retained_as_confounder": [
+        "outer_001_feature_095"
+      ],
+      "selected_as_modifier": [],
+      "true_role": "confounder"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_267"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "retain",
+          "name": "Prior Platinum Exposure"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_267"
+      ],
+      "oracle_variable": "prior platinum exposure",
+      "retained_as_confounder": [
+        "outer_001_feature_267"
+      ],
+      "selected_as_modifier": [
+        "outer_001_feature_267"
+      ],
+      "true_role": "confounder"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_192"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "exclude",
+          "name": "Histologic and Pathology Features"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_192"
+      ],
+      "oracle_variable": "histology",
+      "retained_as_confounder": [],
+      "selected_as_modifier": [],
+      "true_role": "effect_modifier"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_032",
+        "outer_001_feature_111"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "exclude",
+          "name": "Genomic and Molecular Profile"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_111"
+      ],
+      "oracle_variable": "EGFR status",
+      "retained_as_confounder": [
+        "outer_001_feature_032"
+      ],
+      "selected_as_modifier": [],
+      "true_role": "effect_modifier"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_228"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "retain",
+          "name": "Systemic Inflammation (NLR)"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_228"
+      ],
+      "oracle_variable": "NLR",
+      "retained_as_confounder": [
+        "outer_001_feature_228"
+      ],
+      "selected_as_modifier": [
+        "outer_001_feature_228"
+      ],
+      "true_role": "effect_modifier"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_052"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "exclude",
+          "name": "Neuroimaging Characteristics"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_052"
+      ],
+      "oracle_variable": "brain metastasis presence",
+      "retained_as_confounder": [],
+      "selected_as_modifier": [],
+      "true_role": "effect_modifier"
+    },
+    {
+      "candidate_ids": [
+        "outer_001_feature_155"
+      ],
+      "containing_concepts": [
+        {
+          "decision": "retain",
+          "name": "Anemia Burden"
+        }
+      ],
+      "in_top100_union": [
+        "outer_001_feature_155"
+      ],
+      "oracle_variable": "hemoglobin",
+      "retained_as_confounder": [
+        "outer_001_feature_155"
+      ],
+      "selected_as_modifier": [],
+      "true_role": "effect_modifier"
+    }
+  ],
+  "mapping_sha256": "d5a24b7444f4d947f8f36a6842cefb7d454bd13bc027a26e32a92e9d7f5f164a",
+  "selected_vs_previous64": {
+    "added": [
+      "outer_001_feature_096",
+      "outer_001_feature_153",
+      "outer_001_feature_260",
+      "outer_001_feature_276",
+      "outer_001_feature_303",
+      "outer_001_feature_315"
+    ],
+    "overlap": 15,
+    "removed": [
+      "outer_001_feature_001",
+      "outer_001_feature_006",
+      "outer_001_feature_022",
+      "outer_001_feature_037",
+      "outer_001_feature_049",
+      "outer_001_feature_057",
+      "outer_001_feature_064",
+      "outer_001_feature_076",
+      "outer_001_feature_086",
+      "outer_001_feature_099",
+      "outer_001_feature_101",
+      "outer_001_feature_103",
+      "outer_001_feature_124",
+      "outer_001_feature_125",
+      "outer_001_feature_135",
+      "outer_001_feature_147",
+      "outer_001_feature_159",
+      "outer_001_feature_165",
+      "outer_001_feature_166",
+      "outer_001_feature_170",
+      "outer_001_feature_173",
+      "outer_001_feature_174",
+      "outer_001_feature_183",
+      "outer_001_feature_190",
+      "outer_001_feature_201",
+      "outer_001_feature_204",
+      "outer_001_feature_205",
+      "outer_001_feature_212",
+      "outer_001_feature_215",
+      "outer_001_feature_216",
+      "outer_001_feature_224",
+      "outer_001_feature_243",
+      "outer_001_feature_282",
+      "outer_001_feature_295",
+      "outer_001_feature_299",
+      "outer_001_feature_314",
+      "outer_001_feature_329",
+      "outer_001_feature_332",
+      "outer_001_feature_333",
+      "outer_001_feature_334",
+      "outer_001_feature_335",
+      "outer_001_feature_337",
+      "outer_001_feature_338",
+      "outer_001_feature_340",
+      "outer_001_feature_345",
+      "outer_001_feature_347",
+      "outer_001_feature_348",
+      "outer_001_feature_351",
+      "outer_001_feature_352"
+    ]
+  }
+}

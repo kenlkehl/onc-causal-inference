@@ -1,0 +1,111 @@
+{
+  "at": "2026-09-23T10:14:22.481936+00:00",
+  "baseline_commit": "568ef7a",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_modifier_ranking.py": "3a79c9200fcff152e4cbcf930658b1adfa3c887460b8d068a76db2deb9dc6793",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/definitions.json": "2544b5eafd086725e4f6fdf213d18a65a794a8be407924d6eef27f51eb7a4101",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/count_result.json": "fc623933aa171eed6b7e748fa1d8cc7e152cb42b79f7a805b2d8bba5bee21b55",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/PROTOCOL_2026-09-23.md": "5fdb6d27842d29d0ccf8eb597527c54b12811e48d0db9d416d6238fcef1ba3e9",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/common.py": "c50ac4ad83ce801e84bda784a3889945606fddd25c10642f0aa6e565595d6493",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/extend_rankings.py": "bc2edbe6909bdf501ccc45cdc5472044145771566fcec54f5f95544805c8ea8c"
+  },
+  "model": {
+    "endpoint_urls_are_transport_only": true,
+    "extraction": null,
+    "extraction_runtime_continuation": null,
+    "primary": {
+      "actual_model_identity": {
+        "parent": null,
+        "revision": null,
+        "root": "nvidia/Gemma-4-31B-IT-NVFP4",
+        "served_id": "gemma4-31b"
+      },
+      "endpoint_observations": [
+        {
+          "advertised_model_ids": [
+            "gemma4-31b"
+          ],
+          "endpoint": "http://sn4622130540:8000/v1",
+          "selected_model_advertised": true,
+          "selected_model_record": {
+            "id": "gemma4-31b",
+            "parent": null,
+            "revision": null,
+            "root": "nvidia/Gemma-4-31B-IT-NVFP4"
+          }
+        }
+      ],
+      "live_endpoint_verified": true,
+      "model_family": "gemma4",
+      "role": "primary",
+      "sampling_model": "nvidia/Gemma-4-31B-IT-NVFP4",
+      "selected_model": "gemma4-31b"
+    },
+    "schema_version": "stage2_endpoint_model_identity_v1",
+    "selection_consolidation_runtime": null
+  },
+  "n": 100,
+  "no_numerical_or_extraction_rerun": true,
+  "no_outer_test_or_oracle_inputs": true,
+  "policy": {
+    "categorical_min_count": 5,
+    "coefficient_tolerance": 1e-07,
+    "internal_cv_folds": 3,
+    "l1_ratio": 0.8,
+    "max_iter": 5000,
+    "max_propensity": 0.9,
+    "maximum_log10_alpha": -1.0,
+    "min_propensity": 0.1,
+    "minimum_log10_alpha": -5.0,
+    "modifier_continuous_winsor_quantile": 0.005,
+    "modifier_one_standard_error_rule": false,
+    "modifier_ridge_alpha": 10.0,
+    "modifier_selection_rule": "any_inner_fold_union",
+    "modifier_top_n_per_inner_fold": 10,
+    "multi_model": {
+      "feature_subset_size": 32,
+      "forest_min_samples_leaf": 10,
+      "forest_trees": 200,
+      "l1_ratios": [
+        0.2,
+        0.8,
+        1.0
+      ],
+      "max_prompt_chars": 100000,
+      "modifier_count": {
+        "candidate_counts": [
+          0,
+          4,
+          8,
+          12,
+          16,
+          24,
+          32
+        ],
+        "enabled": true,
+        "estimators": [
+          "causal_forest",
+          "linear_interactions"
+        ],
+        "forest_seeds": 3,
+        "max_ranked_modifiers": 64,
+        "selection_rule": "minimum_r_loss"
+      },
+      "nominal_p_threshold": 0.05,
+      "permutation_repeats": 3,
+      "q_threshold": 0.1,
+      "regularization_grid_size": 8,
+      "repeats": 3,
+      "row_fraction": 0.8,
+      "schema_version": "stage2_multi_model_selection_v3"
+    },
+    "nuisance_prediction_one_standard_error_rule": false,
+    "nuisance_selection_rule": "any_inner_fold_union",
+    "one_standard_error_rule": true,
+    "optimization_tolerance": 1e-06,
+    "regularization_grid_size": 16,
+    "selection_mode": "multi_model",
+    "univariable_confounder_p_value_threshold": 0.05,
+    "univariable_confounder_q_value_threshold": 0.1
+  }
+}

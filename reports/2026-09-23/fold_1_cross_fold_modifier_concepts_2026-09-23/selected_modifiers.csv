@@ -1,0 +1,22 @@
+concept,feature_id,name,concept_folds,representative_folds,fold_ranks,reason
+Systemic Inflammation (NLR),outer_001_feature_228,neutrophil_to_lymphocyte_ratio,5,5,"[2, 1, 2, 1, 1]",Most empirically supported modifier in the dataset.
+Renal Function Status,outer_001_feature_096,creatinine_level,5,5,"[7, 12, 16, 93, 53]",Most consistent proxy across provided evidence.
+KRAS G12C Variant Burden,outer_001_feature_179,kras_g12c_variant_allele_frequency,4,4,"[22, 40, 9, null, 55]",Direct measurement of KRAS G12C VAF.
+Lung Adenocarcinoma Marker,outer_001_feature_330,ttf1_expression,5,5,"[48, 2, 8, 9, 38]",Strongest available marker for this histological concept.
+Prior Platinum Exposure,outer_001_feature_267,prior_platinum_chemotherapy,5,4,"[24, 3, null, 15, 46]",More inclusive and empirically supported measure of platinum exposure.
+Distant Visceral Metastasis,outer_001_feature_188,liver_metastasis_presence,5,5,"[46, 92, 32, 5, 69]",Highest recurrence and strongest support among visceral candidates.
+Intracranial Hemorrhage Burden,outer_001_feature_122,epidural_hemorrhage,5,4,"[null, 29, 1, 21, 15]",Strongest univariable and recurrent support among hemorrhage features.
+Dyspnea Severity,outer_001_feature_108,dyspnea_severity,5,5,"[1, 17, 5, 23, 50]","Captures severity grade, showing stronger empirical support."
+Cellular Proliferation Index,outer_001_feature_176,ki67_proliferation_index,5,5,"[42, 4, 30, 89, 7]",Direct measurement of proliferation.
+White Blood Cell Count,outer_001_feature_349,white_blood_cell_count,5,5,"[4, 11, 6, 66, 5]",Highly recurrent proxy for baseline immune status.
+MET Gene Amplification,outer_001_feature_214,met_amplification_status,5,5,"[26, 56, 10, 55, 42]",Direct genomic measure of the concept.
+Cognitive Confusion Status,outer_001_feature_085,confusion_present,4,4,"[25, null, 26, 29, 17]",Strongest empirical support for neurocognitive state.
+Chronic Lung Disease,outer_001_feature_194,lung_disease_diagnosis,5,3,"[27, 26, 37, null, null]",Broadest and most recurrent proxy for pulmonary dysfunction.
+Pulmonary Nodularity,outer_001_feature_276,pulmonary_nodules_presence,4,3,"[6, 73, null, null, 20]",More recurrent and supported than general lesion indicators.
+Radiation Therapy Burden,outer_001_feature_281,radiation_therapy_session_count,5,3,"[null, 23, 72, 24, null]",Quantitative measure with stronger univariable support than binary flags.
+Lymph Node Dissection Status,outer_001_feature_197,lymph_node_dissection_status,4,4,"[63, 45, 94, null, 33]",Most inclusive and consistently recurrent measure of LND.
+Anemia Burden,outer_001_feature_153,hematocrit,4,3,"[null, 36, 48, null, 2]",Stronger recurrence in top-100 lists than hemoglobin.
+Targeted Therapy Exposure,outer_001_feature_315,targeted_therapy_use,4,3,"[83, null, null, 58, 34]",More inclusive representative of targeted therapy exposure.
+Baseline Glucose Level,outer_001_feature_146,glucose_level,2,2,"[21, null, null, 3, null]",Direct measurement of glucose levels.
+Pneumonia Burden,outer_001_feature_260,pneumonia_diagnosis,1,1,"[18, null, null, null, null]",Direct measure of pneumonia presence.
+Skeletal Compression Burden,outer_001_feature_303,skeletal_compression_fracture,5,3,"[17, null, 51, 33, null]",Strongest empirical evidence among skeletal candidates.

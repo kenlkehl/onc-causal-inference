@@ -1,0 +1,212 @@
+[
+  {
+    "feature_id": "outer_001_feature_228",
+    "name": "neutrophil_to_lymphocyte_ratio",
+    "concept_id": "systemic_inflammation",
+    "concept_name": "Circulating leukocyte balance",
+    "folds_in_top100": 5,
+    "ranks": [
+      2,
+      1,
+      2,
+      1,
+      1
+    ],
+    "reason": "The explicitly reported or CBC-derived ratio directly captures the repeatedly supported leukocyte balance."
+  },
+  {
+    "feature_id": "outer_001_feature_349",
+    "name": "white_blood_cell_count",
+    "concept_id": "systemic_inflammation",
+    "concept_name": "Circulating leukocyte balance",
+    "folds_in_top100": 5,
+    "ranks": [
+      4,
+      11,
+      6,
+      66,
+      5
+    ],
+    "reason": "Total white blood cell count captures absolute leukocyte abundance, which the ratio does not, and has its own adjusted signal."
+  },
+  {
+    "feature_id": "outer_001_feature_095",
+    "name": "creatinine_clearance",
+    "concept_id": "renal_function",
+    "concept_name": "Renal filtration and nitrogen burden",
+    "folds_in_top100": 5,
+    "ranks": [
+      5,
+      8,
+      24,
+      95,
+      18
+    ],
+    "reason": "Pretreatment creatinine clearance is a specified filtration measurement with repeated forest support and avoids the naming ambiguity of feature 033."
+  },
+  {
+    "feature_id": "outer_001_feature_037",
+    "name": "blood_urea_nitrogen",
+    "concept_id": "renal_function",
+    "concept_name": "Renal filtration and nitrogen burden",
+    "folds_in_top100": 5,
+    "ranks": [
+      9,
+      98,
+      44,
+      7,
+      8
+    ],
+    "reason": "BUN provides a distinct nitrogen-burden measurement with repeated forest support and some univariable and R-learner support."
+  },
+  {
+    "feature_id": "outer_001_feature_108",
+    "name": "dyspnea_severity",
+    "concept_id": "dyspnea",
+    "concept_name": "Reported dyspnea severity",
+    "folds_in_top100": 5,
+    "ranks": [
+      1,
+      17,
+      5,
+      23,
+      50
+    ],
+    "reason": "The specified patient-reported 0\u20134 grade is the precise measurement carrying the recurring adjusted signal."
+  },
+  {
+    "feature_id": "outer_001_feature_076",
+    "name": "ck5_6_expression",
+    "concept_id": "tumor_lineage",
+    "concept_name": "Tumor histology and lineage staining",
+    "folds_in_top100": 5,
+    "ranks": [
+      29,
+      9,
+      7,
+      28,
+      4
+    ],
+    "reason": "CK5/6 directly measures the squamous-lineage facet and has recurring own-feature evidence."
+  },
+  {
+    "feature_id": "outer_001_feature_330",
+    "name": "ttf1_expression",
+    "concept_id": "tumor_lineage",
+    "concept_name": "Tumor histology and lineage staining",
+    "folds_in_top100": 5,
+    "ranks": [
+      48,
+      2,
+      8,
+      9,
+      38
+    ],
+    "reason": "TTF-1 supplies a complementary glandular-lineage facet with recurring own-feature evidence; adding Napsin A would be more redundant."
+  },
+  {
+    "feature_id": "outer_001_feature_179",
+    "name": "kras_g12c_variant_allele_frequency",
+    "concept_id": "kras_g12c_vaf",
+    "concept_name": "KRAS G12C variant allele frequency",
+    "folds_in_top100": 4,
+    "ranks": [
+      22,
+      40,
+      9,
+      null,
+      55
+    ],
+    "reason": "It retains the mutation-specific meaning of the recurring signal; generic VAF could refer to another variant."
+  },
+  {
+    "feature_id": "outer_001_feature_214",
+    "name": "met_amplification_status",
+    "concept_id": "met_amplification",
+    "concept_name": "MET amplification",
+    "folds_in_top100": 5,
+    "ranks": [
+      26,
+      56,
+      10,
+      55,
+      42
+    ],
+    "reason": "It directly identifies MET amplification and has its own recurring adjusted evidence."
+  },
+  {
+    "feature_id": "outer_001_feature_176",
+    "name": "ki67_proliferation_index",
+    "concept_id": "proliferation",
+    "concept_name": "Ki-67 proliferation index",
+    "folds_in_top100": 5,
+    "ranks": [
+      42,
+      4,
+      30,
+      89,
+      7
+    ],
+    "reason": "It is the existing quantitative proliferation measurement carrying the recurring signal."
+  },
+  {
+    "feature_id": "outer_001_feature_267",
+    "name": "prior_platinum_chemotherapy",
+    "concept_id": "platinum_history",
+    "concept_name": "Prior platinum chemotherapy exposure",
+    "folds_in_top100": 4,
+    "ranks": [
+      24,
+      3,
+      null,
+      15,
+      46
+    ],
+    "reason": "It directly specifies platinum exposure before the current treatment context; the agent-specific proxies reinforce this history but have less secure timing or narrower coverage."
+  },
+  {
+    "feature_id": "outer_001_feature_113",
+    "name": "emphysema",
+    "concept_id": "obstructive_lung",
+    "concept_name": "Obstructive lung disease and emphysema",
+    "folds_in_top100": 4,
+    "ranks": [
+      50,
+      52,
+      null,
+      16,
+      6
+    ],
+    "reason": "Documented emphysema is the facet with the clearest repeated own-feature adjusted evidence."
+  },
+  {
+    "feature_id": "outer_001_feature_103",
+    "name": "dizziness_present",
+    "concept_id": "neurologic_symptoms",
+    "concept_name": "Pretreatment neurologic symptoms",
+    "folds_in_top100": 4,
+    "ranks": [
+      null,
+      21,
+      12,
+      4,
+      96
+    ],
+    "reason": "Dizziness is a specific pretreatment symptom with the most complementary evidence in this concept."
+  },
+  {
+    "feature_id": "outer_001_feature_188",
+    "name": "liver_metastasis_presence",
+    "concept_id": "liver_metastasis",
+    "concept_name": "Liver metastatic involvement",
+    "folds_in_top100": 5,
+    "ranks": [
+      46,
+      92,
+      32,
+      5,
+      69
+    ],
+    "reason": "It directly records pretreatment liver metastatic involvement and has its own cross-fold evidence."
+  }
+]

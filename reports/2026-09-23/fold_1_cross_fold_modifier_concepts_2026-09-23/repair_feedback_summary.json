@@ -1,0 +1,11 @@
+{
+  "at": "2026-09-23T11:29:04.696156+00:00",
+  "feedback": {
+    "content": "The previous JSON failed validation. Correct this exact error: ValueError: Correct ALL of these validation issues together: [\"genomic_molecular_profile: cite at least one supplied own-member effect-evidence record, including for uncertain or excluded concepts\", \"histologic_pathology_features: cite at least one supplied own-member effect-evidence record, including for uncertain or excluded concepts\", \"neuroimaging_characteristics: cite at least one supplied own-member effect-evidence record, including for uncertain or excluded concepts\", \"treatment_history_miscellaneous: cite at least one supplied own-member effect-evidence record, including for uncertain or excluded concepts\", \"patient_baseline_and_comorbidities: cite at least one supplied own-member effect-evidence record, including for uncertain or excluded concepts\", \"general_vitals_and_metabolites: cite at least one supplied own-member effect-evidence record, including for uncertain or excluded concepts\", \"Assign all omitted candidates to a concept: ['outer_001_feature_008', 'outer_001_feature_010', 'outer_001_feature_079', 'outer_001_feature_313', 'outer_001_feature_314', 'outer_001_feature_319']\"]. Return one corrected JSON object only.",
+    "role": "user"
+  },
+  "original_prompt_unchanged": true,
+  "previous_response_sha256": "dd4e5eff1e4e7c4767bf9b5dda5b9e2a85ad4555a5e18e33bd50bc64a710a4dc",
+  "source_sha256": "8a4d90e35edd3be561caf939a1cea7a8e1266fb59d5809399f96a19f783aad50",
+  "validation_requirements_unchanged": true
+}

@@ -1,0 +1,31 @@
+{
+  "at": "2026-09-23T11:34:18.682075+00:00",
+  "confounders": 189,
+  "estimation_performed": false,
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/common.py": "c50ac4ad83ce801e84bda784a3889945606fddd25c10642f0aa6e565595d6493",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_context_budget.json": "062b12edec87f980e6449523c229c29987a079b0c8c467b42a9799ae08f4f677",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_context_budget_before_batched_feedback.json": "adee28a7fdadbed9395c0949f64516bdf9758791d95288def36208bb11771881",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_prompt.json": "841cb6b61c7c69648896e60ae7a808629779d2ef70b975b9d7d3cd4df807fe1a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_request/raw_response_001.json": "e94b19225b204d380166ba1649377d24ffb389c51a7497a79fe21762e608013e",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_request/raw_response_002.json": "3039098cd62549c69d0acee423aa760125e14e9f013e74e0f93ca45c295ee9fe",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_request/raw_response_003.json": "a784a54efc3022cf728afcca1d6137c8cadfeccd19e88c725f7006a6b44fa73b",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_request/raw_response_004.json": "dd4e5eff1e4e7c4767bf9b5dda5b9e2a85ad4555a5e18e33bd50bc64a710a4dc",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_request/raw_response_005.json": "1018a2131cf90c022cf587132ba205879a2ea5cc37ba906758e36b34f832fb26",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_response.json": "de3aa08340ba8b329017ab12dae86e73d3eb8a6f2dba33b91cd32d868ccabc64",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concepts.json": "290edb07ba865ea1e015eae09c50f66045f592383d275925b0c16239cdd1526f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/llm_runtime/config.json": "b1e7058670847fdfb704dfee8a0e9efbdad3a818acade65ea2178f4379187f17",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/rankings_frozen.json": "71c985b71634abda974d6cde931309fc2577cb5331625b4269230c3caff38f15",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/repair_feedback_summary.json": "48dbb0157c418cc3c87a375eb7203ed59d7cf7fb3c6b9ca86a82f509f6ebed01",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/review_resume.json": "0acbf68379f392af35d4ea69c81d0de8aed0a3ad1d65c16f80763c9e3ab523ac",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/selected_definitions.json": "9e94a5df2dae34768934e5107c29076b5ef837264c3a0b7654b1d5bd651fa177",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/selected_modifiers.csv": "34caefe3b78c659398fbf5d3edecd20104ed1d2ac61ccb61fe28cf24b8f6909d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/synthesize.py": "8a4d90e35edd3be561caf939a1cea7a8e1266fb59d5809399f96a19f783aad50",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/synthesize_initial.py": "46a6a80706fb8ece58970ae0b652a56cef0846d7da6feb7eb49b3c01089a9133"
+  },
+  "modifiers": 21,
+  "oracle_inputs_used": false,
+  "outer_test_inputs_used": false,
+  "retained_concepts": 21,
+  "union_candidates": 217
+}

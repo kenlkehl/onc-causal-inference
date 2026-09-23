@@ -1,0 +1,70 @@
+# 01. Discover atomic clinical features
+
+**Unabridged current template, with invented miniature inputs. No LLM was called.**
+
+Activation: Core pathway
+
+
+
+Source: [_interpretation_prompt](/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2.py:3795)
+
+## System message
+
+```text
+Exhaustively decompose every evidence item into all explicitly stated or unambiguously encoded atomic patient-level clinical features. Do not stop at the community's apparent topic or most salient feature. Return JSON only.
+```
+
+## User message
+
+```json
+{
+  "evidence_items": [
+    {
+      "item": 1,
+      "text": [
+        "2025-01-01 pretreatment lab: serum creatinine 1.0 mg/dL. 2025-01-10 pretreatment lab: serum creatinine 1.2 mg/dL. CT documents emphysema."
+      ]
+    }
+  ],
+  "job": "infer_clinical_features_from_text_evidence",
+  "response": {
+    "candidates": [
+      {
+        "caveats": "limitations, ambiguity, or competing clinical explanations",
+        "description": "exactly one atomic, reusable patient-level clinical measurement or attribute with one coherent value domain",
+        "evidence_rationale": "how the cited words, phrases, or clinical context could arise from this feature, including whether the feature is explicit or inferred",
+        "name": "snake_case_clinical_feature_name",
+        "supporting_items": [
+          1
+        ]
+      }
+    ]
+  },
+  "rules": [
+    "Each candidate must represent one patient-level clinical variable with one value per patient. It must be assignable by examining one patient's record without comparing or aggregating across patients.",
+    "Return explicitly documented clinical features and narrower latent clinical features reasonably implied by the text.",
+    "Exhaustively enumerate every distinct atomic patient-level clinical feature explicitly stated or unambiguously encoded anywhere in each evidence item's text. Do not restrict candidates to the item's apparent topic, dominant concept, or consensus theme.",
+    "Read every string in an evidence item's text array. Treat both consensus phrases and every representative excerpt as evidence; consensus phrases are not an exhaustive label for the variables present in the excerpts.",
+    "Do not stop after finding the most salient feature, and do not limit an evidence item to one candidate. Inspect demographic clauses, headers, timepoint labels, laboratory lines, biomarker statements, diagnoses, symptoms, and other embedded fields separately.",
+    "When one clause, header, or line explicitly states multiple independently varying patient attributes, return a separate atomic candidate for each attribute.",
+    "Attribute each feature to the correct subject. Attributes belonging to relatives, specimens, clinicians, or other people do not support the corresponding patient feature.",
+    "When an item contains multiple exemplar patients with different observed values of the same field, treat that as support for one reusable patient-level feature. Do not encode exemplar values or patient identities in the candidate name.",
+    "Prefer atomic clinical variables.",
+    "A candidate is atomic only when a downstream extractor could assign exactly one patient-level value under one coherent ontology. It must not require returning a list, set, tuple, mapping, concatenated code, profile, inventory, or ad hoc aggregation of independently varying values. Collapsing whether any member of an open-ended family is present into one indicator does not make that family atomic.",
+    "Use the narrowest stable and reusable clinical construct directly supported by the cited evidence. Do not use a parent domain, umbrella label, or catch-all concept when the evidence supports separately measurable attributes.",
+    "When evidence explicitly states or unambiguously encodes multiple independently meaningful components, return those components as separate candidates. Do not also return their umbrella or composite representation.",
+    "Do not split a variable merely because its evidence contains different values, categories, thresholds, units, synonyms, or reporting formats. Those may be representations of one underlying measurement rather than distinct variables.",
+    "An established construct that is conventionally reported as one scalar or category under one ontology remains one candidate even if that value is derived from multiple inputs. This exception does not apply to concatenated or multi-field encodings that preserve separately varying component values.",
+    "Specificity concerns the measured clinical dimension, not a particular patient, observed value, document, or wording. Do not encode instance-specific details in a candidate name.",
+    "Do not invent components that are not directly stated or unambiguously encoded in the evidence. If an atomic reusable variable cannot be identified, return no candidate rather than a vague catch-all.",
+    "Each candidate name must identify its exact extraction target. A broad name cannot be repaired by placing a more specific target only in its description.",
+    "Use longitudinal information as clinical context when it appears in the evidence. Do not perform temporal eligibility filtering.",
+    "Do not return patient names, administrative identifiers, documentation artifacts, descriptions of the input collection, multiple-patient heterogeneity, grouping methods, or analysis methods as clinical features.",
+    "If no valid feature is supported, return an empty candidates list. Never turn the absence of a common feature into a candidate.",
+    "Every returned candidate must have a nonempty snake_case name. Omit any candidate you cannot name; never return a blank or null name.",
+    "For each candidate, cite one or more supplied item numbers in supporting_items and explain how its text supports the feature.",
+    "Do not choose a value type, unit, categories, or extraction ontology in this step."
+  ],
+  "task": "Identify all patient-level clinical features supported anywhere in each supplied item's consensus text and representative excerpts. Enumerate every distinct feature atomically; some items may support multiple features or no valid feature."
+}
+```

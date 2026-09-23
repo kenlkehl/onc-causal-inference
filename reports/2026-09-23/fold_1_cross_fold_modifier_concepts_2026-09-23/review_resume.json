@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-23T11:26:40.171608+00:00",
+  "previous_pid": 1685528,
+  "latest_response_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/concept_request/raw_response_004.json",
+  "latest_response_sha256": "dd4e5eff1e4e7c4767bf9b5dda5b9e2a85ad4555a5e18e33bd50bc64a710a4dc",
+  "initial_source_sha256": "46a6a80706fb8ece58970ae0b652a56cef0846d7da6feb7eb49b3c01089a9133",
+  "reason": "Batch existing validation requirements into one repair message instead of reporting one error at a time. Resume the saved response; preserve original data and selection rules."
+}

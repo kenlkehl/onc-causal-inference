@@ -1,0 +1,200 @@
+# 20. Annotate numerically selected roles without changing selection
+
+**Unabridged current template, with invented miniature inputs. No LLM was called.**
+
+Activation: Alternative selection branch: independent_tasks, with LLM annotation enabled
+
+
+
+Source: [_role_request_payload](/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_role_adjudication.py:553)
+
+Source: [annotation-only payload modification](/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_taskwise_annotation.py:70)
+
+## System message
+
+```text
+Interpret clinical measurements inside one outer-training fold.
+Your role assessments are advisory annotations only: they cannot add, remove,
+or reroute any modeling input. All supplied measurements are pretreatment by
+an upstream contract, not a conclusion you need to infer from feature names.
+Distinguish causal common causes from prognosis-only or treatment-only signals;
+statistical predictiveness alone cannot establish confounding or an instrument.
+Discuss effect modification on the outcome risk-difference scale for binary
+outcomes. Address uncertainty, method disagreement, and correlated evidence.
+Never assume a synthetic data-generating process or unseen oracle information.
+Use only supplied definitions and aggregate statistics. Preserve investigator
+roles in annotations. Return the requested JSON with one entry per candidate.
+```
+
+## User message
+
+```json
+{
+  "candidate_batch": {
+    "batch_count": 1,
+    "batch_index": 1,
+    "candidate_count": 2
+  },
+  "decision_policy": {
+    "allow_no_role": true,
+    "annotation_only": true,
+    "assess_disagreement_explicitly": true,
+    "assess_inner_fold_consistency_explicitly": true,
+    "may_change_numerical_selection": false,
+    "preserve_investigator_locked_roles_exactly": true,
+    "statistical_methods_are_evidence_not_gates": true
+  },
+  "prompt_version": "stage2_taskwise_advisory_roles_v1",
+  "required_response": {
+    "decisions": [
+      {
+        "cross_method_reconciliation": "string",
+        "evidence_against": [
+          "specific supplied statistical facts"
+        ],
+        "evidence_for": [
+          "specific supplied statistical facts"
+        ],
+        "feature_id": "every supplied feature ID exactly once",
+        "inner_fold_consistency": "string",
+        "rationale": "causal-role conclusion grounded in supplied evidence",
+        "roles": [
+          "zero or more of confounder, effect_modifier"
+        ]
+      }
+    ],
+    "summary": "string"
+  },
+  "role_evidence": {
+    "candidates": [
+      {
+        "definition": {
+          "categories_or_unit": [
+            "mg/dL"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "Serum creatinine concentration.",
+          "evidence_axes": [],
+          "feature_id": "example_creatinine",
+          "investigator_locked": false,
+          "measurement_definition": "Latest documented pretreatment serum creatinine, in mg/dL; preserve a reported threshold if no exact number exists.",
+          "missing_value_rule": "Null if unreported or unresolved.",
+          "name": "serum_creatinine",
+          "source_feature_ids": [],
+          "supporting_architectures": [],
+          "value_type": "continuous"
+        },
+        "feature_id": "example_creatinine",
+        "statistical_evidence": {
+          "candidate_augmented_r_learner": {
+            "folds": [],
+            "top_n_votes": 0
+          },
+          "multivariable_modifier_elastic_net": {
+            "folds": [],
+            "selection_votes": 0
+          },
+          "multivariable_nuisance_elastic_net": {
+            "folds": [
+              {
+                "inner_fold": 1,
+                "outcome_group_l2_norm": 0.15,
+                "outcome_selected": true,
+                "treatment_group_l2_norm": 0.12,
+                "treatment_selected": true
+              }
+            ],
+            "outcome_votes": 0,
+            "treatment_votes": 0
+          },
+          "provisional_statistical_roles": [],
+          "univariable_confounder_screen": {
+            "folds": [],
+            "multiplicity_adjusted_joint_support_votes": 0,
+            "nominal_joint_support_votes": 0
+          }
+        }
+      },
+      {
+        "definition": {
+          "categories_or_unit": [
+            "Present",
+            "Absent"
+          ],
+          "categories_or_unit_truncated": false,
+          "configured_roles": [],
+          "derived_equivalent_measurement": false,
+          "description": "Documented emphysema.",
+          "evidence_axes": [],
+          "feature_id": "example_emphysema",
+          "investigator_locked": false,
+          "measurement_definition": "Explicit pretreatment documentation of emphysema presence or absence.",
+          "missing_value_rule": "Null if unreported; silence is not absence.",
+          "name": "emphysema",
+          "source_feature_ids": [],
+          "supporting_architectures": [],
+          "value_type": "binary"
+        },
+        "feature_id": "example_emphysema",
+        "statistical_evidence": {
+          "candidate_augmented_r_learner": {
+            "folds": [],
+            "top_n_votes": 0
+          },
+          "multivariable_modifier_elastic_net": {
+            "folds": [],
+            "selection_votes": 0
+          },
+          "multivariable_nuisance_elastic_net": {
+            "folds": [
+              {
+                "inner_fold": 1,
+                "outcome_group_l2_norm": null,
+                "outcome_selected": false,
+                "treatment_group_l2_norm": null,
+                "treatment_selected": false
+              }
+            ],
+            "outcome_votes": 0,
+            "treatment_votes": 0
+          },
+          "provisional_statistical_roles": [],
+          "univariable_confounder_screen": {
+            "folds": [],
+            "multiplicity_adjusted_joint_support_votes": 0,
+            "nominal_joint_support_votes": 0
+          }
+        }
+      }
+    ],
+    "evidence_boundary": {
+      "candidate_measurements_are_pre_index_treatment": true,
+      "data_generation_metadata_is_excluded": true,
+      "dataset_paths_and_dataset_names_are_excluded": true,
+      "definition_fields_use_an_explicit_allowlist": true,
+      "inner_heldout_rows_are_used_only_for_fold_honest_evaluation": true,
+      "oracle_columns_are_excluded": true,
+      "outer_heldout_rows_are_excluded": true,
+      "patient_identifiers_are_excluded": true,
+      "row_level_values_are_excluded": true,
+      "statistical_evidence_uses_outer_training_rows_only": true
+    },
+    "methodology": {
+      "all_statistics_are_evidence_not_automatic_role_labels": true,
+      "confounder": [
+        "multivariable grouped elastic-net treatment and marginal-outcome support",
+        "candidate-wise treatment and outcome association tests, including outcome adjusted for treatment"
+      ],
+      "effect_modifier": [
+        "candidate-augmented univariable R-learner held-out R-loss comparisons",
+        "joint multivariable grouped elastic-net R-loss interaction selection"
+      ]
+    },
+    "schema_version": "stage2_fold_honest_role_evidence_v1",
+    "temporal_scope": "pre_index_treatment"
+  },
+  "task": "annotate_stage2_roles_only"
+}
+```

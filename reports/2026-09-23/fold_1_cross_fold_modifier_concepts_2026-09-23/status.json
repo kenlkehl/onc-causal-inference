@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-23T11:34:20.116389+00:00",
+  "direct_oracle_modifier_recovery": 1,
+  "modifiers": 21,
+  "phase": "complete",
+  "report": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/fold_1_cross_fold_modifier_concepts_2026-09-23/REPORT_2026-09-23.md",
+  "retained_concepts": 21
+}
