@@ -52,7 +52,7 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
             saved_multi = (saved.get("statistical_selection") or {}).get("multi_model") or {}
             if saved_multi.get("schema_version") != SCHEMA_VERSION:
                 raise RuntimeError(
-                    "Stage 2 multi-model policy changed (automatic modifier count); "
+                    "Stage 2 multi-model policy changed (overlap screening and automatic modifier count/architecture search); "
                     "use guarded --stage2-reselect"
                 )
             saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))

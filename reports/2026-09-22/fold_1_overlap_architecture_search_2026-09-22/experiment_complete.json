@@ -1,0 +1,8 @@
+{
+  "all_189_confounders_preserved": true,
+  "at": "2026-09-23T09:08:03.575133+00:00",
+  "evaluation_sha256": "ad9864510ee2af2789777ed7b925e2f7a82c6e101568a5e4b8f5eaa108c2d7b4",
+  "original_splits_and_observed_label_alignment_verified": true,
+  "prediction_hashes_verified": true,
+  "report_sha256": "6415656b98514998af697ce17ecd40f495fb13ca2545de7afc728d51ce2b6301"
+}

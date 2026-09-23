@@ -21,6 +21,8 @@ information, and redundant proxies. Prognostic importance alone is not effect
 modification. Logistic interactions concern log odds; orthogonal models concern
 outcome/probability differences. Methods and overlapping folds are not independent
 replications; support fractions and p-values are not causal probabilities.
+All modifier evidence uses the supplied propensity-eligible population; assess
+its evaluability within that population, not as evidence for excluded patients.
 Order every supplied candidate exactly once, including weak or unevaluable ones.
 Put weak, contradictory, or redundant evidence later; do not invent support.
 Cite only each candidate's supplied effect-evidence IDs. No count or hard p-value
@@ -135,6 +137,7 @@ def rank_modifier_candidates(
             "version": RANKING_VERSION,
             "candidates": batch,
             "score_meaning": evidence["score_meaning"],
+            "analysis_populations": evidence["analysis_populations"],
             "ordered_lists": list(groups),
             "required_response": {
                 "ranking": [

@@ -1,0 +1,42 @@
+{
+  "at": "2026-09-22T22:24:48.554210+00:00",
+  "model": {
+    "endpoint_urls_are_transport_only": true,
+    "extraction": null,
+    "extraction_runtime_continuation": null,
+    "primary": {
+      "actual_model_identity": {
+        "parent": null,
+        "revision": null,
+        "root": "nvidia/Gemma-4-31B-IT-NVFP4",
+        "served_id": "gemma4-31b"
+      },
+      "endpoint_observations": [
+        {
+          "advertised_model_ids": [
+            "gemma4-31b"
+          ],
+          "endpoint": "http://sn4622130540:8000/v1",
+          "selected_model_advertised": true,
+          "selected_model_record": {
+            "id": "gemma4-31b",
+            "parent": null,
+            "revision": null,
+            "root": "nvidia/Gemma-4-31B-IT-NVFP4"
+          }
+        }
+      ],
+      "live_endpoint_verified": true,
+      "model_family": "gemma4",
+      "role": "primary",
+      "sampling_model": "nvidia/Gemma-4-31B-IT-NVFP4",
+      "selected_model": "gemma4-31b"
+    },
+    "schema_version": "stage2_endpoint_model_identity_v1",
+    "selection_consolidation_runtime": null
+  },
+  "pid": 1286857,
+  "process_group": 1286857,
+  "run_directory": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22",
+  "script": "run_2026-09-22.py"
+}

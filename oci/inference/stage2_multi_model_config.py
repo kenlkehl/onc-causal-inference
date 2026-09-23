@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v2"
+SCHEMA_VERSION = "stage2_multi_model_selection_v3"
 PROMPT_VERSION = "stage2_multi_model_themes_v1"
 FAMILIES = (
     "univariable",
@@ -15,6 +15,7 @@ FAMILIES = (
     "predictive_forest",
     "causal_forest",
 )
+FINAL_ESTIMATORS = ("causal_forest", "linear_interactions")
 
 
 @dataclass(frozen=True)
@@ -26,10 +27,20 @@ class ModifierCountConfig:
     max_ranked_modifiers: int = 64
     selection_rule: str = "minimum_r_loss"
     forest_seeds: int = 3
+    estimators: tuple[str, ...] = FINAL_ESTIMATORS
 
     def validate(self) -> None:
         if not isinstance(self.enabled, bool):
             raise ValueError("multi_model.modifier_count.enabled must be boolean")
+        if (
+            not isinstance(self.estimators, tuple)
+            or not self.estimators
+            or any(not isinstance(v, str) or v not in FINAL_ESTIMATORS for v in self.estimators)
+            or len(set(self.estimators)) != len(self.estimators)
+        ):
+            raise ValueError(
+                "modifier_count.estimators must be a nonempty unique list of causal_forest and/or linear_interactions"
+            )
         for name in ("max_ranked_modifiers", "forest_seeds"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -57,7 +68,11 @@ class ModifierCountConfig:
             )
 
     def public_dict(self) -> dict[str, Any]:
-        return {**asdict(self), "candidate_counts": list(self.candidate_counts)}
+        return {
+            **asdict(self),
+            "candidate_counts": list(self.candidate_counts),
+            "estimators": list(self.estimators),
+        }
 
 
 @dataclass(frozen=True)
@@ -77,9 +92,7 @@ class Stage2MultiModelConfig:
 
     def validate(self) -> None:
         if not isinstance(self.modifier_count, ModifierCountConfig):
-            raise ValueError(
-                "multi_model.modifier_count must be a ModifierCountConfig object"
-            )
+            raise ValueError("multi_model.modifier_count must be a ModifierCountConfig object")
         self.modifier_count.validate()
         for name in (
             "repeats",
@@ -96,9 +109,7 @@ class Stage2MultiModelConfig:
                     f"stage2.statistical_selection.multi_model.{name} must be positive integer"
                 )
         if self.regularization_grid_size < 3 or self.forest_trees < 4:
-            raise ValueError(
-                "multi_model requires at least 3 regularization values and 4 trees"
-            )
+            raise ValueError("multi_model requires at least 3 regularization values and 4 trees")
         if self.max_prompt_chars < 4_000:
             raise ValueError("multi_model.max_prompt_chars must be at least 4000")
         for name in ("row_fraction", "nominal_p_threshold", "q_threshold"):
@@ -117,9 +128,7 @@ class Stage2MultiModelConfig:
             or not 0 < v <= 1
             for v in self.l1_ratios
         ):
-            raise ValueError(
-                "multi_model.l1_ratios must contain finite values in (0, 1]"
-            )
+            raise ValueError("multi_model.l1_ratios must contain finite values in (0, 1]")
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -138,6 +147,7 @@ def multi_model_config_from_mapping(
     if raw.pop("schema_version", SCHEMA_VERSION) not in {
         SCHEMA_VERSION,
         "stage2_multi_model_selection_v1",
+        "stage2_multi_model_selection_v2",
     }:
         raise ValueError("unsupported multi_model schema_version")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)
@@ -155,10 +165,11 @@ def multi_model_config_from_mapping(
         unknown = set(count) - set(ModifierCountConfig.__dataclass_fields__)
         if unknown:
             raise ValueError(f"unsupported modifier_count fields: {sorted(unknown)}")
-        if "candidate_counts" in count:
-            if not isinstance(count["candidate_counts"], (list, tuple)):
-                raise ValueError("modifier_count.candidate_counts must be a list")
-            count["candidate_counts"] = tuple(count["candidate_counts"])
+        for name in ("candidate_counts", "estimators"):
+            if name in count:
+                if not isinstance(count[name], (list, tuple)):
+                    raise ValueError(f"modifier_count.{name} must be a list")
+                count[name] = tuple(count[name])
         raw["modifier_count"] = ModifierCountConfig(**count)
     result = Stage2MultiModelConfig(**raw)
     result.validate()

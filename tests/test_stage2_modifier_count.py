@@ -32,9 +32,7 @@ def ranking_request(messages, validate, **kwargs):
                 {
                     "feature_id": c["feature_id"],
                     "evidence_ids": [
-                        r["evidence_id"]
-                        for r in c["modeling_evidence"]
-                        if r["role"] == "effect"
+                        r["evidence_id"] for r in c["modeling_evidence"] if r["role"] == "effect"
                     ],
                     "rationale": "Compare supplied effect evidence.",
                 }
@@ -47,45 +45,58 @@ def ranking_request(messages, validate, **kwargs):
 def test_count_rule_and_configuration_keep_legacy_policies_separate():
     losses = {0: [1.2, 1.3, 1.2], 8: [0.99, 1.02, 1.00], 16: [1.0, 1.0, 1.0]}
     assert (
-        count.choose_modifier_count(losses, rule="minimum_r_loss")[
-            "chosen_additional_count"
-        ]
-        == 16
+        count.choose_modifier_count(losses, rule="minimum_r_loss")["chosen_additional_count"] == 16
     )
     assert (
-        count.choose_modifier_count(losses, rule="one_standard_error")[
-            "chosen_additional_count"
-        ]
+        count.choose_modifier_count(losses, rule="one_standard_error")["chosen_additional_count"]
         == 8
     )
     assert (
-        count.choose_modifier_count(
-            {0: [1.0, 1.0], 4: [1.0, 1.0]}, rule="minimum_r_loss"
-        )["chosen_additional_count"]
+        count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0]}, rule="minimum_r_loss")[
+            "chosen_additional_count"
+        ]
         == 0
     )
     with pytest.raises(ValueError, match="two finite"):
         count.choose_modifier_count({0: [1.0]}, rule="minimum_r_loss")
     with pytest.raises(ValueError, match="identical"):
-        count.choose_modifier_count(
-            {0: [1.0, 1.0], 4: [1.0, 1.0, 1.0]}, rule="minimum_r_loss"
-        )
-    config = statistical_selection_config_from_mapping(
-        {"selection_mode": "multi_model"}
+        count.choose_modifier_count({0: [1.0, 1.0], 4: [1.0, 1.0, 1.0]}, rule="minimum_r_loss")
+    architecture_losses = {
+        ("causal_forest", 0): [1.2, 1.3, 1.2],
+        ("linear_interactions", 8): [0.99, 1.02, 1.0],
+        ("causal_forest", 16): [1.0, 1.0, 1.0],
+    }
+    best = count.choose_effect_model(architecture_losses, rule="minimum_r_loss")
+    assert (best["chosen_estimator"], best["chosen_additional_count"]) == ("causal_forest", 16)
+    simpler = count.choose_effect_model(architecture_losses, rule="one_standard_error")
+    assert (simpler["chosen_estimator"], simpler["chosen_additional_count"]) == (
+        "linear_interactions",
+        8,
     )
+    tied = count.choose_effect_model(
+        {("causal_forest", 0): [1.0, 1.0], ("linear_interactions", 0): [1.0, 1.0]},
+        rule="minimum_r_loss",
+    )
+    assert tied["chosen_estimator"] == "linear_interactions"
+    for estimators in ([], ["unknown"], ["causal_forest", "causal_forest"], [True]):
+        with pytest.raises(ValueError, match="estimators"):
+            statistical_selection_config_from_mapping(
+                {
+                    "selection_mode": "multi_model",
+                    "multi_model": {"modifier_count": {"estimators": estimators}},
+                }
+            )
+    config = statistical_selection_config_from_mapping({"selection_mode": "multi_model"})
     assert config.multi_model.modifier_count.enabled
+    assert config.multi_model.modifier_count.estimators == ("causal_forest", "linear_interactions")
     assert config.multi_model.modifier_count.selection_rule == "minimum_r_loss"
     assert statistical_selection_config_from_mapping(config.public_dict()) == config
     disabled = replace(
         config,
-        multi_model=replace(
-            config.multi_model, modifier_count=ModifierCountConfig(enabled=False)
-        ),
+        multi_model=replace(config.multi_model, modifier_count=ModifierCountConfig(enabled=False)),
     )
     assert statistical_selection_config_from_mapping(disabled.public_dict()) == disabled
-    assert (
-        "multi_model" not in statistical_selection_config_from_mapping({}).public_dict()
-    )
+    assert "multi_model" not in statistical_selection_config_from_mapping({}).public_dict()
     for change in (
         {"candidate_counts": [4, 0]},
         {"candidate_counts": [0, True]},
@@ -126,9 +137,7 @@ def test_bounded_ranking_covers_candidates_preserves_locks_and_detects_corruptio
     )
     first = ranking.rank_modifier_candidates(**arguments, request_json=request)
     assert [r["feature_id"] for r in first["ranking"]] == ["f1", "f2", "f3"]
-    assert (
-        seen == {f"f{i}" for i in range(1, 7)} and "f0" in first["locked_feature_ids"]
-    )
+    assert seen == {f"f{i}" for i in range(1, 7)} and "f0" in first["locked_feature_ids"]
     assert "merge_stage2_modifier_ranking" in calls
     resumed = ranking.rank_modifier_candidates(
         **arguments,
@@ -152,15 +161,10 @@ def test_rank_validator_rejects_foreign_evidence_and_invalid_merges():
     )
     cards = evidence["candidates"][1:3]
     refs = {
-        c["feature_id"]: [
-            r["evidence_id"] for r in c["modeling_evidence"] if r["role"] == "effect"
-        ]
+        c["feature_id"]: [r["evidence_id"] for r in c["modeling_evidence"] if r["role"] == "effect"]
         for c in cards
     }
-    rows = [
-        {"feature_id": k, "evidence_ids": v, "rationale": "Evidence."}
-        for k, v in refs.items()
-    ]
+    rows = [{"feature_id": k, "evidence_ids": v, "rationale": "Evidence."} for k, v in refs.items()]
     validate = ranking._ranking_validator(cards, [["f1", "f2"]])
     with pytest.raises(ValueError, match="preserve order"):
         validate({"ranking": rows[::-1]})
@@ -176,23 +180,13 @@ def test_zero_budget_preserves_confounders_and_exact_investigator_roles():
     selected = [
         {
             **f,
-            "roles": ["confounder", "effect_modifier"]
-            if f["name"] == "c"
-            else ["effect_modifier"],
+            "roles": ["confounder", "effect_modifier"] if f["name"] == "c" else ["effect_modifier"],
         }
         for f in definitions
     ]
-    report = {
-        "decisions": [
-            {"feature_id": f["feature_id"], "roles": f["roles"]} for f in selected
-        ]
-    }
-    ordered = [
-        {"feature_id": "m", "evidence_ids": ["m-effect"], "rationale": "Evidence."}
-    ]
-    kept, reviewed = count._apply_budget(
-        definitions, selected, report, ordered, 0, ["other"]
-    )
+    report = {"decisions": [{"feature_id": f["feature_id"], "roles": f["roles"]} for f in selected]}
+    ordered = [{"feature_id": "m", "evidence_ids": ["m-effect"], "rationale": "Evidence."}]
+    kept, reviewed = count._apply_budget(definitions, selected, report, ordered, 0, ["other"])
     assert {f["feature_id"]: f["roles"] for f in kept} == {
         "c": ["confounder"],
         "other": ["effect_modifier"],
@@ -220,29 +214,21 @@ def test_zero_budget_preserves_confounders_and_exact_investigator_roles():
 
 
 @pytest.mark.parametrize("binary", [False, True])
-def test_real_nested_selection_scoring_alignment_and_no_refit_resume(
-    tmp_path, monkeypatch, binary
-):
+def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, monkeypatch, binary):
     arguments = sample_inputs()
     if binary:
-        arguments["dataset"]["outcome"] = (arguments["dataset"]["outcome"] > 0).astype(
-            int
-        )
+        arguments["dataset"]["outcome"] = (arguments["dataset"]["outcome"] > 0).astype(int)
         arguments["outcome_type"] = "binary"
         arguments["extracted_fit"]["other"] = np.where(
             arguments["extracted_fit"]["other"] > 0, "a", "b"
         )
-        arguments["definitions"][-1].update(
-            value_type="categorical", categories_or_unit=["a", "b"]
-        )
-    cfg = ModifierCountConfig(
-        candidate_counts=(0, 1, 2), max_ranked_modifiers=3, forest_seeds=2
-    )
+        arguments["definitions"][-1].update(value_type="categorical", categories_or_unit=["a", "b"])
+    cfg = ModifierCountConfig(candidate_counts=(0, 1, 2), max_ranked_modifiers=3, forest_seeds=2)
     arguments["policy"] = replace(
         arguments["policy"],
-        multi_model=replace(
-            arguments["policy"].multi_model, repeats=1, modifier_count=cfg
-        ),
+        min_propensity=0.1,
+        max_propensity=0.9,
+        multi_model=replace(arguments["policy"].multi_model, repeats=1, modifier_count=cfg),
     )
     numerical_root = tmp_path / "numerical"
     _, report, _, _ = numerical.select_stage2_features_multi_model(
@@ -251,16 +237,12 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(
     selected = [
         {
             **f,
-            "roles": ["confounder", "effect_modifier"]
-            if f["name"] == "c"
-            else ["effect_modifier"],
+            "roles": ["confounder", "effect_modifier"] if f["name"] == "c" else ["effect_modifier"],
         }
         for f in arguments["definitions"]
     ]
     role_report = {
-        "decisions": [
-            {"feature_id": f["feature_id"], "roles": f["roles"]} for f in selected
-        ]
+        "decisions": [{"feature_id": f["feature_id"], "roles": f["roles"]} for f in selected]
     }
     nested_calls = []
 
@@ -292,15 +274,10 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(
     kept, roles, audit = result
     assert (
         len(nested_calls) == 2
-        and audit["boundaries"][
-            "ranking_and_numerical_evidence_nested_within_count_training"
-        ]
+        and audit["boundaries"]["ranking_and_numerical_evidence_nested_within_count_training"]
     )
     assert next(f for f in kept if f["feature_id"] == "c")["roles"][0] == "confounder"
-    assert (
-        sum("effect_modifier" in f["roles"] for f in kept)
-        == audit["chosen_modifier_count"]
-    )
+    assert sum("effect_modifier" in f["roles"] for f in kept) == audit["chosen_modifier_count"]
     root = tmp_path / "count" / audit["input_fingerprint"][:20]
     labels = arguments["dataset"]
     for split in arguments["inner_splits"]:
@@ -317,27 +294,41 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(
             np.asarray(nuisance["validation_propensity"]),
             np.asarray(nuisance["validation_outcome"]),
         )
+        keep = numerical.linear.propensity_eligibility(e, 0.1, 0.9)
+        eligible = np.asarray(valid_ids)[keep].tolist()
         all_ids = []
-        for path in (root / f"fold_{fold:03d}").glob("size_*/seed_*.json"):
+        for path in (root / f"fold_{fold:03d}").glob("*/size_*/seed_*.json"):
             cell = json.loads(path.read_text())["result"]
-            assert cell["validation_row_ids"] == valid_ids
+            assert cell["validation_row_ids"] == eligible
             expected = (
-                labels.loc[valid_ids, "outcome"].to_numpy()
-                - m
-                - (labels.loc[valid_ids, "treatment"].to_numpy() - e)
+                labels.loc[eligible, "outcome"].to_numpy()
+                - m[keep]
+                - (labels.loc[eligible, "treatment"].to_numpy() - e[keep])
                 * np.asarray(cell["predictions"])
             ) ** 2
             assert np.allclose(cell["squared_errors"], expected)
             assert np.isclose(cell["r_loss"], expected.mean())
             all_ids.append(cell["validation_row_ids"])
         assert (
-            len(all_ids) == 8
-        )  # Four sizes, two seeds; one common scoring population.
+            len(all_ids) == 12
+        )  # Four sizes: two forest seeds and one interaction fit; common patients.
+    options = audit["choice"]["options"]
+    expected_choice = min(
+        (
+            (details["mean_r_loss"], int(k), e != "linear_interactions", e)
+            for e, sizes in options.items()
+            for k, details in sizes.items()
+        )
+    )
+    assert audit["chosen_estimator"] == expected_choice[3]
+    assert audit["choice"]["chosen_additional_count"] == expected_choice[1]
+    assert set(options) == {"causal_forest", "linear_interactions"}
     changed = arguments["dataset"].copy()
     changed.loc[96:, ["treatment", "outcome"]] = 1e12
     changed["oracle"] = "DO_NOT_READ_CHANGED"
+    monkeypatch.setattr(count, "_score_prefix", lambda **k: pytest.fail("cached forest refitted"))
     monkeypatch.setattr(
-        count, "_score_prefix", lambda **k: pytest.fail("cached forest refitted")
+        count, "_score_interactions", lambda **k: pytest.fail("cached interaction model refitted")
     )
     extras.update(
         run_numerical=lambda a: pytest.fail("cached evidence refitted"),

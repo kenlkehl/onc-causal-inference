@@ -1211,14 +1211,20 @@ and annotation failures do not veto estimation. See
 procedure and artifact fields.
 
 In `selection_mode: "multi_model"`, seven modeling families inform LLM theme
-reviews and broad role assignments. Automatic modifier-count selection is
+reviews and broad role assignments. Every modifier screen honors the configured
+propensity bounds; the example uses inclusive 0.1–0.9 eligibility. Confounder
+association screens retain all training patients. Joint modifier-count and
+final-estimator selection is
 enabled by default in this mode: each count-validation fold rebuilds the
 modeling evidence and LLM ranking using its training patients, then compares
-ranked modifier prefixes using held-out R-loss. Minimum mean R-loss chooses the
-count; a paired one-standard-error rule is optional. This step preserves all
+ranked modifier prefixes and causal-forest versus penalized interaction outcome
+models using held-out R-loss. Binary interaction models use a logistic link and
+predict probability differences. Minimum mean R-loss chooses the architecture
+and count; a paired one-standard-error rule is optional. This step preserves all
 retained confounders and investigator-locked roles. Set
 `stage2.statistical_selection.multi_model.modifier_count.enabled: false` to
-retain the broad LLM modifier assignments. See the
+retain the broad LLM modifier assignments and historical forest final model.
+Use `modifier_count.estimators: ["causal_forest"]` for forest-only count tuning. See the
 [multi-model Stage 2 procedure](docs/stage2_multi_model.md) for configuration,
 checkpointing, and the boundaries of this nested validation.
 

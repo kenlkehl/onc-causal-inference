@@ -1,0 +1,79 @@
+{
+  "at": "2026-09-22T22:49:27.669215+00:00",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_0/statistical_evidence.json": "7d0212f601e9f379a797ed86bb6f29d0efc97a8f3ef4308af6910b9a4c038801",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_1/statistical_evidence.json": "77ead3c90ed063a0723e851408c09bd2b328488e7cb12324bf505052a59bb2be",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_2/statistical_evidence.json": "05b4c2c92aafe05b9932533ba54e311215aac57c180ae2b2fa8e15b03600c4df",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_3/statistical_evidence.json": "a4e0a751da7f99888875f900dd7c8a4ae663c30c2a842a8e365e8f45d3e1b14b",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_4/statistical_evidence.json": "468e5b8c190dbf4e1679a7f24d90ae3de399499f7e934ed604bf47488cf94f70",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_5/statistical_evidence.json": "137f5eb61e9c68e52b0e1f244c8750eb073c374f01a4453e1413dfdc4a793669"
+  },
+  "jobs": [
+    {
+      "at": "2026-09-22T22:49:18.059047+00:00",
+      "folds": 5,
+      "input_fingerprint": "07f9231b4eccc0859737e7ce92b87be8d5d6bb6bfe3c92a64fffc403bfbffc5a",
+      "phase": "complete",
+      "position": 0,
+      "report_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_0/statistical_evidence.json",
+      "report_sha256": "7d0212f601e9f379a797ed86bb6f29d0efc97a8f3ef4308af6910b9a4c038801",
+      "seconds": 1455.9808117090724,
+      "training_rows": 800
+    },
+    {
+      "at": "2026-09-22T22:37:51.934578+00:00",
+      "folds": 3,
+      "input_fingerprint": "f3751952bf8eb502223d1a7968d967e3d5f52f7d66b6117191d8702f321626f2",
+      "phase": "complete",
+      "position": 1,
+      "report_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_1/statistical_evidence.json",
+      "report_sha256": "77ead3c90ed063a0723e851408c09bd2b328488e7cb12324bf505052a59bb2be",
+      "seconds": 769.8831290700473,
+      "training_rows": 640
+    },
+    {
+      "at": "2026-09-22T22:38:03.239918+00:00",
+      "folds": 3,
+      "input_fingerprint": "53693c22ee6f7bc0b642bd1b540d1ec19328a8109385607924c430ca3fe41ff5",
+      "phase": "complete",
+      "position": 2,
+      "report_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_2/statistical_evidence.json",
+      "report_sha256": "05b4c2c92aafe05b9932533ba54e311215aac57c180ae2b2fa8e15b03600c4df",
+      "seconds": 781.0257632089779,
+      "training_rows": 640
+    },
+    {
+      "at": "2026-09-22T22:37:55.269255+00:00",
+      "folds": 3,
+      "input_fingerprint": "5b6c7f3e32716a14cdf881d8687b951b82aa57680cbf3fd21318dfe3309050b7",
+      "phase": "complete",
+      "position": 3,
+      "report_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_3/statistical_evidence.json",
+      "report_sha256": "a4e0a751da7f99888875f900dd7c8a4ae663c30c2a842a8e365e8f45d3e1b14b",
+      "seconds": 773.1487753570545,
+      "training_rows": 640
+    },
+    {
+      "at": "2026-09-22T22:37:40.632421+00:00",
+      "folds": 3,
+      "input_fingerprint": "5fb50431ffb02cbb88505ef64056dae3581158228bfe7dae4124a3423c9c8d0a",
+      "phase": "complete",
+      "position": 4,
+      "report_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_4/statistical_evidence.json",
+      "report_sha256": "468e5b8c190dbf4e1679a7f24d90ae3de399499f7e934ed604bf47488cf94f70",
+      "seconds": 758.4613787399139,
+      "training_rows": 640
+    },
+    {
+      "at": "2026-09-22T22:37:52.225356+00:00",
+      "folds": 3,
+      "input_fingerprint": "f8bdb4562bf91983cb55e43cf536e111ba023234468376d9eb0ab75979918a7d",
+      "phase": "complete",
+      "position": 5,
+      "report_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_jobs/job_5/statistical_evidence.json",
+      "report_sha256": "137f5eb61e9c68e52b0e1f244c8750eb073c374f01a4453e1413dfdc4a793669",
+      "seconds": 770.0893112381455,
+      "training_rows": 640
+    }
+  ]
+}

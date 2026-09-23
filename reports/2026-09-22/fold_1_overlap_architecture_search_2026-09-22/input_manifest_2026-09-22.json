@@ -1,0 +1,153 @@
+{
+  "adjudication": {
+    "endpoint": "http://sn4622130540:8000/v1",
+    "max_tokens": 100000,
+    "model": "gemma4-31b",
+    "reasoning_effort": "high"
+  },
+  "candidate_features": 352,
+  "confounder_policy": "Preserve the frozen 189-confounder broad review to isolate overlap screening and architecture search; verify unchanged confounder association evidence.",
+  "created_at": "2026-09-22T22:23:52.051004+00:00",
+  "evaluation_plan": {
+    "comparison": "Previously frozen 189-confounder/16-modifier forest, native and common eligible held-out patients.",
+    "estimation_seeds": [
+      100042,
+      1100042,
+      2100042
+    ],
+    "max_propensity": 0.9,
+    "min_propensity": 0.1,
+    "oracle_recovery_and_ite_evaluation": "Only after selected definitions and all predictions are frozen.",
+    "production": "Refit only the CV-selected architecture and modifier count using retained confounders and modifiers; three seeds.",
+    "propensity_clip": 0.02,
+    "trees": 200
+  },
+  "exploratory_post_hoc_comparison": true,
+  "extraction_refreshed_again": false,
+  "heldout_rows": 200,
+  "input_files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-19/selection_comparison_2026-09-19/results/inputs/refresh_config.json": "a568c34ebe13d003e955a172a9c0e928e49274f869ce0d5d932df51f54be02f1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/definitions.json": "2544b5eafd086725e4f6fdf213d18a65a794a8be407924d6eef27f51eb7a4101",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/heldout.pkl": "ccf6714b666f84146516c3fb344618b5c9044d59117bc4587e5fba68fa91b6dc",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/heldout_labels.parquet": "5f74f5f9572afa8cca219179f05ad750f96bc67586c4d601924b41ee461271de",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/split.json": "0dc3925822f6e75f1453ca3a52008b70dfb789cb15dd11f5d21d30d526a7bf0f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/training.pkl": "82f88ef44eb863e3cbf33bcca2081fb85e9f8a94e9b4119d353837ad6983e63f",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_extracted_logistic_interactions_2026-09-21/inputs/training_labels.parquet": "13d039c9efa5301a05b74d156ac4d10307e966dfa37e2cdc1146b6f54aa2d688",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/input_manifest_2026-09-21.json": "d069d07b217996dc7f0a8e974a77739eaafe424354d320e1b52bcbbdb0d46bf0",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/role_report.json": "628dfd4a96b9ca853a8afd7582e2912558639d705fe464fae23d346943f4d043",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/selected_definitions.json": "ee399ae5dbe7e99a2e880d792f84b75e3549b0c6af866dea996326a73a94d9ea",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-21/fold_1_multi_model_selection_2026-09-21/statistical_evidence.json": "28e8918ed605bc52cbf76b1659c2fc532de4069b061f04831a282c9c45e33092"
+  },
+  "one_standard_error_result": "diagnostic only; do not fit a competing selected model",
+  "oracle_values_used_by_selection_or_fitting": false,
+  "outer_fold": 1,
+  "policy": {
+    "categorical_min_count": 5,
+    "coefficient_tolerance": 1e-07,
+    "internal_cv_folds": 3,
+    "l1_ratio": 0.8,
+    "max_iter": 5000,
+    "max_propensity": 0.9,
+    "maximum_log10_alpha": -1.0,
+    "min_propensity": 0.1,
+    "minimum_log10_alpha": -5.0,
+    "modifier_continuous_winsor_quantile": 0.005,
+    "modifier_one_standard_error_rule": false,
+    "modifier_ridge_alpha": 10.0,
+    "modifier_selection_rule": "any_inner_fold_union",
+    "modifier_top_n_per_inner_fold": 10,
+    "multi_model": {
+      "feature_subset_size": 32,
+      "forest_min_samples_leaf": 10,
+      "forest_trees": 200,
+      "l1_ratios": [
+        0.2,
+        0.8,
+        1.0
+      ],
+      "max_prompt_chars": 100000,
+      "modifier_count": {
+        "candidate_counts": [
+          0,
+          4,
+          8,
+          12,
+          16,
+          24,
+          32
+        ],
+        "enabled": true,
+        "estimators": [
+          "causal_forest",
+          "linear_interactions"
+        ],
+        "forest_seeds": 3,
+        "max_ranked_modifiers": 64,
+        "selection_rule": "minimum_r_loss"
+      },
+      "nominal_p_threshold": 0.05,
+      "permutation_repeats": 3,
+      "q_threshold": 0.1,
+      "regularization_grid_size": 8,
+      "repeats": 3,
+      "row_fraction": 0.8,
+      "schema_version": "stage2_multi_model_selection_v3"
+    },
+    "nuisance_prediction_one_standard_error_rule": false,
+    "nuisance_selection_rule": "any_inner_fold_union",
+    "one_standard_error_rule": true,
+    "optimization_tolerance": 1e-06,
+    "regularization_grid_size": 16,
+    "selection_mode": "multi_model",
+    "univariable_confounder_p_value_threshold": 0.05,
+    "univariable_confounder_q_value_threshold": 0.1
+  },
+  "prior_fold_1_oracle_results_seen": true,
+  "role_policy": {
+    "enabled": true,
+    "max_candidates_per_request": 20,
+    "max_categories_per_feature": 40,
+    "max_description_chars": 1200,
+    "max_measurement_definition_chars": 1600
+  },
+  "scheduling": {
+    "numerical_workers": 6,
+    "production_workers": 3,
+    "ranking_workers": 6
+  },
+  "seed": 100042,
+  "selection_rule": "joint minimum_r_loss across architectures and counts",
+  "sources": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2.py": "ff509e5b44efa3e2dc71dbc60a9e748d35b407e0e6759c4f290e573bbdf78f3a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/plain_handoff_stage2_analysis.py": "71df0d19c29a5f3b8c662d5644515d143fed5d02d2c29391622b2d00ce437c6c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_effect_estimators.py": "1706ed22a0710f5f880af7ae06733bdf7e46dda30b3a653c982a9e5778db924d",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_elastic_net_selection.py": "279abd82a8e688113ac31eb100369b1e1e8e8a7e7a0d434b8d33828e94945ece",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_modifier_count.py": "c48f4b59e90adaaf8b8d5f53fe9744ec0f7256b114b828104823e8caad8c6510",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_modifier_ranking.py": "3a79c9200fcff152e4cbcf930658b1adfa3c887460b8d068a76db2deb9dc6793",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_multi_model_adjudication.py": "d383f81b70d68c63d7257f0dd61509cdc9ff6be2b52157a044928c1d091225df",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_multi_model_config.py": "70e3eaffe1e178d85eecd5bfb0c2565d456b494ae958f6036ee857e243111844",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_multi_model_selection.py": "d347ec2390b5f71debb7046a6a460c8b9f718110282848e95eaad530f002c733",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_role_adjudication.py": "53ea81964a4507bf35fdffb9552396167133cc2069601b34f939ba4125fa018c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/inference/stage2_statistical_selection.py": "b78edb6fe9c67baf330b0baf1fbd029cd52f6cfa32b0b9adb2da2d49038c271c",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/models/causal_forest_head.py": "0154e16dacefd77ccf775668060de0a62df4246517c4dee0ac55a989d0e39a80",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/oci/models/elastic_net_nuisance.py": "2aa470459a08b4a71d7153e8ad93d80a50c803f491f5ea4b4c705cc5f68887c7",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/PROTOCOL_2026-09-22.md": "286c622cedc2aa88c5def5c778d246de214b5e0f3d44e05bc8fcb8b69a716a59",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/common.py": "1c632bb53a32b86ed98011a2e398ba586b1f7620b596c04e3f4b778a9dc9daac",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/evaluate_2026-09-22.py": "9daa9cbc4cebc07d4228df9e07dc46698416484930d87758683fed10f03a9865",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/fit_2026-09-22.py": "a71b5aeb77356ab8cfedd5ce65ada798ffd485ce63142e4997cd5c45e6b90750",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/numerical_2026-09-22.py": "ff3f2f90fdff5ae30c299e4d6353e786ff2969b575653f8517cd63b9de755d6a",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/progress_2026-09-22.py": "df7b1d3186eebcfa251f875117ab9697e0eabcb5568a8c360f7dfd6973acc104",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/run_2026-09-22.py": "171ac3c309107d1ee36861950e5c97a9d5b71aa65743cf69ee52b79cf8fce306",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/select_2026-09-22.py": "518b70dd0ee2791b2f9586c6114d8932c11c44531c238154ea05f06bc057d951",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/select_parallel_2026-09-22.py": "e866b0ab540072e71cca81ff7d8430eabf1c8e2db89e88927a1a4b22cfbe0cc5"
+  },
+  "training_rows": 800,
+  "versions": {
+    "econml": "0.16.0",
+    "numpy": "2.3.5",
+    "pandas": "3.0.5",
+    "scikit-learn": "1.6.1",
+    "scipy": "1.15.3",
+    "statsmodels": "0.14.6"
+  }
+}

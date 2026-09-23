@@ -153,6 +153,72 @@ def test_invalid_inner_boundary_fails_before_fitting(tmp_path):
         select_stage2_features_elastic_net(**arguments, checkpoint_dir=tmp_path)
 
 
+def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(monkeypatch):
+    from oci.inference import stage2_multi_model_selection as selection
+
+    arguments = sample_inputs()
+    arguments["policy"] = replace(
+        arguments["policy"],
+        min_propensity=0.1,
+        max_propensity=0.9,
+        multi_model=replace(arguments["policy"].multi_model, repeats=1),
+    )
+    probabilities = np.array([0.05, 0.1, 0.5, 0.9, 0.95, 0.5])
+
+    def p(frame):
+        return probabilities[frame._oci_row_id.to_numpy() % len(probabilities)]
+
+    # Hold honest scoring nuisances fixed to isolate the downstream eligibility boundary.
+    monkeypatch.setattr(
+        selection,
+        "_nuisances",
+        lambda train, valid, *a, **k: {
+            "training_propensity": p(train).tolist(),
+            "training_outcome": np.zeros(len(train)).tolist(),
+            "validation_propensity": p(valid).tolist(),
+            "validation_outcome": np.zeros(len(valid)).tolist(),
+            "crossfit_audit": [],
+            "validation_fit_audits": [],
+        },
+    )
+    _, original, _, _ = select_stage2_features_elastic_net(**arguments)
+    excluded = ~selection.linear.propensity_eligibility(p(arguments["extracted_fit"]), 0.1, 0.9)
+    changed = arguments["dataset"].copy()
+    changed.loc[np.flatnonzero(excluded), "outcome"] += 100
+    _, poisoned, _, _ = select_stage2_features_elastic_net(**{**arguments, "dataset": changed})
+    for old, new in zip(original["cells"], poisoned["cells"]):
+        if old["family"] == "univariable":
+            assert old["audit"]["association_fit_row_ids"] == old["fit_row_ids"]
+            effect_ids = old["audit"]["effect_fit_row_ids"]
+            assert len(effect_ids) < len(old["fit_row_ids"])
+        elif old["family"] in {
+            "penalized_interactions",
+            "orthogonal_linear",
+            "univariable_rlearner",
+            "causal_forest",
+        }:
+            effect_ids = old["fit_row_ids"]
+            assert all(0.1 <= probabilities[i % 6] <= 0.9 for i in old["validation_row_ids"])
+        else:
+            assert len(old["fit_row_ids"]) == 48
+            continue
+        assert all(0.1 <= probabilities[i % 6] <= 0.9 for i in effect_ids)
+        assert {probabilities[i % 6] for i in effect_ids} >= {0.1, 0.9}
+        assert [r for r in old["records"] if r["role"] == "effect"] == [
+            r for r in new["records"] if r["role"] == "effect"
+        ]
+    empty = selection._univariable(
+        arguments["extracted_fit"],
+        arguments["definitions"],
+        arguments["dataset"].treatment.to_numpy(float)[:96],
+        arguments["dataset"].outcome.to_numpy(float)[:96],
+        binary=False,
+        policy=arguments["policy"],
+        effect_keep=np.zeros(96, bool),
+    )
+    assert all(r["status"] == "not_evaluable" for r in empty["records"] if r["role"] == "effect")
+
+
 def test_subsets_and_group_permutation_preserve_candidate_units():
     for repeat in (0, 1, 2):
         groups = candidate_subsets(list("abcdefg"), repeat=repeat, subset_size=3, seed=55)
@@ -418,6 +484,7 @@ def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
     config = compile_config(raw, config_dir=path.parent)
     assert config.stage2.statistical_selection.selection_mode == "multi_model"
     assert config.stage2.statistical_selection.multi_model.modifier_count.enabled
+    assert (config.stage2.min_propensity, config.stage2.max_propensity) == (0.1, 0.9)
     raw["stage2"]["role_adjudication"]["enabled"] = False
     with pytest.raises(ValueError, match="requires role_adjudication"):
         compile_config(raw, config_dir=path.parent)
@@ -437,11 +504,11 @@ def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
     )
     validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
     old = json.loads(json.dumps(saved))
-    old["statistical_selection"]["multi_model"]["schema_version"] = "stage2_multi_model_selection_v1"
-    old["statistical_selection"]["multi_model"].pop("modifier_count")
-    (root / "config.json").write_text(json.dumps(old))
-    with pytest.raises(RuntimeError, match="automatic modifier count"):
-        validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
+    for version in ("stage2_multi_model_selection_v1", "stage2_multi_model_selection_v2"):
+        old["statistical_selection"]["multi_model"]["schema_version"] = version
+        (root / "config.json").write_text(json.dumps(old))
+        with pytest.raises(RuntimeError, match="automatic modifier count"):
+            validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
     (root / "config.json").write_text(json.dumps(saved))
     changed_trees = replace(config.stage2, estimation_trees=config.stage2.estimation_trees * 2)
     with pytest.raises(RuntimeError, match="modifier-count estimation_trees changed"):

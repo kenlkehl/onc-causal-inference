@@ -1,0 +1,13 @@
+{
+  "completed_at": "2026-09-23T09:05:38Z",
+  "input_fingerprint": "81d512265679feb8734e52916ce19a8917c0d60032da315df06620819bab3968",
+  "model_family": "penalized_logistic_interactions",
+  "outcome_model_contract": {
+    "effect_scale": "probability_difference",
+    "link": "logit"
+  },
+  "outcome_type": "binary",
+  "rows": 200,
+  "schema_version": "stage2_outer_estimation_v9_architecture_search",
+  "status": "complete"
+}

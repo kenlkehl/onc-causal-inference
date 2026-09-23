@@ -7923,7 +7923,7 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     monkeypatch.setattr(
         stage2_analysis,
         "estimate_outer_fold",
-        lambda **_kwargs: {"status": "estimated_from_snapshot"},
+        lambda **kwargs: {"status": "estimated_from_snapshot", "estimator": kwargs["estimator"]},
     )
 
     count_calls = []
@@ -7943,7 +7943,7 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
             assert kw["selected"][0]["roles"] == ["effect_modifier"]
             assert kw["estimation_trees"] in {10, 20}
             count_calls.append(kw["estimation_trees"])
-            report = {"status": "complete", "chosen_modifier_count": 0}
+            report = {"status": "complete", "chosen_modifier_count": 0, "chosen_estimator": "linear_interactions"}
             return [], {"decisions": [{"feature_id": definitions[0]["feature_id"], "roles": []}]}, report
 
         monkeypatch.setattr(stage2_modifier_count, "select_modifier_count", choose_constant)
@@ -7970,13 +7970,15 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     result = run_fold_analysis(**arguments)
 
     assert result["estimation"]["status"] == "estimated_from_snapshot"
+    assert result["estimation"]["estimator"] == ("linear_interactions" if multi_model else "causal_forest")
     assert result["review_convergence"]["reused_frozen_preselection_snapshot"] is True
     assert result["review_rounds"] == 1
     assert len(count_calls) == int(multi_model)
     if multi_model:
         assert result["selection"]["final_role_assignment"] == "llm_confounders_and_nested_r_loss_modifiers"
         assert result["selection"]["modifier_count_selection"]["chosen_modifier_count"] == 0
-        run_fold_analysis(**arguments)
+        resumed = run_fold_analysis(**arguments)
+        assert resumed["estimation"]["estimator"] == "linear_interactions"
         assert count_calls == [10]
         run_fold_analysis(**{**arguments, "config": replace(config, estimation_trees=20)})
         assert count_calls == [10, 20]

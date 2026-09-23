@@ -136,18 +136,20 @@ def _validated_inputs(dataset, extracted, definitions, splits, treatment_column,
     return extracted[["_oci_row_id", *names]].set_index("_oci_row_id", drop=False), labels
 
 
-def _matrix(design, treatment, kind, *, valid=False):
+def _matrix(design, treatment, kind, *, valid=False, modifier_ids=None):
     x = design.valid if valid else design.train
     keys = list(design.column_feature_ids)
     if kind == "main":
         return x, keys, ["main"] * len(keys), keys
     t = np.asarray(treatment, dtype=float).reshape(-1, 1)
     if kind == "interactions":
+        mask = [modifier_ids is None or k in modifier_ids for k in keys]
+        effect_keys = [k for k, keep in zip(keys, mask) if keep]
         return (
-            np.column_stack((t, x, t * x)),
-            ["__treatment__", *keys, *keys],
-            ["treatment", *(["main"] * len(keys)), *(["effect"] * len(keys))],
-            ["treatment", *(f"main:{k}" for k in keys), *(f"effect:{k}" for k in keys)],
+            np.column_stack((t, x, t * x[:, mask])),
+            ["__treatment__", *keys, *effect_keys],
+            ["treatment", *(["main"] * len(keys)), *(["effect"] * len(effect_keys))],
+            ["treatment", *(f"main:{k}" for k in keys), *(f"effect:{k}" for k in effect_keys)],
         )
     if kind == "rlearner":
         return (
@@ -160,7 +162,19 @@ def _matrix(design, treatment, kind, *, valid=False):
 
 
 def _fit_linear(
-    train, valid, definitions, y, *, binary, kind, treatment, valid_treatment, policy, seed, ratio
+    train,
+    valid,
+    definitions,
+    y,
+    *,
+    binary,
+    kind,
+    treatment,
+    valid_treatment,
+    policy,
+    seed,
+    ratio,
+    modifier_ids=None,
 ):
     """Tune inside training, refitting encoders in every penalty-CV partition."""
     y = np.asarray(y, dtype=float)
@@ -178,8 +192,10 @@ def _fit_linear(
     final_design = linear._encode_design(
         train, valid, definitions, categorical_min_count=policy.categorical_min_count
     )
-    x, keys, blocks, groups = _matrix(final_design, treatment, kind)
-    xv, _, _, _ = _matrix(final_design, valid_treatment, kind, valid=True)
+    x, keys, blocks, groups = _matrix(final_design, treatment, kind, modifier_ids=modifier_ids)
+    xv, _, _, _ = _matrix(
+        final_design, valid_treatment, kind, valid=True, modifier_ids=modifier_ids
+    )
     intercept = kind != "rlearner"
     if (binary and len(np.unique(y)) < 2) or x.shape[1] == 0:
         constant = float(np.clip(np.mean(y), 1e-6, 1 - 1e-6) if binary else np.mean(y))
@@ -210,8 +226,10 @@ def _fit_linear(
             definitions,
             categorical_min_count=policy.categorical_min_count,
         )
-        fit_x, _, _, group_ids = _matrix(design, treatment[fit], kind)
-        hold_x, _, _, _ = _matrix(design, treatment[hold], kind, valid=True)
+        fit_x, _, _, group_ids = _matrix(design, treatment[fit], kind, modifier_ids=modifier_ids)
+        hold_x, _, _, _ = _matrix(
+            design, treatment[hold], kind, valid=True, modifier_ids=modifier_ids
+        )
         group_structure = linear._group_structure(group_ids)
         initial = None
         fold_index = len(cv_iterations)
@@ -403,8 +421,13 @@ def grouped_permutation_gain(x, column_ids, score, *, repeats, seed):
     return baseline, result
 
 
-def _univariable(train, definitions, t, y, *, binary, policy):
+def _univariable(train, definitions, t, y, *, binary, policy, effect_keep=None):
     records = []
+    if effect_keep is None:
+        effect_keep = np.ones(len(train), dtype=bool)
+    effect_train = train.loc[effect_keep].reset_index(drop=True)
+    effect_t, effect_y = t[effect_keep], y[effect_keep]
+    effect_evaluable = len(effect_t) >= 4 and len(np.unique(effect_t)) == 2
     intercept = np.ones((len(t), 1))
     adjusted, _ = linear._univariable_rank_safe_columns(intercept, t.reshape(-1, 1))
 
@@ -432,15 +455,17 @@ def _univariable(train, definitions, t, y, *, binary, policy):
             tested_p(lambda: outcome_test(y, adjusted, design.main)[0]),
             tested_p(
                 lambda: _modifier_test_chunk(
-                    train,
-                    t,
-                    y,
-                    np.column_stack((np.ones(len(t)), t)),
+                    effect_train,
+                    effect_t,
+                    effect_y,
+                    np.column_stack((np.ones(len(effect_t)), effect_t)),
                     [feature],
                     binary_outcome=binary,
                     p_value_threshold=policy.multi_model.nominal_p_threshold,
                 )[0]["interaction_p_value"]
-            ),
+            )
+            if effect_evaluable
+            else None,
         )
         for role, p in zip(ROLES, values):
             records.append(
@@ -465,6 +490,11 @@ def _univariable(train, definitions, t, y, *, binary, policy):
             "outcome_association_model": "Y ~ T + candidate",
             "multiplicity": "BH_within_resample_and_endpoint",
             "hard_gate": False,
+            "association_fit_row_ids": train._oci_row_id.astype(int).tolist(),
+            "effect_fit_row_ids": effect_train._oci_row_id.astype(int).tolist(),
+            "effect_status": "ok"
+            if effect_evaluable
+            else "insufficient_eligible_rows_or_treatment_arms",
         },
     }
 
@@ -794,9 +824,10 @@ def select_stage2_features_multi_model(
         for position, split in enumerate(inner_splits, 1):
             fold = int(split.get("inner_fold", position))
             train_ids, valid_ids = split["fit_row_ids"], split["heldout_row_ids"]
-            train, valid = frame.loc[train_ids].reset_index(drop=True), frame.loc[
-                valid_ids
-            ].reset_index(drop=True)
+            train, valid = (
+                frame.loc[train_ids].reset_index(drop=True),
+                frame.loc[valid_ids].reset_index(drop=True),
+            )
             t, y = labels.loc[train_ids, [treatment_column, outcome_column]].to_numpy(dtype=float).T
             tv, yv = (
                 labels.loc[valid_ids, [treatment_column, outcome_column]].to_numpy(dtype=float).T
@@ -859,6 +890,7 @@ def select_stage2_features_multi_model(
                             selected_definitions = [by_id[k] for k in feature_ids]
                             nuisance_view = {"e": e[rows], "m": m[rows], "ev": ev, "mv": mv}
                             effect_family = family in {
+                                "penalized_interactions",
                                 "orthogonal_linear",
                                 "univariable_rlearner",
                                 "causal_forest",
@@ -873,9 +905,10 @@ def select_stage2_features_multi_model(
                             keepv = (
                                 eligible_valid if effect_family else np.ones(len(valid), dtype=bool)
                             )
-                            fit, hold = sampled.loc[keep].reset_index(drop=True), valid.loc[
-                                keepv
-                            ].reset_index(drop=True)
+                            fit, hold = (
+                                sampled.loc[keep].reset_index(drop=True),
+                                valid.loc[keepv].reset_index(drop=True),
+                            )
                             tt, yy, ttval, yyval = (
                                 t[rows][keep],
                                 y[rows][keep],
@@ -901,6 +934,9 @@ def select_stage2_features_multi_model(
                                         yy,
                                         binary=binary,
                                         policy=policy,
+                                        effect_keep=linear.propensity_eligibility(
+                                            e[rows], policy.min_propensity, policy.max_propensity
+                                        ),
                                     )
                                 elif family in {
                                     "penalized_main",
@@ -950,7 +986,9 @@ def select_stage2_features_multi_model(
                                     )
                             except NotEstimable as exc:
                                 roles = (
-                                    ("effect",)
+                                    ("outcome", "effect")
+                                    if family == "penalized_interactions"
+                                    else ("effect",)
                                     if effect_family
                                     else (
                                         ("treatment", "outcome")
@@ -974,6 +1012,17 @@ def select_stage2_features_multi_model(
                                 "seed": cell_seed + subset_index,
                                 "fit_row_ids": fit._oci_row_id.astype(int).tolist(),
                                 "validation_row_ids": hold._oci_row_id.astype(int).tolist(),
+                                "propensity_bounds": {
+                                    "min": policy.min_propensity,
+                                    "max": policy.max_propensity,
+                                },
+                                "population": (
+                                    "overlap_eligible"
+                                    if effect_family
+                                    else "all_sampled_for_associations_overlap_eligible_for_interactions"
+                                    if family == "univariable"
+                                    else "all_sampled"
+                                ),
                                 **result,
                             }
 

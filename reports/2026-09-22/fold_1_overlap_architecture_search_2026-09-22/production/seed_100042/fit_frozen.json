@@ -1,0 +1,15 @@
+{
+  "estimator": "linear_interactions",
+  "files": {
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/production/seed_100042/complete.json": "f469a16c9f88376b2c115a51adc78ef6ac46e7087d6a8ff778e4a6489d040190",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/production/seed_100042/diagnostics.json": "8c2f5ab6c82c72247c923464ac690aed67cce7dbe9d8b0b4044d2fb60970e144",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/production/seed_100042/nuisance_fit_predictions.csv": "caf46fe6709ff32ca86d7cbe6a4f95de1541cf4bfa9a4e44ab74139088168fd1",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/production/seed_100042/predictions.csv": "b3edd399f48aa639d774b5e89eb1b8816ad6f85131691755d23a9b58932453db",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/production/seed_100042/propensity_overlap.json": "8e63d596f885601eda84cbd1d1819aeef1b149b62a7ed1a9ee9fd3e156c3cbad",
+    "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-22/fold_1_overlap_architecture_search_2026-09-22/production/seed_100042/started.json": "682fb3cf96b0663f72853e748f318d94d1dceeafaa8860abfaed398b1c45e9e8"
+  },
+  "fit_n": 645,
+  "seconds": 961.311831405852,
+  "seed": 100042,
+  "test_n": 170
+}

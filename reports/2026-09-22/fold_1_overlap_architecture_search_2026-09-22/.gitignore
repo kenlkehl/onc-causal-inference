@@ -1,0 +1,10 @@
+numerical/
+numerical_jobs/
+modifier_count/
+ranking_jobs/
+llm_runtime/
+*.log
+**/*.log
+**/*.pkl
+**/*.joblib
+__pycache__/

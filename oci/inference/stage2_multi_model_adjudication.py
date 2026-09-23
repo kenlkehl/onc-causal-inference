@@ -42,6 +42,9 @@ interactions are on the log-odds scale and unadjusted for other covariates.
 Orthogonal linear models, candidate R-learners, and causal forests assess the
 probability/outcome scale after elastic-net nuisance adjustment. Their targets
 and biases differ. A model family is evidence, not an independent replication.
+All modifier evidence uses the supplied propensity-eligible population. Treatment
+and outcome association screens use all sampled training patients; main effects
+from the joint interaction model instead share its restricted population.
 
 Use exposure and evaluability denominators. Missing or nonconverged fits are not
 negative votes. Repeated samples and folds overlap; support fractions are not
@@ -129,6 +132,18 @@ def build_multi_model_role_evidence(*, definitions, statistical_report, policy):
     return {
         "schema_version": SCHEMA_VERSION,
         "candidates": cards,
+        "analysis_populations": {
+            "modifier_min_propensity": _number(
+                (statistical_report.get("policy") or {}).get("min_propensity")
+            ),
+            "modifier_max_propensity": _number(
+                (statistical_report.get("policy") or {}).get("max_propensity")
+            ),
+            "bounds_are_inclusive": True,
+            "null_bound_means_unrestricted": True,
+            "modifier_evidence": "propensity_eligible_patients_using_training_only_nuisances",
+            "association_evidence": "all_sampled_patients_except_joint_interaction_model_main_effects",
+        },
         "evidence_boundary": {
             "aggregate_outer_training_evidence_only": True,
             "row_level_values_are_excluded": True,
@@ -337,6 +352,7 @@ def adjudicate_multi_model_roles(
             "task": "review_stage2_multi_model_themes",
             "prompt_version": PROMPT_VERSION,
             "score_meaning": evidence["score_meaning"],
+            "analysis_populations": evidence["analysis_populations"],
             "candidates": batch,
             "required_response": {
                 "themes": [
@@ -422,6 +438,7 @@ def adjudicate_multi_model_roles(
             "task": "adjudicate_stage2_multi_model_roles",
             "prompt_version": PROMPT_VERSION,
             "score_meaning": evidence["score_meaning"],
+            "analysis_populations": evidence["analysis_populations"],
             "candidates": batch,
             "themes": relevant,
             "required_response": {

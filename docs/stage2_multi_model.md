@@ -1,7 +1,7 @@
 # Stage 2 selection from multiple models
 
-Implemented September 21, 2026; automatic modifier-count selection added September
-22, 2026. Enable with
+Implemented September 21, 2026; overlap-restricted modifier screening and joint
+modifier-count/estimator selection updated September 22, 2026. Enable with
 `stage2.statistical_selection.selection_mode: "multi_model"`.
 
 ## 1. Purpose and scope
@@ -10,7 +10,8 @@ Implemented September 21, 2026; automatic modifier-count selection added Septemb
    evidence and LLM interpretation. A candidate discarded by one model remains
    available to other models and final review.
 2. Use existing consolidated, ontology-reviewed, extracted measurements. This
-   mode does not repeat discovery/extraction or change the final estimator.
+   mode does not repeat discovery/extraction. It can now select the final CATE
+   estimator as well as its modifier inputs.
 3. Work separately inside each outer-training population. The numerical selector
    reads only observed treatment/outcome from the source dataset. Patient text,
    outer-test data, oracle columns, and generation metadata cannot enter its
@@ -77,9 +78,23 @@ Implemented September 21, 2026; automatic modifier-count selection added Septemb
    scores hold nuisance residuals fixed while permuting effect inputs. These are
    marginal permutation diagnostics, not conditional importance estimates;
    correlated alternatives can dilute or redistribute their scores.
-8. Configured propensity eligibility applies to orthogonal linear models,
-   candidate R-learners, and causal forests. Association and outcome models use
-   all sampled patients, so their populations and score scales differ.
+8. **Every modifier screen uses the same configured overlap restriction**:
+   univariable `T:candidate` tests, penalized outcome interactions, orthogonal
+   linear models, candidate R-learners, and causal forests. Set
+   `stage2.min_propensity: 0.1` and `stage2.max_propensity: 0.9`, as in the example,
+   to retain estimated propensities **including** the endpoints. The previously
+   unrestricted univariable and penalized interaction screens now honor these
+   bounds. Bounds remain optional for other configurations; these are eligibility
+   filters, separate from numerical propensity clipping.
+9. Eligibility uses cross-fitted training propensities and training-only models
+   for validation propensities. No oracle propensity or outer-test outcome enters
+   screening. Insufficient eligible rows or treatment arms make a screen
+   unevaluable; it never falls back to all patients.
+10. Univariable treatment/outcome associations, penalized main-effect models,
+    predictive forests, and scoring nuisances retain all sampled patients.
+    Main-effect evidence from the *joint interaction* model necessarily shares
+    its overlap-restricted population. Audits record the relevant row IDs, and
+    LLM prompts describe these population differences without exposing row IDs.
 
 ## 4. Stability summaries and LLM interpretation
 
@@ -112,75 +127,86 @@ Implemented September 21, 2026; automatic modifier-count selection added Septemb
    paths, exception messages, and oracle metadata. Oversized prompts split or
    fail with a budget error; no candidate is silently omitted.
 
-## 5. Automatic modifier-count selection
+## 5. Joint modifier-count and final-estimator selection
 
-1. Enabled by default **within `multi_model` mode**. The default rule is
-   `minimum_r_loss`: select the modifier budget with the lowest mean validation
-   R-loss, breaking exact ties toward fewer features. `one_standard_error` is
-   available for stronger pruning: choose the smallest budget whose mean paired
-   loss difference from the best is within one paired standard error across
-   folds. This is a simplification heuristic, not a significance test.
-2. The count step preserves **every confounder retained by the full-training
-   role adjudication**. It does not force their elastic-net coefficients to be
-   nonzero. Investigator-locked roles are exact; locked modifiers are always
-   included and do not consume the additional-candidate budget. Locked
-   confounder-only variables cannot acquire a modifier role.
-3. Candidate budgets default to `0, 4, 8, 12, 16, 24, 32`, plus the complete
-   ranked shortlist, capped at 64 unlocked candidates. Counts exceeding the
-   available shortlist are clipped and deduplicated. Zero means a constant
-   effect when no modifiers are locked, or the locked-modifier model otherwise.
-   A constant effect is estimated from training residuals, not set to zero.
-4. Preserve the original count-validation folds. **Inside each fold's training
-   portion**, create treatment-stratified subfolds using `internal_cv_folds`,
-   rerun all seven modeling families, and obtain a new LLM ranking. The evidence
-   worker receives only that training portion's labels; every other label is
-   masked. The count-validation outcomes cannot enter those evidence summaries
-   or ranking prompts. A global ranking formed from all outer-training outcomes
-   is not reused in these validation fits.
-5. The ranking considers every unlocked candidate, including candidates not
-   given a modifier role in the provisional broad review. It uses only the
-   existing prompt-safe definitions and aggregate numerical evidence. Bounded
-   requests sort batches; further requests merge leading windows while
-   preserving each list's relative order. Every reviewed candidate is accounted
-   for, candidate-specific effect citations are required, and oversized prompts
-   fail rather than discard evidence. This ordering is an LLM heuristic, not an
-   exhaustive search over feature subsets or a measurement consolidation.
-6. For each count-validation fold, reuse the original numerical pass's
-   all-candidate elastic-net nuisances. Training residuals are themselves
-   cross-fitted; validation residuals use nuisance models fitted only on that
-   fold's training patients. The residuals and propensity-eligible patients stay
-   identical across modifier budgets. Selected confounder roles do not gate these
-   broad scoring nuisances.
-7. Fit the ranked prefixes using the production feature encoder, fitted only on
-   eligible training patients. Validation forests use the configured
-   `estimation_trees`, minimum leaf size 10, square-root feature sampling, 45%
-   subsampling, honesty and inference enabled, and no tuning. Three seeds per
-   fold are the default. This count-validation forest uses fixed residuals; the
-   final production DML estimator subsequently refits its own nuisance models.
-8. Score each held-out prediction using
-   `mean(((Y - m_hat) - (T - e_hat) * tau_hat)**2)`. Average seeds within each
-   fold, then average fold losses with equal fold weights. All budgets must have
-   at least two common usable folds; insufficient overlap/variation fails visibly
-   rather than selecting a budget using incomparable populations. Forest seeds
-   are not counted as independent patient replications.
-9. After choosing the budget, form a final ranking from all outer-training
-   numerical evidence and take that prefix for the production refit. Preserve
-   the broad confounder set, roles and citations before count selection, selected
-   count, complete loss curve, fold rankings, predictions, encoded dimensions,
-   seeds, and source/input fingerprints. The usual measurement-dependency and
-   latent-materialization logic runs on the resulting roles.
-10. This nesting is **conditional on the frozen upstream candidate catalog,
-    extractions, ontology, and preselection consolidation**. It does not rerun
-    Stage 1 or the unsupervised consolidation separately inside each split.
-    R-loss is a noisy model-selection objective, not oracle-feature recall or
-    Pearson ITE correlation, and does not establish causal identification.
+1. Enabled by default **within `multi_model` mode**, through `modifier_count`.
+   The `estimators` list defaults to `["causal_forest", "linear_interactions"]`.
+   Each architecture is evaluated at every modifier budget; the budget is not
+   chosen using only a forest before considering the linear alternative.
+2. `minimum_r_loss` chooses the architecture/count pair with the smallest mean
+   validation R-loss. Exact ties prefer fewer modifiers, then the linear model.
+   Optional `one_standard_error` chooses the simplest pair, in that same order,
+   whose paired excess loss over the best is within one paired standard error
+   across folds. This is a simplification heuristic, not a significance test.
+3. Preserve **every confounder retained by full-training role adjudication**.
+   This does not force its penalized coefficient to be nonzero. Investigator
+   locks remain exact. Locked modifiers are always included outside the additional
+   candidate budget; locked confounder-only variables cannot acquire interactions.
+4. Additional budgets default to `0, 4, 8, 12, 16, 24, 32`, plus the complete
+   ranked shortlist, capped at 64 unlocked candidates. Clip/deduplicate counts
+   when fewer candidates exist. With no locked modifiers, zero is a constant
+   residual-effect forest; the interaction model retains treatment and covariate
+   main effects but has no explicit interactions. A logistic model can still
+   produce varying probability differences because baseline risk varies.
+5. Preserve the original inner folds. **Inside each fold's training portion**,
+   create subfolds with `internal_cv_folds`, rerun all seven evidence families,
+   and obtain a fresh LLM modifier ranking. Every other patient's label is masked
+   before the nested evidence worker runs. Neither validation outcomes nor a
+   global outcome-informed ranking enter these training fits.
+6. The LLM considers every unlocked candidate, even those without a provisional
+   modifier role. Bounded requests sort batches and merge ordered windows using
+   prompt-safe aggregate evidence. Every candidate is accounted for; rankings
+   require candidate-specific effect citations. This remains a heuristic ordering,
+   not an exhaustive subset search or another measurement-consolidation pass.
+7. Reuse the parent numerical pass's **fixed all-candidate elastic-net nuisances**.
+   Training residuals are cross-fitted; validation residuals use models fitted
+   only on that fold's training patients. Scoring residuals and overlap-eligible
+   validation patients are identical for every count and architecture. Broad
+   scoring nuisances do not depend on the full-training selected confounder set.
+8. Fit two architecture families on eligible training patients:
+   - **Causal forest:** production feature encoding, configured `estimation_trees`,
+     minimum leaf size 10, square-root feature sampling, 45% subsampling, honesty
+     and inference enabled. It fits the fixed residuals. Average three forest
+     seeds per fold/count by default.
+   - **Penalized outcome interactions:** treatment main effect, all frozen
+     candidate main effects, and treatment interactions only with the selected
+     modifier prefix and locked modifiers. Use a logistic link for binary
+     outcomes and identity for continuous outcomes. Group elastic net uses the
+     configured `l1_ratio`; tune its penalty by outcome loss inside training,
+     refitting the encoder in every penalty-CV partition. One deterministic fit
+     per fold/count predicts both treatment states; CATE is `mu1 - mu0` on the
+     outcome/probability scale. No validation labels enter penalty fitting.
+9. Score both families with
+   `mean(((Y - m_hat) - (T - e_hat) * tau_hat)**2)` on the same validation rows.
+   Average forest seeds within folds, then average fold losses equally. Require
+   at least two common usable folds and finite scores for every option; failures
+   are visible rather than silently comparing different populations. Seeds are
+   not independent patient replications. Even when all features are locked,
+   architectures are compared on the fixed locked modifier set.
+10. Choose the pair, form a final ranking from all outer-training evidence, and
+    take the chosen prefix. Preserve the selected architecture, complete loss
+    surface, fold rankings, row IDs, predictions, model audits, seeds, locks,
+    role decisions, and source/input fingerprints. Final refitting uses retained
+    confounders/modifiers: the DML forest refits nuisances; the interaction outcome
+    model retunes its penalty with retained main effects and selected interactions.
+11. Validation therefore uses broader adjustment than the final retained-role
+    refit. It is an architecture/count comparison conditional on that adjustment
+    and the **frozen upstream catalog, extractions, ontology, and consolidation**,
+    not a fully nested rerun of discovery or full LLM confounder selection. R-loss
+    is noisy and does not optimize oracle recall or Pearson ITE correlation.
 
 ## 6. Routing, checkpoints, and use
 
-1. Final roles after count selection feed the existing estimator adapter:
-   confounders enter nuisance adjustment, modifiers enter forest X, and dual-role
-   variables receive both uses. No extraction definitions are changed by theme
-   review.
+1. The chosen architecture is passed to the final estimator on fresh and resumed
+   selections. Forests use modifiers in X and pure confounders in W. Interaction
+   models use retained covariate main effects, a treatment main effect, and
+   treatment interactions with selected modifiers. No extraction definition is
+   changed. AIPW ATE estimation/calibration continues using separate nuisance
+   models for either architecture. Penalized interaction models currently emit
+   CATE point estimates only; individual-effect intervals remain missing, while
+   the existing AIPW ATE interval remains available. `mu0`/`mu1` in the common
+   predictions file are the AIPW nuisance predictions, not interaction-model
+   counterfactual predictions.
 2. This is opt-in. Omitted selectors preserve `llm_roles`; `independent_tasks`
    keeps binding joint-model selection and advisory LLM annotations. New defaults
    are omitted from both legacy policy fingerprints.
@@ -199,23 +225,26 @@ Implemented September 21, 2026; automatic modifier-count selection added Septemb
 7. Count selection stores checkpoints under `selection/modifier_count/` and
    nested numerical evidence under `selection/multi_model/modifier_count_training/`.
    `selection/modifier_count/selection.json` points to the active count result.
-   Each LLM request and each fold/count/seed fit can resume independently;
+   Each LLM request and each fold/architecture/count/seed fit can resume independently;
    completed result hashes are validated. Count-only policy changes leave the
    underlying numerical-evidence fingerprint unchanged. When count selection is
    enabled, `estimation_trees` is also a selection parameter: changing it requires
    guarded reselection and invalidates the prior count-selection result.
-8. This update uses `stage2_multi_model_selection_v2`. Version 1 configuration
-   blocks are accepted as input, but an existing version 1 run requires guarded
-   reselection before adopting the new defaults. The preflight check blocks the
-   old completion shortcut. Set `modifier_count.enabled` to false to use only the
-   broad role adjudication in a new/reselected version 2 run. Other selector modes
-   retain their previous policies and fingerprints.
+8. This update uses `stage2_multi_model_selection_v3` and
+   `stage2_nested_modifier_count_v2`. Version 1/2 configuration blocks are accepted
+   as input, but existing runs require guarded reselection before adopting these
+   changes. Preflight blocks stale completion shortcuts. Set `estimators` to
+   `["causal_forest"]` for forest-only count tuning, or set `modifier_count.enabled`
+   to false to retain broad LLM modifiers and the historical forest final model.
+   Other selector modes retain their selection policies.
 
 Configuration block:
 
 ```json
 {
   "stage2": {
+    "min_propensity": 0.1,
+    "max_propensity": 0.9,
     "statistical_selection": {
       "selection_mode": "multi_model",
       "multi_model": {
@@ -235,7 +264,8 @@ Configuration block:
           "candidate_counts": [0, 4, 8, 12, 16, 24, 32],
           "max_ranked_modifiers": 64,
           "selection_rule": "minimum_r_loss",
-          "forest_seeds": 3
+          "forest_seeds": 3,
+          "estimators": ["causal_forest", "linear_interactions"]
         }
       }
     },
@@ -259,8 +289,9 @@ forests are separate: 230 predictive forests plus 115 causal forests, alongside
 linear models and univariable tests. With the default three nested evidence
 folds, count selection adds five training-only evidence runs of three folds each,
 their LLM rankings, one final full-training ranking, and up to
-`5 × 8 budgets × 3 seeds = 120` count-validation fits (zero-budget constant
-models do not need a forest). The nested numerical work is substantially more
+`5 × 8 budgets × 3 seeds = 120` forest-validation fits (zero-budget constant
+models do not need a forest), plus `5 × 8 = 40` interaction models with nested
+penalty tuning. The nested numerical work is substantially more
 expensive than reusing a global ranking.
 
 ## 7. Validation and limits
@@ -275,12 +306,15 @@ expensive than reusing a global ranking.
    confounder/modifier recovery, held-out effect estimates, and outer-fold
    variability. More evidence families do not establish better sensitivity,
    specificity, or causal identification by themselves.
-4. Count-selection tests run real binary/continuous numerical models and forests
-   with controlled LLM replies. They check nested row/label isolation, categorical
+4. Selection tests run real binary/continuous numerical models, forests, and
+   penalized interaction outcome models with controlled LLM replies. They check nested row/label isolation, categorical
    measurements, independently recomputed validation R-loss, common populations,
    confounder/lock preservation, zero-budget behavior, exact resume without
-   refitting, corruption detection, and version 1 preflight rejection. They do
-   not measure a live LLM's ranking quality.
+   refitting, corruption detection, and version 1/2 preflight rejection. They do
+   not measure a live LLM's ranking quality. Additional checks change excluded
+   patients' outcomes while holding nuisances fixed, verify all effect evidence
+   is unchanged, check probability-scale counterfactuals, and verify production
+   routing plus prediction invariance to changed outer-test outcomes.
 
 Method references: [EconML causal forest](https://www.pywhy.org/EconML/_autosummary/econml.grf.CausalForest.html)
 and [GRF variable importance](https://grf-labs.github.io/grf/reference/variable_importance.html).

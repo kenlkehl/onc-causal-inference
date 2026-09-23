@@ -1,0 +1,477 @@
+{
+  "direct": [
+    {
+      "assigned_roles": {
+        "outer_001_feature_009": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_009"
+      ],
+      "candidate_names": [
+        "age"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_009": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": null,
+          "inner_fold": 1,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 2,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": 46,
+          "inner_fold": 3,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 4,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 5,
+          "within_chosen_prefix": false
+        }
+      ],
+      "oracle_variable": "age",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_302": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_302"
+      ],
+      "candidate_names": [
+        "sex"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_302": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": null,
+          "inner_fold": 1,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 2,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 3,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 4,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 5,
+          "within_chosen_prefix": false
+        }
+      ],
+      "oracle_variable": "sex",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_109": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_109"
+      ],
+      "candidate_names": [
+        "ecog_performance_status"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_109": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": null,
+          "inner_fold": 1,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": 49,
+          "inner_fold": 2,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 11,
+          "inner_fold": 3,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 4,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 5,
+          "within_chosen_prefix": false
+        }
+      ],
+      "oracle_variable": "ECOG",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_095": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_095"
+      ],
+      "candidate_names": [
+        "creatinine_clearance"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_095": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": 5,
+          "inner_fold": 1,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 8,
+          "inner_fold": 2,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 24,
+          "inner_fold": 3,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 4,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": 18,
+          "inner_fold": 5,
+          "within_chosen_prefix": true
+        }
+      ],
+      "oracle_variable": "creatinine clearance",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_267": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_267"
+      ],
+      "candidate_names": [
+        "prior_platinum_chemotherapy"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_267": 43
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": 24,
+          "inner_fold": 1,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 3,
+          "inner_fold": 2,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 3,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": 15,
+          "inner_fold": 4,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 46,
+          "inner_fold": 5,
+          "within_chosen_prefix": true
+        }
+      ],
+      "oracle_variable": "prior platinum exposure",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "confounder"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_192": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_192"
+      ],
+      "candidate_names": [
+        "lung_cancer_histology"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_192": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": 53,
+          "inner_fold": 1,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 47,
+          "inner_fold": 2,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 3,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 4,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 5,
+          "within_chosen_prefix": false
+        }
+      ],
+      "oracle_variable": "histology",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_032": [
+          "confounder"
+        ],
+        "outer_001_feature_111": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_032",
+        "outer_001_feature_111"
+      ],
+      "candidate_names": [
+        "biomarker_egfr_status",
+        "egfr_mutation_status"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_032": null,
+        "outer_001_feature_111": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": null,
+          "inner_fold": 1,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 2,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 3,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": 59,
+          "inner_fold": 4,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 5,
+          "within_chosen_prefix": false
+        }
+      ],
+      "oracle_variable": "EGFR status",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_228": [
+          "confounder",
+          "effect_modifier"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_228"
+      ],
+      "candidate_names": [
+        "neutrophil_to_lymphocyte_ratio"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_228": 1
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": 2,
+          "inner_fold": 1,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 1,
+          "inner_fold": 2,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 2,
+          "inner_fold": 3,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 1,
+          "inner_fold": 4,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 1,
+          "inner_fold": 5,
+          "within_chosen_prefix": true
+        }
+      ],
+      "oracle_variable": "NLR",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": true,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_052": []
+      },
+      "candidate_ids": [
+        "outer_001_feature_052"
+      ],
+      "candidate_names": [
+        "brain_metastases_presence"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_052": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": null,
+          "inner_fold": 1,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 2,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": 43,
+          "inner_fold": 3,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 54,
+          "inner_fold": 4,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 5,
+          "within_chosen_prefix": false
+        }
+      ],
+      "oracle_variable": "brain metastasis presence",
+      "retained_in_any_role": false,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    },
+    {
+      "assigned_roles": {
+        "outer_001_feature_155": [
+          "confounder"
+        ]
+      },
+      "candidate_ids": [
+        "outer_001_feature_155"
+      ],
+      "candidate_names": [
+        "hemoglobin_level"
+      ],
+      "global_modifier_ranks": {
+        "outer_001_feature_155": null
+      },
+      "nested_modifier_ranks": [
+        {
+          "best_rank": null,
+          "inner_fold": 1,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 2,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": null,
+          "inner_fold": 3,
+          "within_chosen_prefix": false
+        },
+        {
+          "best_rank": 36,
+          "inner_fold": 4,
+          "within_chosen_prefix": true
+        },
+        {
+          "best_rank": 48,
+          "inner_fold": 5,
+          "within_chosen_prefix": true
+        }
+      ],
+      "oracle_variable": "hemoglobin",
+      "retained_in_any_role": true,
+      "retained_in_correct_role": false,
+      "true_role": "effect_modifier"
+    }
+  ],
+  "lineage_source_sha256": "32d6c5bdcc0b387c88e5fdda945c53c3674132963a3cc511647b3086f737488a"
+}

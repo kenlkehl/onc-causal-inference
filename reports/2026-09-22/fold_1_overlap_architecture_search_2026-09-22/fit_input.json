@@ -1,0 +1,20 @@
+{
+  "chosen_estimator": "linear_interactions",
+  "parallel_production_workers": 3,
+  "plan": {
+    "comparison": "Previously frozen 189-confounder/16-modifier forest, native and common eligible held-out patients.",
+    "estimation_seeds": [
+      100042,
+      1100042,
+      2100042
+    ],
+    "max_propensity": 0.9,
+    "min_propensity": 0.1,
+    "oracle_recovery_and_ite_evaluation": "Only after selected definitions and all predictions are frozen.",
+    "production": "Refit only the CV-selected architecture and modifier count using retained confounders and modifiers; three seeds.",
+    "propensity_clip": 0.02,
+    "trees": 200
+  },
+  "selection_freeze_sha256": "e698fe10b8b6a03ba690ec3cbf8fd655bea0bbe0d2e385be843b7c77da560ba3",
+  "source_sha256": "a71b5aeb77356ab8cfedd5ce65ada798ffd485ce63142e4997cd5c45e6b90750"
+}

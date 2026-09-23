@@ -83,7 +83,7 @@ PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = (
 )
 REVIEW_CHECKPOINT_SCHEMA_VERSION = "stage2_aggregate_ontology_supervisor_v1"
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
-ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v8_calibration_overlap"
+ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v9_architecture_search"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
 PRESELECTION_SNAPSHOT_SCHEMA_VERSION = "stage2_frozen_preselection_snapshot_v1"
 HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION = (
@@ -8579,7 +8579,16 @@ def estimate_outer_fold(
     output_dir: Path,
     min_propensity: float | None = None,
     max_propensity: float | None = None,
+    estimator: str = "causal_forest",
+    statistical_policy: Any = None,
 ) -> dict[str, Any]:
+    from .stage2_effect_estimators import effect_model_family, fit_interaction_effect
+
+    model_family = effect_model_family(estimator, outcome_type)
+    if estimator == "linear_interactions":
+        if statistical_policy is None:
+            raise ValueError("linear interaction estimation requires a statistical policy")
+        statistical_policy.validate()
     validate_propensity_bounds(min_propensity, max_propensity)
     complete_path = output_dir / "complete.json"
     diagnostics_path = output_dir / "diagnostics.json"
@@ -8598,6 +8607,22 @@ def estimate_outer_fold(
             "max_propensity": max_propensity,
             "propensity_clip": propensity_clip,
             "estimation_trees": estimation_trees,
+            "estimator": estimator,
+            "interaction_policy": statistical_policy.public_dict()
+            if estimator == "linear_interactions"
+            else None,
+            "interaction_source_fingerprint": _value_fingerprint(
+                [
+                    Path(__file__).with_name(name).read_text()
+                    for name in (
+                        "stage2_effect_estimators.py",
+                        "stage2_multi_model_selection.py",
+                        "stage2_elastic_net_selection.py",
+                    )
+                ]
+            )
+            if estimator == "linear_interactions"
+            else None,
             "dataset_modeling_fingerprint": _frame_fingerprint(
                 dataset[[unit_id_column, treatment_column, outcome_column]]
             ),
@@ -8639,9 +8664,7 @@ def estimate_outer_fold(
     effect_defs = _definitions_for_roles(definitions, {"effect_modifier"})
     effect_ids = {str(feature["feature_id"]) for feature in effect_defs}
     pure_confounder_defs = [
-        feature
-        for feature in adjustment_defs
-        if str(feature["feature_id"]) not in effect_ids
+        feature for feature in adjustment_defs if str(feature["feature_id"]) not in effect_ids
     ]
     # Eligibility for effect fitting must not use in-sample propensity predictions.
     supplied_inner = list(split.get("inner_splits") or []) or _fallback_inner_splits(
@@ -8677,21 +8700,15 @@ def estimate_outer_fold(
     _write_json(output_dir / "propensity_overlap.json", {"fit": fit_overlap})
     if fit_keep.sum() < 4 or min(np.sum(t_fit[fit_keep] == arm) for arm in (0, 1)) < 2:
         raise ValueError(
-            "propensity bounds leave insufficient training rows or treatment arms for causal forest"
+            "propensity bounds leave insufficient training rows or treatment arms for effect estimation"
         )
     t_encoder = _FeatureEncoder(propensity_defs).fit(extracted_fit)
     y_encoder = _FeatureEncoder(outcome_defs).fit(extracted_fit)
     eligible_fit = extracted_fit.iloc[np.flatnonzero(fit_keep)]
-    effect_encoder = _FeatureEncoder(effect_defs).fit(eligible_fit)
-    control_encoder = _FeatureEncoder(pure_confounder_defs).fit(eligible_fit)
     x_t_fit = t_encoder.transform(extracted_fit)
     x_t_heldout = t_encoder.transform(extracted_heldout)
     x_y_fit = y_encoder.transform(extracted_fit)
     x_y_heldout = y_encoder.transform(extracted_heldout)
-    x_effect_fit = effect_encoder.transform(extracted_fit)
-    x_effect_heldout = effect_encoder.transform(extracted_heldout)
-    w_fit = control_encoder.transform(extracted_fit)
-    w_heldout = control_encoder.transform(extracted_heldout)
     treatment_model = _fit_classifier(
         x_t_fit,
         t_fit,
@@ -8716,44 +8733,82 @@ def estimate_outer_fold(
     _write_json(output_dir / "propensity_overlap.json", overlap)
     if not heldout_keep.any():
         raise ValueError("propensity bounds leave no held-out patients for effect estimation")
-    if x_effect_fit.shape[1] == 0:
-        # EconML requires X for heterogeneous-effect prediction. A constant X
-        # yields one fold-level treatment effect when no modifier survived.
-        x_effect_fit = np.ones((len(extracted_fit), 1), dtype=float)
-        x_effect_heldout = np.ones((len(extracted_heldout), 1), dtype=float)
-        constant_effect_design = True
+    if estimator == "causal_forest":
+        effect_encoder = _FeatureEncoder(effect_defs).fit(eligible_fit)
+        control_encoder = _FeatureEncoder(pure_confounder_defs).fit(eligible_fit)
+        x_effect_fit = effect_encoder.transform(extracted_fit)
+        x_effect_heldout = effect_encoder.transform(extracted_heldout)
+        w_fit = control_encoder.transform(extracted_fit)
+        if x_effect_fit.shape[1] == 0:
+            # EconML requires X for heterogeneous-effect prediction. A constant X
+            # yields one fold-level treatment effect when no modifier survived.
+            x_effect_fit = np.ones((len(extracted_fit), 1), dtype=float)
+            x_effect_heldout = np.ones((len(extracted_heldout), 1), dtype=float)
+            constant_effect_design = True
+        else:
+            constant_effect_design = False
+        controls_fit = w_fit[fit_keep] if w_fit.shape[1] else None
+        causal_forest = CausalForestHead(
+            n_estimators=int(estimation_trees),
+            max_depth=None,
+            min_samples_leaf=10,
+            max_features="sqrt",
+            honest=True,
+            inference=True,
+            random_state=seed + 20_000,
+            tune_model=False,
+            subforest_size=next(size for size in (4, 3, 2, 1) if int(estimation_trees) % size == 0),
+            n_jobs=1,
+            outcome_type=outcome_type,
+        )
+        causal_forest.fit(
+            x_effect_fit[fit_keep],
+            t_fit[fit_keep],
+            y_fit[fit_keep],
+            W=controls_fit,
+        )
+        effect_predictions = causal_forest.predict(
+            x_effect_heldout[heldout_keep],
+            return_ci=True,
+        )
+
+        fit_audit = causal_forest.fit_audit()
+        architecture_diagnostics = {
+            "causal_forest_trees": int(estimation_trees),
+            "causal_forest_honest": True,
+            "causal_forest_inference": True,
+            "causal_forest_tuned": False,
+            "causal_forest_fit_audit": fit_audit,
+            "pure_confounders_in_w": len(pure_confounder_defs),
+            "dual_role_features_in_x_only": len(
+                [f for f in adjustment_defs if str(f["feature_id"]) in effect_ids]
+            ),
+            "constant_effect_design": constant_effect_design,
+        }
     else:
-        constant_effect_design = False
-    controls_fit = w_fit[fit_keep] if w_fit.shape[1] else None
-    causal_forest = CausalForestHead(
-        n_estimators=int(estimation_trees),
-        max_depth=None,
-        min_samples_leaf=10,
-        max_features="sqrt",
-        honest=True,
-        inference=True,
-        random_state=seed + 20_000,
-        tune_model=False,
-        subforest_size=next(
-            size for size in (4, 3, 2, 1) if int(estimation_trees) % size == 0
-        ),
-        n_jobs=1,
-        outcome_type=outcome_type,
-    )
-    causal_forest.fit(
-        x_effect_fit[fit_keep],
-        t_fit[fit_keep],
-        y_fit[fit_keep],
-        W=controls_fit,
-    )
-    causal_forest_predictions = causal_forest.predict(
-        x_effect_heldout[heldout_keep],
-        return_ci=True,
-    )
+        # Shared with the inner validation search; no held-out labels enter this API.
+        result = fit_interaction_effect(
+            train=eligible_fit,
+            valid=extracted_heldout.iloc[np.flatnonzero(heldout_keep)],
+            definitions=definitions,
+            modifier_ids=effect_ids,
+            treatment=t_fit[fit_keep],
+            outcome=y_fit[fit_keep],
+            binary=binary,
+            policy=statistical_policy,
+            seed=seed + 20_000,
+        )
+        effect_predictions = {"tau_pred": result["tau"]}
+        fit_audit = result["audit"]
+        architecture_diagnostics = {
+            "interaction_fit_audit": fit_audit,
+            "cate_confidence_intervals": "not_computed_for_penalized_interaction_model",
+            "no_selected_interactions": not effect_ids,
+        }
 
     def scatter_prediction(key: str) -> np.ndarray:
         values = np.full(len(heldout_ids), np.nan)
-        prediction = causal_forest_predictions.get(key)
+        prediction = effect_predictions.get(key)
         if prediction is not None:
             values[heldout_keep] = np.asarray(prediction, dtype=float).reshape(-1)
         return values
@@ -8797,16 +8852,14 @@ def estimate_outer_fold(
         float(np.std(finite, ddof=1) / math.sqrt(len(finite))) if len(finite) > 1 else None
     )
     diagnostics = {
-        "model_family": "causal_forest_dml",
+        "model_family": model_family,
+        "estimator": estimator,
+        "effect_model_fit_audit": fit_audit,
+        **architecture_diagnostics,
         "primary_ate_estimator": "outer_cross_fitted_aipw",
         "nuisance_model_family": "elastic_net",
         "binary_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier"),
         "continuous_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetRegressor"),
-        "causal_forest_trees": int(estimation_trees),
-        "causal_forest_honest": True,
-        "causal_forest_inference": True,
-        "causal_forest_tuned": False,
-        "causal_forest_fit_audit": causal_forest.fit_audit(),
         "rows": len(heldout_ids),
         "fit_rows": len(fit_ids),
         "effect_fit_rows": int(fit_keep.sum()),
@@ -8850,11 +8903,6 @@ def estimate_outer_fold(
         "treatment_nuisance_features": len(propensity_defs),
         "outcome_nuisance_features": len(outcome_defs),
         "effect_modifiers": len(effect_defs),
-        "pure_confounders_in_w": len(pure_confounder_defs),
-        "dual_role_features_in_x_only": len(
-            [feature for feature in adjustment_defs if str(feature["feature_id"]) in effect_ids]
-        ),
-        "constant_effect_design": constant_effect_design,
         "ate_aipw": ate,
         "standard_error": standard_error,
         "confidence_interval_95": (
@@ -8863,12 +8911,24 @@ def estimate_outer_fold(
             else None
         ),
         "mean_estimated_cate": float(np.nanmean(cate)) if np.isfinite(cate).any() else None,
-        "mean_causal_forest_effect": float(np.nanmean(cate)) if np.isfinite(cate).any() else None,
-        "mean_causal_forest_lower_95": (
-            float(np.nanmean(cate_lower_values)) if np.isfinite(cate_lower_values).any() else None
-        ),
-        "mean_causal_forest_upper_95": (
-            float(np.nanmean(cate_upper_values)) if np.isfinite(cate_upper_values).any() else None
+        **(
+            {
+                "mean_causal_forest_effect": float(np.nanmean(cate))
+                if np.isfinite(cate).any()
+                else None,
+                "mean_causal_forest_lower_95": (
+                    float(np.nanmean(cate_lower_values))
+                    if np.isfinite(cate_lower_values).any()
+                    else None
+                ),
+                "mean_causal_forest_upper_95": (
+                    float(np.nanmean(cate_upper_values))
+                    if np.isfinite(cate_upper_values).any()
+                    else None
+                ),
+            }
+            if estimator == "causal_forest"
+            else {}
         ),
         "propensity_min": float(np.min(propensity)) if len(propensity) else None,
         "propensity_max": float(np.max(propensity)) if len(propensity) else None,
@@ -8890,9 +8950,8 @@ def estimate_outer_fold(
             "schema_version": ESTIMATION_CHECKPOINT_SCHEMA_VERSION,
             "input_fingerprint": estimation_input_fingerprint,
             "outcome_type": outcome_type,
-            "outcome_model_contract": diagnostics["causal_forest_fit_audit"][
-                "outcome_model_contract"
-            ],
+            "model_family": model_family,
+            "outcome_model_contract": fit_audit["outcome_model_contract"],
             "completed_at": _now(),
             "rows": len(heldout_ids),
         },
@@ -10320,6 +10379,11 @@ def run_fold_analysis(
             "reused_frozen_preselection_snapshot": True,
         }
     _write_json(output_dir / "ontology_supervision" / "convergence.json", review_convergence)
+    from .stage2_effect_estimators import effect_model_family
+
+    final_estimator = selection_report.get("modifier_count_selection", {}).get(
+        "chosen_estimator", "causal_forest"
+    )
     _write_json(
         output_dir / "final_definitions.json",
         {
@@ -10347,7 +10411,8 @@ def run_fold_analysis(
                 if statistical_policy.selection_mode == "multi_model" else
                 "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
             ),
-            "final_model_family": "causal_forest_dml",
+            "final_model_family": effect_model_family(final_estimator, outcome_type),
+            "final_estimator": final_estimator,
             "harmonization_validation_fallbacks": harmonization_validation_fallbacks,
         },
     )
@@ -10371,6 +10436,8 @@ def run_fold_analysis(
         min_propensity=getattr(config, "min_propensity", None),
         max_propensity=getattr(config, "max_propensity", None),
         estimation_trees=int(config.estimation_trees),
+        estimator=final_estimator,
+        statistical_policy=statistical_policy,
         output_dir=output_dir / "estimation",
     )
     return {

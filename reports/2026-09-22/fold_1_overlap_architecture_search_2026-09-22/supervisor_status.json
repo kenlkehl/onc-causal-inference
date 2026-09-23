@@ -1,0 +1,52 @@
+{
+  "at": "2026-09-23T09:08:18.375985+00:00",
+  "children": {
+    "evaluate": {
+      "pid": 1616598,
+      "process_group": 1616598,
+      "returncode": 0
+    },
+    "fit": {
+      "pid": 1607639,
+      "process_group": 1607639,
+      "returncode": 0
+    },
+    "numerical": {
+      "pid": 1286899,
+      "process_group": 1286899,
+      "returncode": 0
+    },
+    "selection": {
+      "pid": 1286900,
+      "process_group": 1286900,
+      "returncode": 0
+    }
+  },
+  "completed_stages": [
+    {
+      "at": "2026-09-22T22:49:44.063005+00:00",
+      "returncode": 0,
+      "stage": "numerical"
+    },
+    {
+      "at": "2026-09-23T08:48:07.116782+00:00",
+      "returncode": 0,
+      "stage": "selection"
+    },
+    {
+      "at": "2026-09-23T09:06:59.585955+00:00",
+      "returncode": 0,
+      "stage": "fit"
+    },
+    {
+      "at": "2026-09-23T09:08:12.266553+00:00",
+      "returncode": 0,
+      "stage": "evaluate"
+    }
+  ],
+  "phase": "complete",
+  "pid": 1286857,
+  "process_group": 1286857,
+  "source_sha256": "171ac3c309107d1ee36861950e5c97a9d5b71aa65743cf69ee52b79cf8fce306",
+  "started_at": "2026-09-22T22:24:52.913077+00:00"
+}
