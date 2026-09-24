@@ -1,0 +1,25 @@
+
+
+{
+  "understanding": "Review the supplied extraction task and example, explain what the task asks and what the input represents, then return the extracted clinical variables from the example as JSON.",
+  "input_meaning": "The example input is a set of dated clinical record excerpts describing laboratory results and an imaging finding.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "candidates": [
+      {
+        "name": "Serum creatinine concentration",
+        "description": "The patient's serum creatinine level measured from a blood test, typically reported in mg/dL.",
+        "basis": "Two dated lab excerpts explicitly report serum creatinine values of 1.0 mg/dL and 1.2 mg/dL.",
+        "uncertainty": ""
+      },
+      {
+        "name": "Emphysema on imaging",
+        "description": "An imaging-based finding indicating the presence of emphysema.",
+        "basis": "The excerpt states that CT documents emphysema.",
+        "uncertainty": ""
+      }
+    ]
+  }
+}

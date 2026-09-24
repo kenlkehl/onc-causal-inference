@@ -1,0 +1,30 @@
+{
+  "http_status": 200,
+  "request_sha256": "7056d6cee16eb6d57604bc3cecdac5157915257dcf888be619352c9cbeff11b3",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 39.11,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 492,
+    "total_tokens": 1791,
+    "completion_tokens": 1299,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 1010
+    }
+  },
+  "reasoning_characters": 5009,
+  "content": "\n\n{\n  \"description\": \"Serum creatinine concentration from serum/plasma creatinine laboratory tests.\",\n  \"value_type\": \"continuous\",\n  \"categories_or_unit\": \"mg/dL\",\n  \"measurement_definition\": \"Extract the numeric serum or plasma creatinine result. Convert to mg/dL using the standard conversion: mg/dL = µmol/L ÷ 88.4. Use the latest dated observation; if all observations are undated, use the latest text-order observation. If multiple observations share the same date, use the last mention for the latest result. Exclude urine creatinine, creatinine clearance, eGFR, and estimates of renal function unless they are explicitly reported as a serum creatinine concentration.\",\n  \"missing_value_rule\": \"Return null if there is no clearly documented serum/plasma creatinine numeric value, if the latest selected observation lacks a resolvable unit, if the reported unit is incompatible with creatinine concentration, or if only qualitative or threshold documentation is present without a numeric result.\",\n  \"conflict_resolution\": {\n    \"strategy\": \"latest\",\n    \"positive_category\": null\n  },\n  \"caveats\": \"If a creatinine threshold is documented without a numeric serum creatinine result, do not infer a numeric value; set null and note the threshold separately only if downstream processing supports storing textual caveats.\"\n}",
+  "parsed": {
+    "description": "Serum creatinine concentration from serum/plasma creatinine laboratory tests.",
+    "value_type": "continuous",
+    "categories_or_unit": "mg/dL",
+    "measurement_definition": "Extract the numeric serum or plasma creatinine result. Convert to mg/dL using the standard conversion: mg/dL = µmol/L ÷ 88.4. Use the latest dated observation; if all observations are undated, use the latest text-order observation. If multiple observations share the same date, use the last mention for the latest result. Exclude urine creatinine, creatinine clearance, eGFR, and estimates of renal function unless they are explicitly reported as a serum creatinine concentration.",
+    "missing_value_rule": "Return null if there is no clearly documented serum/plasma creatinine numeric value, if the latest selected observation lacks a resolvable unit, if the reported unit is incompatible with creatinine concentration, or if only qualitative or threshold documentation is present without a numeric result.",
+    "conflict_resolution": {
+      "strategy": "latest",
+      "positive_category": null
+    },
+    "caveats": "If a creatinine threshold is documented without a numeric serum creatinine result, do not infer a numeric value; set null and note the threshold separately only if downstream processing supports storing textual caveats."
+  }
+}

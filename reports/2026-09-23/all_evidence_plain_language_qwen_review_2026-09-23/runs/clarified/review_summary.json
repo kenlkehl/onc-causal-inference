@@ -1,0 +1,30 @@
+[
+  {
+    "prompt": "04_define_ontology",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "07_page_observations",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "09_refine_ontology",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "12_supervise_ontology",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  }
+]

@@ -1,6 +1,9 @@
 """Scientific boundaries and end-to-end behavior of the multi-model selector."""
 
 from dataclasses import replace
+from tests.stage2_prompt_spy import prompt_inputs, role_response
+from oci.inference.stage2_prompt_catalog import SYSTEM_PROMPTS
+
 import json
 import warnings
 from pathlib import Path
@@ -330,52 +333,18 @@ def test_themes_cover_all_batches_roles_cite_evidence_and_resume(tmp_path):
     calls = []
 
     def request(messages, validate, **kwargs):
-        payload = json.loads(messages[1]["content"])
         assert "DO_NOT_LEAK" not in json.dumps(messages)
-        calls.append(payload["task"])
-        if "themes" in payload["task"]:
-            if "candidates" in payload:
-                members = [c["feature_id"] for c in payload["candidates"]]
-                citations = [
-                    r["evidence_id"] for c in payload["candidates"] for r in c["modeling_evidence"]
-                ]
-            else:
-                members = list(
-                    dict.fromkeys(k for t in payload["themes"] for k in t["member_feature_ids"])
-                )
-                citations = list(
-                    dict.fromkeys(k for t in payload["themes"] for k in t["evidence_ids"])
-                )
-            return validate(
-                {
-                    "themes": [
-                        {
-                            "name": "Shared evidence",
-                            "member_feature_ids": members,
-                            "evidence_ids": citations[:12],
-                            "interpretation": "Candidate-specific support.",
-                            "disagreements": "Shared samples limit independence.",
-                        }
-                    ]
-                }
-            )
-        decisions = []
-        for c in payload["candidates"]:
-            decisions.append(
-                {
-                    "feature_id": c["feature_id"],
-                    "roles": ["confounder"] if c["feature_id"] == "f0" else ["effect_modifier"],
-                    "evidence_ids": [r["evidence_id"] for r in c["modeling_evidence"]],
-                    "evidence_for": ["Supplied support."],
-                    "evidence_against": [],
-                    "inner_fold_consistency": "Only one fold supplied.",
-                    "cross_method_reconciliation": "Only one family supplied.",
-                    "rationale": "Exploratory support.",
-                    "stability": "insufficient",
-                }
-            )
+        slug = next(key for key, text in SYSTEM_PROMPTS.items() if text == messages[0]["content"])
+        calls.append(slug)
+        if slug == "16_merge_themes":
+            return validate({"merges": []})
+        payload = prompt_inputs(messages)
+        if slug == "15_model_themes":
+            return validate({"themes": [{"name": "Shared evidence", "members": [c["definition"]["name"].replace("_", " ") for c in payload["candidates"]],
+                "interpretation": "Candidate-specific support.", "disagreements": "Shared samples limit independence."}]})
+        candidate = payload["candidates"][0]
         assert payload["themes"]
-        return validate({"summary": "Provisional roles.", "decisions": decisions})
+        return validate(role_response(confounder=candidate["feature_id"] == "f0", modifier=candidate["feature_id"] != "f0"))
 
     selected, audit, evidence = adjudicate_stage2_roles(
         definitions=definitions,
@@ -388,8 +357,8 @@ def test_themes_cover_all_batches_roles_cite_evidence_and_resume(tmp_path):
     assert {k for t in audit["themes"] for k in t["member_feature_ids"]} == {
         f"f{i}" for i in range(7)
     }
-    assert "merge_stage2_multi_model_themes" in calls
-    assert calls.count("adjudicate_stage2_multi_model_roles") == 4
+    assert "16_merge_themes" in calls
+    assert calls.count("17_model_roles") == 7
     first_count = len(calls)
     second = adjudicate_stage2_roles(
         definitions=definitions,
@@ -401,7 +370,7 @@ def test_themes_cover_all_batches_roles_cite_evidence_and_resume(tmp_path):
     assert len(calls) == first_count and second == (selected, audit, evidence)
     response = tmp_path / "roles/batch_000/response.json"
     response.write_text(response.read_text().replace("Exploratory support.", "Tampered evidence."))
-    with pytest.raises(ValueError, match="corrupt"):
+    with pytest.raises(ValueError, match="hash does not match"):
         adjudicate_stage2_roles(
             definitions=definitions,
             statistical_report=report,
@@ -413,7 +382,7 @@ def test_themes_cover_all_batches_roles_cite_evidence_and_resume(tmp_path):
 
 def test_role_review_rejects_lost_candidates_and_invented_citations():
     validator = _themes_validator(["a", "b"], ["e1"], maximum=2)
-    with pytest.raises(ValueError, match="preserve every"):
+    with pytest.raises(ValueError, match="include every"):
         validator(
             {
                 "themes": [

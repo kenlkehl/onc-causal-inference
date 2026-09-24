@@ -1,0 +1,29 @@
+{
+  "http_status": 200,
+  "request_sha256": "d03a180ab952bdf2966944907ce730cdd82740643234f3f22eb9d36c75f28f10",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 19.632,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 706,
+    "total_tokens": 1606,
+    "completion_tokens": 900,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 767
+    }
+  },
+  "reasoning_characters": 3538,
+  "content": "\n\n{\n  \"understanding\": \"Extract each requested clinical variable from the patient record, applying the variable-specific rules for dates, explicit findings, numeric values, and missing values.\",\n  \"input_meaning\": \"The supplied text is a single patient's clinical record containing dated serum creatinine results and an imaging statement about emphysema.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"Serum creatinine\": 1.2,\n    \"Emphysema on imaging\": \"Present\"\n  }\n}",
+  "parsed": {
+    "understanding": "Extract each requested clinical variable from the patient record, applying the variable-specific rules for dates, explicit findings, numeric values, and missing values.",
+    "input_meaning": "The supplied text is a single patient's clinical record containing dated serum creatinine results and an imaging statement about emphysema.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "Serum creatinine": 1.2,
+      "Emphysema on imaging": "Present"
+    }
+  }
+}

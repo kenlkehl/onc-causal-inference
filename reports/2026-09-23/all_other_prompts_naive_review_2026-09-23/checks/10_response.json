@@ -1,0 +1,17 @@
+{
+  "status": "ready",
+  "representation": "categorical",
+  "reason": "The explicit <1.0 mg/dL threshold supports the smallest categorical partition needed to preserve its exact boundary semantics. The undefined qualitative token high is unusable and maps to null.",
+  "token_interpretations": [
+    {
+      "raw_text": "<1.0",
+      "meaning": "explicit_interval",
+      "interpretation": "Serum creatinine is less than 1.0 mg/dL; the boundary value 1.0 mg/dL is excluded."
+    },
+    {
+      "raw_text": "high",
+      "meaning": "unusable",
+      "interpretation": "No exact supported meaning is available because no definition or reference interval for high was supplied; map this token to null."
+    }
+  ]
+}

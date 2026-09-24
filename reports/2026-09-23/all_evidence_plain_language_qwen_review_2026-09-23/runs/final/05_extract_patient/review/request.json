@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Read the supplied task as someone receiving it for the first time. Use the task messages and their example input to work out what you are being asked to do.\n\nExplain the task and the meaning of its input in plain language. Ask any clarification questions whose answers would change your action or output. Identify any wording that requires unexplained context, or unnecessary software/process detail. Empty question and unnecessary-context lists are appropriate when the task is clear.\n\nThen carry out the example task if you can. Return one JSON object with exactly these keys:\n- understanding: a concise statement of the task.\n- input_meaning: a concise statement of what the supplied information represents.\n- can_complete: a boolean.\n- questions: an array of clarification questions.\n- unnecessary_context: an array of passages that could be removed, with a brief reason for each.\n- sample_response: your answer to the example task as a JSON value, or null if a required clarification prevents an answer.\n\nKeep the review concise. The task conversation is quoted below for this review."
+    },
+    {
+      "role": "user",
+      "content": "<task_to_review>\nSYSTEM MESSAGE\nRead the patient's clinical text and report a value for each listed clinical variable.\n\nWhat you receive\n\nThe clinical variable definitions and the text from one patient's record.\n\nHow to decide\n\nFollow each variable's definition. Use the wording in the patient's text to determine its value. An explicit date belongs to a finding when the sentence or record heading links them. An undated CT sentence therefore keeps an unknown date even when it follows a dated laboratory result.\n\nUse the defined category labels exactly. Write numerical measurements as JSON numbers in the required unit; a definition may also allow a reported threshold string. Use null according to the variable's missing-value rule.\n\nWhat to return\n\nReturn one JSON object whose top-level keys are exactly the supplied clinical variable names. Each value is a scalar or null. Include every requested variable.\n\nUSER MESSAGE\nClinical variables\n\nSerum creatinine\n- Report the latest serum creatinine result in mg/dL.\n- A directly reported threshold, such as <1.0, may remain a string.\n- If several results have dates, use the latest dated result. Break a date tie using the last mention. If all results are undated, use the last mention.\n- Use null for missing or unresolved results.\n\nEmphysema on imaging\n- Use Present for an explicit positive imaging finding and Absent for an explicit negative imaging finding.\n- Use null for silence, uncertainty, or an unresolved finding.\n- If findings conflict, use the latest dated finding. Break a date tie using the last mention. If all findings are undated, use the last mention.\n\nPatient's clinical text\n\n2025-01-01: serum creatinine 1.0 mg/dL. 2025-01-10: serum creatinine 1.2 mg/dL. CT documents emphysema.\n</task_to_review>\n\nGive your review using understanding, input_meaning, can_complete, questions, unnecessary_context, and sample_response. Put the example task's answer inside sample_response."
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

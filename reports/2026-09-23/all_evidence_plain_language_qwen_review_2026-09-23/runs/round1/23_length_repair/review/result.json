@@ -1,0 +1,29 @@
+{
+  "http_status": 200,
+  "request_sha256": "d3c0c56f878e13ebc7c9918013e6b85a6ea475644ec956495c72b36317e252cd",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 29.002,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 744,
+    "total_tokens": 1865,
+    "completion_tokens": 1121,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 987
+    }
+  },
+  "reasoning_characters": 4555,
+  "content": "\n\n{\n  \"understanding\": \"Extract the requested clinical variables from the provided patient note and return one JSON object containing every requested variable name with its supported value or null.\",\n  \"input_meaning\": \"The supplied information includes clinical variable definitions and a short patient record with laboratory values and an imaging finding, from which the values must be inferred.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"Serum creatinine\": 1.2,\n    \"Emphysema on imaging\": \"Present\"\n  }\n}",
+  "parsed": {
+    "understanding": "Extract the requested clinical variables from the provided patient note and return one JSON object containing every requested variable name with its supported value or null.",
+    "input_meaning": "The supplied information includes clinical variable definitions and a short patient record with laboratory values and an imaging finding, from which the values must be inferred.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "Serum creatinine": 1.2,
+      "Emphysema on imaging": "Present"
+    }
+  }
+}

@@ -229,3 +229,62 @@ def test_live_alias_resolution_routes_primary_and_extraction_profiles(monkeypatc
     )
     assert policy["top_k"] == 64
     assert policy["temperature"] == 1.0
+
+
+@pytest.mark.parametrize("request_kind", ["interpretation", "extraction"])
+def test_flash_next_auto_uses_xhigh_and_publisher_sampling_for_both_roles(request_kind):
+    cfg = config("local-alias", runtime_model_family="qwen3",
+                 runtime_sampling_model="Inferact/Qwen3.8-Flash-Next-NVFP4")
+    policy = stage2._stage2_request_policy(cfg, request_kind)
+    assert policy["reasoning_effort"] == "xhigh"
+    assert {k: policy[k] for k in SAMPLING_FIELDS} == {
+        "temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0,
+        "presence_penalty": 0.0, "frequency_penalty": 0.0, "repetition_penalty": 1.0,
+    }
+    assert policy["sampling_provenance"]["profile"] == "qwen3.8_flash_next"
+    variants = stage2._openai_request_variants(base_kwargs={}, request_policy=policy, model_family="qwen3")
+    for variant in variants:
+        assert variant["reasoning_effort"] == "xhigh"
+        assert variant["extra_body"]["top_k"] == 20
+        assert variant["extra_body"]["chat_template_kwargs"] == {"enable_thinking": True, "preserve_thinking": True}
+
+
+def test_flash_next_rejected_controls_fail_without_silent_downgrade(monkeypatch):
+    calls = []
+
+    class Unsupported(ValueError):
+        status_code = 400
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kwargs):
+            calls.append(kwargs)
+            raise Unsupported("unsupported parameter: reasoning_effort")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("openai.OpenAI", Client)
+    with pytest.raises(stage2._Stage2TransportFailure):
+        stage2._openai_completion([{"role": "user", "content": "Test"}],
+                                 config("Inferact/Qwen3.8-Flash-Next-NVFP4"))
+    assert len(calls) == 1
+    assert calls[0]["reasoning_effort"] == "xhigh"
+    assert calls[0]["extra_body"]["top_k"] == 20
+
+
+def test_live_flash_next_backing_model_controls_both_roles_and_manifest(monkeypatch, tmp_path):
+    class Models(list):
+        records = [{"id": "clinical", "root": "Inferact/Qwen3.8-Flash-Next-NVFP4"}]
+    monkeypatch.setattr(stage2, "_served_model_ids", lambda cfg: Models(["clinical"]))
+    runner = stage2.PlainHandoffStage2(config=config("clinical", extraction_llm=stage2.Stage2ExtractionLLMConfig(
+        endpoint="http://test/v1", model="clinical")), clinical_question="Treatment effect", extraction_tokenizer=object())
+    runner._check_and_record_model_identity(tmp_path)
+    import json
+    manifest = json.loads((tmp_path / "model_identity.json").read_text())
+    assert all(p["reasoning_effort"] == "xhigh" for p in manifest["effective_request_policies"].values())
+    explicit = replace(runner.config, extraction_reasoning_effort="none")
+    policy = stage2._stage2_request_policy(explicit, "extraction")
+    assert (policy["reasoning_effort"], policy["temperature"], policy["top_p"], policy["presence_penalty"]) == ("none", 0.7, 0.8, 1.5)

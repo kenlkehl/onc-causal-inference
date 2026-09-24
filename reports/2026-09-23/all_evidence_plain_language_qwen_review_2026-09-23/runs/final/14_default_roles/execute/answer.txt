@@ -1,0 +1,26 @@
+
+
+{
+  "confounder": {
+    "assign": true,
+    "assessment": "supported",
+    "stability": "consistent",
+    "rationale": "Serum creatinine is clinically plausible as a pretreatment factor that may affect both treatment choice and outcome. Penalized main-effect selection supports this: it was retained for outcome in all analyses and for treatment in most analyses, with clinical background providing additional support for a common-cause role.",
+    "evidence_comments": [
+      "penalized main effects for outcome: nonzero in 3/3 analyses",
+      "penalized main effects for treatment: nonzero in 2/3 analyses",
+      "clinical background states renal function can influence treatment choice and outcome"
+    ]
+  },
+  "effect_modifier": {
+    "assign": false,
+    "assessment": "not_supported",
+    "stability": "mixed",
+    "rationale": "Evidence for effect modification is weak and not validated. Only one exploratory penalized interaction analysis selected serum creatinine, while univariable R-learner validation showed no improvement over a constant treatment effect. Because the treatment effect of interest is a probability difference and validation R-loss evidence is absent, the available results do not justify using serum creatinine to predict differences in treatment benefit.",
+    "evidence_comments": [
+      "penalized treatment interactions: nonzero in only 1/3 analyses",
+      "univariable R-learner validation gains were non-positive in 0/3 analyses",
+      "validation R-loss gains were -0.002, 0.0, and -0.001, indicating no validation improvement over a constant effect"
+    ]
+  }
+}

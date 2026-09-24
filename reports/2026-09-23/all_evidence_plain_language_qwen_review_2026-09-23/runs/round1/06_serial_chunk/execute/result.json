@@ -1,0 +1,28 @@
+{
+  "http_status": 200,
+  "request_sha256": "ad7a3f06e9c6d6caecd29ff65c52cce8ce8027874a96d4ca9b673fc7e9780401",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 42.105,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 626,
+    "total_tokens": 2119,
+    "completion_tokens": 1493,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 1368
+    }
+  },
+  "reasoning_characters": 4981,
+  "content": "\n\n{\n  \"values\": {\n    \"Serum creatinine\": 1.2,\n    \"Emphysema on imaging\": \"Present\"\n  },\n  \"decision_notes\": {\n    \"Serum creatinine\": \"Latest dated creatinine 1.2 on 2025-01-10 supersedes prior 1.0 on 2025-01-01.\",\n    \"Emphysema on imaging\": \"Explicit positive CT finding; CT sentence undated, prior null.\"\n  }\n}",
+  "parsed": {
+    "values": {
+      "Serum creatinine": 1.2,
+      "Emphysema on imaging": "Present"
+    },
+    "decision_notes": {
+      "Serum creatinine": "Latest dated creatinine 1.2 on 2025-01-10 supersedes prior 1.0 on 2025-01-01.",
+      "Emphysema on imaging": "Explicit positive CT finding; CT sentence undated, prior null."
+    }
+  }
+}

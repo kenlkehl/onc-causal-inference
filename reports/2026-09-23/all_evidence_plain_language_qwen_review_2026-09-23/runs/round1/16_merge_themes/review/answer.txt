@@ -1,0 +1,12 @@
+
+
+{
+  "understanding": "Identify clinical themes that represent the same or overlapping concept and combine them into a single merged theme; leave unrelated themes unchanged.",
+  "input_meaning": "The input lists clinical themes, the measured variable for each theme, and summaries or disagreements about the supporting statistical evidence.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "merges": []
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "http_status": 200,
+  "request_sha256": "59bfd2b9171df17f43e42addf31882d25c65f8e314347ebf4641b1254f2c8ec3",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 22.472,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 567,
+    "total_tokens": 1398,
+    "completion_tokens": 831,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 677
+    }
+  },
+  "reasoning_characters": 2983,
+  "content": "\n\n{\n  \"candidates\": [\n    {\n      \"name\": \"Serum creatinine concentration\",\n      \"description\": \"Concentration of creatinine in the serum, measured in mg/dL.\",\n      \"basis\": \"The excerpt reports serum creatinine results of 1.0 mg/dL and 1.2 mg/dL on two dates.\",\n      \"uncertainty\": \"\"\n    },\n    {\n      \"name\": \"Emphysema on imaging\",\n      \"description\": \"Presence of emphysema identified on CT imaging.\",\n      \"basis\": \"The excerpt states that CT documents emphysema.\",\n      \"uncertainty\": \"\"\n    }\n  ]\n}",
+  "parsed": {
+    "candidates": [
+      {
+        "name": "Serum creatinine concentration",
+        "description": "Concentration of creatinine in the serum, measured in mg/dL.",
+        "basis": "The excerpt reports serum creatinine results of 1.0 mg/dL and 1.2 mg/dL on two dates.",
+        "uncertainty": ""
+      },
+      {
+        "name": "Emphysema on imaging",
+        "description": "Presence of emphysema identified on CT imaging.",
+        "basis": "The excerpt states that CT documents emphysema.",
+        "uncertainty": ""
+      }
+    ]
+  }
+}

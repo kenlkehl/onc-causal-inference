@@ -113,7 +113,7 @@ def _continuous_alias_response(source_ids):
     }
 
 
-def test_created_latent_replaces_components_in_later_retrieval(tmp_path):
+def test_created_latent_replaces_components_in_later_retrieval(tmp_path, monkeypatch):
     definitions = [
         _continuous("a", "first_burden"),
         _continuous("b", "second_burden"),
@@ -128,56 +128,24 @@ def test_created_latent_replaces_components_in_later_retrieval(tmp_path):
         }
     )
     requests = []
+    from oci.inference import stage2_sequential_consolidation as module
+    original = module._decision_messages
+    def capture(step_input, **kwargs):
+        requests.append(step_input)
+        return original(step_input, **kwargs)
+    monkeypatch.setattr(module, "_decision_messages", capture)
 
-    def request_json(
-        messages,
-        validate,
-        *,
-        request_kind="interpretation",
-        **repair_kwargs,
-    ):
+    def request_json(messages, validate, *, request_kind="interpretation", **repair_kwargs):
         assert request_kind == "interpretation"
-        body = json.loads(messages[1]["content"])
-        assert "treatment" not in body
-        assert "outcome" not in body
-        assert body["response_json_schema"]["$defs"]["condition"]["properties"][
-            "feature_id"
-        ]["enum"] == [feature["feature_id"] for feature in body["features"]]
-        assert body["valid_structural_examples"]["leave_unchanged"]["latents"] == []
-        assert body["equivalence_policy"]["replacement_scope"] == (
-            "same_measurement_aliases_only"
-        )
-        assert body["equivalence_policy"]["minimum_pairwise_association"] == 0.85
-        assert body["equivalence_policy"][
-            "allow_lossless_categorical_union_recode"
-        ] is True
-        assert body["equivalence_policy"][
-            "continuous_coalesce_skips_nonnumeric_source_values"
-        ] is True
-        assert body["equivalence_policy"][
-            "require_overlapping_source_agreement"
-        ] is True
-        assert body["response_json_schema"]["$defs"]["condition"]["properties"][
-            "operator"
-        ]["enum"] == ["eq", "in"]
-        assert "general category and a subtype" in messages[0]["content"]
-        assert repair_kwargs["repair_context"]["allowed_feature_ids"] == [
-            feature["feature_id"] for feature in body["features"]
-        ]
-        assert repair_kwargs["conservative_validation_fallback"]["action"] == (
-            "leave_unchanged"
-        )
+        assert "feature_id" not in messages[1]["content"]
+        assert "Paired measurements" in messages[1]["content"]
+        assert repair_kwargs["conservative_validation_fallback"]["action"] == "leave_unchanged"
         assert repair_kwargs["fallback_after_same_error"] == 3
-        requests.append(body)
         if len(requests) == 1:
-            return validate(_continuous_alias_response(["a", "b"]))
-        return validate(
-            {
-                "action": "leave_unchanged",
-                "rationale": "The remaining measurements are distinct constructs.",
-                "latents": [],
-            }
-        )
+            return validate({"action": "merge", "reason": "Equivalent values and units.",
+                "members": ["First Burden", "Second Burden"],
+                "canonical_label": "Baseline burden", "category_equivalences": []})
+        return validate({"action": "keep", "reason": "Distinct clinical measurements."})
 
     consolidated, active, report, entries = consolidate_stage2_candidates(
         extracted_fit=frame,
@@ -344,7 +312,7 @@ def test_categorical_latent_flattens_lineage_and_populates_heldout(tmp_path):
     assert pd.isna(populated[latent["name"]].iloc[2])
 
 
-def test_continuous_alias_coalesce_skips_malformed_source_value(tmp_path):
+def test_continuous_alias_preserves_nonnumeric_source_information(tmp_path):
     definitions = [
         _continuous("a", "first_measure"),
         _continuous("b", "second_measure"),
@@ -358,7 +326,9 @@ def test_continuous_alias_coalesce_skips_malformed_source_value(tmp_path):
     )
 
     def request_json(_messages, validate, **_kwargs):
-        return validate(_continuous_alias_response(["a", "b"]))
+        with pytest.raises(ValueError, match="discard reported thresholds"):
+            validate(_continuous_alias_response(["a", "b"]))
+        return validate({"action": "keep", "reason": "A source contains information that numeric coalescing would drop."})
 
     consolidated, active, report, entries = consolidate_stage2_candidates(
         extracted_fit=frame,
@@ -374,12 +344,10 @@ def test_continuous_alias_coalesce_skips_malformed_source_value(tmp_path):
         embedding_function=_embedding,
     )
 
-    assert report["latents_created"] == 1
-    assert len(active) == 1
-    assert len(entries) == 1
-    populated = consolidated[entries[0]["name"]]
-    assert populated.iloc[0] == 100.0
-    np.testing.assert_allclose(populated.to_numpy(dtype=float), np.arange(100, 120))
+    assert report["latents_created"] == 0
+    assert len(active) == 2
+    assert entries == []
+    assert consolidated["first_measure"].iloc[0] == "100/60 unitless"
 
 
 def test_continuous_alias_rejects_conflicting_overlapping_values(tmp_path):

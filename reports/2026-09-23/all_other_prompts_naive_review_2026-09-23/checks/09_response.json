@@ -1,0 +1,4 @@
+{
+  "action": "keep",
+  "reason": "The failed outputs are unambiguous synonyms of the declared Present category, and the supplied normalization step already maps such wording to Present or Absent. They do not identify a mismatch in type, vocabulary, measurement, or missingness rules."
+}

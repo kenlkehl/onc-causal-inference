@@ -1,0 +1,27 @@
+
+
+{
+  "confounder": {
+    "assign": false,
+    "assessment": "not_supported",
+    "stability": "insufficient",
+    "rationale": "There is no available evidence that emphysema on imaging influenced treatment choice, and the study description identifies pulmonary disease mainly as prognostic rather than as a driver of treatment selection. Outcome main-effect support is weak and sparse, with only 1 of 3 penalized main-effect analyses retaining the variable. Thus, a credible common cause of both treatment assignment and favorable outcome is not supported in this analysis.",
+    "evidence_comments": [
+      "Penalized main effects for treatment: results unavailable",
+      "Penalized main effects for outcome: 1 of 3 analyses selected the variable",
+      "Clinical description supports pulmonary disease prognosis but not treatment choice"
+    ]
+  },
+  "effect_modifier": {
+    "assign": true,
+    "assessment": "supported",
+    "stability": "consistent",
+    "rationale": "Validation evidence broadly agrees that emphysema on imaging predicts differences in treatment benefit. All three penalized treatment-interaction analyses retained the variable, all three univariable R-learner analyses had positive validation R-loss gains, and all three causal forest analyses had positive permutation R-loss increases. Nominal interaction p-values were mostly significant, with one borderline 0.06. The positive R-learner and causal forest results directly support probability-scale treatment-effect heterogeneity, so the modifier role is supported despite modest gain magnitudes and unavailable multiplicity adjustment.",
+    "evidence_comments": [
+      "Penalized treatment interactions: 3 of 3 analyses retained a nonzero interaction group",
+      "Univariable R-learner: 3 of 3 analyses had validation R-loss gain > 0 (0.004, 0.006, 0.003)",
+      "Univariable interaction: 2 of 3 analyses had p < 0.05 (0.03, 0.06, 0.04)",
+      "Causal forest: 3 of 3 analyses had permutation R-loss increase > 0 (0.003, 0.004, 0.002)"
+    ]
+  }
+}

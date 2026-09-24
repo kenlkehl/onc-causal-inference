@@ -1,0 +1,42 @@
+{
+  "http_status": 200,
+  "request_sha256": "782fcc0c85a2da5b845ada88530d9b1ed3ad12b09fa5b00da4009a3f2e7cd0e3",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 77.497,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 614,
+    "total_tokens": 4069,
+    "completion_tokens": 3455,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 3104
+    }
+  },
+  "reasoning_characters": 15134,
+  "content": "\n\n{\n  \"understanding\": \"Review the supplied clinical-variable representation task, explain it plainly, note any missing or unnecessary details, and provide the requested example output.\",\n  \"input_meaning\": \"A serum creatinine variable reported in mg/dL has numeric observations and two text phrases; the phrase '<1.0' is explicitly defined, but the word 'high' has no provided reference interval or definition.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"status\": \"ready\",\n    \"representation\": \"categorical\",\n    \"reason\": \"The usable non-numeric phrase '<1.0' is an explicit exclusive threshold in mg/dL, so a categorical representation is needed to preserve that boundary. Use the smallest supported partition: values below 1.0 mg/dL and values at or above 1.0 mg/dL. The term 'high' cannot be assigned a category because no reference interval or definition is supplied; it is retained as unusable.\",\n    \"token_interpretations\": [\n      {\n        \"raw_text\": \"<1.0\",\n        \"meaning\": \"explicit_interval\",\n        \"interpretation\": \"Less than 1.0 mg/dL; an exclusive upper-bound interval below 1.0 mg/dL.\"\n      },\n      {\n        \"raw_text\": \"high\",\n        \"meaning\": \"unusable\",\n        \"interpretation\": \"No supplied definition or reference range is available, so no supported category or numeric interval can be inferred.\"\n      }\n    ]\n  }\n}",
+  "parsed": {
+    "understanding": "Review the supplied clinical-variable representation task, explain it plainly, note any missing or unnecessary details, and provide the requested example output.",
+    "input_meaning": "A serum creatinine variable reported in mg/dL has numeric observations and two text phrases; the phrase '<1.0' is explicitly defined, but the word 'high' has no provided reference interval or definition.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "status": "ready",
+      "representation": "categorical",
+      "reason": "The usable non-numeric phrase '<1.0' is an explicit exclusive threshold in mg/dL, so a categorical representation is needed to preserve that boundary. Use the smallest supported partition: values below 1.0 mg/dL and values at or above 1.0 mg/dL. The term 'high' cannot be assigned a category because no reference interval or definition is supplied; it is retained as unusable.",
+      "token_interpretations": [
+        {
+          "raw_text": "<1.0",
+          "meaning": "explicit_interval",
+          "interpretation": "Less than 1.0 mg/dL; an exclusive upper-bound interval below 1.0 mg/dL."
+        },
+        {
+          "raw_text": "high",
+          "meaning": "unusable",
+          "interpretation": "No supplied definition or reference range is available, so no supported category or numeric interval can be inferred."
+        }
+      ]
+    }
+  }
+}

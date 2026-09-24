@@ -1,0 +1,28 @@
+
+
+{
+  "concepts": [
+    {
+      "name": "Pretreatment renal function",
+      "members": [
+        "Serum creatinine"
+      ],
+      "modifier_recommendation": "uncertain",
+      "rationale": "Serum creatinine has credible prognostic signal, with a nonzero outcome-model main effect in 3 of 3 overlapping analyses and repeated appearance in 2 of 3 candidate lists. However, treatment-effect modification evidence is inconsistent and generally weak. Penalized treatment interactions are nonzero in only 1 of 3 analyses, univariable R-learner validation R-loss gains are non-positive (-0.002, 0.0, -0.001), and causal-forest permutation increases are effectively null (-0.001, 0.001, 0.0). Nominal univariable interaction p-values are positive in 2 of 3 analyses (0.02, 0.04, 0.2), but multiplicity-adjusted q-values are unavailable, and the interaction estimates are on the log-odds scale rather than the probability-difference scale. Score calibration and measured redundancy are unavailable, so the small magnitudes and possible overlap with other variables cannot be evaluated.",
+      "representatives": [],
+      "unresolved_questions": "Are the nominal interaction associations reproducible after multiplicity adjustment, and can serum creatinine demonstrate a calibrated probability-difference treatment effect beyond prognosis?"
+    },
+    {
+      "name": "Imaging evidence of emphysema",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "modifier_recommendation": "retain",
+      "rationale": "Emphysema on imaging shows convergent evidence across complementary methods for modifying the difference in probability of a favorable one-year event between treatments. Penalized treatment interactions are nonzero in 3 of 3 overlapping analyses, univariable R-learner validation R-loss gains are positive in 3 of 3 analyses (0.004, 0.006, 0.003), and causal-forest permutation increases are positive in 3 of 3 analyses (0.003, 0.004, 0.002). It also appeared in 3 of 3 candidate lists, indicating repeated selection within this dataset. Nominal univariable interaction p-values are below 0.05 in 2 of 3 analyses (0.03, 0.06, 0.04), though multiplicity-adjusted q-values are unavailable. The retain recommendation reflects consistent directional evidence rather than calibrated effect size, because no null-distribution calibration, minimum meaningful R-loss improvement, or measured redundancy information is available.",
+      "representatives": [
+        "Emphysema on imaging"
+      ],
+      "unresolved_questions": "What calibrated probability-difference treatment-effect sizes are associated with emphysema status, and whether the causal-forest importance is redundant with correlated imaging or clinical measurements?"
+    }
+  ]
+}

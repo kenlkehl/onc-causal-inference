@@ -1,0 +1,16 @@
+
+
+{
+  "action": "revise",
+  "reason": "The failed outputs 'positive' and 'present on CT' indicate that equivalent imaging wording is not being normalized into the allowed binary categories. The definition should explicitly require output exactly Present or Absent and map common synonyms or phrases to those categories.",
+  "definition": {
+    "description": "Imaging documentation of emphysema presence or absence.",
+    "value_type": "binary",
+    "categories_or_unit": [
+      "Present",
+      "Absent"
+    ],
+    "measurement_definition": "Report only Present or Absent based on an explicit positive or negative imaging statement. Map equivalent wording to the allowed categories: positive imaging language, 'present on CT', 'emphysema present', or equivalent findings indicates Present; negative imaging language, 'absent on CT', 'no emphysema seen', or 'no evidence of emphysema' indicates Absent.",
+    "missing_value_rule": "Use null for unreported or unresolved findings, including findings that are equivocal or cannot be mapped confidently to Present or Absent."
+  }
+}

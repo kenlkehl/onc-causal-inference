@@ -1,0 +1,28 @@
+{
+  "http_status": 200,
+  "request_sha256": "26cd5b59124c63fe0b79cbd94ce44d568bfe357e3321f91117887062a7fe61a0",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 9.781,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 401,
+    "total_tokens": 892,
+    "completion_tokens": 491,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 382
+    }
+  },
+  "reasoning_characters": 1948,
+  "content": "\n\n{\n  \"understanding\": \"Classify a clinical phrase into one allowed category for a single variable, or return null if it is unclear or incompatible.\",\n  \"input_meaning\": \"The input describes a clinical variable, lists its allowed categories, and provides a phrase that may indicate one of those categories.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"value\": \"Present\"\n  }\n}",
+  "parsed": {
+    "understanding": "Classify a clinical phrase into one allowed category for a single variable, or return null if it is unclear or incompatible.",
+    "input_meaning": "The input describes a clinical variable, lists its allowed categories, and provides a phrase that may indicate one of those categories.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "value": "Present"
+    }
+  }
+}

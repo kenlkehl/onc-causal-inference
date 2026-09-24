@@ -1,0 +1,28 @@
+
+
+{
+  "concepts": [
+    {
+      "name": "Renal function",
+      "members": [
+        "Serum creatinine"
+      ],
+      "modifier_recommendation": "exclude",
+      "rationale": "Serum creatinine represents renal function and has strong main-effect signals: it was selected in the penalized outcome model in 3 of 3 analyses and in the penalized treatment model in 2 of 3 analyses. These findings are consistent with renal function influencing prognosis or treatment selection, but they are not treatment-effect modification evidence. The usable modification evidence is weak and inconsistent: penalized treatment interactions were nonzero in only 1 of 3 analyses; univariable R-learner validation R-loss gains were non-positive (-0.002, 0.000, -0.001), indicating no validation improvement over a constant treatment effect; causal-forest permutation R-loss increases were inconsistent and very small (-0.001, 0.001, 0.000); and nominal interaction p-values were conflicting (0.02, 0.04, 0.20) with no multiplicity-adjusted q-values. Candidate-list recurrence in 2 of 3 lists only describes repeated selection within this dataset. Null-distribution calibration and minimum meaningful R-loss improvement are missing, and measured redundancy with other variables is unavailable, so small positive values cannot be treated as clinically or statistically meaningful. Deprioritize as a treatment-effect modifier despite possible prognostic or treatment-choice relevance.",
+      "representatives": [],
+      "unresolved_questions": "Whether adjusted or independent analyses, alternative functional forms, or larger samples could reveal clinically meaningful treatment-effect modification that the current R-learner and causal-forest results did not support. Missing score calibration and minimum meaningful R-loss thresholds prevent interpretation of the very small permutation and R-loss values. Measured redundancy is unavailable."
+    },
+    {
+      "name": "Emphysema on imaging",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "modifier_recommendation": "retain",
+      "rationale": "Emphysema on imaging represents structural pulmonary disease and has convergent evidence for treatment-effect modification across usable methods. The univariable R-learner validation R-loss gain was positive in 3 of 3 analyses (0.004, 0.006, 0.003), the causal-forest permutation R-loss increase was positive in 3 of 3 analyses (0.003, 0.004, 0.002), and penalized treatment interactions were nonzero in 3 of 3 analyses. Nominal univariable interaction tests were also mostly supportive, with 2 of 3 p-values below 0.05 (0.03, 0.06, 0.04), though q-values are unavailable. Main-effect evidence is weaker or partly unavailable: outcome selection was 1 of 3 analyses and treatment main-effect results were unavailable. Candidate-list recurrence in 3 of 3 lists describes repeated selection within this dataset. R-loss and permutation values are comparable only within their own method and scale, and because no null calibration or minimum meaningful R-loss improvement is available, their absolute magnitudes cannot yet be judged clinically meaningful. This concept warrants further evaluation as a treatment-effect modifier rather than confirmation of effect size.",
+      "representatives": [
+        "Emphysema on imaging"
+      ],
+      "unresolved_questions": "Whether the small positive R-learner and causal-forest gains are statistically and clinically meaningful without null calibration or a minimum R-loss threshold. Multiplicity-adjusted interaction q-values, treatment main-effect results, and independent validation are missing. Measured redundancy with renal or other pulmonary variables is unavailable, so overlap with other predictors cannot be assessed."
+    }
+  ]
+}

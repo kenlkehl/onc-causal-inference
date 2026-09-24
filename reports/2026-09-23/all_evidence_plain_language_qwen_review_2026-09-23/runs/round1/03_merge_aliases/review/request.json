@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Read the supplied task as someone receiving it for the first time. Use the task messages and their example input to work out what you are being asked to do.\n\nExplain the task and the meaning of its input in plain language. Ask any clarification questions whose answers would change your action or output. Identify any wording that requires unexplained context, or unnecessary software/process detail. Empty question and unnecessary-context lists are appropriate when the task is clear.\n\nThen carry out the example task if you can. Return one JSON object with exactly these keys:\n- understanding: a concise statement of the task.\n- input_meaning: a concise statement of what the supplied information represents.\n- can_complete: a boolean.\n- questions: an array of clarification questions.\n- unnecessary_context: an array of passages that could be removed, with a brief reason for each.\n- sample_response: your answer to the example task as a JSON value, or null if a required clarification prevents an answer.\n\nKeep the review concise. The task conversation is quoted below for this review."
+    },
+    {
+      "role": "user",
+      "content": "SYSTEM MESSAGE\nIdentify clinical variable names that describe the same measurement and can share one definition.\n\nWhat you receive\n\nA list of names and descriptions. Protected names, when present, must remain recognizable in the result.\n\nHow to decide\n\nGroup synonyms, abbreviations, and detailed/coarsened names when one measurement definition can represent them. Keep independently varying findings separate. Leave uncertain matches ungrouped. Each group needs at least two supplied names. A name can belong to one group. A group containing a protected name uses that name as its canonical label; two protected names remain separate.\n\nWhat to return\n\nReturn one object with the key merges, an array. Each group has members (existing names) and canonical_label (a clear clinical name). Omit unchanged variables. Use {\"merges\": []} when no merge is justified.\n\nUSER MESSAGE\nVariables\n- Creatinine level: Serum creatinine concentration.\n- Serum creatinine: Serum creatinine concentration.\n- Emphysema: Documented emphysema.\n\nProtected names: none."
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

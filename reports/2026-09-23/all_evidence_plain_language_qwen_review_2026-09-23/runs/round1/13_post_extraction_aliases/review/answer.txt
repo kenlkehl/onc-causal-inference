@@ -1,0 +1,28 @@
+
+
+{
+  "understanding": "Decide whether the supplied fields measure the same clinical attribute and can be merged without losing any observed values.",
+  "input_meaning": "The supplied information describes two field definitions and evidence from paired values in patients where both were measured, including units, timing, agreement, and any protected canonical field names.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    {
+      "passage": "High correlation by itself leaves agreement unresolved.",
+      "reason": "No correlation value is supplied, and the comparison already explicitly reports no disagreements."
+    },
+    {
+      "passage": "Neither field contains text values.",
+      "reason": "The fields are defined as exact numeric measurements, so this does not change the decision unless categories are being reconciled."
+    }
+  ],
+  "sample_response": {
+    "action": "merge",
+    "members": [
+      "Creatinine level",
+      "Serum creatinine"
+    ],
+    "canonical_label": "Serum creatinine",
+    "category_equivalences": [],
+    "reason": "Both fields represent the latest serum creatinine measurement in mg/dL, have matching timing and units, show no disagreements in paired values, and combining them preserves all nonmissing observed values."
+  }
+}

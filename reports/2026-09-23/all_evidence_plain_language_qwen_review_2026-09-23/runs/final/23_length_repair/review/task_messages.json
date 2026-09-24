@@ -1,0 +1,18 @@
+[
+  {
+    "role": "system",
+    "content": "Read the patient's clinical text and report a value for each listed clinical variable.\n\nWhat you receive\n\nThe clinical variable definitions and the text from one patient's record.\n\nHow to decide\n\nFollow each variable's definition. Use the wording in the patient's text to determine its value. An explicit date belongs to a finding when the sentence or record heading links them. An undated CT sentence therefore keeps an unknown date even when it follows a dated laboratory result.\n\nUse the defined category labels exactly. Write numerical measurements as JSON numbers in the required unit; a definition may also allow a reported threshold string. Use null according to the variable's missing-value rule.\n\nWhat to return\n\nReturn one JSON object whose top-level keys are exactly the supplied clinical variable names. Each value is a scalar or null. Include every requested variable."
+  },
+  {
+    "role": "user",
+    "content": "Clinical variables\n\nSerum creatinine\n- Report the latest serum creatinine result in mg/dL.\n- A directly reported threshold, such as <1.0, may remain a string.\n- If several results have dates, use the latest dated result. Break a date tie using the last mention. If all results are undated, use the last mention.\n- Use null for missing or unresolved results.\n\nEmphysema on imaging\n- Use Present for an explicit positive imaging finding and Absent for an explicit negative imaging finding.\n- Use null for silence, uncertainty, or an unresolved finding.\n- If findings conflict, use the latest dated finding. Break a date tie using the last mention. If all findings are undated, use the last mention.\n\nPatient's clinical text\n\n2025-01-01: serum creatinine 1.0 mg/dL. 2025-01-10: serum creatinine 1.2 mg/dL. CT documents emphysema."
+  },
+  {
+    "role": "assistant",
+    "content": "{\"Serum creatinine\":1.2,\"Emphysema on imaging\":"
+  },
+  {
+    "role": "user",
+    "content": "Your preceding answer ended before the JSON object was complete. Return a complete JSON object using the clinical text and definitions above. Include every requested variable and its supported scalar value or null."
+  }
+]

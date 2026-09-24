@@ -23,6 +23,8 @@ import json
 import math
 import re
 import threading
+from . import stage2_clinical_prompts as clinical_prompts
+
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,7 +42,7 @@ from .stage2_agentic_selection import (
     fit_latent_state,
 )
 
-SCHEMA_VERSION = "stage2_sequential_equivalent_measurement_consolidation_v4_row_agreement"
+SCHEMA_VERSION = "stage2_sequential_equivalent_measurement_consolidation_v5_clinical_prompts"
 SELECTION_SCHEMA_VERSION = (
     "stage2_all_evidence_llm_role_selection_v1"
 )
@@ -929,6 +931,9 @@ def _validate_and_fit_decision(
 ) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("consolidation response must be an object")
+    if value.get("action") in {"keep", "merge"}:
+        value = _clinical_alias_decision(value, definitions_by_id=definitions_by_id,
+            cluster_ids=cluster_ids, protected_ids=protected_ids)
     action = str(value.get("action") or "")
     if action not in {"leave_unchanged", "replace_with_latents"}:
         raise ValueError("action must be leave_unchanged or replace_with_latents")
@@ -946,6 +951,13 @@ def _validate_and_fit_decision(
         raise ValueError(
             "replace_with_latents requires between one and max_latents_per_cluster latents"
         )
+    for raw in raw_latents:
+        if raw.get("output_type") == "continuous":
+            for key in raw.get("source_feature_ids") or []:
+                if key in definitions_by_id:
+                    values = frame[str(definitions_by_id[key]["name"])]
+                    if (values.notna() & pd.to_numeric(values, errors="coerce").isna()).any():
+                        raise ValueError("keep numerical fields separate when coalescing would discard reported thresholds or other text values")
     proposals = [
         _validate_latent_proposal(
             item,
@@ -1223,154 +1235,78 @@ def _decision_response_schema(
     }
 
 
-def _decision_messages(
-    step_input: Mapping[str, Any],
-    *,
-    max_latents_per_cluster: int,
-) -> list[dict[str, str]]:
-    equivalence_policy = dict(step_input.get("equivalence_policy") or {})
-    association_threshold = float(
-        equivalence_policy.get(
-            "minimum_pairwise_association",
-            DEFAULT_MINIMUM_PAIRWISE_ASSOCIATION,
-        )
-    )
-    system = (
-        "You are performing alias consolidation of already extracted pretreatment clinical "
-        "variables before statistical feature selection. Treatment and outcome are "
-        "intentionally unavailable. Replacement is allowed only for alternate encodings or "
-        "duplicate fields that mean the same measurement: the same clinical attribute, same "
-        "entity, same time scope, same granularity, and compatible scale. Do not invent broader "
-        "latent concepts. A general category and a subtype or site-specific category are not "
-        "aliases. A condition and its treatment, a test and its result, related domains of an "
-        "instrument, different biomarkers, different anatomic sites, and component versus total "
-        "measurements are not aliases. High association is necessary but never sufficient. "
-        "The canonical output must preserve all nonmissing information from every source, apart "
-        "from synonymous category labels, and must preserve all-source missingness as null. If "
-        "there is any doubt, leave the variables unchanged. Never assign causal roles. Return "
-        "one JSON object and no prose outside it."
-    )
-    cluster_ids = [str(feature["feature_id"]) for feature in step_input["features"]]
-    first, second = cluster_ids[:2]
-    first_feature = dict(step_input["features"][0])
-    example_output_type = str(first_feature.get("value_type") or "categorical")
-    if example_output_type not in {"binary", "categorical", "ordinal", "continuous"}:
-        example_output_type = "categorical"
-    example_categories = list(first_feature.get("categories_or_unit") or [])
-    if example_output_type == "continuous":
-        example_categories = example_categories[:1] or ["same source unit"]
-    elif example_output_type == "binary":
-        example_categories = example_categories[:2]
-        if len(example_categories) != 2:
-            example_categories = ["Category A", "Category B"]
-    elif len(example_categories) < 2:
-        example_categories = ["Category A", "Category B"]
-    conservative_example = {
-        "action": "leave_unchanged",
-        "rationale": "No defensible schema-valid consolidation is supported; retain the original variables.",
-        "latents": [],
-    }
-    payload = {
-        "job": "sequential_stage2_candidate_consolidation",
-        "instructions": {
-            "decision": (
-                "Choose action='leave_unchanged' with latents=[] or "
-                "action='replace_with_latents' with one or more disjoint latent proposals."
-            ),
-            "pivot_requirement": (
-                "If replacing, exactly one of the disjoint proposals must include the pivot."
-            ),
-            "protected_features": "Never include a protected explicit feature as a source.",
-            "equivalence_only": (
-                "Every pair of sources in a proposal must be genuinely interchangeable "
-                "measurements, not merely correlated, predictive of one another, members of a "
-                "shared hierarchy, or evidence for a broader concept. Do not merge a broad "
-                "feature with a narrower subtype, component, location, severity band, drug, "
-                "procedure, assay, or manifestation. Do not create any-use, any-disease, "
-                "any-site, burden, maximum, mean, count, score, or other rollup variables."
-            ),
-            "association_requirement": (
-                "Every source pair must have evaluable outer-training association at least "
-                f"{association_threshold:.3f}. Association never overrides a semantic or "
-                "granularity mismatch. If any pair is unevaluable or below threshold, leave "
-                "the cluster unchanged."
-            ),
-            "information_preservation": (
-                "Use kind='categorical_rule'. All sources and the output must have the same "
-                "value_type and information granularity. Continuous sources must use the same "
-                "unit and may only be coalesced; nonnumeric values that violate a continuous "
-                "source ontology are treated as missing and the next valid alias is used. "
-                "Where two sources are nonmissing on the same training row, their numeric "
-                "values (or their canonical categorical values after recoding) must agree; "
-                "a first-source-wins rule is never allowed to hide a conflict. "
-                "Categorical, binary, or ordinal aliases may be coalesced only when their "
-                "category vocabularies are identical. Synonymous categorical vocabularies may "
-                "use a case rule with a canonical union: map every declared category from each "
-                "source exactly once, never collapse two categories from the same source, and "
-                "include no output category that is unreachable from all sources. Binary and "
-                "ordinal scales must still map one-to-one onto the complete output scale. A "
-                "case rule may use only eq/in and must use else=null. Never turn missingness "
-                "into 'No', 'Absent', zero, or a reference category. Do not reject otherwise "
-                "equivalent nominal aliases merely because one declared vocabulary is a "
-                "lossless subset of another or uses synonymous spelling variants."
-            ),
-            "required_latent_fields": [
-                "kind",
-                "source_feature_ids",
-                "label",
-                "description",
-                "rationale",
-                "measurement_definition",
-                "missing_value_rule",
-                "output_type (categorical_rule only)",
-                "categories_or_unit (categorical_rule only)",
-                "expression (categorical_rule only)",
-            ],
-            "ontology": (
-                "Declared categories must cover every possible nonmissing rule output. "
-                "The output must be a canonical name for the exact shared measurement, not a "
-                "more general parent concept."
-            ),
-            "schema_escape_hatch": (
-                "If uncertain, or if you cannot satisfy the schema exactly, return "
-                "action='leave_unchanged' with a nonempty rationale and latents=[]."
-            ),
-        },
-        "allowed_feature_ids": cluster_ids,
-        **dict(step_input),
-        "response_json_schema": _decision_response_schema(
-            cluster_ids,
-            max_latents_per_cluster=max_latents_per_cluster,
-        ),
-        "valid_structural_examples": {
-            "leave_unchanged": conservative_example,
-            "categorical_rule": {
-                "action": "replace_with_latents",
-                "rationale": "Structural example only; use replacement only for empirically concordant aliases with exactly the same meaning and granularity.",
-                "latents": [
-                    {
-                        "kind": "categorical_rule",
-                        "source_feature_ids": [first, second],
-                        "label": "Example canonical alias",
-                        "description": "Canonical representation of two equivalent source fields.",
-                        "rationale": "The sources are the same measurement with identical granularity, compatible encoding, and pairwise association above the required threshold.",
-                        "measurement_definition": "Use the first documented value among the equivalent source fields.",
-                        "missing_value_rule": "Return null when every equivalent source field is missing.",
-                        "output_type": example_output_type,
-                        "categories_or_unit": example_categories,
-                        "expression": _rule_expression_examples(cluster_ids)[
-                            "coalesce_identically_encoded_aliases"
-                        ],
-                    }
-                ],
-            },
-            "rule_expressions": _rule_expression_examples(cluster_ids),
-        },
-    }
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": _canonical_json(payload)},
-    ]
+def _decision_messages(step_input: Mapping[str, Any], *, max_latents_per_cluster: int) -> list[dict[str, str]]:
+    features = step_input["features"]
+    by_id = {str(f["feature_id"]): f for f in features}
+    text = clinical_prompts.definitions_text(features)
+    protected = [clinical_prompts.label(f) for f in features if f.get("protected")]
+    if protected:
+        text += "\n\nProtected clinical variables: " + "; ".join(protected)
+    text += "\n\nPaired measurements\n"
+    for pair in step_input["pairwise_associations"]:
+        left, right = pair["left_feature_id"], pair["right_feature_id"]
+        text += f"\n{clinical_prompts.label(by_id[left])} and {clinical_prompts.label(by_id[right])}\n"
+        text += clinical_prompts.readable({k: v for k, v in pair.items() if k not in {"left_feature_id", "right_feature_id"}}) + "\n"
+    return clinical_prompts.messages("13_post_extraction_aliases", text)
+
+
+def _clinical_alias_decision(value, *, definitions_by_id, cluster_ids, protected_ids):
+    if value.get("action") == "keep":
+        if set(value) != {"action", "reason"}:
+            raise ValueError("keep requires only action and reason")
+        return {"action": "leave_unchanged", "rationale": value["reason"], "latents": []}
+    if set(value) != {"action", "reason", "members", "canonical_label", "category_equivalences"}:
+        raise ValueError("merge requires reason, members, canonical_label, and category_equivalences")
+    if not isinstance(value["members"], list):
+        raise ValueError("members must list existing clinical variables")
+    names = {clinical_prompts.label(definitions_by_id[k]): k for k in cluster_ids}
+    sources = [clinical_prompts.resolve_label(x, names) for x in value["members"]]
+    if len(sources) < 2 or len(set(sources)) != len(sources):
+        raise ValueError("a merge requires at least two distinct clinical variables")
+    # Protected measurements remain untouched by this optional consolidation.
+    if set(sources) & protected_ids:
+        return {"action": "leave_unchanged", "rationale": "Preserve the investigator-configured measurement and its identity.", "latents": []}
+    definitions = [definitions_by_id[k] for k in sources]
+    canonical = str(value["canonical_label"]).strip()
+    base = next((f for f in definitions if clinical_prompts.label(f).casefold() == canonical.casefold()), definitions[0])
+    value_type = str(base["value_type"])
+    if len({f["value_type"] for f in definitions}) != 1:
+        raise ValueError("equivalent measurements need the same value type")
+    recodings = value["category_equivalences"]
+    if not isinstance(recodings, list):
+        raise ValueError("category_equivalences must be an array")
+    if value_type == "continuous" and recodings:
+        raise ValueError("numerical aliases cannot use category recodings")
+    mappings = {}
+    for row in recodings:
+        if set(row) != {"source_feature", "source_category", "canonical_category"}:
+            raise ValueError("each category equivalence requires source_feature, source_category, and canonical_category")
+        key = clinical_prompts.resolve_label(row["source_feature"], names)
+        category = row["source_category"]
+        if key not in sources or category not in definitions_by_id[key]["categories_or_unit"] or (key, category) in mappings:
+            raise ValueError("a category equivalence must refer to one declared member category once")
+        if not isinstance(row["canonical_category"], str) or not row["canonical_category"].strip():
+            raise ValueError("canonical categories must be nonempty text")
+        mappings[key, category] = row["canonical_category"].strip()
+    categories = list(base.get("categories_or_unit") or [])
+    expression = {"op": "coalesce", "feature_ids": sources}
+    if recodings or (value_type != "continuous" and any(f["categories_or_unit"] != categories for f in definitions)):
+        cases, categories = [], []
+        for key, definition in zip(sources, definitions):
+            for category in definition["categories_or_unit"]:
+                mapped = mappings.get((key, category), category)
+                if mapped not in categories:
+                    categories.append(mapped)
+                cases.append({"when": {"feature_id": key, "operator": "eq", "value": category}, "then": mapped})
+        expression = {"op": "case", "cases": cases, "else": None}
+    return {"action": "replace_with_latents", "rationale": value["reason"], "latents": [{
+        "kind": "categorical_rule", "source_feature_ids": sources, "label": canonical,
+        "description": base["description"], "rationale": value["reason"],
+        "measurement_definition": base["measurement_definition"],
+        "missing_value_rule": "Return null when every equivalent measurement is missing.",
+        "output_type": value_type, "categories_or_unit": categories, "expression": expression}]}
+
+
 
 
 def _protected_ids(
@@ -1674,11 +1610,16 @@ def consolidate_stage2_candidates(
                 )
                 for feature in cluster
             ],
-            "pairwise_associations": associations,
+            "pairwise_associations": [
+                {**pair, "paired_agreement": _paired_agreement_summary(
+                    frame, definitions_by_id[pair["left_feature_id"]], definitions_by_id[pair["right_feature_id"]])}
+                for pair in associations
+            ],
         }
         step_fingerprint = _fingerprint(
             {
                 "root_input_fingerprint": root_fingerprint,
+                "prompt_version": clinical_prompts.PROMPT_VERSION,
                 "active_feature_ids": active_ids,
                 "step_input": step_input,
             }
@@ -1966,3 +1907,22 @@ __all__ = [
     "measurement_definitions_for_selected",
     "sequential_consolidation_config_from_mapping",
 ]
+
+
+def _paired_agreement_summary(frame, left, right):
+    a, b = frame[str(left["name"])], frame[str(right["name"])]
+    keep = a.notna() & b.notna()
+    paired = pd.DataFrame({"left": a[keep].astype(str), "right": b[keep].astype(str)})
+    exact = int((paired["left"] == paired["right"]).sum())
+    result = {"paired_patients": int(keep.sum()), "exactly_equal_pairs": exact,
+              "unequal_pairs": int(keep.sum()) - exact}
+    if left["value_type"] == right["value_type"] == "continuous":
+        x, y = pd.to_numeric(a[keep], errors="coerce"), pd.to_numeric(b[keep], errors="coerce")
+        numeric = x.notna() & y.notna()
+        result.update({"numeric_pairs": int(numeric.sum()),
+                       "maximum_absolute_numeric_difference": float((x[numeric] - y[numeric]).abs().max()) if numeric.any() else None})
+    else:
+        pairs = paired.value_counts().rename("patients").reset_index()
+        result["category_pairs"] = pairs.head(60).to_dict(orient="records")
+        result["category_pairs_truncated"] = len(pairs) > 60
+    return result

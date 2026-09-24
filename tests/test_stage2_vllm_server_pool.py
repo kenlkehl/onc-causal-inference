@@ -45,8 +45,8 @@ def test_managed_gemma_defaults_use_request_scoped_reasoning():
 
     assert config is not None
     assert config.endpoint == ""
-    assert config.interpretation_reasoning_effort == "high"
-    assert config.extraction_reasoning_effort == "none"
+    assert config.interpretation_reasoning_effort == "auto"
+    assert config.extraction_reasoning_effort == "auto"
     assert config.vllm is not None
     assert config.vllm.reasoning_parser == "gemma4"
     assert config.vllm.language_model_only is True
@@ -105,8 +105,8 @@ def test_managed_qwen_defaults_can_be_overridden():
     assert default_config.vllm.reasoning_parser == "qwen3"
     assert default_config.vllm.language_model_only is True
     assert default_config.vllm.default_chat_template_kwargs is None
-    assert default_config.interpretation_reasoning_effort == "high"
-    assert default_config.extraction_reasoning_effort == "none"
+    assert default_config.interpretation_reasoning_effort == "auto"
+    assert default_config.extraction_reasoning_effort == "auto"
     assert overridden is not None and overridden.vllm is not None
     assert overridden.vllm.reasoning_parser == "custom-parser"
     assert overridden.vllm.language_model_only is False

@@ -1,0 +1,40 @@
+{
+  "http_status": 200,
+  "request_sha256": "df9b919dd35492371c6eb960af7b36233b23c69d8d1d7081a35a904c1bf4cab4",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 10.509,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 330,
+    "total_tokens": 845,
+    "completion_tokens": 515,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 298
+    }
+  },
+  "reasoning_characters": 978,
+  "content": "\n\n{\n  \"observations\": [\n    {\n      \"feature\": \"Serum creatinine\",\n      \"value\": 1.0,\n      \"quote\": \"2025-01-01: serum creatinine 1.0 mg/dL\",\n      \"governing_date_quote\": \"2025-01-01\"\n    },\n    {\n      \"feature\": \"Serum creatinine\",\n      \"value\": 1.2,\n      \"quote\": \"2025-01-10: serum creatinine 1.2 mg/dL\",\n      \"governing_date_quote\": \"2025-01-10\"\n    },\n    {\n      \"feature\": \"Emphysema on imaging\",\n      \"value\": \"Present\",\n      \"quote\": \"CT documents emphysema\",\n      \"governing_date_quote\": null\n    }\n  ]\n}",
+  "parsed": {
+    "observations": [
+      {
+        "feature": "Serum creatinine",
+        "value": 1.0,
+        "quote": "2025-01-01: serum creatinine 1.0 mg/dL",
+        "governing_date_quote": "2025-01-01"
+      },
+      {
+        "feature": "Serum creatinine",
+        "value": 1.2,
+        "quote": "2025-01-10: serum creatinine 1.2 mg/dL",
+        "governing_date_quote": "2025-01-10"
+      },
+      {
+        "feature": "Emphysema on imaging",
+        "value": "Present",
+        "quote": "CT documents emphysema",
+        "governing_date_quote": null
+      }
+    ]
+  }
+}

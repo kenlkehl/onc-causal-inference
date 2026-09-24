@@ -1,0 +1,18 @@
+
+
+{
+  "candidates": [
+    {
+      "name": "Serum creatinine concentration",
+      "description": "Measured serum creatinine level reported in mg/dL.",
+      "basis": "Two explicit creatinine values are provided: 1.0 mg/dL and 1.2 mg/dL.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Emphysema on imaging",
+      "description": "Presence of emphysema identified on CT imaging.",
+      "basis": "The excerpt states that CT documents emphysema.",
+      "uncertainty": ""
+    }
+  ]
+}

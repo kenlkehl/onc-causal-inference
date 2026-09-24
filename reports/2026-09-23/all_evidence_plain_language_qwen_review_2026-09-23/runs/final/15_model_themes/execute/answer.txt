@@ -1,0 +1,22 @@
+
+
+{
+  "themes": [
+    {
+      "name": "Renal function",
+      "members": [
+        "Serum creatinine"
+      ],
+      "interpretation": "Serum creatinine behaves mainly as a baseline prognostic and treatment-assignment-related marker rather than a strong, consistent treatment-effect modifier. It met the penalized main-effect outcome criterion in all three analyses and the penalized main-effect treatment criterion in two of three analyses, indicating some association with outcome and possibly with treatment selection. However, evidence for heterogeneity was mixed: only one of three penalized treatment interaction results met the nonzero interaction criterion, the univariable R-learner showed no validation R-loss gains greater than zero, and only one of three causal-forest permutation R-loss increases was positive. The univariable interaction test gave two nominally significant p-values, but without multiplicity adjustment and with weak R-learner and causal-forest support, this variable is best interpreted as a patient characteristic associated with prognosis rather than a robust driver of differential treatment benefit.",
+      "disagreements": "The strongest results are for main effects, while treatment-interaction evidence is inconsistent. The univariable interaction screen suggested some association in 2 of 3 overlapping analyses, but this was not reinforced by the R-learner or most causal-forest results. The small negative or zero validation R-loss gains and permutation changes leave uncertainty about true effect modification."
+    },
+    {
+      "name": "Pulmonary structural imaging phenotype",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "interpretation": "Explicit pretreatment imaging evidence of emphysema appears to be the clearest candidate for treatment-effect heterogeneity. It showed treatment interactions in all three penalized treatment-interaction analyses, positive univariable R-learner validation gains in all three analyses, and positive causal-forest permutation R-loss increases in all three analyses. Although its main-effect evidence was less pronounced, with the outcome main effect meeting criterion in only one of three analyses and treatment main effects unavailable, the consistency across interaction-focused methods suggests that the presence of emphysema may modify the comparative effectiveness of treatment A versus treatment B.",
+      "disagreements": "There is some discordance between main-effect and interaction results: penalized main effects were weak or unavailable, while treatment-interaction evidence was strong. The univariable interaction p-values were mostly but not uniformly significant, with one p-value of 0.06. Nevertheless, the R-learner and causal-forest results provide consistent support for treatment-effect modification within the overlapping analyses."
+    }
+  ]
+}

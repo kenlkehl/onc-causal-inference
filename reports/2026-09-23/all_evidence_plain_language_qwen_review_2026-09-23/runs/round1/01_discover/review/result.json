@@ -1,0 +1,41 @@
+{
+  "http_status": 200,
+  "request_sha256": "2663ce2ef939e236a6a106e68b9ba37f4ec27d0cb48052d7a9046a391a2af11c",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 21.748,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 791,
+    "total_tokens": 1831,
+    "completion_tokens": 1040,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 782
+    }
+  },
+  "reasoning_characters": 3611,
+  "content": "\n\n{\n  \"understanding\": \"Review the supplied extraction task and example, explain what the task asks and what the input represents, then return the extracted clinical variables from the example as JSON.\",\n  \"input_meaning\": \"The example input is a set of dated clinical record excerpts describing laboratory results and an imaging finding.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"candidates\": [\n      {\n        \"name\": \"Serum creatinine concentration\",\n        \"description\": \"The patient's serum creatinine level measured from a blood test, typically reported in mg/dL.\",\n        \"basis\": \"Two dated lab excerpts explicitly report serum creatinine values of 1.0 mg/dL and 1.2 mg/dL.\",\n        \"uncertainty\": \"\"\n      },\n      {\n        \"name\": \"Emphysema on imaging\",\n        \"description\": \"An imaging-based finding indicating the presence of emphysema.\",\n        \"basis\": \"The excerpt states that CT documents emphysema.\",\n        \"uncertainty\": \"\"\n      }\n    ]\n  }\n}",
+  "parsed": {
+    "understanding": "Review the supplied extraction task and example, explain what the task asks and what the input represents, then return the extracted clinical variables from the example as JSON.",
+    "input_meaning": "The example input is a set of dated clinical record excerpts describing laboratory results and an imaging finding.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "candidates": [
+        {
+          "name": "Serum creatinine concentration",
+          "description": "The patient's serum creatinine level measured from a blood test, typically reported in mg/dL.",
+          "basis": "Two dated lab excerpts explicitly report serum creatinine values of 1.0 mg/dL and 1.2 mg/dL.",
+          "uncertainty": ""
+        },
+        {
+          "name": "Emphysema on imaging",
+          "description": "An imaging-based finding indicating the presence of emphysema.",
+          "basis": "The excerpt states that CT documents emphysema.",
+          "uncertainty": ""
+        }
+      ]
+    }
+  }
+}

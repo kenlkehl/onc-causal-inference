@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Read the supplied task as someone receiving it for the first time. Use the task messages and their example input to work out what you are being asked to do.\n\nExplain the task and the meaning of its input in plain language. Ask any clarification questions whose answers would change your action or output. Identify any wording that requires unexplained context, or unnecessary software/process detail. Empty question and unnecessary-context lists are appropriate when the task is clear.\n\nThen carry out the example task if you can. Return one JSON object with exactly these keys:\n- understanding: a concise statement of the task.\n- input_meaning: a concise statement of what the supplied information represents.\n- can_complete: a boolean.\n- questions: an array of clarification questions.\n- unnecessary_context: an array of passages that could be removed, with a brief reason for each.\n- sample_response: your answer to the example task as a JSON value, or null if a required clarification prevents an answer.\n\nKeep the review concise. The task conversation is quoted below for this review."
+    },
+    {
+      "role": "user",
+      "content": "SYSTEM MESSAGE\nWrite clear instructions for extracting one clinical variable from a patient's medical record.\n\nWhat you receive\n\nThe variable's name and clinical excerpts illustrating how it is documented. The excerpts can come from different patients.\n\nHow to decide\n\nDefine one value per patient. Choose a numerical value when the record supports a measurement, and specify its unit. State allowed labels for categorical values. Use null for missing or unresolved findings. Preserve directly reported thresholds when an exact number is unavailable.\n\nSpecify how to handle repeated observations. For ordinary measurements, use the latest result. Other choices are earliest, maximum, minimum, mode (most frequent value), any_positive (positive if any observation is positive), and single_or_null (use a value only when observations agree). Select another rule when the named variable calls for it. Maximum/minimum apply to numbers; any_positive applies to a binary variable.\n\nFor latest/earliest, choose among dated observations when any are available; use text order when all are undated. Equal-date ties use the last mention for latest and first for earliest. State a standard unit conversion if one is needed. An unresolved unit or incompatible measurement yields null.\n\nWhat to return\n\nReturn one object with description, value_type, categories_or_unit, measurement_definition, missing_value_rule, conflict_resolution, and caveats. Text fields contain the definition and any necessary qualifications. value_type is continuous, binary, categorical, ordinal, or ambiguous. categories_or_unit contains one unit for continuous values, two labels for binary values, or the ordered/nominal labels for ordinal/categorical values. It is empty for unitless or ambiguous values. conflict_resolution contains strategy (one of the named rules) and positive_category (the exact positive label for any_positive; otherwise null). For ambiguous measurements, explain the ambiguity in caveats and use single_or_null. caveats may be empty.\n\nUSER MESSAGE\nClinical variable: Serum creatinine\n\nExample clinical excerpts\n2025-01-01: serum creatinine 1.0 mg/dL. 2025-01-10: serum creatinine 1.2 mg/dL. CT documents emphysema."
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

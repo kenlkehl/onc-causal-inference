@@ -1,0 +1,32 @@
+{
+  "http_status": 200,
+  "request_sha256": "e5a3ff34ce057c37d6f6650469e7640183841cdb02ba5e6bb04ceb2e65ae16a6",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 61.324,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 769,
+    "total_tokens": 3433,
+    "completion_tokens": 2664,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 2464
+    }
+  },
+  "reasoning_characters": 11811,
+  "content": "\n\n{\n  \"understanding\": \"The task is to extract each named clinical variable from the patient note and answer with a complete JSON object using exactly those variable names.\",\n  \"input_meaning\": \"The supplied information provides two variable definitions and one clinical note containing two dated serum creatinine results and an undated CT finding of emphysema.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [\n    \"\\\"What you receive ... one patient's record.\\\": It only restates the input format and adds no actionable extraction rule.\",\n    \"\\\"Your preceding answer ended before the JSON object was complete.\\\": This meta-comment about a prior truncated response is not needed once the instructions require a complete JSON object.\"\n  ],\n  \"sample_response\": {\n    \"Serum creatinine\": 1.2,\n    \"Emphysema on imaging\": \"Present\"\n  }\n}",
+  "parsed": {
+    "understanding": "The task is to extract each named clinical variable from the patient note and answer with a complete JSON object using exactly those variable names.",
+    "input_meaning": "The supplied information provides two variable definitions and one clinical note containing two dated serum creatinine results and an undated CT finding of emphysema.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [
+      "\"What you receive ... one patient's record.\": It only restates the input format and adds no actionable extraction rule.",
+      "\"Your preceding answer ended before the JSON object was complete.\": This meta-comment about a prior truncated response is not needed once the instructions require a complete JSON object."
+    ],
+    "sample_response": {
+      "Serum creatinine": 1.2,
+      "Emphysema on imaging": "Present"
+    }
+  }
+}

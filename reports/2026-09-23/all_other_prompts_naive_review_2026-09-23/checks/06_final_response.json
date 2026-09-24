@@ -1,0 +1,10 @@
+{
+  "values": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  },
+  "decision_notes": {
+    "Serum creatinine": "Selected the latest eligible result, explicitly dated 2025-01-10.",
+    "Emphysema on imaging": "CT explicitly documents emphysema; the observation date is unknown."
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "http_status": 200,
+  "request_sha256": "23609db944b01034c401dc92c520a3cb6efbd88aa11d0f9bd6548aa7f73db87c",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 2.738,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 219,
+    "total_tokens": 344,
+    "completion_tokens": 125,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 113
+    }
+  },
+  "reasoning_characters": 407,
+  "content": "\n\n{\"value\":\"Below 1.0\"}",
+  "parsed": {
+    "value": "Below 1.0"
+  }
+}

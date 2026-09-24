@@ -1,0 +1,13 @@
+
+
+{
+  "understanding": "Review whether a clinical variable extraction definition should be kept unchanged or revised based on current extracted values and earlier failed answers.",
+  "input_meaning": "The supplied input describes one clinical variable, its current definition, counts of extracted values for 10 patients, and example outputs that previously failed extraction or mapping.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "action": "keep",
+    "reason": "The failed answers 'positive' and 'present on CT' are ordinary synonyms for the existing 'Present' category, and the current binary definition already specifies using explicit positive or negative imaging statements. The summaries do not reveal an unclear measurement rule, unsuitable type, or missing category distinction."
+  }
+}

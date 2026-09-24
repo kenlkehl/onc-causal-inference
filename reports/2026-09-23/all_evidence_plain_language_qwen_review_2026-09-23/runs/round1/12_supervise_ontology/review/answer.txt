@@ -1,0 +1,13 @@
+
+
+{
+  "understanding": "Review the supplied extraction definition for the clinical variable and decide whether to keep it or revise it, returning the required action JSON.",
+  "input_meaning": "The supplied information describes one clinical variable, its current extraction definition, counts of current extracted values, and examples of earlier failed outputs.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "action": "keep",
+    "reason": "The definition is usable for binary imaging findings: Present and Absent are suitable categories, the measurement rule correctly requires explicit positive or negative imaging statements, and missing/unresolved findings map to null. The failed examples ('positive' and 'present on CT') are ordinary positive-imaging wording that can be interpreted as Present under the existing definition, so they do not show an unclear measurement rule, unsuitable type, or missing category distinction."
+  }
+}

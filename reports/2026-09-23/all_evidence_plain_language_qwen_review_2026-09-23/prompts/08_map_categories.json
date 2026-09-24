@@ -1,0 +1,10 @@
+[
+  {
+    "role": "system",
+    "content": "Choose the category that matches the supplied phrase for one clinical variable.\n\nWhat you receive\n\nThe variable's meaning, its allowed categories, and the phrase to interpret.\n\nHow to decide\n\nUse an allowed category when the phrase has an unambiguous equivalent meaning. Return null for an unclear or incompatible phrase. Use the category's exact spelling.\n\nWhat to return\n\nReturn one JSON object with only value, containing an allowed category or null."
+  },
+  {
+    "role": "user",
+    "content": "Clinical variable: Emphysema on imaging\nMeaning: Whether imaging explicitly describes emphysema.\nAllowed categories: Present, Absent\nPhrase: present on CT"
+  }
+]

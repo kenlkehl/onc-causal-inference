@@ -1,0 +1,19 @@
+
+
+{
+  "status": "ready",
+  "representation": "categorical",
+  "reason": "The explicit threshold '<1.0' creates a meaningful boundary that should be preserved. The smallest supported partition is two categories: less than 1.0 mg/dL and 1.0 mg/dL or greater. Observed numbers such as 0.8 and 1.2 can be mapped into these categories. The phrase 'high' cannot be represented because no reference interval or definition is provided.",
+  "token_interpretations": [
+    {
+      "raw_text": "<1.0",
+      "meaning": "explicit_interval",
+      "interpretation": "Serum creatinine strictly below 1.0 mg/dL; this maps to the category 'less than 1.0 mg/dL'."
+    },
+    {
+      "raw_text": "high",
+      "meaning": "unusable",
+      "interpretation": "The term 'high' is not supported because no reference range or definition is supplied."
+    }
+  ]
+}

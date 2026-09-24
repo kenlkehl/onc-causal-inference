@@ -1,0 +1,185 @@
+{
+  "checked_at": "2026-09-23T23:34:10.941896+00:00",
+  "endpoint": "http://sn4622130540:8001",
+  "models": {
+    "object": "list",
+    "data": [
+      {
+        "id": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+        "object": "model",
+        "created": 1790206450,
+        "owned_by": "vllm",
+        "root": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+        "parent": null,
+        "max_model_len": 262144,
+        "permission": [
+          {
+            "id": "modelperm-a0a48914412fb966",
+            "object": "model_permission",
+            "created": 1790206450,
+            "allow_create_engine": false,
+            "allow_sampling": true,
+            "allow_logprobs": true,
+            "allow_search_indices": false,
+            "allow_view": true,
+            "allow_fine_tuning": false,
+            "organization": "*",
+            "group": null,
+            "is_blocking": false
+          }
+        ]
+      }
+    ]
+  },
+  "parameters": {
+    "temperature": 1.0,
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.0,
+    "frequency_penalty": 0.0,
+    "reasoning_effort": "xhigh",
+    "chat_template_kwargs": {
+      "enable_thinking": true,
+      "preserve_thinking": true
+    },
+    "max_tokens": 65536
+  },
+  "recommendation_sources": [
+    "https://huggingface.co/Qwen/Qwen3.8-Flash-Next#api-usage",
+    "https://huggingface.co/Inferact/Qwen3.8-Flash-Next-NVFP4#api-usage",
+    "https://recipes.vllm.ai/Qwen/Qwen3.8-Flash-Next"
+  ],
+  "output_limit_note": "65536 is this review's completion ceiling; all calls retain xhigh and thinking. Check finish_reason to detect truncation.",
+  "server_version": {
+    "version": "0.29.1rc1.dev452+g3df4ae153"
+  },
+  "request_schema_controls": {
+    "temperature": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Temperature"
+    },
+    "top_p": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Top P"
+    },
+    "top_k": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Top K"
+    },
+    "min_p": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Min P"
+    },
+    "presence_penalty": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Presence Penalty",
+      "default": 0.0
+    },
+    "repetition_penalty": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Repetition Penalty"
+    },
+    "frequency_penalty": {
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Frequency Penalty",
+      "default": 0.0
+    },
+    "reasoning_effort": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "none",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Reasoning Effort",
+      "description": "Constrains effort on reasoning for reasoning models. Currently supported values are none, minimal, low, medium, high, xhigh, and max. Reducing reasoning effort can result in faster responses and fewer tokens used on reasoning in a response. Note that 'max' is specific to the DeepSeek V4 series and is not part of the standard OpenAI API specification."
+    },
+    "chat_template_kwargs": {
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Chat Template Kwargs",
+      "description": "Additional keyword args to pass to the template renderer. Will be accessible by the chat template."
+    },
+    "max_tokens": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Max Tokens",
+      "deprecated": true
+    }
+  }
+}

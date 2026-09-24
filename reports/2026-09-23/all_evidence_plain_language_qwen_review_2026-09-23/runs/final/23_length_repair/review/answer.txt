@@ -1,0 +1,16 @@
+
+
+{
+  "understanding": "The task is to extract each named clinical variable from the patient note and answer with a complete JSON object using exactly those variable names.",
+  "input_meaning": "The supplied information provides two variable definitions and one clinical note containing two dated serum creatinine results and an undated CT finding of emphysema.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    "\"What you receive ... one patient's record.\": It only restates the input format and adds no actionable extraction rule.",
+    "\"Your preceding answer ended before the JSON object was complete.\": This meta-comment about a prior truncated response is not needed once the instructions require a complete JSON object."
+  ],
+  "sample_response": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  }
+}

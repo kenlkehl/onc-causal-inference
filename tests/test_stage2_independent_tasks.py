@@ -1,6 +1,8 @@
 """Task-selection contracts, annotation isolation, and numerical smoke tests."""
 from __future__ import annotations
 
+from tests.stage2_prompt_spy import prompt_inputs, role_response
+
 import copy
 import json
 from dataclasses import asdict
@@ -140,7 +142,7 @@ def test_llm_cannot_veto_or_promote(tmp_path, roles):
     raw = evidence()
     numerical, numeric_report = finalize_taskwise_report(definitions(), raw)
     def request(messages, validate, **kwargs):
-        payload = json.loads(messages[-1]["content"])
+        payload = prompt_inputs(messages)
         assert payload["decision_policy"]["annotation_only"]
         return validate(response_for(payload, roles))
     selected, report, _ = adjudicate_stage2_roles(
@@ -173,12 +175,12 @@ def test_annotations_cached_but_not_binding(tmp_path):
     calls = []
     def request(messages, validator, **kwargs):
         calls.append(1)
-        return validator(response_for(json.loads(messages[-1]["content"]), []))
+        return validator({"interpretation": "Recorded numerical decision.", "limitations": "Uncertain causal role."})
     kwargs = dict(definitions=definitions(), statistical_report=raw, request_json=request,
                   output_dir=tmp_path, policy=Stage2RoleAdjudicationConfig(max_candidates_per_request=2))
     first = adjudicate_stage2_roles(**kwargs)
     second = adjudicate_stage2_roles(**kwargs)
-    assert len(calls) == 3
+    assert len(calls) == len(definitions())
     assert first == second
     assert not (tmp_path / "complete.json").exists()  # no binding-role cache overwritten
 
@@ -189,7 +191,7 @@ def test_advisory_payload_excludes_unallowlisted_data(tmp_path):
     raw = evidence(); raw["dataset"] = "DO_NOT_SEND"
     def request(messages, validator, **kwargs):
         assert "DO_NOT_SEND" not in json.dumps(messages)
-        return validator(response_for(json.loads(messages[-1]["content"]), []))
+        return validator({"interpretation": "Recorded numerical decision.", "limitations": "Uncertain causal role."})
     adjudicate_stage2_roles(definitions=defs, statistical_report=raw, request_json=request,
                            output_dir=tmp_path, policy=Stage2RoleAdjudicationConfig())
 
@@ -197,7 +199,7 @@ def test_advisory_payload_excludes_unallowlisted_data(tmp_path):
 def test_legacy_roles_remain_binding(tmp_path):
     raw = evidence(); raw["policy"] = {}
     def request(messages, validator, **kwargs):
-        return validator(response_for(json.loads(messages[-1]["content"]), []))
+        return validator(role_response())
     selected, report, _ = adjudicate_stage2_roles(
         definitions=definitions(), statistical_report=raw, request_json=request,
         output_dir=tmp_path, policy=Stage2RoleAdjudicationConfig(),

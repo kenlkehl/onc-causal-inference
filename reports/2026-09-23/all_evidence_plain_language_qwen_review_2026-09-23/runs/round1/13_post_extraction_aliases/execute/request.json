@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Decide whether the supplied fields record the same clinical measurement and can be combined while retaining every observed value.\n\nWhat you receive\n\nField definitions and comparisons of their values in patients for whom both fields were measured.\n\nHow to decide\n\nConfirm the same clinical attribute, timing rule, unit, and level of detail, together with agreement between paired values. High correlation by itself leaves agreement unresolved. Keep fields separate when meaning, timing, units, or agreement is uncertain. Every pair in a proposed group must be compatible. Category synonyms may be equated when their meanings match. Preserve reported thresholds and all nonmissing information. A protected name remains the canonical name; two protected names remain separate.\n\nWhat to return\n\nReturn one JSON object with action and reason. For action keep, these are the only fields. For action merge, also return members (existing field names), canonical_label (a clinical name), and category_equivalences (an array containing source_feature, source_category, and canonical_category for each needed recoding; otherwise empty)."
+    },
+    {
+      "role": "user",
+      "content": "Fields\n- Creatinine level: Latest serum creatinine, mg/dL; exact number or null.\n- Serum creatinine: Latest serum creatinine, mg/dL; exact number or null.\n\nPaired-value comparison\n- 40 patients have both values.\n- No disagreements at the stated measurement precision.\n- Units and timing rules match.\n- Neither field contains text values.\n- Combining their observed values preserves all nonmissing information.\n\nProtected names: none."
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

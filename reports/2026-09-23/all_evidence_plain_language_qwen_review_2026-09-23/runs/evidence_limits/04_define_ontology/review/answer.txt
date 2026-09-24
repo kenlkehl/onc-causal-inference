@@ -1,0 +1,25 @@
+
+
+{
+  "understanding": "Generate a JSON specification describing how to extract a single serum creatinine value per patient from medical-record text.",
+  "input_meaning": "The clinical variable name is the target lab value, and the excerpts are example ways serum creatinine may be documented, possibly across different patients.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    "The passage Other choices are earliest, maximum, minimum, mode, any_positive, and single_or_null can be removed or shortened because this example only requires the latest-result rule for serum creatinine.",
+    "The sentence Text fields contain the definition and any necessary qualifications can be removed because the required field names already indicate their purpose."
+  ],
+  "sample_response": {
+    "description": "Extract the documented serum creatinine concentration from blood-test results for one patient.",
+    "value_type": "continuous",
+    "unit": "mg/dL",
+    "categories": [],
+    "measurement_definition": "Extract each serum creatinine observation as either an exact numeric value or a directly reported threshold string, such as <1.0, expressed in mg/dL. If a result is reported in umol/L, convert it to mg/dL by dividing by 88.4. For repeated observations, use the latest result: if any observation has a date, select the most recently dated observation; if multiple dated observations share the latest date, use the last mention at that date; if all observations are undated, use the last mention in text order.",
+    "missing_value_rule": "Return null when serum creatinine is absent, cannot be resolved to an mg/dL numeric value or a directly reported threshold string, has an unresolved unit, is incompatible with creatinine, or cannot be converted. A directly reported threshold string such as <1.0 is a valid non-missing value when it is the selected observation.",
+    "conflict_resolution": {
+      "strategy": "latest",
+      "positive_category": null
+    },
+    "caveats": "Do not coerce threshold values into numeric values; preserve the reported threshold operator exactly. If the unit is missing or ambiguous and conversion cannot be resolved, return null."
+  }
+}

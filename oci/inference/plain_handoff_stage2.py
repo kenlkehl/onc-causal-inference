@@ -64,7 +64,12 @@ from .stage2_role_adjudication import (
     Stage2RoleAdjudicationConfig,
     role_adjudication_config_from_mapping,
 )
-from .stage2_sampling import SAMPLING_FIELDS, recommended_sampling
+from .stage2_sampling import (
+    SAMPLING_FIELDS, recommended_sampling, default_reasoning,
+    is_qwen_flash_next, sampling_provenance,
+)
+from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
+from . import stage2_clinical_prompts as clinical_prompts
 from . import stage2_request_audit as request_audit
 from .stage2_sequential_consolidation import (
     Stage2SequentialConsolidationConfig,
@@ -106,14 +111,14 @@ DEFAULT_MAX_TOKENS = MINIMUM_MAX_TOKENS
 # fingerprints below).
 MINIMUM_EXTRACTION_MAX_TOKENS = 4_096
 DEFAULT_EXTRACTION_MAX_TOKENS = 75_000
-DEFAULT_INTERPRETATION_REASONING_EFFORT = "high"
-DEFAULT_EXTRACTION_REASONING_EFFORT = "none"
+DEFAULT_INTERPRETATION_REASONING_EFFORT = "auto"
+DEFAULT_EXTRACTION_REASONING_EFFORT = "auto"
 STAGE2_REQUEST_KINDS = frozenset({"interpretation", "extraction"})
 MANAGED_MODEL_PHASE_SCHEMA_VERSION = "stage2_managed_model_phase_v1"
 DEFAULT_VLLM_RAPID_SWITCH_SECONDS = 15 * 60.0
 MANAGED_VLLM_ALLOCATION_MODES = frozenset({"all_gpus", "configured_split"})
 SUPPORTED_REASONING_EFFORTS = frozenset(
-    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+    {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
 DEFAULT_EXTRACTION_MAX_PROMPT_CHARS = 640_000
 DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE = 10
@@ -152,7 +157,7 @@ EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION = (
 OPERATIONALIZATION_SCHEMA_VERSION = (
     "feature_name_bounded_supporting_text_v7_conflict_resolution"
 )
-INTERPRETATION_SCHEMA_VERSION = "semantic_cards_exhaustive_feature_discovery_v12"
+INTERPRETATION_SCHEMA_VERSION = DISCOVERY_PROMPT_VERSION
 INTERPRETATION_AUDIT_SCHEMA_VERSION = (
     "rejected_packet_text_only_ordinals_v7_exhaustive_decomposition"
 )
@@ -2451,19 +2456,26 @@ def _stage2_request_policy(
         if kind == "extraction"
         else config.interpretation_reasoning_effort
     )
+    model = config.runtime_sampling_model or config.model
     reasoning_effort = config.runtime_reasoning_effort or configured_reasoning_effort
+    if reasoning_effort == "auto":
+        reasoning_effort = default_reasoning(model, kind)
     extraction_ceiling = config.extraction_max_tokens
     if _reasoning_enabled(reasoning_effort) and config.extraction_reasoning_max_tokens is not None:
         extraction_ceiling = config.extraction_reasoning_max_tokens
     return {
         "request_kind": kind,
         "reasoning_effort": reasoning_effort,
+        "sampling_provenance": sampling_provenance(
+            model, config.runtime_model_family or _stage2_model_family(model)
+        ),
+        "preserve_thinking": is_qwen_flash_next(model),
         "max_tokens": int(
             extraction_ceiling if kind == "extraction" else config.max_tokens
         ),
         **recommended_sampling(
             config.runtime_sampling_model or config.model,
-            config.runtime_model_family or _stage2_model_family(config.model),
+            config.runtime_model_family or _stage2_model_family(model),
             _reasoning_enabled(reasoning_effort),
         ),
         **{
@@ -2486,6 +2498,7 @@ def _feature_definition_input_value(
 
     return {
         "feature_definition_input_schema": FEATURE_DEFINITION_INPUT_SCHEMA_VERSION,
+        "prompt_catalog_version": clinical_prompts.PROMPT_VERSION,
         "outer_fold": int(outer_fold),
         "compiler": config.evidence_compiler,
         "candidate_discovery_source": "all_semantic_evidence_cards",
@@ -2664,7 +2677,10 @@ def _openai_request_variants(
             [
                 {
                     **sampling_extra,
-                    "chat_template_kwargs": {"enable_thinking": enabled},
+                    "chat_template_kwargs": {
+                        "enable_thinking": enabled,
+                        **({"preserve_thinking": True} if request_policy.get("preserve_thinking") else {}),
+                    },
                 },
                 {
                     **sampling_extra,
@@ -2673,6 +2689,14 @@ def _openai_request_variants(
             ]
         )
     family_bodies.extend([sampling_extra, {}])
+
+    if request_policy.get("preserve_thinking"):
+        # The Flash Next publisher documents these controls. Never silently
+        # lower reasoning effort or discard its sampling profile on a retry.
+        strict = {**dict(base_kwargs), "extra_body": family_bodies[0]}
+        if wire_reasoning_effort is not None:
+            strict["reasoning_effort"] = wire_reasoning_effort
+        return [{**strict, "response_format": {"type": "json_object"}}, strict]
 
     variants: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -2754,11 +2778,13 @@ def _openai_completion(
         configured_effort=str(request_policy["reasoning_effort"]),
         model_family=model_family,
     )
-    controlled_messages = _reasoning_controlled_messages(
-        messages,
-        model_family=model_family,
-        enable_thinking=_reasoning_enabled(str(request_policy["reasoning_effort"])),
-        max_prompt_chars=int(config.max_prompt_chars),
+    controlled_messages = (
+        [dict(message) for message in messages]
+        if request_policy.get("preserve_thinking") else _reasoning_controlled_messages(
+            messages, model_family=model_family,
+            enable_thinking=_reasoning_enabled(str(request_policy["reasoning_effort"])),
+            max_prompt_chars=int(config.max_prompt_chars),
+        )
     )
     base_kwargs: dict[str, Any] = {
         "model": config.model,
@@ -2837,6 +2863,11 @@ def _openai_completion(
             "http_attempt_started", http_variant=variant_index,
             reasoning_effort=request_policy["reasoning_effort"],
             max_tokens=request_policy["max_tokens"], streaming=streaming,
+            wire_reasoning_effort=kwargs.get("reasoning_effort"),
+            sampling={name: kwargs.get(name, (kwargs.get("extra_body") or {}).get(name))
+                      for name in SAMPLING_FIELDS},
+            chat_template_kwargs=(kwargs.get("extra_body") or {}).get("chat_template_kwargs"),
+            sampling_provenance=request_policy["sampling_provenance"],
             read_timeout_seconds=min(float(config.request_timeout), remaining),
         )
         try:
@@ -2880,6 +2911,9 @@ def _openai_completion(
                 name for name in ("top_k", "min_p", "repetition_penalty")
                 if name.replace("_", " ") in normalized_error
             }
+            if request_policy.get("preserve_thinking") and (rejected_sampling
+                    or "reasoning effort" in normalized_error or "thinking" in normalized_error):
+                raise _Stage2TransportFailure(exc, attempts_used=attempts_used) from exc
             for remaining_variant in variants[variant_index:]:
                 body = remaining_variant.get("extra_body")
                 if body is not None:
@@ -3271,66 +3305,22 @@ def _transport_retry_messages(
     ) from exc
 
 
-def _repair_message(
-    exc: Exception,
-    *,
-    repair_context: Mapping[str, Any] | None = None,
-    repeated_error_count: int = 1,
-) -> dict[str, str]:
+def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None = None, repeated_error_count: int = 1) -> dict[str, str]:
+    del repair_context, repeated_error_count
     if isinstance(exc, _Stage2OutputLengthError):
         content = (
-            "The previous JSON exceeded the available response length. "
-            f"{type(exc).__name__}: {exc}. Return one materially "
-            "shorter corrected JSON object using the same required schema. Remove redundancy, "
-            "merge duplicate entries, and keep descriptions and rationales concise. Do not omit "
-            "required records or fields. Return JSON only."
+            "Your preceding answer ended before the JSON object was complete. "
+            "Return a complete JSON object using the task and information above. "
+            "Include every requested entry and field. Keep explanations concise."
         )
     else:
         content = (
-            "The previous JSON failed validation. Correct this exact error: "
-            f"{type(exc).__name__}: {exc}. Return one corrected JSON object only."
+            "Your preceding answer needs this correction: " + str(exc) + "\n"
+            "Use the task and information above to return the complete corrected JSON object. "
+            "Preserve supported values and use null when the definition requires it."
         )
-    context = dict(repair_context or {})
-    allowed_feature_ids = context.get("allowed_feature_ids")
-    if isinstance(allowed_feature_ids, list) and allowed_feature_ids:
-        content += (
-            " The only feature_ids allowed in this response are: "
-            + json.dumps(
-                list(map(str, allowed_feature_ids)),
-                ensure_ascii=False,
-                separators=(",", ":"),
-            )
-            + "."
-        )
-    expression_examples = context.get("valid_expression_examples")
-    if isinstance(expression_examples, Mapping) and expression_examples:
-        content += (
-            " Valid categorical-rule expression examples are: "
-            + json.dumps(
-                dict(expression_examples),
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            )
-            + "."
-        )
-    conservative_response = context.get("conservative_response")
-    if repeated_error_count >= 2 and isinstance(conservative_response, Mapping):
-        content += (
-            f" This exact validation error has now occurred {repeated_error_count} times. "
-            "Abandon the latent proposal and return exactly this conservative response: "
-            + json.dumps(
-                dict(conservative_response),
-                ensure_ascii=False,
-                separators=(",", ":"),
-                sort_keys=True,
-            )
-            + "."
-        )
-    return {
-        "role": "user",
-        "content": content,
-    }
+    return {"role": "user", "content": content}
+
 
 
 def _bounded_repair_directive(
@@ -3677,6 +3667,8 @@ def _checkpointed_request_json(
     checkpoint_input = {
         **dict(input_value),
         "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
+        "messages": list(messages),
+        "prompt_catalog_version": clinical_prompts.PROMPT_VERSION,
         "llm_identity": {
             "model": config.model,
         },
@@ -3797,84 +3789,91 @@ def _interpretation_prompt(
     architecture: str,
     packets: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, str]]:
+    """Render one card without asking the model to track source identifiers."""
+
     del architecture
-    body = {
-        "job": "infer_clinical_features_from_text_evidence",
-        "task": (
-            "Identify all patient-level clinical features supported anywhere in each supplied "
-            "item's consensus text and representative excerpts. Enumerate every distinct "
-            "feature atomically; some items may support multiple features or no valid feature."
-        ),
-        "rules": [
-            "Each candidate must represent one patient-level clinical variable with one value per patient. It must be assignable by examining one patient's record without comparing or aggregating across patients.",
-            "Return explicitly documented clinical features and narrower latent clinical features reasonably implied by the text.",
-            *_atomic_feature_interpretation_rules(),
-            "Use longitudinal information as clinical context when it appears in the evidence. Do not perform temporal eligibility filtering.",
-            "Do not return patient names, administrative identifiers, documentation artifacts, descriptions of the input collection, multiple-patient heterogeneity, grouping methods, or analysis methods as clinical features.",
-            "If no valid feature is supported, return an empty candidates list. Never turn the absence of a common feature into a candidate.",
-            "Every returned candidate must have a nonempty snake_case name. Omit any candidate you cannot name; never return a blank or null name.",
-            "For each candidate, cite one or more supplied item numbers in supporting_items and explain how its text supports the feature.",
-            "Do not choose a value type, unit, categories, or extraction ontology in this step.",
-        ],
-        "evidence_items": _interpretation_evidence_items(packets),
-        "response": _interpretation_response_contract(),
-    }
+    if len(packets) != 1:
+        raise ValueError("discovery requires exactly one evidence card per request")
+    texts = _readable_supporting_text(packets)
+    if not texts:
+        raise ValueError("discovery evidence card has no readable text")
+    excerpts = "\n".join(f"<excerpt>\n{text}\n</excerpt>" for text in texts)
     return [
-        {
-            "role": "system",
-            "content": (
-                "Exhaustively decompose every evidence item into all explicitly stated or "
-                "unambiguously encoded atomic patient-level clinical features. Do not stop at "
-                "the community's apparent topic or most salient feature. Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True)},
+        {"role": "system", "content": DISCOVERY_SYSTEM_PROMPT},
+        {"role": "user", "content": (
+            "Identify the clinical variables supported by these excerpts using the "
+            "instructions above.\n\n<clinical_excerpts>\n"
+            f"{excerpts}\n</clinical_excerpts>"
+        )},
     ]
 
 
-def _rejected_packet_audit_prompt(
+def _validate_discovery(
+    value: Mapping[str, Any],
     *,
-    architecture: str,
-    packets: Sequence[Mapping[str, Any]],
-) -> list[dict[str, str]]:
-    """Build a recall-oriented second pass over initially rejected packets."""
+    packet_id: str,
+    evidence_axes: Sequence[str] = (),
+) -> dict[str, Any]:
+    """Validate clinical content; attach trusted call provenance in Python."""
 
-    del architecture
-    body = {
-        "job": "audit_unmapped_text_evidence_for_missed_clinical_features",
-        "task": (
-            "The supplied text was not cited by an initial review. Re-examine every string in "
-            "every item and enumerate all atomic patient-level clinical features that may have "
-            "been missed, including features embedded outside the apparent community topic."
-        ),
-        "rules": [
-            "Review every evidence item independently. One clear item is sufficient to support a candidate; a clue does not need to recur.",
-            "Each candidate must represent one patient-level clinical variable with one value per patient. It must be assignable by examining one patient's record without comparing or aggregating across patients.",
-            "Return explicitly documented clinical features and narrower latent clinical features reasonably implied by the text.",
-            *_atomic_feature_interpretation_rules(),
-            "Use longitudinal information as clinical context when it appears in the evidence. Do not perform temporal eligibility filtering.",
-            "Do not return patient names, administrative identifiers, documentation artifacts, descriptions of the input collection, multiple-patient heterogeneity, grouping methods, or analysis methods as clinical features.",
-            "If no valid feature is supported, return an empty candidates list. Never turn the absence of a common feature into a candidate.",
-            "Every returned candidate must have a nonempty snake_case name. Omit any candidate you cannot name; never return a blank or null name.",
-            "For each candidate, cite one or more supplied item numbers in supporting_items and explain how its text supports the feature.",
-            "Do not choose a value type, unit, categories, or extraction ontology in this step.",
-        ],
-        "evidence_items": _interpretation_evidence_items(packets),
-        "response": _interpretation_response_contract(),
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "Re-examine every supplied text string for missed patient-level clinical "
-                "features. Favor recall by exhaustively identifying all supported atomic "
-                "variables, including secondary features outside the dominant topic, not by "
-                "creating umbrella, inventory, or composite candidates. Return no candidate "
-                "for input or analysis artifacts. Return JSON only."
-            ),
+    if not isinstance(value, Mapping) or set(value) != {"candidates"}:
+        raise ValueError("discovery requires one object containing only candidates")
+    rows = value["candidates"]
+    if not isinstance(rows, list):
+        raise ValueError("discovery candidates must be an array")
+    fields = {"name", "description", "basis", "uncertainty"}
+    cleaned = []
+    for row in rows:
+        if not isinstance(row, Mapping) or set(row) != fields:
+            raise ValueError("each discovery candidate requires name, description, basis, uncertainty only")
+        if any(not isinstance(row[field], str) for field in fields):
+            raise ValueError("discovery candidate fields must be text")
+        candidate = {field: row[field].strip() for field in fields}
+        if any(not candidate[field] for field in ("name", "description", "basis")):
+            raise ValueError("discovery name, description, and basis must be nonempty")
+        base = _snake_case_name(candidate["name"], fallback="")
+        if not base:
+            raise ValueError("discovery name must contain a usable clinical label")
+        cleaned.append((base, candidate))
+
+    # Avoid silently merging different measurements whose labels normalize to
+    # the same spelling. Stable ordering also makes suffixes independent of the
+    # order in which the model returned those candidates.
+    cleaned.sort(key=lambda pair: (pair[0], *(pair[1][field] for field in sorted(fields))))
+    names: set[str] = set()
+    concepts = []
+    for base, candidate in cleaned:
+        name, suffix = base, 2
+        while name in names:
+            name, suffix = f"{base}_{suffix}", suffix + 1
+        names.add(name)
+        concepts.append({
+            "name": name,
+            "description": candidate["description"],
+            "supporting_packet_ids": [str(packet_id)],
+            "evidence_axes": _canonical_evidence_axes(evidence_axes),
+            "evidence_rationale": candidate["basis"],
+            "caveats": candidate["uncertainty"],
+        })
+    return {
+        "concepts": concepts,
+        "packet_dispositions": {
+            str(packet_id): {
+                "status": "supports_concept" if concepts else "reviewed_no_specific_concept",
+                "concept_names": sorted(names),
+                "reason": "Derived from the single-card discovery response; provenance attached by Python.",
+            }
         },
-        {"role": "user", "content": json.dumps(body, sort_keys=True)},
-    ]
+    }
+
+
+def _rejected_packet_audit_prompt(*, architecture: str, packets: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    del architecture
+    if len(packets) != 1:
+        raise ValueError("recall review requires one evidence card per call")
+    text = "\n\n".join(_readable_supporting_text(packets))
+    return clinical_prompts.messages("02_audit_unmapped", "Clinical excerpts\n\n" + text)
+
 
 
 def _validate_interpretation(
@@ -3883,6 +3882,10 @@ def _validate_interpretation(
     packet_ids: Sequence[str],
     packet_evidence_axes: Mapping[str, Sequence[str]] | None = None,
 ) -> dict[str, Any]:
+    if set(value) == {"candidates"} and len(packet_ids) == 1 and (
+        not value["candidates"] or set(value["candidates"][0]) == {"name", "description", "basis", "uncertainty"}
+    ):
+        return _validate_discovery(value, packet_id=str(packet_ids[0]), evidence_axes=(packet_evidence_axes or {}).get(str(packet_ids[0]), ()))
     ordered_packet_ids = list(map(str, packet_ids))
     if len(ordered_packet_ids) != len(set(ordered_packet_ids)):
         raise ValueError("interpretation input contains duplicate packet IDs")
@@ -4072,16 +4075,15 @@ def _partition_interpretation_packets(
     architecture: str,
     max_prompt_chars: int,
 ) -> list[list[Mapping[str, Any]]]:
-    """Pack evidence using the exact fully rendered interpretation prompt."""
+    """Keep each card in its own call and check its complete prompt budget."""
 
-    return _partition_packets_for_prompt(
-        packets,
-        render_prompt=lambda batch: _interpretation_prompt(
-            architecture=architecture,
-            packets=batch,
-        ),
-        max_prompt_chars=max_prompt_chars,
-    )
+    batches = []
+    for packet in packets:
+        messages = _interpretation_prompt(architecture=architecture, packets=[packet])
+        if sum(len(message["content"]) for message in messages) > int(max_prompt_chars):
+            raise ValueError("one Stage 2 evidence card cannot fit the rendered prompt budget")
+        batches.append([packet])
+    return batches
 
 
 def _partition_rejected_packet_audit(
@@ -5017,89 +5019,16 @@ def _derive_roles(evidence_axes: Sequence[str]) -> list[str]:
     return roles
 
 
-def _global_candidate_pool_prompt(
-    *,
-    groups: Sequence[Mapping[str, Any]],
-    configured_feature_names: Sequence[str] = (),
-    batch_ordering: str = "alphabetical_shift",
-) -> list[dict[str, str]]:
-    """Consolidate aliases in one bounded candidate-pool batch without filtering."""
+def _global_candidate_pool_prompt(*, groups: Sequence[Mapping[str, Any]], configured_feature_names: Sequence[str] = (), batch_ordering: str = "alphabetical_shift") -> list[dict[str, str]]:
+    del batch_ordering
+    views = [_candidate_pool_feature_view(group) for group in sorted(groups, key=_candidate_group_sort_key)]
+    text = "Variables\n" + "\n".join(
+        "- " + clinical_prompts.label(view["name"]) + ": " + "; ".join(view.get("descriptions") or [view.get("description") or ""])
+        for view in views
+    )
+    text += "\n\nProtected names: " + ("; ".join(clinical_prompts.label(n) for n in configured_feature_names) or "none")
+    return clinical_prompts.messages("03_merge_aliases", text)
 
-    features = [
-        _candidate_pool_feature_view(group)
-        for group in sorted(groups, key=_candidate_group_sort_key)
-    ]
-
-    body: dict[str, Any] = {
-        "job": "consolidate_stage2_candidate_pool",
-        "task": (
-            "Review this "
-            + (
-                "alphabetically adjacent"
-                if batch_ordering == "alphabetical_shift"
-                else "deterministically shuffled"
-            )
-            + " batch of interpreted candidate features. "
-            "Partition semantic aliases and equivalent representations of each underlying "
-            "patient-level measurement within the supplied batch. Every supplied feature "
-            "must survive this pass either unchanged or as an input to exactly one merge. "
-            "Later rounds will use new deterministic partitions of the consolidated candidates."
-        ),
-        "features": features,
-        "rules": [
-            "Every name absent from merge_directives will be retained unchanged; do not restate unchanged features.",
-            "This is merge-only ontology consolidation, not feature filtering or quality review. Never exclude or drop a supplied feature.",
-            "Each merge directive must contain at least two exact names from features.",
-            "Treat merge_directives as a disjoint partition of alias families within this batch, not as sequential rename operations: return exactly one directive for each complete supplied alias family and never chain or split one family across directives.",
-            "Each directive's inputs must list every exact supplied feature name in that alias family within this batch, including the selected canonical name when output reuses a supplied feature name.",
-            "An output that equals a supplied feature name is valid only when that exact name appears in the same directive's inputs; it must not be an input of another directive or an unchanged feature.",
-            "Use each feature name at most once across all merge inputs.",
-            "Merge spelling variants, abbreviations, synonymous clinical names, and all clearly equivalent representations of the same underlying measurement.",
-            "A general measurement name, its quantitative score, a thresholded or coarsened status, a named category, and a name containing one observed value belong together when they can all be represented by one underlying patient variable.",
-            "Prefer an information-preserving underlying measurement name over a threshold, category, or observed value encoded in one candidate name.",
-            "When a value-encoded or awkward alias has a clear underlying measurement in this batch, merge it into that measurement; otherwise retain it unchanged.",
-            "Judge alias families jointly across this entire batch; do not require a direct lexical match between every pair of members in one family.",
-            "Do not merge merely related but independently varying variables, a diagnosis with a related laboratory value, a broad concept with one independently varying component, different anatomical sites, different biomarkers, or different timepoints.",
-            "Merge only true semantic aliases of the same atomic clinical variable. Inputs are aliases only when they identify the same measured dimension and can share one extraction ontology without discarding an independently varying component.",
-            "Every merge output must itself be atomic: one patient-level value under one coherent ontology.",
-            "The canonical output name must identify the exact clinical dimension shared by every merge input. It must not broaden them into a parent domain, umbrella, inventory, profile, or composite construct.",
-            "Never introduce a broader name merely to make related candidates appear mergeable. Clinical relatedness, correlation, shared anatomy, shared domain, or membership in the same assessment does not establish semantic equivalence.",
-            "Do not merge constituent variables that can vary independently. If no precise atomic target is common to every input, retain the inputs unchanged.",
-            "Differences that encode only values, categories, thresholds, units, spelling, abbreviations, or reporting formats may still represent aliases of one underlying variable. Preserve the measured dimension without encoding a particular observed value in the canonical name.",
-            "The output must be one concise snake_case canonical name for the exact consolidated measurement. It may reuse the best input name or provide a clearer equivalent name.",
-            "When semantic equivalence is uncertain, do not merge the features.",
-            "Return only exact supplied feature names in merge inputs. Return no internal IDs, provenance, definitions, explanations, unchanged feature names, or exclusion list.",
-        ],
-        "response": {
-            "merge_directives": [
-                {
-                    "inputs": [
-                        "all exact supplied names in one alias family, including a reused output name"
-                    ],
-                    "output": "one snake_case canonical feature name",
-                }
-            ]
-        },
-    }
-    configured_names = list(map(str, configured_feature_names))
-    if configured_names:
-        body["configured_feature_names"] = configured_names
-        body["rules"].extend(
-            [
-                "Never merge two names listed in configured_feature_names; the investigator specified them as distinct features.",
-                "When one merge input is listed in configured_feature_names, output that exact configured name so its investigator-supplied ontology remains authoritative.",
-            ]
-        )
-    return [
-        {
-            "role": "system",
-            "content": "Consolidate aliases without filtering any features. Return JSON only.",
-        },
-        {
-            "role": "user",
-            "content": json.dumps(body, sort_keys=True, ensure_ascii=False),
-        },
-    ]
 
 
 def _validate_global_candidate_pool_directives(
@@ -5111,6 +5040,20 @@ def _validate_global_candidate_pool_directives(
 ) -> dict[str, Any]:
     """Validate directives using only names and descriptions supplied in the batch."""
 
+    if set(value) == {"merges"}:
+        names = {clinical_prompts.label(n): str(n) for n in group_names}
+        if not isinstance(value["merges"], list):
+            raise ValueError("merges must be an array")
+        directives = []
+        for row in value["merges"]:
+            if not isinstance(row, Mapping) or set(row) != {"members", "canonical_label"}:
+                raise ValueError("each merge requires members and canonical_label")
+            if not isinstance(row["members"], list) or not isinstance(row["canonical_label"], str):
+                raise ValueError("members must be an array and canonical_label must be text")
+            output = row["canonical_label"]
+            output = names.get(output, _snake_case_name(output, fallback=""))
+            directives.append({"inputs": [clinical_prompts.resolve_label(n, names) for n in row["members"]], "output": output})
+        value = {"merge_directives": directives}
     available = [str(name) for name in group_names]
     if len(available) != len(set(available)):
         raise ValueError("global candidate pool requires unique supplied feature names")
@@ -5316,75 +5259,12 @@ def _apply_global_candidate_pool_directives(
     return merged
 
 
-def _operationalization_prompt(
-    *,
-    feature_name: str,
-    supporting_evidence: Sequence[str],
-) -> list[dict[str, str]]:
-    evidence = list(
-        dict.fromkeys(str(item).strip() for item in supporting_evidence if str(item).strip())
-    )
+def _operationalization_prompt(*, feature_name: str, supporting_evidence: Sequence[str]) -> list[dict[str, str]]:
+    evidence = list(dict.fromkeys(str(item).strip() for item in supporting_evidence if str(item).strip()))
     if not evidence:
         raise ValueError("operationalization requires readable supporting evidence")
-    instructions = {
-        "task": (
-            "Define the extraction ontology for the named candidate clinical feature. "
-            "Decide its value type, allowed values or unit, and measurement rule from the "
-            "candidate name and readable supporting clinical evidence."
-        ),
-        "rules": [
-            "Define exactly the named scalar pretreatment measurement; do not rename, merge, or split it in this step.",
-            "Determine value_type yourself from what the named feature means and how it is represented in the supplied evidence. No value type from an earlier discovery step is being provided.",
-            "The evidence may contain unrelated clues; use only text that actually bears on the named feature.",
-            "Specify a reproducible extraction target from a complete patient record.",
-            "Do not invent an ad hoc score, formula, or index to force multiple distinct measurements into one scalar.",
-            "Prefer value_type continuous, with a clinically meaningful unit when applicable, when the named feature can realistically be extracted as a numeric measurement. Use categorical or ordinal only when continuous measurement is infeasible or would misrepresent the feature.",
-            "A continuous ontology may preserve a categorical or threshold report when a patient record lacks an exact number. Describe those evidence-supported fallback representations in the measurement rule; aggregate outer-training values will later determine continuous, categorical, or hybrid modeling.",
-            "For categorical or ordinal variables, enumerate the extraction ontology; for continuous variables, provide the unit when applicable.",
-            "For a binary variable, categories_or_unit must contain exactly two distinct extractable scalar values as separate array items.",
-            "For a categorical or ordinal variable, categories_or_unit must contain at least two distinct extractable scalar values as separate array items.",
-            "List each category exactly once. Categories that differ only by capitalization, punctuation, underscores, or spacing are duplicates and must not both appear.",
-            "Never use a type label such as binary or categorical, or a combined phrase such as present-or-absent, as one ontology value.",
-            "Define how absent, ambiguous, and conflicting documentation is represented.",
-            "Choose one conflict_resolution strategy for multiple longitudinal observations: latest, earliest, maximum, minimum, mode, any_positive, or single_or_null.",
-            "Use maximum or minimum only for continuous measurements. Use any_positive only for a binary ontology and provide its exact affirmative category as positive_category.",
-            "Use single_or_null when conflicting supported values cannot be scientifically resolved by a reproducible patient-level rule.",
-            "Return one flat JSON object with every response field shown below; measurement_definition and missing_value_rule are required nonempty strings.",
-        ],
-        "response": {
-            "description": "one patient-level scalar measurement",
-            "value_type": "binary|categorical|continuous|ordinal|ambiguous",
-            "categories_or_unit": ["categories or one unit string"],
-            "measurement_definition": "what to extract from the pretreatment record",
-            "missing_value_rule": "how missing or ambiguous documentation is represented",
-            "conflict_resolution": {
-                "strategy": "latest|earliest|maximum|minimum|mode|any_positive|single_or_null",
-                "positive_category": "exact affirmative binary category, otherwise null",
-            },
-            "stability_summary": "scientific support summary without provenance identifiers",
-            "caveats": "remaining scientific limitations",
-        },
-    }
-    body = {
-        "candidate_feature_name": str(feature_name),
-        "supporting_evidence": evidence,
-    }
-    return [
-        {
-            "role": "system",
-            "content": json.dumps(
-                {
-                    "instruction": (
-                        "Define one clinical feature ontology from its name and supporting "
-                        "clinical text. Return JSON only."
-                    ),
-                    **instructions,
-                },
-                sort_keys=True,
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True)},
-    ]
+    return clinical_prompts.messages("04_define_ontology", "Clinical variable: " + clinical_prompts.label(feature_name) + "\n\nExample clinical excerpts\n\n" + "\n\n".join(evidence))
+
 
 
 def _readable_supporting_text(
@@ -6292,28 +6172,13 @@ def _pack_operationalization_supporting_evidence(
     repair_headroom = min(16_000, max(512, prompt_limit // 20))
     initial_prompt_budget = prompt_limit - repair_headroom
 
-    # The system message is independent of the evidence values. Compute the
-    # exact JSON-list contribution without repeatedly rendering a growing body.
-    template = _operationalization_prompt(
-        feature_name=feature_name,
-        supporting_evidence=[evidence[0]],
-    )
-    system_chars = len(template[0]["content"])
-    empty_body_chars = len(
-        json.dumps(
-            {
-                "candidate_feature_name": str(feature_name),
-                "supporting_evidence": [],
-            },
-            sort_keys=True,
-        )
-    )
-    fixed_chars_without_list = system_chars + empty_body_chars - 2
-    list_chars = 2
+    # Count exactly the prose the model receives, including Unicode text.
+    template = _operationalization_prompt(feature_name=feature_name, supporting_evidence=[evidence[0]])
+    fixed_chars_without_list = sum(len(message["content"]) for message in template) - len(evidence[0])
+    list_chars = 0
     packed: list[str] = []
     for text_value in evidence:
-        separator_chars = 2 if packed else 0
-        candidate_list_chars = list_chars + separator_chars + len(json.dumps(text_value))
+        candidate_list_chars = list_chars + (2 if packed else 0) + len(text_value)
         if fixed_chars_without_list + candidate_list_chars > initial_prompt_budget:
             continue
         packed.append(text_value)
@@ -6321,7 +6186,7 @@ def _pack_operationalization_supporting_evidence(
 
     truncated_items = 0
     if not packed:
-        available_encoded_chars = initial_prompt_budget - fixed_chars_without_list - 2
+        available_encoded_chars = initial_prompt_budget - fixed_chars_without_list
         first = evidence[0]
         best = ""
         low, high = 1, len(first)
@@ -6330,7 +6195,7 @@ def _pack_operationalization_supporting_evidence(
             candidate = first[:midpoint].rstrip()
             if midpoint < len(first):
                 candidate = candidate.rstrip(" .") + "..."
-            if candidate and len(json.dumps(candidate)) <= available_encoded_chars:
+            if candidate and len(candidate) <= available_encoded_chars:
                 best = candidate
                 low = midpoint + 1
             else:
@@ -6417,6 +6282,22 @@ def _validate_operationalization(
     # Prefer the first recognized nested object while preserving usable scalar
     # fields returned at the top level.
     normalized = dict(value)
+    if "unit" in normalized or "categories" in normalized:
+        unit, categories = normalized.pop("unit", None), normalized.pop("categories", [])
+        if unit is not None and not isinstance(unit, str):
+            raise ValueError("unit must be a string or null")
+        if not isinstance(categories, list):
+            raise ValueError("categories must be an array")
+        if normalized.get("value_type") == "continuous":
+            if categories:
+                raise ValueError("a continuous measurement requires an empty categories array")
+            normalized["categories_or_unit"] = [unit] if unit else []
+        else:
+            if unit is not None:
+                raise ValueError("categorical and ambiguous variables require a null unit")
+            normalized["categories_or_unit"] = categories
+        if isinstance(normalized.get("caveats"), list):
+            normalized["caveats"] = " ".join(map(str, normalized["caveats"]))
     for key in ("operationalization", "feature", "definition", "variable", "result"):
         nested = value.get(key)
         if isinstance(nested, Mapping):
@@ -6794,19 +6675,15 @@ class PlainHandoffStage2:
             if extraction_tokenizer is not None:
                 self.extraction_tokenizer = extraction_tokenizer
             elif uses_default_extraction_transport:
-                extraction_vllm = extraction.vllm
+                extraction_policy = _stage2_request_policy(self.extraction_request_config, "extraction")
+                template_kwargs = dict(extraction.vllm.default_chat_template_kwargs or {}) if extraction.vllm else {}
+                template_kwargs["enable_thinking"] = _reasoning_enabled(extraction_policy["reasoning_effort"])
+                if extraction_policy.get("preserve_thinking"):
+                    template_kwargs.update(preserve_thinking=True, reasoning_effort=extraction_policy["reasoning_effort"])
                 self.extraction_tokenizer = _LazyStage2ExtractionTokenizer(
-                    model=request_model,
-                    cache_dir=(
-                        str(extraction.vllm.download_dir)
-                        if extraction.vllm is not None
-                        else ""
-                    ),
-                    chat_template_kwargs=(
-                        extraction.vllm.default_chat_template_kwargs
-                        if extraction.vllm is not None
-                        else None
-                    ),
+                    model=str(live_extraction_identity.get("sampling_model") or request_model),
+                    cache_dir=str(extraction.vllm.download_dir) if extraction.vllm else "",
+                    chat_template_kwargs=template_kwargs,
                 )
         else:
             extraction_identity = None
@@ -6818,6 +6695,10 @@ class PlainHandoffStage2:
             "extraction_runtime_continuation": extraction_runtime_identity,
             "selection_consolidation_runtime": consolidation_identity,
             "endpoint_urls_are_transport_only": True,
+            "effective_request_policies": {
+                "interpretation": _stage2_request_policy(self.config, "interpretation"),
+                "extraction": _stage2_request_policy(self.extraction_request_config or self.config, "extraction"),
+            },
         }
 
     def _check_and_record_model_identity(self, output_dir: Path) -> None:
@@ -7065,6 +6946,8 @@ class PlainHandoffStage2:
         packets: Sequence[Mapping[str, Any]],
         output_dir: Path,
     ) -> Mapping[str, Any]:
+        if len(packets) != 1:
+            raise ValueError("discovery requires exactly one evidence card per request")
         input_value = {
             "interpretation_schema": INTERPRETATION_SCHEMA_VERSION,
             "llm_identity": {
@@ -7129,10 +7012,10 @@ class PlainHandoffStage2:
             ),
             config=self.config,
             completion=self.completion,
-            validate=lambda value: _validate_interpretation(
+            validate=lambda value: _validate_discovery(
                 value,
-                packet_ids=packet_ids,
-                packet_evidence_axes=packet_evidence_axes,
+                packet_id=packet_ids[0],
+                evidence_axes=packet_evidence_axes[packet_ids[0]],
             ),
         )
 

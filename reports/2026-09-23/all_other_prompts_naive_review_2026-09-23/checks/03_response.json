@@ -1,0 +1,11 @@
+{
+  "merges": [
+    {
+      "members": [
+        "Creatinine level",
+        "Serum creatinine"
+      ],
+      "canonical_label": "Serum creatinine"
+    }
+  ]
+}

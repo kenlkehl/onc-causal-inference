@@ -20,7 +20,8 @@ from typing import Any, Callable, Mapping, Protocol, Sequence
 
 SCHEMA_VERSION = "stage2_all_evidence_llm_role_adjudication_v1"
 EVIDENCE_SCHEMA_VERSION = "stage2_fold_honest_role_evidence_v1"
-PROMPT_VERSION = "stage2_all_evidence_role_prompt_v1"
+from .stage2_clinical_prompts import PROMPT_VERSION, SYSTEM_PROMPTS
+from . import stage2_clinical_prompts as clinical_prompts
 TEMPORAL_SCOPE = "pre_index_treatment"
 ALLOWED_ROLES = ("confounder", "effect_modifier")
 
@@ -374,6 +375,7 @@ def build_stage2_role_evidence(
         raise ValueError("Stage 2 role evidence requires unique feature IDs")
     return {
         "schema_version": EVIDENCE_SCHEMA_VERSION,
+        "study_context": clinical_prompts.study_context(statistical_report),
         "temporal_scope": TEMPORAL_SCOPE,
         "evidence_boundary": {
             "candidate_measurements_are_pre_index_treatment": True,
@@ -414,31 +416,7 @@ def build_stage2_role_evidence(
     }
 
 
-ROLE_ADJUDICATION_SYSTEM_PROMPT = """
-You are the final causal-role adjudicator inside one outer training fold. Every
-candidate measurement is pretreatment by a hard upstream invariant. Decide
-which candidates should be retained as confounders, effect modifiers, both, or
-neither using only the supplied definitions and fold-honest evidence.
-
-Treat every statistical method as fallible evidence, not as a gate or an oracle.
-For confounding, distinguish a plausible common cause of treatment and outcome
-from a treatment-only predictor, an outcome-only prognostic factor, a mediator,
-or an instrument. Elastic-net support for either nuisance task alone is not
-sufficient. Univariable evidence can recover signals suppressed by correlated
-covariates, but multiplicity, instability, and disagreement must be discussed.
-
-For effect modification, require empirical treatment-heterogeneity evidence.
-Reconcile the candidate-wise held-out R-loss comparison with the joint grouped
-elastic-net interaction model. Outcome prognosis or a main-effect association
-alone is not modifier evidence. Negative held-out R-loss gains and inconsistent
-fold behavior count as evidence against promotion.
-
-Definitions may inform causal interpretation, but a suggestive feature name is
-not hidden truth. Never infer a data-generating process, synthetic provenance,
-oracle label, or true role that is not present in the supplied evidence. You do
-not have outer-heldout data. Investigator-locked roles must be preserved
-exactly. Return one JSON object and cover every candidate exactly once.
-""".strip()
+ROLE_ADJUDICATION_SYSTEM_PROMPT = SYSTEM_PROMPTS["14_default_roles"]
 
 
 def _role_response_validator(
@@ -451,6 +429,8 @@ def _role_response_validator(
     def validate(value: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(value, Mapping):
             raise ValueError("role adjudication response must be one JSON object")
+        if set(value) == {"confounder", "effect_modifier"} and len(definitions) == 1:
+            value = {"summary": "Clinical role review", "decisions": [clinical_prompts.role_decision(value, definitions[0])]}
         raw_decisions = value.get("decisions")
         if not isinstance(raw_decisions, list):
             raise ValueError("role adjudication requires a decisions list")
@@ -507,6 +487,9 @@ def _role_response_validator(
                 "cross_method_reconciliation": reconciliation,
                 "rationale": rationale,
             }
+            for key in ("role_assessments", "evidence_attachment", "evidence_ids", "stability"):
+                if key in raw:
+                    decisions[feature_id][key] = copy.deepcopy(raw[key])
         if set(decisions) != set(ordered_ids):
             raise ValueError(
                 "role adjudication must cover every candidate exactly once; "
@@ -618,187 +601,29 @@ def adjudicate_stage2_roles(
             definitions=definitions, statistical_report=statistical_report,
             request_json=request_json, output_dir=output_dir, policy=policy,
         )
+    from .stage2_prompt_io import request_review
+
     definitions = [copy.deepcopy(dict(feature)) for feature in definitions]
-    evidence = build_stage2_role_evidence(
-        definitions=definitions,
-        statistical_report=statistical_report,
-        policy=policy,
-    )
-    evidence_fingerprint = _fingerprint(evidence)
-    adjudication_fingerprint = _fingerprint(
-        {
-            "evidence_fingerprint": evidence_fingerprint,
-            "prompt_version": PROMPT_VERSION,
-            "policy": policy.public_dict(),
-        }
-    )
-    output_dir.mkdir(parents=True, exist_ok=True)
-    evidence_path = output_dir / "evidence.json"
-    prompt_path = output_dir / "prompt.json"
-    response_path = output_dir / "response.json"
-    complete_path = output_dir / "complete.json"
-    _write_json(evidence_path, evidence)
-    candidate_limit = int(policy.max_candidates_per_request)
-    definition_batches = [
-        definitions[start : start + candidate_limit]
-        for start in range(0, len(definitions), candidate_limit)
-    ]
-    evidence_candidates = list(evidence.get("candidates") or [])
-    evidence_batches = [
-        evidence_candidates[start : start + candidate_limit]
-        for start in range(0, len(evidence_candidates), candidate_limit)
-    ]
-    batch_count = len(definition_batches)
-    prompt_record = {
-        "prompt_version": PROMPT_VERSION,
-        "system": ROLE_ADJUDICATION_SYSTEM_PROMPT,
-        "evidence_fingerprint": evidence_fingerprint,
-        "adjudication_fingerprint": adjudication_fingerprint,
-        "batching": {
-            "max_candidates_per_request": candidate_limit,
-            "batch_count": batch_count,
-            "candidate_count": len(definitions),
-            "batch_artifact_directory": "batches",
-        },
-        "prompt_data_contract": evidence["evidence_boundary"],
-    }
-    _write_json(prompt_path, prompt_record)
-    validator = _role_response_validator(definitions=definitions)
-    adjudication: dict[str, Any] | None = None
-    if response_path.is_file() and complete_path.is_file():
-        try:
-            completion = json.loads(complete_path.read_text(encoding="utf-8"))
-            cached = json.loads(response_path.read_text(encoding="utf-8"))
-            if (
-                completion.get("status") == "complete"
-                and completion.get("schema_version") == SCHEMA_VERSION
-                and completion.get("evidence_fingerprint") == evidence_fingerprint
-                and completion.get("adjudication_fingerprint")
-                == adjudication_fingerprint
-            ):
-                adjudication = validator(cached)
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            adjudication = None
-    if adjudication is None:
-        batch_summaries: list[str] = []
-        decisions: list[dict[str, Any]] = []
-        for batch_offset, (batch_definitions, batch_candidates) in enumerate(
-            zip(definition_batches, evidence_batches),
-            start=1,
-        ):
-            batch_dir = output_dir / "batches" / f"batch_{batch_offset:03d}"
-            batch_evidence = {
-                **copy.deepcopy(evidence),
-                "candidates": copy.deepcopy(batch_candidates),
-            }
-            payload = _role_request_payload(
-                evidence=batch_evidence,
-                batch_index=batch_offset,
-                batch_count=batch_count,
-            )
-            batch_fingerprint = _fingerprint(payload)
-            batch_prompt_path = batch_dir / "prompt.json"
-            batch_response_path = batch_dir / "response.json"
-            batch_complete_path = batch_dir / "complete.json"
-            _write_json(
-                batch_prompt_path,
-                {
-                    "prompt_version": PROMPT_VERSION,
-                    "system": ROLE_ADJUDICATION_SYSTEM_PROMPT,
-                    "payload": payload,
-                    "batch_fingerprint": batch_fingerprint,
-                },
-            )
-            batch_validator = _role_response_validator(
-                definitions=batch_definitions
-            )
-            batch_adjudication: dict[str, Any] | None = None
-            if batch_response_path.is_file() and batch_complete_path.is_file():
-                try:
-                    batch_completion = json.loads(
-                        batch_complete_path.read_text(encoding="utf-8")
-                    )
-                    cached_batch = json.loads(
-                        batch_response_path.read_text(encoding="utf-8")
-                    )
-                    if (
-                        batch_completion.get("status") == "complete"
-                        and batch_completion.get("schema_version") == SCHEMA_VERSION
-                        and batch_completion.get("batch_fingerprint")
-                        == batch_fingerprint
-                    ):
-                        batch_adjudication = batch_validator(cached_batch)
-                except (OSError, TypeError, ValueError, json.JSONDecodeError):
-                    batch_adjudication = None
-            if batch_adjudication is None:
-                batch_adjudication = request_json(
-                    [
-                        {
-                            "role": "system",
-                            "content": ROLE_ADJUDICATION_SYSTEM_PROMPT,
-                        },
-                        {"role": "user", "content": _canonical_json(payload)},
-                    ],
-                    batch_validator,
-                    request_kind="interpretation",
-                )
-                batch_adjudication = batch_validator(batch_adjudication)
-                _write_json(batch_response_path, batch_adjudication)
-                _write_json(
-                    batch_complete_path,
-                    {
-                        "status": "complete",
-                        "schema_version": SCHEMA_VERSION,
-                        "batch_fingerprint": batch_fingerprint,
-                        "batch_index": batch_offset,
-                        "batch_count": batch_count,
-                        "candidate_count": len(batch_definitions),
-                    },
-                )
-            summary = _bounded_text(batch_adjudication.get("summary"), 2_000)
-            if summary:
-                batch_summaries.append(
-                    f"Batch {batch_offset}/{batch_count}: {summary}"
-                )
-            decisions.extend(batch_adjudication["decisions"])
-        adjudication = validator(
-            {
-                "summary": _bounded_text(" ".join(batch_summaries), 6_000),
-                "decisions": decisions,
-            }
-        )
-        _write_json(response_path, adjudication)
-        _write_json(
-            complete_path,
-            {
-                "status": "complete",
-                "schema_version": SCHEMA_VERSION,
-                "evidence_fingerprint": evidence_fingerprint,
-                "adjudication_fingerprint": adjudication_fingerprint,
-                "candidate_count": len(definitions),
-                "batch_count": batch_count,
-            },
-        )
-    selected = _selected_from_adjudication(
-        definitions=definitions,
-        adjudication=adjudication,
-    )
-    report = {
-        "schema_version": SCHEMA_VERSION,
-        "prompt_version": PROMPT_VERSION,
-        "status": "complete",
-        "temporal_scope": TEMPORAL_SCOPE,
-        "evidence_schema_version": EVIDENCE_SCHEMA_VERSION,
-        "evidence_fingerprint": evidence_fingerprint,
-        "adjudication_fingerprint": adjudication_fingerprint,
-        "batch_count": batch_count,
-        "max_candidates_per_request": candidate_limit,
-        "failure_policy": "fail_outer_fold_without_statistical_fallback",
-        "prompt_data_contract": evidence["evidence_boundary"],
-        "summary": adjudication.get("summary"),
-        "decisions": adjudication["decisions"],
-        "retained_feature_ids": [_feature_id(feature) for feature in selected],
-    }
+    evidence = build_stage2_role_evidence(definitions=definitions, statistical_report=statistical_report, policy=policy)
+    identity = {"evidence": _fingerprint(evidence), "policy": policy.public_dict(),
+                "model": statistical_report.get("adjudication_model_identity"), "prompt": PROMPT_VERSION}
+    _write_json(output_dir / "evidence.json", evidence)
+    decisions = []
+    for index, (feature, card) in enumerate(zip(definitions, evidence["candidates"])):
+        messages = clinical_prompts.messages("14_default_roles", clinical_prompts.evidence_input(evidence, [card]))
+        response = request_review(output_dir / "batches" / f"batch_{index + 1:03d}", messages,
+            _role_response_validator(definitions=[feature]), request_json=request_json, identity=identity)
+        decisions.extend(response["decisions"])
+    adjudication = _role_response_validator(definitions=definitions)({"summary": "Clinical role reviews", "decisions": decisions})
+    selected = _selected_from_adjudication(definitions=definitions, adjudication=adjudication)
+    report = {"schema_version": SCHEMA_VERSION, "prompt_version": PROMPT_VERSION, "status": "complete",
+              "evidence_fingerprint": identity["evidence"], "adjudication_fingerprint": _fingerprint(identity),
+              "batch_count": len(definitions), "max_candidates_per_request": 1,
+              "failure_policy": "fail_outer_fold_without_statistical_fallback",
+              "prompt_data_contract": evidence["evidence_boundary"], **adjudication,
+              "retained_feature_ids": [_feature_id(f) for f in selected]}
+    _write_json(output_dir / "response.json", report)
+    _write_json(output_dir / "complete.json", {"status": "complete", "identity": identity})
     return selected, report, evidence
 
 

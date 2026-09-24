@@ -1,0 +1,12 @@
+
+
+{
+  "understanding": "Classify a clinical phrase into one allowed category for a single variable, or return null if it is unclear or incompatible.",
+  "input_meaning": "The input describes a clinical variable, lists its allowed categories, and provides a phrase that may indicate one of those categories.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "value": "Present"
+  }
+}

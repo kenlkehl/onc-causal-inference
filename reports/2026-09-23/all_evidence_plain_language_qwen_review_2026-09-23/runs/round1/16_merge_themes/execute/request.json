@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Identify themes that describe the same or clearly overlapping clinical concept and combine their summaries.\n\nWhat you receive\n\nTheme names, their clinical variables, and summaries of the statistical evidence.\n\nHow to decide\n\nCombine themes when one coherent clinical description preserves their meanings. Keep unrelated themes separate. Preserve distinct measurements and disagreements in the combined summary. A theme can appear in one proposed merge group.\n\nWhat to return\n\nReturn one JSON object with merges, an array. Each group has source_themes (existing names), name (the combined clinical name), interpretation (text), and disagreements (text or an empty string). Omit unchanged themes. Use {\"merges\": []} when none overlap."
+    },
+    {
+      "role": "user",
+      "content": "Themes\n\nRenal function\n- Variable: Serum creatinine\n- Summary: Predicts treatment/outcome; weak adjusted modifier evidence.\n- Disagreement: Unadjusted interaction evidence is stronger than validation evidence.\n\nPulmonary disease\n- Variable: Emphysema on imaging\n- Summary: Positive effect-validation results.\n- Disagreement: One interaction screen is weaker than the others."
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

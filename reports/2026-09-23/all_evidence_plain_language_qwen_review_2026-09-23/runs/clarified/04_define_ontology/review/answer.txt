@@ -1,0 +1,25 @@
+
+
+{
+  "understanding": "Create a JSON extraction specification for one clinical variable from patient records, defining the value type, unit, categories, measurement rule, missing-value rule, conflict resolution, and caveats; here apply it to Serum creatinine.",
+  "input_meaning": "The supplied information is the target variable name, Serum creatinine, and illustrative record excerpts showing a dated numeric serum creatinine result, a directly reported threshold result, and an unrelated CT finding; the excerpts may come from different patients.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    "\"CT documents emphysema.\" — Unrelated to serum creatinine and does not affect the extraction rule.",
+    "\"The excerpts can come from different patients.\" — Useful for interpreting examples, but the extraction specification can be written without this note."
+  ],
+  "sample_response": {
+    "description": "Extract one serum creatinine result per patient, preserving exact numeric results and directly reported threshold strings such as <1.0.",
+    "value_type": "continuous",
+    "unit": "mg/dL",
+    "categories": [],
+    "measurement_definition": "Identify observations whose analyte is serum creatinine or creatinine in a serum/blood context; exclude urine creatinine, creatinine clearance, eGFR, BUN/creatinine, and unrelated findings. Return either a finite numeric result or a directly reported threshold string associated with that creatinine result, preserving the threshold and numeric value exactly (for example, return <1.0 for a documented <1.0 result). Normalize accepted results to mg/dL; if the source uses µmol/L, divide the numeric or threshold value by 88.4 and retain the threshold symbol, rounding to the source precision or to two decimals if needed. If multiple observations exist for the same patient, select the latest observation: prefer the most recent dated observation when any dated observations exist; if all are undated, use text order; for equal dates, use the last mention for latest.",
+    "missing_value_rule": "Use null when no serum creatinine observation is documented, when the selected observation lacks an extractable number or directly reported threshold, or when the unit is unresolved or incompatible with mg/dL after applying the µmol/L conversion. Do not convert a directly reported threshold into an estimated numeric value; if the selected observation is a threshold, return the threshold string. Unresolved or incompatible units yield null.",
+    "conflict_resolution": {
+      "strategy": "latest",
+      "positive_category": null
+    },
+    "caveats": "Ignore unrelated clinical findings, such as a CT finding of emphysema, when selecting a serum creatinine observation. If a patient has both dated creatinine results and undated creatinine thresholds, the latest rule selects among dated observations first. A threshold is valid only when it is directly associated with the serum creatinine result."
+  }
+}

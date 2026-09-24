@@ -1,0 +1,47 @@
+{
+  "http_status": 200,
+  "request_sha256": "9d6196a68cd88df5de479c50d9be9481fb8765dba02cc68da651202977311511",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 53.992,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 599,
+    "total_tokens": 3008,
+    "completion_tokens": 2409,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 2092
+    }
+  },
+  "reasoning_characters": 8649,
+  "content": "\n\n{\n  \"understanding\": \"Find and return every documented observation of the defined clinical variables in the supplied clinical text, preserving repeated or conflicting findings.\",\n  \"input_meaning\": \"The supplied input includes clinical variable definitions and one patient record section with two dated serum creatinine values and one undated CT emphysema statement.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"observations\": [\n      {\n        \"feature\": \"Serum creatinine\",\n        \"value\": 1.0,\n        \"quote\": \"2025-01-01: serum creatinine 1.0 mg/dL\",\n        \"governing_date_quote\": \"2025-01-01\"\n      },\n      {\n        \"feature\": \"Serum creatinine\",\n        \"value\": 1.2,\n        \"quote\": \"2025-01-10: serum creatinine 1.2 mg/dL\",\n        \"governing_date_quote\": \"2025-01-10\"\n      },\n      {\n        \"feature\": \"Emphysema on imaging\",\n        \"value\": \"Present\",\n        \"quote\": \"CT documents emphysema\",\n        \"governing_date_quote\": null\n      }\n    ]\n  }\n}",
+  "parsed": {
+    "understanding": "Find and return every documented observation of the defined clinical variables in the supplied clinical text, preserving repeated or conflicting findings.",
+    "input_meaning": "The supplied input includes clinical variable definitions and one patient record section with two dated serum creatinine values and one undated CT emphysema statement.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "observations": [
+        {
+          "feature": "Serum creatinine",
+          "value": 1.0,
+          "quote": "2025-01-01: serum creatinine 1.0 mg/dL",
+          "governing_date_quote": "2025-01-01"
+        },
+        {
+          "feature": "Serum creatinine",
+          "value": 1.2,
+          "quote": "2025-01-10: serum creatinine 1.2 mg/dL",
+          "governing_date_quote": "2025-01-10"
+        },
+        {
+          "feature": "Emphysema on imaging",
+          "value": "Present",
+          "quote": "CT documents emphysema",
+          "governing_date_quote": null
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+
+
+{
+  "understanding": "Extract each requested clinical variable from the patient record, applying the variable-specific rules for dates, explicit findings, numeric values, and missing values.",
+  "input_meaning": "The supplied text is a single patient's clinical record containing dated serum creatinine results and an imaging statement about emphysema.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  }
+}

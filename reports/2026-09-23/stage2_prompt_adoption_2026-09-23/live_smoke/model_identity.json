@@ -1,0 +1,123 @@
+{
+  "checked_at": "2026-09-24T01:14:16Z",
+  "effective_request_policies": {
+    "extraction": {
+      "frequency_penalty": 0.0,
+      "max_tokens": 65536,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "preserve_thinking": true,
+      "reasoning_effort": "xhigh",
+      "repetition_penalty": 1.0,
+      "request_kind": "extraction",
+      "sampling_provenance": {
+        "profile": "qwen3.8_flash_next",
+        "source": "https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices",
+        "verified_on": "2026-09-23"
+      },
+      "temperature": 1.0,
+      "top_k": 20,
+      "top_p": 0.95
+    },
+    "interpretation": {
+      "frequency_penalty": 0.0,
+      "max_tokens": 100000,
+      "min_p": 0.0,
+      "presence_penalty": 0.0,
+      "preserve_thinking": true,
+      "reasoning_effort": "xhigh",
+      "repetition_penalty": 1.0,
+      "request_kind": "interpretation",
+      "sampling_provenance": {
+        "profile": "qwen3.8_flash_next",
+        "source": "https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices",
+        "verified_on": "2026-09-23"
+      },
+      "temperature": 1.0,
+      "top_k": 20,
+      "top_p": 0.95
+    }
+  },
+  "endpoint_urls_are_transport_only": true,
+  "extraction": {
+    "actual_model_identity": {
+      "parent": null,
+      "revision": null,
+      "root": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+      "served_id": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+    },
+    "endpoint_observations": [
+      {
+        "advertised_model_ids": [
+          "Inferact/Qwen3.8-Flash-Next-NVFP4"
+        ],
+        "endpoint": "http://sn4622130540:8001/v1",
+        "selected_model_advertised": true,
+        "selected_model_record": {
+          "id": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+          "parent": null,
+          "revision": null,
+          "root": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+        }
+      }
+    ],
+    "live_endpoint_verified": true,
+    "model_family": "qwen3",
+    "role": "extraction",
+    "sampling_model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+    "selected_model": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+  },
+  "extraction_runtime_continuation": null,
+  "primary": {
+    "actual_model_identity": {
+      "parent": null,
+      "revision": null,
+      "root": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+      "served_id": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+    },
+    "endpoint_observations": [
+      {
+        "advertised_model_ids": [
+          "Inferact/Qwen3.8-Flash-Next-NVFP4"
+        ],
+        "endpoint": "http://sn4622130540:8001/v1",
+        "selected_model_advertised": true,
+        "selected_model_record": {
+          "id": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+          "parent": null,
+          "revision": null,
+          "root": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+        }
+      }
+    ],
+    "live_endpoint_verified": true,
+    "model_family": "qwen3",
+    "role": "primary",
+    "sampling_model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+    "selected_model": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+  },
+  "schema_version": "stage2_endpoint_model_identity_v1",
+  "scientific_identity": {
+    "extraction": {
+      "actual_model_identity": {
+        "parent": null,
+        "revision": null,
+        "root": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+        "served_id": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+      },
+      "model_family": "qwen3",
+      "selected_model": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+    },
+    "primary": {
+      "actual_model_identity": {
+        "parent": null,
+        "revision": null,
+        "root": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+        "served_id": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+      },
+      "model_family": "qwen3",
+      "selected_model": "Inferact/Qwen3.8-Flash-Next-NVFP4"
+    }
+  },
+  "selection_consolidation_runtime": null
+}

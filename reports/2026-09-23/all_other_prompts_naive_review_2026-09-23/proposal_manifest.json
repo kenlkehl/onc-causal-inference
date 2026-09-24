@@ -1,0 +1,134 @@
+[
+  {
+    "slug": "02_audit_unmapped",
+    "title": "Audit a card with no initial candidates",
+    "python_work": "One card per request; reuse the new discovery validator, provenance attachment, name normalization, and empty-card handling. Do not ask the reviewer to identify an uncited item by number.",
+    "changes": "Supplies discovery purpose/input context; resolves timing, inference, specificity, and output-shape questions; removes item citations and ordering duties."
+  },
+  {
+    "slug": "03_merge_aliases",
+    "title": "Merge candidate aliases before measurement extraction",
+    "python_work": "Provide unique semantic display labels; deduplicate exact input records; resolve labels to IDs; normalize canonical names; enforce disjoint groups, protected features, and full survival. Unchanged members and deterministic ordering are computed in Python.",
+    "changes": "Clarifies the wrapper, empty response, singleton behavior, free ordering, and canonical-name discretion. Clinical names remain necessary semantic references; opaque identifiers are removed."
+  },
+  {
+    "slug": "04_define_ontology",
+    "title": "Define one clinical extraction target",
+    "python_work": "Keep feature identity and investigator protections outside the model. Enforce category uniqueness/cardinality and legal conflict rules. Attach the ontology to the sole supplied feature. If downstream requires legacy stability_summary, write neutral provenance in Python rather than ask for unsupported scientific stability.",
+    "changes": "Makes eligibility an explicit caller input, supplies a documented latest-observation default, defines null/units/conflicts, and removes unsupported stability-summary boilerplate. The new default is an explicit proposed policy, not an evaluated improvement."
+  },
+  {
+    "slug": "05_extract_patient",
+    "title": "Extract one patient's declared variables",
+    "python_work": "Attach the patient row ID and legacy rows/values wrappers, resolve clinical labels to internal columns, and validate exact keys, scalar types, and category membership. The caller must supply a truthful eligibility contract.",
+    "changes": "Explains who handled time eligibility and date scope; removes row IDs and envelopes from model output; states exact keys and null semantics."
+  },
+  {
+    "slug": "06_serial_chunk",
+    "title": "Update extraction with the next record chunk",
+    "python_work": "Retain patient/chunk identifiers, offsets, serial ordering, and final-chunk status in Python. Translate display labels and decision_notes to existing fields. Route mode features through occurrence extraction and count them in Python. Parse/compare structured dates in Python when feasible; unresolved clinical date-to-finding association remains a semantic task.",
+    "changes": "Explicitly permits prior decision state, resolves date-scope and eligibility questions, and separates semantic carry-forward facts from chunk bookkeeping."
+  },
+  {
+    "slug": "07_page_observations",
+    "title": "Extract observations with source quotations",
+    "python_work": "Resolve display labels, verify quoted substrings, find their offsets and repeated occurrences, normalize dates, attach patient/page IDs, and reconcile observations across pages. Do not pick an arbitrary occurrence when quote matching is ambiguous.",
+    "changes": "Clarifies occurrence granularity, quote scope, empty output, and ordering; removes model-authored character arithmetic and row identity."
+  },
+  {
+    "slug": "08_map_categories",
+    "title": "Map one invalid token to a declared category",
+    "python_work": "Deduplicate tokens, try deterministic exact/case normalization first, attach mapping IDs and patient targets afterward, and enforce the closed vocabulary.",
+    "changes": "Original example was already semantically clear. The replacement adds stage context and removes mapping IDs and multi-record accounting."
+  },
+  {
+    "slug": "09_refine_ontology",
+    "title": "Review repeated extraction failures for one feature",
+    "python_work": "Attach feature identity, preserve configured protections and roles, validate only allowed revisions, and re-extract affected training measurements only when the definition actually changes.",
+    "changes": "Defines keep/revise shapes, clarifies normalization versus schema changes, and avoids treating failed model tokens as clinical truth."
+  },
+  {
+    "slug": "10_harmonize_values",
+    "title": "Choose a supported common representation",
+    "python_work": "Parse ordinary numeric relations, build minimal exhaustive nonoverlapping intervals, generate category names, check semantic-to-numeric consistency, and attach feature/token IDs. Insufficient definitions require an explicit caller path; they must not silently drop variables or patient values.",
+    "changes": "Resolves the arbitrary-cutoff ambiguity and delegates interval bookkeeping to Python. The insufficient_definition branch and deterministic partition policy are proposed behavior changes requiring review before adoption."
+  },
+  {
+    "slug": "11_extend_value_map",
+    "title": "Map one new token into a frozen representation",
+    "python_work": "Handle identity, duplicate tokens, exact map extension, numeric parsing, and unchanged-plan enforcement. This remains training-only; do not learn a new map from heldout values.",
+    "changes": "Original example needed no substantive clarification. The new prompt supplies stage context and replaces map-record IDs with a single semantic decision."
+  },
+  {
+    "slug": "12_supervise_ontology",
+    "title": "Supervise one extraction definition from training aggregates",
+    "python_work": "Maintain feature identity, distinguish current versus historical count populations, enforce protected features and allowed schema changes, and manage re-extraction/checkpoints.",
+    "changes": "Clarifies count overlap, synonym handling, limited authority, and exact keep/revise output contracts."
+  },
+  {
+    "slug": "13_post_extraction_aliases",
+    "title": "Check whether extracted variables can be merged without loss",
+    "python_work": "Compute pairwise agreement and missingness, maintain IDs and audit counts, validate every pair, and compile coalescing/category recodes from semantic decisions. Verify losslessness on training values before accepting. Reject unsupported expressions or changing the clinical target.",
+    "changes": "Replaces a misleading correlation-only toy example with explicit agreement diagnostics. Removes active-feature/step counts and model-authored expression code. This does not establish that the original production diagnostics are defective."
+  },
+  {
+    "slug": "14_default_roles",
+    "title": "Assess roles from the default statistical evidence",
+    "python_work": "Supply real study context; label missing analyses explicitly; compute coherent support denominators from fold records; map role objects to internal assignments; attach IDs/evidence provenance; preserve locked roles and validate assessment/assign consistency.",
+    "changes": "Clarifies causal versus predictive evidence, missing versus negative evidence, stability, and uncertainty. Corrects an inconsistent invented fixture (selected fold but zero supplied aggregate votes), not an observed experiment. Study context and richer uncertainty states require caller changes before adoption."
+  },
+  {
+    "slug": "15_model_themes",
+    "title": "Organize modeling evidence into clinical themes",
+    "python_work": "Provide unique clinical labels; check exact one-theme coverage and no added members; generate theme IDs; attach member evidence panels and provenance. Clinical grouping remains the model's job.",
+    "changes": "Removes role-assignment instructions that the original theme-only response schema could not express. Clarifies singleton handling and that related measurements are not necessarily aliases."
+  },
+  {
+    "slug": "16_merge_themes",
+    "title": "Consolidate synonymous themes across review batches",
+    "python_work": "Resolve unique theme names to IDs, enforce disjoint merges, preserve unmentioned themes, union member/evidence records, and manage context limits without a forced semantic count target.",
+    "changes": "Removes the contradictory request to compress two unrelated themes into one while preserving clinical distinctions. Semantic-only merging plus Python context management is a substantive proposed change."
+  },
+  {
+    "slug": "17_model_roles",
+    "title": "Assess roles using multiple models and clinical themes",
+    "python_work": "Attach identity and evidence, retain all supplied method panels, validate assignment consistency, preserve locked roles, and route selected variables. Do not ask the model to rebuild source-ID lists or software stability counts.",
+    "changes": "Defines evidence-family meaning, role-specific stability, conservative confounder reasoning, and uncertain/unevaluable responses. It does not invent a numerical composite score or hard significance gate."
+  },
+  {
+    "slug": "18_rank_modifiers",
+    "title": "Rank candidates for later modifier-count selection",
+    "python_work": "Check exact coverage, resolve feature labels, sort genuine ties deterministically, assign numerical ranks and evidence provenance, and conduct count/architecture selection using training-only validation.",
+    "changes": "Makes score precedence qualitative and explicit, defines unavailable data, provides a tie representation, and removes ranks and source citations that Python can attach. Evidence rationales identify methods in ordinary language."
+  },
+  {
+    "slug": "19_merge_rankings",
+    "title": "Compare front candidates while Python merges ranked lists",
+    "python_work": "Own the merge queue, within-list order, coverage, stable tie breaking, rank numbering, and audit provenance. Cache pairwise decisions; do not repeatedly ask the model to track list positions. Cross-list pairwise preferences can be nontransitive, so record the deterministic merge order and test sensitivity before adopting.",
+    "changes": "Replaces an error-prone whole-list interleaving response with a two-candidate semantic decision. This changes call granularity and potentially cost; it remains a proposal, not an evaluated ranking improvement."
+  },
+  {
+    "slug": "20_advisory_roles",
+    "title": "Explain fixed numerical decisions without changing them",
+    "python_work": "Attach annotation and identity, preserve numerical decisions without reading prose as commands, and retain a failed/missing annotation without altering selection. Compute coherent evidence summaries before the call.",
+    "changes": "Removes role-assignment authority from an annotation-only call and fixes the inconsistent toy support summary. Makes study context, unavailable analyses, and overlapping split evidence explicit."
+  },
+  {
+    "slug": "21_cross_fold_concepts",
+    "title": "Infer modifier concepts from several inner-fold candidate lists",
+    "python_work": "Deduplicate candidate records across folds, compute recurrence/coverage, supply method-specific calibration when available, preserve source panels, resolve semantic membership and representatives, and test proposed concepts with training-only validation before selection.",
+    "changes": "Explains score scale, signal criteria, overlap, and conservative uncertainty. Replaces duplicated invented candidate arrays with distinct evidence. Removes compact n/s/ne keys and model-maintained fold/feature IDs; no oracle truth is introduced."
+  },
+  {
+    "slug": "22_validation_repair",
+    "title": "Repair a response using validation feedback",
+    "python_work": "Retain original task and source context; format precise schema errors using semantic labels; preserve available failed output; control retry count, reasoning settings, token budgets, and splitting; revalidate the entire response. Never present a fragment as a self-contained task.",
+    "changes": "The original inventory showed only the appended repair fragment, so its naive reviewer lacked the original task. The production transport already retains original context. This proposal shows the complete conversation, uses semantic feature names in feedback, and clarifies complete-response repair without inventing measurements."
+  },
+  {
+    "slug": "23_length_repair",
+    "title": "Retry a truncated response without dropping required content",
+    "python_work": "Retain original task and source context; format precise schema errors using semantic labels; preserve available failed output; control retry count, reasoning settings, token budgets, and splitting; revalidate the entire response. Never present a fragment as a self-contained task.",
+    "changes": "Shows the full task and partial output rather than an isolated repair fragment. Prohibits deleting required entries to satisfy a length limit; request splitting and budget escalation belong to Python."
+  }
+]

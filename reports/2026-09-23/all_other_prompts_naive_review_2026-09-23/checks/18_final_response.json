@@ -1,0 +1,16 @@
+{
+  "ordered_groups": [
+    {
+      "features": [
+        "Emphysema on imaging"
+      ],
+      "rationale": "Strong, repeatable probability-scale heterogeneity evidence: nuisance-adjusted inner-validation R-loss improved in all three one-candidate R-learner splits, and causal-forest permutation increased validation R-loss in all three splits. Penalized treatment interactions also supported it in all three splits, with two of three nominal univariable interaction screens positive. Unavailable treatment main-effect evidence reduces information about that nuisance role but is not negative modifier evidence."
+    },
+    {
+      "features": [
+        "Serum creatinine"
+      ],
+      "rationale": "Direct probability-scale evidence is weak: nuisance-adjusted inner-validation R-loss gains were nonpositive in all three one-candidate R-learner splits, and causal-forest permutation importance was positive in only one of three splits with mixed near-zero values. Two nominal univariable log-odds interaction screens and one penalized interaction split provide limited support, while frequent treatment and outcome main-effect selection concerns prediction rather than effect modification."
+    }
+  ]
+}

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from tests.stage2_prompt_spy import prompt_inputs
+
 import json
 import threading
 import time
@@ -97,7 +99,7 @@ def test_all_extraction_repairs_enable_thinking_with_larger_budget_after_thresho
     for prompt in prompts[1:]:
         assert prompt[0]["content"] == "PRIVATE NOTE"
         assert prompt[-2] == {"role": "assistant", "content": "{}"}
-        assert f"ValueError: {error}" in prompt[-1]["content"]
+        assert error in prompt[-1]["content"]
     records = events(path)
     assert records[-1]["event"] == "request_validated"
     assert records[-1]["response_attempt"] == 16
@@ -251,7 +253,7 @@ def test_exhausted_patient_is_deferred_until_other_patients_finish(tmp_path):
     calls = []
 
     def request(messages, validate, **_kwargs):
-        row = json.loads(messages[-1]["content"])["patients"][0]["row_id"]
+        row = prompt_inputs(messages)["patients"][0]["row_id"]
         calls.append(row)
         if calls == [0]:
             raise analysis.Stage2RequestExhaustedError("one stalled call")
@@ -267,7 +269,7 @@ def test_unresolved_patient_blocks_completion_and_resume_reuses_other_patient(tm
     calls = []
 
     def failing(messages, validate, **_kwargs):
-        row = json.loads(messages[-1]["content"])["patients"][0]["row_id"]
+        row = prompt_inputs(messages)["patients"][0]["row_id"]
         calls.append(row)
         if row == 0:
             raise analysis.Stage2RequestExhaustedError("still stalled")
@@ -283,7 +285,7 @@ def test_unresolved_patient_blocks_completion_and_resume_reuses_other_patient(tm
     calls.clear()
 
     def working(messages, validate, **_kwargs):
-        row = json.loads(messages[-1]["content"])["patients"][0]["row_id"]
+        row = prompt_inputs(messages)["patients"][0]["row_id"]
         calls.append(row)
         return validate({"rows": [{"row_id": row, "values": {"ecog": row}}]})
 

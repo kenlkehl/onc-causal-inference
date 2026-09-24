@@ -1,0 +1,4 @@
+{
+  "preferred_feature": "Emphysema on imaging",
+  "rationale": "Emphysema on imaging has stronger and more repeatable nuisance-adjusted inner-validation evidence on the probability-scale effect target: its univariable R-learner gains are positive in all 3 evaluated splits and its causal-forest permutation R-loss increases are positive in all 3, whereas serum creatinine has no positive R-learner split and only 1 positive causal-forest split. Penalized interaction selection also supports emphysema in 3 of 3 splits versus 1 of 3 for creatinine. The unadjusted log-odds interaction screens are broadly similar and do not outweigh the more directly relevant validation evidence. Emphysema's unavailable treatment main-effect analysis reduces completeness but is not negative modifier evidence."
+}

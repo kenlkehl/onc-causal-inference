@@ -1,0 +1,58 @@
+[
+  {
+    "prompt": "04_define_ontology",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "14_default_roles",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "15_model_themes",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "17_model_roles",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "18_rank_modifiers",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "19_merge_rankings",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "20_advisory_roles",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  },
+  {
+    "prompt": "21_cross_fold_concepts",
+    "state": "done",
+    "finish_reason": "stop",
+    "json_ok": true,
+    "can_complete": true
+  }
+]

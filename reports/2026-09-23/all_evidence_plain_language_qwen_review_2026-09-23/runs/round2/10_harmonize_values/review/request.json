@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Read the supplied task as someone receiving it for the first time. Use the task messages and their example input to work out what you are being asked to do.\n\nExplain the task and the meaning of its input in plain language. Ask any clarification questions whose answers would change your action or output. Identify any wording that requires unexplained context, or unnecessary software/process detail. Empty question and unnecessary-context lists are appropriate when the task is clear.\n\nThen carry out the example task if you can. Return one JSON object with exactly these keys:\n- understanding: a concise statement of the task.\n- input_meaning: a concise statement of what the supplied information represents.\n- can_complete: a boolean.\n- questions: an array of clarification questions.\n- unnecessary_context: an array of passages that could be removed, with a brief reason for each.\n- sample_response: your answer to the example task as a JSON value, or null if a required clarification prevents an answer.\n\nKeep the review concise. The task conversation is quoted below for this review."
+    },
+    {
+      "role": "user",
+      "content": "<task_to_review>\nSYSTEM MESSAGE\nThe measurements of one clinical variable contain numbers and text phrases. Choose a common representation that preserves their clinical meaning.\n\nWhat you receive\n\nThe variable's definition, its observed numbers and phrases, and any stated thresholds or reference ranges.\n\nHow to decide\n\nUse continuous values when every usable phrase denotes an exact number in the stated unit. Use categories when a reported threshold or range needs to be preserved. Use the smallest partition supported by explicit boundaries. Treat inequalities as intervals with their stated inclusive or exclusive boundary. A word such as high needs a supplied definition or reference range; otherwise classify it as unusable. If the supplied information cannot support a coherent representation, choose insufficient_definition and explain what is missing.\n\nWhat to return\n\nReturn one JSON object with status (ready or insufficient_definition), representation (continuous, categorical, or null when insufficient), reason (text), and token_interpretations (an array). For each supplied phrase, return raw_text, meaning (exact_number, explicit_interval, defined_category, or unusable), and interpretation (a short statement of its supported meaning). Describe the threshold or category meaning in words.\n\nUSER MESSAGE\nClinical variable: Serum creatinine, measured in mg/dL\nObserved numbers include: 0.8, 1.2\nObserved phrases: <1.0; high\nExplicit threshold: <1.0 means less than 1.0 mg/dL.\nReference interval or definition of high: unavailable.\n</task_to_review>\n\nGive your review using understanding, input_meaning, can_complete, questions, unnecessary_context, and sample_response. Put the example task's answer inside sample_response."
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

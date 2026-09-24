@@ -1,0 +1,24 @@
+
+
+{
+  "observations": [
+    {
+      "feature": "Serum creatinine",
+      "value": "1.0",
+      "quote": "2025-01-01: serum creatinine 1.0 mg/dL.",
+      "governing_date_quote": "2025-01-01"
+    },
+    {
+      "feature": "Serum creatinine",
+      "value": "1.2",
+      "quote": "2025-01-10: serum creatinine 1.2 mg/dL.",
+      "governing_date_quote": "2025-01-10"
+    },
+    {
+      "feature": "Emphysema on imaging",
+      "value": "Present",
+      "quote": "CT documents emphysema.",
+      "governing_date_quote": null
+    }
+  ]
+}

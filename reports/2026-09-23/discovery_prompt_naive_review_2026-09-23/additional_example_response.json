@@ -1,0 +1,58 @@
+{
+  "candidates": [
+    {
+      "name": "Tumor HER2 immunohistochemistry result",
+      "description": "The patient's tumor HER2 expression result measured by immunohistochemistry.",
+      "basis": "The patient's tumor is reported to have HER2 immunostaining of 3+.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Maternal history of breast cancer",
+      "description": "Whether the patient's mother has a history of breast cancer.",
+      "basis": "The text states that the patient's mother had breast cancer.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Emphysema on imaging",
+      "description": "The presence or absence of emphysema on imaging.",
+      "basis": "The CT is reported to show no emphysema.",
+      "uncertainty": ""
+    },
+    {
+      "name": "ECOG performance status",
+      "description": "The patient's Eastern Cooperative Oncology Group performance status.",
+      "basis": "The text explicitly reports an ECOG performance status of 2.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Tumor T category",
+      "description": "The primary tumor category in the patient's TNM classification.",
+      "basis": "The TNM classification directly encodes T2.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Regional lymph node N category",
+      "description": "The regional lymph node category in the patient's TNM classification.",
+      "basis": "The TNM classification directly encodes N1.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Distant metastasis M category",
+      "description": "The distant metastasis category in the patient's TNM classification.",
+      "basis": "The TNM classification directly encodes M0.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Cough duration",
+      "description": "The length of time the patient has had a cough.",
+      "basis": "The text states that the cough has lasted three weeks.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Peripheral neuropathy status",
+      "description": "The presence or absence of peripheral neuropathy in the patient.",
+      "basis": "The text states that peripheral neuropathy is possible.",
+      "uncertainty": "The finding is explicitly uncertain because peripheral neuropathy is described as possible."
+    }
+  ]
+}

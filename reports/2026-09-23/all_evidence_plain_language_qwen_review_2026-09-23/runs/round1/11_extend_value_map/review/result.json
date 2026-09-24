@@ -1,0 +1,28 @@
+{
+  "http_status": 200,
+  "request_sha256": "a222761adeebb4b11f78222f74e842acdf0b06216b4ad238b1cec3460bf18c3a",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 9.6,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 443,
+    "total_tokens": 804,
+    "completion_tokens": 361,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 236
+    }
+  },
+  "reasoning_characters": 1008,
+  "content": "\n\n{\n  \"understanding\": \"Map a supplied phrase to the correct clinical measurement representation, using the provided numerical definition or category definitions exactly, and return either an exact number, an existing category label, or null.\",\n  \"input_meaning\": \"The input describes a clinical variable, gives the allowed numerical representation or category definitions, and provides a new phrase to classify.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"value\": \"Below 1.0\"\n  }\n}",
+  "parsed": {
+    "understanding": "Map a supplied phrase to the correct clinical measurement representation, using the provided numerical definition or category definitions exactly, and return either an exact number, an existing category label, or null.",
+    "input_meaning": "The input describes a clinical variable, gives the allowed numerical representation or category definitions, and provides a new phrase to classify.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "value": "Below 1.0"
+    }
+  }
+}

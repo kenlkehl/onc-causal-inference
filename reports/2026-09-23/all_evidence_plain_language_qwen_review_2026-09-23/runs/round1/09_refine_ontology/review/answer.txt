@@ -1,0 +1,13 @@
+
+
+{
+  "understanding": "Review the definition and failed examples for the clinical variable 'Emphysema on imaging' and decide whether the extraction instructions should be kept or revised, returning the specified JSON object.",
+  "input_meaning": "The supplied information gives the current variable definition, allowed output labels, measurement and missing-value rules, and examples of answer strings that did not match the required labels.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "action": "keep",
+    "reason": "The failed outputs are ordinary synonyms or abbreviations for the existing category 'Present' ('positive', 'present on CT'), not an unclear measurement rule or unsuitable type. The definition can remain usable if these equivalent wordings are mapped to 'Present'."
+  }
+}

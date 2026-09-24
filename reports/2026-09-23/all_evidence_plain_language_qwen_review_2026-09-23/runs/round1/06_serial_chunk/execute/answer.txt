@@ -1,0 +1,12 @@
+
+
+{
+  "values": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  },
+  "decision_notes": {
+    "Serum creatinine": "Latest dated creatinine 1.2 on 2025-01-10 supersedes prior 1.0 on 2025-01-01.",
+    "Emphysema on imaging": "Explicit positive CT finding; CT sentence undated, prior null."
+  }
+}

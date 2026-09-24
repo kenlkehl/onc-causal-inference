@@ -1,6 +1,8 @@
 """Nested ranking, fixed scoring populations, role protection, and resume integrity."""
 
 from dataclasses import replace
+from tests.stage2_prompt_spy import prompt_inputs
+
 import json
 
 import numpy as np
@@ -19,27 +21,18 @@ from tests.test_stage2_multi_model import sample_inputs, role_fixture
 
 def ranking_request(messages, validate, **kwargs):
     assert "DO_NOT" not in json.dumps(messages)
-    payload = json.loads(messages[1]["content"])
+    payload = prompt_inputs(messages)
     # A deterministic stand-in for an LLM ordering; the numerical fits are real.
     priority = {"m": 0, "c": 1, "noise": 2, "other": 3}
     cards = sorted(
         payload["candidates"],
         key=lambda c: (priority.get(c["feature_id"], 10), c["feature_id"]),
     )
-    return validate(
-        {
-            "ranking": [
-                {
-                    "feature_id": c["feature_id"],
-                    "evidence_ids": [
-                        r["evidence_id"] for r in c["modeling_evidence"] if r["role"] == "effect"
-                    ],
-                    "rationale": "Compare supplied effect evidence.",
-                }
-                for c in cards
-            ]
-        }
-    )
+    if payload["task"] == "merge_stage2_modifier_ranking":
+        return validate({"preferred_feature": cards[0]["definition"]["name"].replace("_", " "),
+                         "rationale": "Compare supplied effect evidence."})
+    return validate({"ordered_groups": [{"features": [card["definition"]["name"].replace("_", " ")],
+                                        "rationale": "Compare supplied effect evidence."} for card in cards]})
 
 
 def test_count_rule_and_configuration_keep_legacy_policies_separate():
@@ -120,7 +113,7 @@ def test_bounded_ranking_covers_candidates_preserves_locks_and_detects_corruptio
     calls, seen = [], set()
 
     def request(messages, validate, **kwargs):
-        payload = json.loads(messages[1]["content"])
+        payload = prompt_inputs(messages)
         assert len(payload["candidates"]) <= 2
         seen.update(c["feature_id"] for c in payload["candidates"])
         calls.append(payload["task"])
@@ -144,11 +137,11 @@ def test_bounded_ranking_covers_candidates_preserves_locks_and_detects_corruptio
         request_json=lambda *a, **k: pytest.fail("cached ranking requested again"),
     )
     assert resumed == first
-    path = next(tmp_path.glob("requests/*/response.json"))
+    path = next(p for p in tmp_path.glob("requests/*/response.json") if "ranking" in json.loads(p.read_text()))
     cached = json.loads(path.read_text())
-    cached["result"]["ranking"][0]["rationale"] = "changed"
+    cached["ranking"][0]["rationale"] = "changed"
     path.write_text(json.dumps(cached))
-    with pytest.raises(ValueError, match="corrupt"):
+    with pytest.raises(ValueError, match="hash does not match"):
         ranking.rank_modifier_candidates(**arguments, request_json=request)
 
 
@@ -166,7 +159,7 @@ def test_rank_validator_rejects_foreign_evidence_and_invalid_merges():
     }
     rows = [{"feature_id": k, "evidence_ids": v, "rationale": "Evidence."} for k, v in refs.items()]
     validate = ranking._ranking_validator(cards, [["f1", "f2"]])
-    with pytest.raises(ValueError, match="preserve order"):
+    with pytest.raises(ValueError, match="prior order"):
         validate({"ranking": rows[::-1]})
     rows[0]["evidence_ids"] = rows[1]["evidence_ids"]
     with pytest.raises(ValueError, match="own supplied"):
@@ -223,7 +216,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
             arguments["extracted_fit"]["other"] > 0, "a", "b"
         )
         arguments["definitions"][-1].update(value_type="categorical", categories_or_unit=["a", "b"])
-    cfg = ModifierCountConfig(candidate_counts=(0, 1, 2), max_ranked_modifiers=3, forest_seeds=2)
+    cfg = ModifierCountConfig(candidate_counts=(0, 1, 2), max_ranked_modifiers=3, forest_seeds=2, concept_review=binary, concept_top_n_per_fold=100)
     arguments["policy"] = replace(
         arguments["policy"],
         min_propensity=0.1,
@@ -258,6 +251,20 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         nested_calls.append(ids)
         return numerical.select_stage2_features_multi_model(**values)
 
+    concept_inputs = []
+    if cfg.concept_review:
+        def concept_review(**kwargs):
+            evidence = kwargs["statistical_report"]
+            expected_rows = nested_calls[-1] if len(concept_inputs) < 2 else set(range(96))
+            assert evidence["cells"]
+            for cell in evidence["cells"]:
+                assert set(cell["fit_row_ids"]) <= expected_rows
+                assert set(cell["validation_row_ids"]) <= expected_rows
+            concept_inputs.append(expected_rows)
+            assert kwargs["top_n"] == 100
+            return ranking.rank_modifier_candidates(**{k: v for k, v in kwargs.items() if k != "top_n"})
+        monkeypatch.setattr(count.concepts, "infer_modifier_concepts", concept_review)
+
     extras = dict(
         selected=selected,
         role_report=role_report,
@@ -271,6 +278,8 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         run_numerical=run_nested,
     )
     result = count.select_modifier_count(**arguments, **extras)
+    if cfg.concept_review:
+        assert concept_inputs == [*nested_calls, set(range(96))]
     kept, roles, audit = result
     assert (
         len(nested_calls) == 2
@@ -357,5 +366,5 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
     corrupted = json.loads(saved.read_text())
     corrupted["result"]["report"]["chosen_modifier_count"] += 1
     saved.write_text(json.dumps(corrupted))
-    with pytest.raises(ValueError, match="corrupt"):
+    with pytest.raises(ValueError, match="corrupt multi-model checkpoint"):
         count.select_modifier_count(**arguments, **extras)

@@ -1,0 +1,25 @@
+{
+  "baseline_commit": "e5466c414140333b23b7c52b1c48e23f25ae925b",
+  "final_prompt": "01_discover_messages_2026-09-23.json",
+  "final_version": "v3",
+  "fresh_reviews": 3,
+  "targeted_followups": 1,
+  "model_requested": "gpt-5.6-sol",
+  "final_message_sha256": "f1b806c3bdde2c7483d275ee7f3124e83cb8f0c4ba415f2adef226fab78ba3ca",
+  "original_message_sha256": "aa8c44c167d3c4f895a5083875a9c29c4d27af8b91bbb40f00429b94f39699fb",
+  "production_code_changed": false,
+  "response_schema": {
+    "candidates": "array",
+    "fields": [
+      "name",
+      "description",
+      "basis",
+      "uncertainty"
+    ]
+  },
+  "example_counts": {
+    "original_example_response.json": 2,
+    "additional_example_response.json": 9
+  },
+  "review_scope_limit": "Qualitative clarity review and two invented examples; no real-card extraction or causal-performance evaluation."
+}

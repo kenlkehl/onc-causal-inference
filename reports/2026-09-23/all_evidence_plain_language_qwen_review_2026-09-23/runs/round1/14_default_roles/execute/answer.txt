@@ -1,0 +1,28 @@
+
+
+{
+  "confounder": {
+    "assign": true,
+    "assessment": "supported",
+    "stability": "consistent",
+    "rationale": "Serum creatinine is clinically described as reflecting renal function that can influence both treatment choice and prognosis, supporting a common-cause/confounding concern. This is consistent with the penalized main-effect results, which show the variable was selected for the treatment model in most analyses and for the outcome model in all analyses.",
+    "evidence_comments": [
+      "Study description: renal function can influence treatment choice and prognosis.",
+      "Penalized main effects—outcome: nonzero coefficient group in 3 of 3 analyses.",
+      "Penalized main effects—treatment: nonzero coefficient group in 2 of 3 analyses.",
+      "The main-effect evidence broadly agrees on an association with both treatment and outcome."
+    ]
+  },
+  "effect_modifier": {
+    "assign": false,
+    "assessment": "not_supported",
+    "stability": "mixed",
+    "rationale": "The primary validation evidence for treatment-benefit heterogeneity does not support an effect modifier: the univariable R-learner validation R-loss gains are all non-positive, indicating no improvement over a constant treatment effect. One of three penalized treatment interactions was nonzero, suggesting weak log-odds-scale heterogeneity, but this conflicts with the probability-difference validation evidence and does not justify retaining serum creatinine as an effect modifier.",
+    "evidence_comments": [
+      "Penalized treatment interactions: nonzero interaction group in 1 of 3 analyses, indicating weak and inconsistent log-odds interaction.",
+      "Univariable R-learner: validation R-loss gain >0 in 0 of 3 analyses.",
+      "Validation R-loss gains: -0.002, 0.0, -0.001; none show improvement over a constant treatment effect.",
+      "Because the treatment effect is a probability difference, the non-positive probability-difference R-loss evidence argues against effect modification."
+    ]
+  }
+}

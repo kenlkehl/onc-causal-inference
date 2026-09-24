@@ -1,0 +1,26 @@
+{
+  "concepts": [
+    {
+      "name": "Pretreatment renal function",
+      "members": [
+        "Serum creatinine"
+      ],
+      "modifier_recommendation": "uncertain",
+      "rationale": "Serum creatinine is clinically relevant to treatment choice and prognosis in the stated context, and it shows some penalized and univariable log-odds interaction signals. However, the more directly relevant probability-scale validation evidence is not convergent: the univariable R-learner has no positive validation R-loss gains, and causal-forest permutation evidence is positive in only one overlapping split with a very small reported increase. With no calibration or multiplicity-adjusted univariable results, the supplied evidence does not warrant either retention or exclusion as a modifier concept.",
+      "representatives": [],
+      "unresolved_questions": "Would adjusted probability-scale heterogeneity evidence become stable with calibrated uncertainty estimates or evaluation in additional training resamples?"
+    },
+    {
+      "name": "Imaging-defined emphysema",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "modifier_recommendation": "retain",
+      "rationale": "Emphysema on imaging has consistent heterogeneity evidence across the supplied methods: penalized treatment interactions, positive univariable R-learner validation R-loss gains, and positive causal-forest permutation R-loss increases occur throughout the evaluated overlapping splits. The univariable log-odds interaction results also provide some supporting association evidence. Retention means further training-only evaluation is warranted; the overlapping splits, absent calibration, missing treatment main-effect analysis, and lack of causal ground truth prevent a claim that emphysema is a true modifier.",
+      "representatives": [
+        "Emphysema on imaging"
+      ],
+      "unresolved_questions": "How stable and clinically meaningful are the probability-scale gains under calibrated uncertainty assessment?"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+Identify the clinical variables supported by these excerpts using the instructions above.
+
+<clinical_excerpts>
+<excerpt>
+2025-01-01 pretreatment lab: serum creatinine 1.0 mg/dL. 2025-01-10 pretreatment lab: serum creatinine 1.2 mg/dL. CT documents emphysema.
+</excerpt>
+</clinical_excerpts>

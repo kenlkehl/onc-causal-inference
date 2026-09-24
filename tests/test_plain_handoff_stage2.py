@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.stage2_prompt_spy import prompt_inputs
+
 import json
 import re
 import threading
@@ -128,8 +130,8 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config.max_tokens == 100_000
     assert config.extraction_max_tokens == 75_000
     assert config.repetition_penalty is None
-    assert config.interpretation_reasoning_effort == "high"
-    assert config.extraction_reasoning_effort == "none"
+    assert config.interpretation_reasoning_effort == "auto"
+    assert config.extraction_reasoning_effort == "auto"
     assert config.max_prompt_chars == 100_000
     assert config.consolidation_max_prompt_chars == 640_000
     assert config.operationalization_max_prompt_chars == 640_000
@@ -846,7 +848,7 @@ def test_stage2_maps_legacy_enable_thinking_to_interpretation_effort(caplog):
 
     assert config is not None
     assert config.interpretation_reasoning_effort == "none"
-    assert config.extraction_reasoning_effort == "none"
+    assert config.extraction_reasoning_effort == "auto"
     assert "enable_thinking is deprecated" in caplog.text
 
 
@@ -1250,10 +1252,9 @@ def test_json_repair_audits_invalid_responses_and_uses_repeated_error_fallback()
 
     assert result == fallback
     assert len(conversations) == 3
-    assert "feature_a" in conversations[1][-1]["content"]
-    assert "Valid categorical-rule expression examples" in conversations[1][-1]["content"]
-    assert "has now occurred 2 times" in conversations[2][-1]["content"]
-    assert "leave_unchanged" in conversations[2][-1]["content"]
+    assert "rule condition references unavailable feature" in conversations[1][-1]["content"]
+    assert "complete corrected JSON object" in conversations[2][-1]["content"]
+    assert "Valid categorical-rule expression examples" not in conversations[1][-1]["content"]
     invalid_events = [event for event in events if event["event"] == "invalid_response"]
     assert len(invalid_events) == 3
     assert invalid_events[0]["raw_response"].startswith('{"ok":false')
@@ -1311,9 +1312,9 @@ def test_output_length_repair_explicitly_requests_a_shorter_complete_object():
     )
 
     assert message["role"] == "user"
-    assert "materially shorter" in message["content"]
-    assert "Remove redundancy" in message["content"]
-    assert "Do not omit required records or fields" in message["content"]
+    assert "complete JSON object" in message["content"]
+    assert "Keep explanations concise" in message["content"]
+    assert "Include every requested entry and field" in message["content"]
 
 
 def test_json_repair_losslessly_compacts_json_to_include_the_validation_error():
@@ -1386,73 +1387,13 @@ def test_extraction_category_error_lists_allowed_literals_and_prompts_forbid_ali
     assert "value 1 is invalid" in message
     assert '["not documented","documented"] or null' in message
 
-    extraction = json.loads(
-        stage2_analysis._extraction_prompt(
-            definitions=[definition],
-            rows=[{"row_id": 7, "text": "Prior immunotherapy was documented."}],
-        )[1]["content"]
-    )
-    page_extraction = json.loads(
-        stage2_analysis._page_extraction_prompt(
-            definitions=[definition],
-            row={
-                "row_id": 7,
-                "text": "Prior immunotherapy was documented.",
-                "page": {
-                    "page_index": 1,
-                    "char_start": 0,
-                    "char_end": 37,
-                    "document_chars": 37,
-                },
-            },
-        )[1]["content"]
-    )
-    assert extraction["features"][0]["categories_or_unit"] == [
-        "not documented",
-        "documented",
-    ]
-    assert page_extraction["features"][0]["categories_or_unit"] == [
-        "not documented",
-        "documented",
-    ]
-    expected_extraction_fields = {
-        "name",
-        "description",
-        "value_type",
-        "categories_or_unit",
-        "measurement_definition",
-        "missing_value_rule",
-        "conflict_resolution",
-    }
-    assert set(extraction["features"][0]) == expected_extraction_fields
-    assert set(page_extraction["features"][0]) == expected_extraction_fields
-    assert "clinical_question" not in extraction
-    assert "clinical_question" not in page_extraction
-    assert any("Do not substitute 0/1" in rule for rule in extraction["rules"])
-    assert any("declared category exactly" in rule for rule in page_extraction["rules"])
-    assert any("exact contiguous evidence" in rule for rule in page_extraction["rules"])
-    assert any("do not collapse conflicting" in rule.lower() for rule in page_extraction["rules"])
-    extraction_messages = stage2_analysis._extraction_prompt(
-        definitions=[definition],
-        rows=[{"row_id": 7, "text": "Prior immunotherapy was documented."}],
-    )
-    extraction_instructions = " ".join(
-        [
-            extraction_messages[0]["content"],
-            *extraction["rules"],
-        ]
-    ).lower()
-    assert "pretreatment" not in extraction_instructions
-    assert "pre-treatment" not in extraction_instructions
-    assert "treatment received" not in extraction_instructions
-    assert any("supplied clinical text" in rule for rule in extraction["rules"])
-    assert any("never return an object or array" in rule for rule in extraction["rules"])
-    composite_rule = next(
-        rule for rule in extraction["rules"] if "composite such as 147/93" in rule
-    )
-    assert "component explicitly named by the feature" in composite_rule
-    assert "requests multiple components, return null" in composite_rule
-    assert "rather than a ratio string or aggregate" in composite_rule
+    extraction = stage2_analysis._extraction_prompt(definitions=[definition], rows=[{"row_id": 7, "text": "Prior immunotherapy was documented."}])
+    page = stage2_analysis._page_extraction_prompt(definitions=[definition], row={"row_id": 7, "text": "Prior immunotherapy was documented."})
+    for messages in (extraction, page):
+        assert "Allowed categories: not documented; documented" in messages[1]["content"]
+        assert "row_id" not in str(messages) and "record_scope" not in str(messages)
+    assert "Use the defined category labels exactly" in extraction[0]["content"]
+    assert "Preserve repeated or conflicting observations" in page[0]["content"]
 
 
 def test_normal_extraction_prompt_applies_explicit_conflict_resolution():
@@ -1468,28 +1409,10 @@ def test_normal_extraction_prompt_applies_explicit_conflict_resolution():
         "conflict_resolution": {"strategy": "latest", "positive_category": None},
     }
 
-    prompt = json.loads(
-        stage2_analysis._extraction_prompt(
-            definitions=[definition],
-            rows=[
-                {
-                    "row_id": 7,
-                    "text": "At age 68 the patient was diagnosed. At age 72 treatment was considered.",
-                }
-            ],
-        )[1]["content"]
-    )
-
-    policy = prompt["features"][0]["conflict_resolution"]
-    rules = " ".join(prompt["rules"])
-    assert policy["strategy"] == "latest"
-    assert policy["strategy_source"] == "explicit_ontology"
-    assert policy["dated_observations_precede_undated"] is True
-    assert policy["source_order_tie_breaker"] == "last"
-    assert "Consider every explicitly supported observation" in rules
-    assert "conflict_resolution policy governs" in rules
-    assert "use clinical-text source order" in rules
-    assert "do not treat the first mention" in rules
+    messages = stage2_analysis._extraction_prompt(definitions=[definition], rows=[{"row_id": 7, "text": "Age 68 at diagnosis; age 72 today."}])
+    assert "Choose among repeated observations using this rule: Use the latest dated observation" in messages[1]["content"]
+    assert "use the last mention" in messages[1]["content"]
+    assert "row_id" not in str(messages)
 
 
 def test_continuous_extraction_preserves_categorical_fallback_for_modeling_review():
@@ -1517,12 +1440,7 @@ def test_continuous_extraction_preserves_categorical_fallback_for_modeling_revie
         row_ids=[7],
         definitions=[definition],
     )
-    prompt = json.loads(
-        stage2_analysis._extraction_prompt(
-            definitions=[definition],
-            rows=[{"row_id": 7, "text": "PD-L1 TPS was reported as <1%."}],
-        )[1]["content"]
-    )
+    prompt = stage2_analysis._extraction_prompt(definitions=[definition], rows=[{"row_id": 7, "text": "PD-L1 TPS was reported as <1%."}])[1]["content"]
     frame = pd.DataFrame(
         {
             "_oci_row_id": [0, 1, 2, 3],
@@ -1537,7 +1455,7 @@ def test_continuous_extraction_preserves_categorical_fallback_for_modeling_revie
     encoded = stage2_analysis._FeatureEncoder([hybrid]).fit(frame).transform(frame)
 
     assert validated["rows"][0]["values"]["pd_l1_tumor_proportion_score"] == "<1%"
-    assert "categorical/threshold string" in prompt["features"][0]["accepted_representations"]
+    assert "categorical/threshold string" in prompt
     assert summary["numeric_nonmissing"] == 2
     assert summary["categorical_fallback_nonmissing"] == 1
     assert summary["categorical_fallback_values"] == {"<1%": 1}
@@ -1566,7 +1484,7 @@ def test_stage2_extraction_forbids_multiple_patients_in_one_prompt(tmp_path: Pat
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         assert request_kind == "extraction"
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         assert body["job"] == "extract_stage2_patient_variables"
         assert len(body["patients"]) == 1
         patient = body["patients"][0]
@@ -1619,7 +1537,7 @@ def test_stage2_extraction_batches_features_by_default_and_accepts_override(
         prompt_feature_names = []
 
         def request_json(messages, validate, *, request_kind="interpretation"):
-            body = json.loads(messages[1]["content"])
+            body = prompt_inputs(messages)
             names = [feature["name"] for feature in body["features"]]
             prompt_feature_names.append(names)
             assert len(body["patients"]) == 1
@@ -1730,7 +1648,7 @@ def test_extraction_retries_only_legacy_infrastructure_failure_feature_batches(
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         assert request_kind == "extraction"
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         names = [feature["name"] for feature in body["features"]]
         calls.append(names)
         return validate(
@@ -1854,7 +1772,7 @@ def test_stage2_serial_extraction_carries_state_across_lossless_token_chunks_and
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         assert request_kind == "extraction"
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         assert body["job"] == "update_stage2_patient_variables_serially"
         bodies.append(body)
         patient = body["patient"]
@@ -1982,7 +1900,7 @@ def test_serial_ontology_repair_normalizes_numeric_carry_forward_state(
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         nonlocal extraction_calls
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         if request_kind == "interpretation":
             item = body["items"][0]
             return validate(
@@ -2060,7 +1978,7 @@ def test_stage2_tokenizer_keeps_short_patient_extraction_one_shot(tmp_path: Path
     jobs = []
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         jobs.append(body["job"])
         patient = body["patients"][0]
         return validate(
@@ -2116,7 +2034,7 @@ def test_stage2_extraction_prompt_does_not_ascii_escape_clinical_text():
 
     assert note in messages[1]["content"]
     assert "\\u60a3" not in messages[1]["content"]
-    assert json.loads(messages[1]["content"])["patients"][0]["text"] == note
+    assert messages[1]["content"].endswith(note)
 
 
 def test_ordinal_integer_range_is_expanded_in_prompt_and_validation():
@@ -2125,12 +2043,7 @@ def test_ordinal_integer_range_is_expanded_in_prompt_and_validation():
         "value_type": "ordinal",
         "categories_or_unit": ["0-4"],
     }
-    prompt = json.loads(
-        stage2_analysis._extraction_prompt(
-            definitions=[definition],
-            rows=[{"row_id": 3, "text": "Pretreatment ECOG performance status was 2."}],
-        )[1]["content"]
-    )
+    prompt = stage2_analysis._extraction_prompt(definitions=[definition], rows=[{"row_id": 3, "text": "ECOG was 2."}])[1]["content"]
     validated = stage2_analysis._validate_extraction(
         {
             "rows": [
@@ -2144,7 +2057,7 @@ def test_ordinal_integer_range_is_expanded_in_prompt_and_validation():
         definitions=[definition],
     )
 
-    assert prompt["features"][0]["categories_or_unit"] == ["0", "1", "2", "3", "4"]
+    assert "Allowed categories: 0; 1; 2; 3; 4" in prompt
     assert validated["rows"][0]["values"]["performance_status"] == "2"
     assert stage2_analysis._normalized_category_values(
         value_type="categorical",
@@ -2435,7 +2348,7 @@ def test_resume_retries_only_checkpoints_with_stale_range_ontology_repairs(tmp_p
     calls = []
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        calls.append(json.loads(messages[1]["content"])["job"])
+        calls.append(prompt_inputs(messages)["job"])
         return validate(
             {
                 "rows": [
@@ -2484,7 +2397,7 @@ def test_extraction_uses_note_free_category_ontology_after_fifteen_failed_repair
 
     def completion(messages, _config):
         nonlocal ontology_body
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         jobs.append(body["job"])
         if body["job"] == "extract_stage2_patient_variables":
             return json.dumps(
@@ -2606,7 +2519,7 @@ def test_pending_category_ontology_resumes_without_repeating_extraction(
     def resume_interpretation(messages, validate, *, request_kind="interpretation"):
         resumed_calls.append(request_kind)
         assert request_kind == "interpretation"
-        item = json.loads(messages[1]["content"])["items"][0]
+        item = prompt_inputs(messages)["items"][0]
         return validate(
             {
                 "corrections": [
@@ -2690,7 +2603,7 @@ def test_extraction_defaults_unmappable_category_to_null_instead_of_crashing(
     }
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         if body["job"] == "extract_stage2_patient_variables":
             return validate(
                 {
@@ -2831,203 +2744,90 @@ def test_extraction_nulls_only_invalid_feature_value_and_retains_valid_values(
     assert "dict" in audit["issues"][0]["reason"]
 
 
-def test_interpretation_prompt_inverts_noisy_text_evidence_without_temporal_filtering():
-    packet = {
-        "packet_id": "packet-a",
-        "architecture": "htr_neural",
-        "observable_axes": ["outcome", "residual_effect"],
-        "content": {
-            "evidence_kind": "clinical_text",
-            "semantic_grouping": "opaque_grouping",
-            "score_summary": {"score": {"maximum": 9.0}},
-            "source_architectures": ["opaque_architecture"],
-            "representative_evidence": [
-                {
-                    "text": "Needs help with activities of daily living; spends most of day in bed.",
-                    "details": {"opaque": "metadata"},
-                    "text_truncated": True,
-                }
-            ],
-        },
-    }
-
-    messages = stage2_workflow._interpretation_prompt(
-        architecture="htr_neural",
-        packets=[packet],
-    )
-    body = json.loads(messages[1]["content"])
-    rules = " ".join(body["rules"]).lower()
-
-    instructions = " ".join(
-        [messages[0]["content"], body["task"], rules, json.dumps(body["response"])]
-    ).lower()
-
-    assert body["job"] == "infer_clinical_features_from_text_evidence"
-    assert "patient-level clinical features" in body["task"]
-    assert "one value per patient" in rules
-    assert "one patient's record" in rules
-    assert "without comparing or aggregating across patients" in rules
-    assert "descriptions of the input collection" in rules
-    assert "absence of a common feature" in rules
-    assert "supporting_items" in rules
-    assert "nonempty snake_case name" in rules
-    assert "blank or null name" in rules
-    assert "do not choose a value type" in rules
-    assert "longitudinal information as clinical context" in rules
-    assert "do not perform temporal eligibility filtering" in rules
-    assert "prefer atomic clinical variables" in rules
-    assert "exhaustively enumerate every distinct atomic patient-level clinical feature" in rules
-    assert "apparent topic, dominant concept, or consensus theme" in rules
-    assert "read every string in an evidence item's text array" in rules
-    assert "do not limit an evidence item to one candidate" in rules
-    assert "multiple independently varying patient attributes" in rules
-    assert "a separate atomic candidate for each attribute" in rules
-    assert "attributes belonging to relatives, specimens, clinicians" in rules
-    assert "corresponding patient feature" in rules
-    assert "multiple exemplar patients with different observed values" in rules
-    assert "community's apparent topic or most salient feature" in messages[0][
-        "content"
-    ].lower()
-    assert re.search(r"\bage\b", instructions) is None
-    assert "one coherent ontology" in rules
-    assert "list, set, tuple, mapping, concatenated code" in rules
-    assert "open-ended family is present" in rules
-    assert "parent domain, umbrella label, or catch-all concept" in rules
-    assert "do not also return their umbrella or composite representation" in rules
-    assert "do not split a variable merely because" in rules
-    assert "each candidate name must identify its exact extraction target" in rules
-    assert "clinical_question" not in body
-    assert "architecture" not in body
-    assert body["evidence_items"] == [
+def test_discovery_keeps_each_card_separate_and_hides_provenance():
+    packets = [
         {
-            "item": 1,
-            "text": ["Needs help with activities of daily living; spends most of day in bed."],
+            "packet_id": f"private-card-{index}",
+            "architecture": "private-architecture",
+            "observable_axes": ["outcome"],
+            "content": {
+                "score_summary": {"secret_statistic": 9.0},
+                "representative_evidence": [{"text": text, "private_detail": "hidden"}],
+            },
         }
+        for index, text in enumerate(["Creatinine 1.2 mg/dL", "CT documents emphysema"])
     ]
-    assert "pretreatment" not in instructions
-    assert "posttreatment" not in instructions
-    assert "causal" not in instructions
-    assert "stage 1" not in instructions
-    assert "value_type" not in json.dumps(body["response"])
-    assert "supporting_items" in body["response"]["candidates"][0]
-    assert "atomic, reusable patient-level clinical measurement" in (
-        body["response"]["candidates"][0]["description"]
+    batches = stage2_workflow._partition_interpretation_packets(
+        packets, architecture="private-architecture", max_prompt_chars=20_000,
     )
-    assert "packet_dispositions" not in instructions
-    assert "evidence_rationale" in body["response"]["candidates"][0]
-    rendered_items = json.dumps(body["evidence_items"])
-    for forbidden in (
-        "packet-a",
-        "evidence_kind",
-        "semantic_grouping",
-        "score_summary",
-        "source_architectures",
-        "observable_axes",
-        "details",
-        "text_truncated",
-    ):
-        assert forbidden not in rendered_items
+    assert batches == [[packets[0]], [packets[1]]]
+    for batch in batches:
+        messages = stage2_workflow._interpretation_prompt(
+            architecture="private-architecture", packets=batch,
+        )
+        rendered = " ".join(message["content"] for message in messages)
+        assert batch[0]["content"]["representative_evidence"][0]["text"] in rendered
+        for forbidden in ("private-card", "private-architecture", "secret_statistic",
+                          "private_detail", "supporting_items", "observable_axes"):
+            assert forbidden not in rendered
+    with pytest.raises(ValueError, match="exactly one evidence card"):
+        stage2_workflow._interpretation_prompt(architecture="ignored", packets=packets)
+    with pytest.raises(ValueError, match="cannot fit"):
+        stage2_workflow._partition_interpretation_packets(
+            packets, architecture="ignored", max_prompt_chars=100,
+        )
+
+
+def test_discovery_attaches_trusted_provenance_and_preserves_name_collisions():
+    rows = [
+        {"name": "Risk score", "description": "First distinct scale.", "basis": "First scale is reported.", "uncertainty": ""},
+        {"name": "Risk-score", "description": "Second distinct scale.", "basis": "Second scale is reported.", "uncertainty": "Scale is not otherwise named."},
+    ]
+    result = stage2_workflow._validate_discovery(
+        {"candidates": rows}, packet_id="trusted-card", evidence_axes=["outcome", "outcome"],
+    )
+    assert len({row["name"] for row in result["concepts"]}) == 2
+    assert {row["description"] for row in result["concepts"]} == {row["description"] for row in rows}
+    assert all(row["supporting_packet_ids"] == ["trusted-card"] for row in result["concepts"])
+    assert all(row["evidence_axes"] == ["outcome"] for row in result["concepts"])
+    assert result == stage2_workflow._validate_discovery(
+        {"candidates": list(reversed(rows))}, packet_id="trusted-card", evidence_axes=["outcome"],
+    )
+    empty = stage2_workflow._validate_discovery({"candidates": []}, packet_id="empty-card")
+    assert empty["packet_dispositions"]["empty-card"]["status"] == "reviewed_no_specific_concept"
+
+
+@pytest.mark.parametrize("bad_row", [
+    {"name": "Clinical finding", "description": "Finding.", "basis": "Explicit.", "uncertainty": "", "supporting_packet_ids": ["forged"]},
+    {"name": "Clinical finding", "description": "Finding.", "basis": "", "uncertainty": ""},
+    {"name": "Clinical finding", "description": "Finding.", "basis": "Explicit.", "uncertainty": None},
+])
+def test_discovery_rejects_invalid_content_instead_of_silently_losing_features(bad_row):
+    with pytest.raises(ValueError):
+        stage2_workflow._validate_discovery({"candidates": [bad_row]}, packet_id="trusted")
 
 
 def test_rejected_packet_audit_prompt_is_generic_recall_guardrail():
-    packet = {
-        "packet_id": "packet-a",
-        "architecture": "bow_r_loss",
-        "observable_axes": ["residual_effect"],
-        "content": {"representative_evidence": [{"text": "pretreatment serum albumin 2.8 g/dL"}]},
-    }
-
-    messages = stage2_workflow._rejected_packet_audit_prompt(
-        architecture="bow_r_loss",
-        packets=[packet],
-    )
-    body = json.loads(messages[1]["content"])
-    rules = " ".join(body["rules"]).lower()
-
-    instructions = " ".join(
-        [messages[0]["content"], body["task"], rules, json.dumps(body["response"])]
-    ).lower()
-
-    assert body["job"] == "audit_unmapped_text_evidence_for_missed_clinical_features"
-    assert "clinical_question" not in body
-    assert "one clear item is sufficient" in rules
-    assert "one value per patient" in rules
-    assert "one patient's record" in rules
-    assert "without comparing or aggregating across patients" in rules
-    assert "descriptions of the input collection" in rules
-    assert "absence of a common feature" in rules
-    assert "supporting_items" in rules
-    assert "nonempty snake_case name" in rules
-    assert "blank or null name" in rules
-    assert "do not choose a value type" in rules
-    assert "input or analysis artifacts" in messages[0]["content"].lower()
-    assert "supported atomic variables" in messages[0]["content"].lower()
-    assert "not by creating umbrella, inventory, or composite candidates" in (
-        messages[0]["content"].lower()
-    )
-    assert "prefer atomic clinical variables" in rules
-    assert "exhaustively enumerate every distinct atomic patient-level clinical feature" in rules
-    assert "read every string in an evidence item's text array" in rules
-    assert "do not limit an evidence item to one candidate" in rules
-    assert "multiple independently varying patient attributes" in rules
-    assert "a separate atomic candidate for each attribute" in rules
-    assert "attributes belonging to relatives, specimens, clinicians" in rules
-    assert "including secondary features outside the dominant topic" in messages[0][
-        "content"
-    ].lower()
-    assert re.search(r"\bage\b", instructions) is None
-    assert "return no candidate rather than a vague catch-all" in rules
-    assert "longitudinal information as clinical context" in rules
-    assert "pretreatment" not in instructions
-    assert "posttreatment" not in instructions
-    assert "causal" not in instructions
-    assert "stage 1" not in instructions
-    assert body["evidence_items"] == [{"item": 1, "text": ["pretreatment serum albumin 2.8 g/dL"]}]
-    assert "value_type" not in json.dumps(body["response"])
-    assert "packet_dispositions" not in instructions
+    from oci.inference.stage2_prompt_catalog import SYSTEM_PROMPTS
+    excerpt = "pretreatment serum albumin 2.8 g/dL"
+    messages = stage2_workflow._rejected_packet_audit_prompt(architecture="bow_r_loss", packets=[{
+        "packet_id": "PRIVATE_PACKET", "content": {"representative_evidence": [{"text": excerpt}]}}])
+    assert messages[0]["content"] == SYSTEM_PROMPTS["02_audit_unmapped"]
+    assert excerpt in messages[1]["content"]
+    assert "PRIVATE_PACKET" not in str(messages)
+    assert "supporting_items" not in str(messages)
+    result = stage2_workflow._validate_interpretation({"candidates": [{"name": "Serum albumin", "description": "Albumin concentration.", "basis": "Albumin result.", "uncertainty": ""}]}, packet_ids=["PRIVATE_PACKET"])
+    assert result["concepts"][0]["supporting_packet_ids"] == ["PRIVATE_PACKET"]
 
 
 def test_operationalization_prompt_prefers_realistic_continuous_measurements():
-    evidence = ["PD-L1 tumor proportion score was 80 percent."]
-    messages = stage2_workflow._operationalization_prompt(
-        feature_name="pd_l1_expression_level",
-        supporting_evidence=evidence,
-    )
-    body = json.loads(messages[1]["content"])
-    instructions = json.loads(messages[0]["content"])
-    rules = " ".join(instructions["rules"]).lower()
-
-    assert set(body) == {"candidate_feature_name", "supporting_evidence"}
-    assert body["candidate_feature_name"] == "pd_l1_expression_level"
-    assert body["supporting_evidence"] == evidence
-    assert "determine value_type yourself" in rules
-    assert "no value type from an earlier discovery step" in rules
-    assert "prefer value_type continuous" in rules
-    assert "realistically be extracted as a numeric measurement" in rules
-    assert "would misrepresent the feature" in rules
-    assert "conflict_resolution strategy" in rules
-    assert instructions["response"]["conflict_resolution"]["strategy"].startswith("latest|")
-    rendered = messages[1]["content"]
-    for irrelevant_key in (
-        "outer_fold",
-        "clinical_question",
-        "group_id",
-        "candidate_value_type",
-        "evidence_axes",
-        "supporting_architectures",
-        "origin_candidate_count",
-        "packet_support_count",
-        "member_measurements",
-        "evidence_kind",
-        "representative_evidence",
-        "semantic_grouping",
-        "source_architectures",
-        "source_families",
-        "score_summary",
-        "supporting_context_count",
-        "text_truncated",
-    ):
-        assert irrelevant_key not in rendered
+    from oci.inference.stage2_prompt_catalog import SYSTEM_PROMPTS
+    excerpt = "PD-L1 tumor proportion score was 80 percent."
+    messages = stage2_workflow._operationalization_prompt(feature_name="pd_l1_expression_level", supporting_evidence=[excerpt])
+    assert messages[0]["content"] == SYSTEM_PROMPTS["04_define_ontology"]
+    assert "pd l1 expression level" in messages[1]["content"] and excerpt in messages[1]["content"]
+    for field in ("feature_id", "outer_fold", "clinical_question", "packet_id", "supporting_items"):
+        assert field not in str(messages)
 
 
 def test_supporting_evidence_preserves_text_and_architecture_without_packet_metadata():
@@ -3202,12 +3002,13 @@ def test_interpretation_second_pass_recovers_rejected_named_measurement(tmp_path
     secret_question = "SECRET CLINICAL QUESTION THAT MUST NOT REACH INTERPRETATION"
 
     def completion(messages, _config):
-        body = json.loads(messages[1]["content"])
-        calls.append(body["job"])
         assert secret_question not in messages[1]["content"]
-        assert "clinical_question" not in body
-        if body["job"] == "infer_clinical_features_from_text_evidence":
+        if messages[0]["content"].startswith("You identify clinical variables") and not calls:
+            calls.append("infer_clinical_features_from_text_evidence")
             return json.dumps({"candidates": []})
+        body = prompt_inputs(messages)
+        calls.append(body["job"])
+        assert "clinical_question" not in body
         assert body["job"] == "audit_unmapped_text_evidence_for_missed_clinical_features"
         return json.dumps(
             {
@@ -3305,22 +3106,12 @@ def test_interpretation_does_not_pair_new_input_with_an_old_complete_result(
 
     def completion(_messages, _config):
         calls.append("called")
-        return json.dumps(
-            {
-                "concepts": [
-                    {
-                        "name": "performance_status",
-                        "description": "Pretreatment ECOG performance status.",
-                        "supporting_items": [1],
-                        "evidence_rationale": (
-                            "The functional-status language is a noisy manifestation of "
-                            "baseline performance status."
-                        ),
-                        "caveats": "",
-                    }
-                ],
-            }
-        )
+        return json.dumps({"candidates": [{
+            "name": "Performance status",
+            "description": "ECOG performance status.",
+            "basis": "The text explicitly reports ECOG 2.",
+            "uncertainty": "",
+        }]})
 
     runner = PlainHandoffStage2(
         config=PlainHandoffStage2Config(
@@ -3829,7 +3620,10 @@ def _agentic_fixture_response(body):
 
 def _fake_completion(calls):
     def complete(messages, _config):
-        body = json.loads(messages[1]["content"])
+        if messages[0]["content"].startswith("You identify clinical variables"):
+            body = {"job": "infer_clinical_features_from_text_evidence"}
+        else:
+            body = prompt_inputs(messages)
         job = _prompt_job(body)
         calls.append(job)
         if body.get("task") in {
@@ -3881,23 +3675,12 @@ def _fake_completion(calls):
                 }
             )
         if job == "infer_clinical_features_from_text_evidence":
-            supporting_items = [row["item"] for row in body["evidence_items"]]
-            return json.dumps(
-                {
-                    "candidates": [
-                        {
-                            "name": "performance_status",
-                            "description": "Baseline functional performance status.",
-                            "supporting_items": supporting_items,
-                            "evidence_rationale": (
-                                "Repeated functional-status language could be generated by "
-                                "latent baseline performance status."
-                            ),
-                            "caveats": "The exact scale must be extracted.",
-                        }
-                    ],
-                }
-            )
+            return json.dumps({"candidates": [{
+                "name": "Performance status",
+                "description": "Baseline functional performance status.",
+                "basis": "The supplied text reports performance status.",
+                "uncertainty": "",
+            }]})
         if job == "consolidate_stage2_candidate_pool":
             assert "candidate_id" not in messages[1]["content"]
             return json.dumps({"merge_directives": []})
@@ -4100,7 +3883,7 @@ def test_stage2_pages_oversized_unicode_note_without_dropping_text(tmp_path: Pat
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         prompt_sizes.append(sum(len(message["content"]) for message in messages))
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         assert body["job"] == "extract_stage2_patient_variable_observations"
         patient = body["patient"]
         page_bodies.append(patient)
@@ -4170,7 +3953,7 @@ def test_stage2_feature_batch_limit_is_preserved_across_lossless_pages(tmp_path:
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         prompt_sizes.append(sum(len(message["content"]) for message in messages))
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         names = [feature["name"] for feature in body["features"]]
         assert len(names) <= 4
         assert body["job"] == "extract_stage2_patient_variable_observations"
@@ -4261,7 +4044,7 @@ def test_stage2_reconciles_oversized_page_observations_without_another_llm_reque
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         prompt_sizes.append(sum(len(message["content"]) for message in messages))
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         assert body["job"] == "extract_stage2_patient_variable_observations"
         page_bodies.append(body["patient"])
         patient = body["patient"]
@@ -4327,7 +4110,7 @@ def test_stage2_oversized_note_uses_verified_dates_instead_of_page_order(tmp_pat
     page_prompts = []
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         assert body["job"] == "extract_stage2_patient_variable_observations"
         page_prompts.append(body)
         patient = body["patient"]
@@ -4517,7 +4300,7 @@ def test_stage2_iterative_consolidation_does_not_lose_candidates():
     prompts = []
 
     def completion(messages, request_config):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         prompts.append(
             (
                 _prompt_job(body),
@@ -4610,7 +4393,7 @@ def test_stage2_iterative_consolidation_does_not_lose_candidates():
 
 def test_consolidation_dispositions_follow_registry_origin_candidates():
     def completion(messages, _request_config):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         if _prompt_job(body) == "consolidate_stage2_candidate_pool":
             return json.dumps({"merge_directives": []})
         return json.dumps(
@@ -4656,63 +4439,15 @@ def test_consolidation_dispositions_follow_registry_origin_candidates():
 
 
 def test_global_candidate_pool_prompt_exposes_all_unique_names_and_descriptions():
-    messages = stage2_workflow._global_candidate_pool_prompt(
-        groups=[
-            {
-                "name": "patient_age",
-                "description": "Patient age.",
-                "member_measurements": [
-                    {"description": "Age expressed in years."},
-                ],
-            },
-            {"name": "age_2", "description": "A value-encoded age alias."},
-            {"name": "serum_sodium", "description": "Serum sodium."},
-        ],
-    )
-
-    body = json.loads(messages[1]["content"])
-
-    assert body["job"] == "consolidate_stage2_candidate_pool"
-    assert "clinical_question" not in body
-    assert [feature["name"] for feature in body["features"]] == [
-        "age_2",
-        "patient_age",
-        "serum_sodium",
-    ]
-    assert body["features"][1]["descriptions"] == [
-        "Patient age.",
-        "Age expressed in years.",
-    ]
-    assert body["response"] == {
-        "merge_directives": [
-            {
-                "inputs": [
-                    "all exact supplied names in one alias family, including a reused output name"
-                ],
-                "output": "one snake_case canonical feature name",
-            }
-        ],
-    }
-    assert "candidate_id" not in messages[1]["content"]
-    assert "group_id" not in messages[1]["content"]
-    instructions = " ".join([messages[0]["content"], body["task"], *body["rules"]]).lower()
-    assert "alphabetically adjacent batch" in instructions
-    assert "new deterministic partitions" in instructions
-    assert "including the selected canonical name" in instructions
-    assert "never chain or split one family" in instructions
-    assert "only when that exact name appears in the same directive's inputs" in instructions
-    assert "merge-only ontology consolidation" in instructions
-    assert "never exclude or drop" in instructions
-    assert "true semantic aliases of the same atomic clinical variable" in instructions
-    assert "every merge output must itself be atomic" in instructions
-    assert "must not broaden them into a parent domain" in instructions
-    assert "does not establish semantic equivalence" in instructions
-    assert "constituent variables that can vary independently" in instructions
-    assert "no precise atomic target is common to every input" in instructions
-    assert "exclude_feature_names" not in messages[1]["content"]
-    assert "pretreatment" not in instructions
-    assert "post-treatment" not in instructions
-    assert "treatment" not in instructions
+    messages = stage2_workflow._global_candidate_pool_prompt(groups=[
+        {"name": "patient_age", "description": "Patient age.", "member_measurements": [{"description": "Age expressed in years."}]},
+        {"name": "age_2", "description": "A value-encoded age alias."}, {"name": "serum_sodium", "description": "Serum sodium."}])
+    text = messages[1]["content"]
+    for text_value in ("patient age", "Patient age.", "Age expressed in years.", "age 2", "serum sodium"):
+        assert text_value in text
+    assert "candidate_id" not in str(messages) and "group_id" not in str(messages)
+    result = stage2_workflow._validate_global_candidate_pool_directives({"merges": [{"members": ["patient age", "age 2"], "canonical_label": "Patient age"}]}, group_names=["patient_age", "age_2", "serum_sodium"])
+    assert result["merge_directives"] == [{"inputs": ["patient_age", "age_2"], "output": "patient_age"}]
 
 
 def test_alphabetical_candidate_batches_shift_boundaries_between_rounds():
@@ -4810,7 +4545,7 @@ def test_iterative_consolidation_finds_aliases_across_a_shifted_batch_boundary(
     prompt_features = []
 
     def completion(messages, _config):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         batch_names = [feature["name"] for feature in body["features"]]
         prompt_features.append(body["features"])
         if {"marker_level", "marker_status"} <= set(batch_names):
@@ -4927,7 +4662,7 @@ def test_seeded_shuffle_round_can_merge_candidates_from_distant_alphabetical_bat
     )
 
     def completion(messages, _config):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         batch_names = {feature["name"] for feature in body["features"]}
         if set(alias_pair) <= batch_names:
             return json.dumps(
@@ -5430,17 +5165,11 @@ def test_redesigned_consolidation_assembles_provenance_roles_and_dispositions_in
     def completion(messages, _config):
         rendered = messages[1]["content"]
         assert all(packet_id not in rendered for packet_id in packet_ids)
-        body = json.loads(rendered)
+        body = prompt_inputs(messages)
         prompt_bodies.append(body)
         job = _prompt_job(body)
         if job == "consolidate_stage2_candidate_pool":
-            assert set(body) == {
-                "job",
-                "task",
-                "features",
-                "rules",
-                "response",
-            }
+            assert rendered.startswith("Variables\n")
             assert all("candidate" not in feature["name"] for feature in body["features"])
             names = {feature["name"] for feature in body["features"]}
             if not {"serum_sodium", "blood_sodium_concentration"} <= names:
@@ -5600,7 +5329,7 @@ def test_configured_feature_is_consolidated_with_discovery_and_keeps_supplied_on
     jobs = []
 
     def completion(messages, _config):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         job = _prompt_job(body)
         jobs.append(job)
         assert job == "consolidate_stage2_candidate_pool"
@@ -5751,7 +5480,7 @@ def test_shifted_consolidation_round_preserves_explicit_feature_name_ontology_an
     configured_batches = []
 
     def completion(messages, _config):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         names = [feature["name"] for feature in body["features"]]
         if "ecog_performance_status" in names:
             configured_batches.append(body["configured_feature_names"])
@@ -5863,7 +5592,7 @@ def test_global_consolidation_merges_aliases_and_retains_all_candidates_for_scre
 
     def completion(messages, _config):
         rendered = messages[1]["content"]
-        body = json.loads(rendered)
+        body = prompt_inputs(messages)
         prompt_bodies.append(body)
         job = _prompt_job(body)
         if job == "consolidate_stage2_candidate_pool":
@@ -6022,7 +5751,7 @@ def test_iterative_batch_jointly_merges_general_threshold_value_and_score_repres
     jobs = []
 
     def completion(messages, _config):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         job = _prompt_job(body)
         jobs.append(job)
         if job == "consolidate_stage2_candidate_pool":
@@ -6387,7 +6116,7 @@ def test_operationalization_packs_oversized_supporting_evidence_under_independen
     def completion(messages, request_config):
         observed["prompt_chars"] = sum(len(message["content"]) for message in messages)
         observed["prompt_limit"] = request_config.max_prompt_chars
-        observed["body"] = json.loads(messages[1]["content"])
+        observed["body"] = prompt_inputs(messages)
         return json.dumps(
             {
                 "description": "A generic quantitative clinical measurement.",
@@ -6552,7 +6281,7 @@ def test_llm_harmonizes_generic_mixed_values_and_applies_plan_to_heldout(
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         assert request_kind == "interpretation"
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         jobs.append(body["job"])
         assert body["feature"]["name"] == "tumor_marker_score"
         return validate(
@@ -6725,7 +6454,7 @@ def test_harmonization_extends_only_new_values_in_a_frozen_prior_plan(tmp_path: 
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         assert request_kind == "interpretation"
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         jobs.append(body["job"])
         assert body["new_observed_training_text_values"] == [
             {"raw_value": "new label", "count": 1}
@@ -7321,20 +7050,7 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
         / "selection"
         / "statistical_evidence.json"
     ).is_file()
-    role_prompt_path = (
-        output
-        / "outer_001"
-        / "selection"
-        / "role_adjudication"
-        / "prompt.json"
-    )
-    assert role_prompt_path.is_file()
-    role_batch_prompt_path = (
-        role_prompt_path.parent
-        / "batches"
-        / "batch_001"
-        / "prompt.json"
-    )
+    role_batch_prompt_path = output / "outer_001" / "selection" / "role_adjudication" / "batches" / "batch_001" / "prompt.json"
     assert role_batch_prompt_path.is_file()
     role_prompt = role_batch_prompt_path.read_text(encoding="utf-8").casefold()
     assert "oracle_ite" not in role_prompt
@@ -7448,7 +7164,7 @@ def test_aggregate_supervisor_reuses_identical_feature_review_across_rounds(
     calls = []
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        calls.append(json.loads(messages[1]["content"])["feature"]["feature_id"])
+        calls.append(prompt_inputs(messages)["feature"]["feature_id"])
         assert request_kind == "interpretation"
         return validate(
             {
@@ -7641,7 +7357,7 @@ def test_aggregate_supervisor_can_revise_then_reextract_a_definition(
     )
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         if body.get("task") in {
             "analyze_cluster",
             "outer_fold_role_adjudication",
@@ -8353,7 +8069,7 @@ def test_repeated_training_extraction_failures_refine_ontology_and_reextract(
     jobs = []
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         if body.get("task") in {
             "analyze_cluster",
             "outer_fold_role_adjudication",
@@ -8518,7 +8234,7 @@ def test_failure_refinement_reextracts_only_changed_features_and_resumes(
     extraction_feature_sets = []
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         if body.get("task") in {
             "analyze_cluster",
             "outer_fold_role_adjudication",
@@ -8787,7 +8503,7 @@ def test_final_training_extraction_fails_fast_when_effectively_all_null(
     }
 
     def request_json(messages, validate, *, request_kind="interpretation"):
-        body = json.loads(messages[1]["content"])
+        body = prompt_inputs(messages)
         if body.get("task") in {
             "analyze_cluster",
             "outer_fold_role_adjudication",

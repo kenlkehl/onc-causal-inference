@@ -1,0 +1,14 @@
+{
+  "description": "Serum creatinine concentration documented in an eligible record.",
+  "value_type": "continuous",
+  "categories_or_unit": [
+    "mg/dL"
+  ],
+  "measurement_definition": "Extract the numeric serum creatinine result reported in mg/dL from the supplied eligible records. Ignore unrelated findings. When more than one eligible serum creatinine result is present, use the latest result by explicit observation date; if dates tie, use the result appearing later in source order.",
+  "missing_value_rule": "Return null when no eligible serum creatinine result is documented, when the result is nonnumeric without a supported exact value, or when its unit cannot be resolved to mg/dL without an unambiguous stated conversion.",
+  "conflict_resolution": {
+    "strategy": "latest",
+    "positive_category": null
+  },
+  "caveats": "Do not treat ordinary results from different dates as contradictions. Do not use unrelated clinical findings to infer a value."
+}

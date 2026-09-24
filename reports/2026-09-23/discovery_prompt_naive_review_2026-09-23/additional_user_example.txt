@@ -1,0 +1,10 @@
+Identify the clinical variables supported by these excerpts using the instructions above.
+
+<clinical_excerpts>
+<excerpt>
+HER2 immunostaining is 3+ in the patient’s tumor. The patient’s mother had breast cancer. No emphysema is seen on CT.
+</excerpt>
+<excerpt>
+ECOG performance status 2. TNM classification T2N1M0. Cough has lasted three weeks. Possible peripheral neuropathy.
+</excerpt>
+</clinical_excerpts>

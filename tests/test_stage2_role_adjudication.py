@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.stage2_prompt_spy import prompt_inputs, role_response
+
 import inspect
 import json
 
@@ -175,35 +177,12 @@ def test_adjudication_applies_roles_preserves_lock_and_reuses_checkpoint(tmp_pat
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         assert request_kind == "interpretation"
-        payload = json.loads(messages[1]["content"])
+        payload = prompt_inputs(messages)
         assert payload["task"] == "adjudicate_stage2_roles_from_all_evidence"
         assert "dataset" not in payload
         calls.append(payload)
-        return validate(
-            {
-                "summary": "Reconciled all statistical views.",
-                "decisions": [
-                    {
-                        "feature_id": "candidate_a",
-                        "roles": ["effect_modifier"],
-                        "evidence_for": ["Positive held-out R-loss evidence."],
-                        "evidence_against": ["Confounder evidence was inconsistent."],
-                        "inner_fold_consistency": "Modifier support recurred.",
-                        "cross_method_reconciliation": "Both modifier views agreed.",
-                        "rationale": "Retain only as an effect modifier.",
-                    },
-                    {
-                        "feature_id": "locked_b",
-                        "roles": ["confounder"],
-                        "evidence_for": ["Investigator-locked role."],
-                        "evidence_against": [],
-                        "inner_fold_consistency": "The lock is invariant.",
-                        "cross_method_reconciliation": "Empirical evidence is advisory.",
-                        "rationale": "Preserve the configured role exactly.",
-                    },
-                ],
-            }
-        )
+        candidate = payload["role_evidence"]["candidates"][0]
+        return validate(role_response(confounder=candidate["feature_id"] == "locked_b", modifier=candidate["feature_id"] == "candidate_a"))
 
     arguments = {
         "definitions": definitions,
@@ -229,11 +208,11 @@ def test_adjudication_applies_roles_preserves_lock_and_reuses_checkpoint(tmp_pat
     assert report["failure_policy"] == (
         "fail_outer_fold_without_statistical_fallback"
     )
-    assert len(calls) == 1
+    assert len(calls) == 2
 
     cached, _cached_report, _cached_evidence = adjudicate_stage2_roles(**arguments)
     assert cached == selected
-    assert len(calls) == 1
+    assert len(calls) == 2
 
 
 def test_adjudication_rejects_changed_investigator_locked_role(tmp_path):
@@ -275,18 +254,12 @@ def test_adjudication_batches_large_candidate_sets_and_aggregates_in_order(tmp_p
 
     def request_json(messages, validate, *, request_kind="interpretation"):
         assert request_kind == "interpretation"
-        payload = json.loads(messages[1]["content"])
+        payload = prompt_inputs(messages)
         supplied_ids = [
             row["feature_id"]
             for row in payload["role_evidence"]["candidates"]
         ]
-        observed_batches.append(
-            (
-                payload["candidate_batch"]["batch_index"],
-                payload["candidate_batch"]["batch_count"],
-                supplied_ids,
-            )
-        )
+        observed_batches.append(supplied_ids)
         return validate(
             {
                 "summary": "Batch evidence reconciled.",
@@ -313,11 +286,7 @@ def test_adjudication_batches_large_candidate_sets_and_aggregates_in_order(tmp_p
         policy=Stage2RoleAdjudicationConfig(max_candidates_per_request=2),
     )
 
-    assert observed_batches == [
-        (1, 3, feature_ids[0:2]),
-        (2, 3, feature_ids[2:4]),
-        (3, 3, feature_ids[4:5]),
-    ]
+    assert observed_batches == [[key] for key in feature_ids]
     assert [row["feature_id"] for row in selected] == feature_ids
-    assert report["batch_count"] == 3
-    assert report["max_candidates_per_request"] == 2
+    assert report["batch_count"] == 5
+    assert report["max_candidates_per_request"] == 1

@@ -1,0 +1,22 @@
+{
+  "http_status": 200,
+  "request_sha256": "242d6a13c141e46f277870656362916d27805d6386dc76bc8cccbbf6bc855134",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 4.445,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 524,
+    "total_tokens": 747,
+    "completion_tokens": 223,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 201
+    }
+  },
+  "reasoning_characters": 677,
+  "content": "\n\n{\"Serum creatinine\":1.2,\"Emphysema on imaging\":\"Present\"}",
+  "parsed": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  }
+}

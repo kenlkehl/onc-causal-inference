@@ -1,0 +1,6 @@
+
+
+{
+  "preferred_feature": "Emphysema on imaging",
+  "rationale": "Emphysema on imaging has stronger and more consistent evidence for predicting differences in treatment benefit. Its treatment-interaction signal was positive in all three penalized analyses, all three univariable R-learner validation R-loss gains were positive (0.003 to 0.006), and all three causal-forest permutation R-loss increases were positive (0.002 to 0.004), indicating it helped predict heterogeneous treatment effects in held-out analyses. Serum creatinine had a weaker effect-heterogeneity profile: only 1 of 3 penalized treatment interactions was nonzero, none of the 3 univariable R-learner R-loss gains were positive, and causal-forest permutation evidence was mostly null. Although serum creatinine showed 2 of 3 nominal interaction p-values <0.05, univariable interaction p-values are less direct evidence of usable treatment-benefit prediction than consistent positive R-learner and causal-forest validation results, and multiplicity-adjusted q-values are unavailable. Serum creatinine’s main-effect results suggest possible prognostic association, but the available evidence for modifying treatment benefit is weaker and less consistent than for emphysema. Measured redundancy between the variables is unavailable, so one should not infer that either variable is redundant with the other."
+}

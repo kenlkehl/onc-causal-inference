@@ -137,12 +137,15 @@ extracted measurements. Inner-fold grouped elastic nets, candidate-wise tests,
 and R-loss models then produce selection evidence. The default `llm_roles`
 mode uses primary-model adjudication; the opt-in `independent_tasks` mode uses
 separate numerical treatment, outcome, and effect selections with optional
-advisory annotations. P/q values are evidence, not hard inclusion gates.
+advisory annotations. The opt-in `multi_model` mode combines several model
+families, clinical theme review, and nested selection of modifier count and
+final estimator. P/q values contribute evidence.
 Explicit investigator variables retain their configured ontologies and roles
 regardless of selection evidence. Only the retained variables are
 extracted from outer-held-out text. The final heterogeneous-effect model is an
-honest causal forest, while outer-held-out nuisance predictions supply
-cross-fitted AIPW scores. Stage 2 is enabled by specifying `stage2.endpoint` or
+honest causal forest by default. Multi-model architecture search can select a
+penalized outcome model with treatment interactions. Outer-held-out nuisance
+predictions supply cross-fitted AIPW scores. Stage 2 is enabled by specifying `stage2.endpoint` or
 `stage2.vllm`; dataset-backed execution additionally requires a separate
 `stage2.extraction_llm` model configuration.
 
@@ -154,17 +157,30 @@ not an artifact-authentication, byte-attestation, or deployment-gate system.
 The former `raw_packets_v1` compatibility option is intentionally unsupported
 because it combined scientifically distinct architectures.
 
-For feature discovery, Python projects every compiled packet to a prompt-local
-integer `item` and its readable representative texts. Card and packet IDs,
+For initial feature discovery, Python sends one compiled card per request,
+containing only its readable representative texts. Card and packet IDs,
 evidence kind, detail objects, truncation flags, axes, polarity, semantic
 grouping, architectures, scores, support counts, folds, and other provenance
-stay outside the model prompt. The model returns feature names, descriptions,
-rationales, and `supporting_items` such as `[1, 3]`; Python immediately maps
-those ordinal labels back to the original compiled packets. Discovery does not
+stay outside the model prompt. The self-contained prose instructions explain
+the purpose, what the excerpts represent, and which choices belong downstream.
+The model returns ordinary clinical names, descriptions, textual bases, and
+material uncertainties. Python validates that response, normalizes names,
+preserves distinct candidates when normalized names collide, and attaches the
+card's provenance. There are no model-authored IDs or item indices. Discovery does not
 choose causal roles, value types, units, categories, or extraction ontologies.
 All returned candidates continue to lossless, iterative consolidation; the
 later one-feature ontology request sees the canonical name and its directly
-cited readable supporting text.
+associated readable supporting text. Cards with no candidates still enter the
+recall audit, which uses the same clinical response contract on one card at a
+time. All 23 reviewed prompt types are now standard: discovery, aliases,
+measurement definitions, patient/chunk/occurrence extraction, category mapping,
+ontology review, harmonization, role/theme review, modifier ordering, concept
+review, and repairs. Their source is `stage2_prompt_catalog.py`; repair wording
+is assembled with the actual validation error. Python assigns identifiers,
+source offsets, provenance, ranking positions, and merge bookkeeping. Clinical
+names remain in responses so measurements and judgments can be matched.
+The prompt version and exact request content participate in checkpoint identity. Use a fresh Stage 2 output directory to regenerate definitions
+under the new discovery contract; existing completed definitions are preserved.
 
 An external endpoint configuration is:
 
@@ -191,8 +207,8 @@ An external endpoint configuration is:
     "max_response_repairs": 15,
     "thinking_after_response_repairs": 5,
     "repetition_penalty": null,
-    "interpretation_reasoning_effort": "high",
-    "extraction_reasoning_effort": "none",
+    "interpretation_reasoning_effort": "auto",
+    "extraction_reasoning_effort": "auto",
     "evidence_compiler": "semantic_cluster_cards_v2",
     "evidence_max_cards_per_fold": 400,
     "evidence_max_exemplars_per_card": 4,
@@ -428,8 +444,10 @@ uses `reasoning_parser: "qwen3"` and `language_model_only: true`.
 Stage 2 selects reasoning per Chat Completions request. Evidence interpretation
 and audit, consolidation, operationalization, category mapping, aggregate
 ontology supervision, and ontology refinement go to the primary model with
-`reasoning_effort: "high"` by default. Only one-patient value extraction goes
-to the small model with `reasoning_effort: "none"` initially. Primary-model
+`reasoning_effort: "auto"` by default. The extraction model also uses `auto`.
+After `/models` identifies the backing model, Qwen3.8 Flash Next resolves to
+`xhigh` for both roles; other models retain high interpretation and initially
+disabled extraction reasoning. Explicit settings override these defaults. Primary-model
 requests receive the configured `max_tokens` ceiling (100,000 by default), while
 patient extraction receives `extraction_max_tokens` (75,000 when omitted;
 the recommended example uses 4,096 for ten-feature non-thinking requests).
@@ -444,15 +462,17 @@ Stage 2 uses [publisher sampling profiles](stage2_sampling.md), with explicit
 configuration overrides taking precedence.
 Stage 2 first verifies each live endpoint's selected model through `/models`.
 It recognizes Qwen 3 (including 3.8), Gemma 4, and LFM 2.5 model IDs and sends
-their boolean chat-template thinking switch plus a portable prompt fallback.
-If an OpenAI-compatible server rejects a nonstandard control, Stage 2 retries
-with progressively more standard request fields. Responses are accepted whether
+their chat-template thinking switch. Flash Next also receives `xhigh` and
+`preserve_thinking`; rejected reasoning or sampling controls cause a visible
+failure. Other families retain the portable prompt fallback and progressively
+more standard request fields when an endpoint rejects an extension. Responses are accepted whether
 reasoning is separated into `reasoning_content` or remains inline in Qwen/LFM
 `<think>` blocks or Gemma thought channels. The configured fields are
 `interpretation_reasoning_effort` and `extraction_reasoning_effort`.
-Qwen 3.8 translates the configured `high` policy to its accepted wire value
-`xhigh`; thinking-off extraction requests omit the enabled-only effort enum and
-use the template switch and prompt fallback.
+Qwen 3.8 translates an explicit `high` policy to its accepted wire value
+`xhigh`. Explicit thinking-off requests use the template switch and omit the
+enabled-only effort enum. Effective policies and publisher sources appear in
+`model_identity.json`; request events record the controls sent on each attempt.
 
 A complete logical request is bounded by `request_timeout` (7200 seconds by
 default), including transport retries and response-repair turns. Individual
@@ -515,7 +535,8 @@ while retaining all provenance and candidate descriptions.
 
 The clinical question is deliberately absent from every consolidation batch.
 The model returns `merge_directives`, each with an `inputs` list of exact names
-from that batch and one canonical `output` name. Iterative consolidation is
+from that batch in `members` and one `canonical_label`. Python translates the
+clinical names to its internal merge directives. Iterative consolidation is
 strictly merge-only: every supplied feature survives each round either
 unchanged or as a member of one merged alias family. The response contract has
 no exclusion list, and a response that supplies `exclude_feature_names` is
@@ -725,6 +746,42 @@ uv run python scripts/run_all_evidence.py \
 ```
 
 Command-line values override the config file.
+
+## Clinical modifier concepts and architecture selection
+
+In `multi_model` mode, set
+`stage2.statistical_selection.multi_model.modifier_count.concept_review=true`
+to review the concepts represented by the top candidates from each inner fold.
+`concept_top_n_per_fold` defaults to 100. Python assembles each union and its
+recurrence counts. The LLM groups clinically related measurements, explains the
+evidence and uncertainty, and nominates existing representative measurements.
+Retained representatives and explicitly nominated uncertain representatives
+enter the subsequent modifier-count search. Confounder roles are preserved.
+
+This review is repeated inside each count-validation training partition using
+numerical evidence computed within that partition. Each final estimator/count
+combination is scored on the same held-out overlap-eligible patients using
+R-loss. The default candidates are an honest causal forest and a penalized
+linear outcome model with treatment interactions (logistic for binary outcomes).
+The final review uses all outer-training evidence after the search selects an
+architecture and count budget. Available representatives can be fewer than the
+budget; the audit records the actual counts. Investigator-locked roles remain
+fixed. No oracle values enter these steps.
+
+Concept review is disabled when omitted. It adds repeated numerical fits and
+LLM reviews; each is checkpointed. Rankings are constructed from clinical
+ordered groups and pairwise comparisons of leading candidates. Python owns
+positions, deterministic ties, and list merging. The candidate definitions and
+measurement ontology are still learned on the outer-training set, so the inner
+R-loss comparison is conditional on that upstream adaptation. Outer-held-out
+evaluation remains the final test of the whole workflow.
+
+A fresh run against preserved Stage 1 files can use
+`scripts/run_stage2_from_artifacts.py CONFIG.json`. The launcher projects the
+dataset to the four declared patient/text/treatment/outcome columns, records
+source hashes and endpoint identities, checks tokenizer availability, and keeps
+status and logs alongside the dated run configuration. `--preflight` performs
+those checks without starting discovery or fitting.
 
 ## Parallel execution
 
@@ -954,8 +1011,9 @@ and consolidation leaves, extraction batches, ontology-supervision leaves, and
 completed fold estimates.
 The compiled packet plan is cached under `stage2/evidence_compilation/`; on a
 restart the runner hashes the handoff and normally loads this small cache rather
-than reparsing the raw Stage 1 evidence. Interpretation batches are skipped only when their input fingerprint
-(compiled discovery packets plus clinical question by default) matches.
+than reparsing the raw Stage 1 evidence. Single-card interpretation requests
+are skipped only when their input fingerprint (compiled card, model identity,
+and discovery version) matches.
 It writes an outer-fold completion marker only after held-out estimation, and
 writes the final top-level marker only after the cross-fitted estimates have
 been assembled.

@@ -1,0 +1,22 @@
+
+
+{
+  "understanding": "Extract each defined clinical variable from a single patient text and return a JSON object with the exact requested variable names and allowed values.",
+  "input_meaning": "The input contains clinical variable definitions plus one patient's clinical note; the note includes creatinine results and an imaging statement.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    {
+      "passage": "What you receive: The clinical variable definitions and the text from one patient's record.",
+      "reason": "It restates the obvious input structure and does not change extraction or output."
+    },
+    {
+      "passage": "ASSISTANT MESSAGE {\"Serum creatinine\":1.2} and the follow-up request for a complete corrected JSON object.",
+      "reason": "The original instructions already require every requested variable, so this prior-error correction is redundant for determining the answer."
+    }
+  ],
+  "sample_response": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  }
+}

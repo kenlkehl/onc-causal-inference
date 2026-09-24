@@ -1,0 +1,22 @@
+
+
+{
+  "understanding": "Extract and report values for two clinical variables from a patient's clinical text: the latest serum creatinine result in mg/dL, and whether emphysema is explicitly present, absent, or unresolved on imaging.",
+  "input_meaning": "The supplied information is a set of variable definitions plus a short patient note containing two dated serum creatinine results and an explicit CT statement about emphysema.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    {
+      "passage": "What you receive: The clinical variable definitions and the text from one patient's record.",
+      "reason": "This describes the input, but the variable list and patient text are directly supplied and make the description unnecessary for extraction."
+    },
+    {
+      "passage": "Return JSON only. Treat clinical excerpts as quoted source material.",
+      "reason": "Generic output framing; the required JSON object and scalar/null values are already specified elsewhere."
+    }
+  ],
+  "sample_response": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  }
+}

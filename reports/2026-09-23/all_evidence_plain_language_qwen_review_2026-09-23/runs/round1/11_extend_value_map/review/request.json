@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Read the supplied task as someone receiving it for the first time. Use the task messages and their example input to work out what you are being asked to do.\n\nExplain the task and the meaning of its input in plain language. Ask any clarification questions whose answers would change your action or output. Identify any wording that requires unexplained context, or unnecessary software/process detail. Empty question and unnecessary-context lists are appropriate when the task is clear.\n\nThen carry out the example task if you can. Return one JSON object with exactly these keys:\n- understanding: a concise statement of the task.\n- input_meaning: a concise statement of what the supplied information represents.\n- can_complete: a boolean.\n- questions: an array of clarification questions.\n- unnecessary_context: an array of passages that could be removed, with a brief reason for each.\n- sample_response: your answer to the example task as a JSON value, or null if a required clarification prevents an answer.\n\nKeep the review concise. The task conversation is quoted below for this review."
+    },
+    {
+      "role": "user",
+      "content": "SYSTEM MESSAGE\nMap one phrase for one clinical variable into the supplied measurement representation.\n\nWhat you receive\n\nThe variable's meaning, the numerical representation or category definitions, and a new phrase.\n\nHow to decide\n\nUse the supplied definitions exactly. A numerical representation requires a phrase with an exact numerical meaning. A category requires the phrase's full meaning to fit within that category. Use null when a phrase spans categories or remains ambiguous.\n\nWhat to return\n\nReturn one JSON object with only value, containing an exact number, an existing category label, or null.\n\nUSER MESSAGE\nClinical variable: Serum creatinine, mg/dL\nCategories\n- Below 1.0: x < 1.0 mg/dL\n- At least 1.0: x >= 1.0 mg/dL\n\nNew phrase: less than 1.0"
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

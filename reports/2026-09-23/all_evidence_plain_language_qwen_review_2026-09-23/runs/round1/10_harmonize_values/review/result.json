@@ -1,0 +1,51 @@
+{
+  "http_status": 200,
+  "request_sha256": "d16091327f7af0e07f3497c8c874e3e6670e62d667767fed683ae9ac5c7ea833",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 90.466,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 582,
+    "total_tokens": 4485,
+    "completion_tokens": 3903,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 3453
+    }
+  },
+  "reasoning_characters": 16992,
+  "content": "\n\n{\n  \"understanding\": \"Decide whether a clinical variable's mixed numeric and textual observations should be represented as continuous values or categorical groups, preserving explicit thresholds and reference-range meaning; mark phrases that cannot be interpreted as unusable or return insufficient_definition when no coherent representation is possible.\",\n  \"input_meaning\": \"The supplied example gives serum creatinine in mg/dL, example observed numbers and phrases, an explicit meaning for the phrase '<1.0', and no supplied definition or reference range for the word 'high'.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [\n    {\n      \"passage\": \"Treat clinical excerpts as quoted source material.\",\n      \"reason\": \"The input is structured variable information, and quoting source material is not needed for the required representation decision or JSON output.\"\n    },\n    {\n      \"passage\": \"The measurements of one clinical variable contain numbers and text phrases.\",\n      \"reason\": \"This is redundant because the example explicitly lists observed numbers and observed phrases.\"\n    }\n  ],\n  \"sample_response\": {\n    \"status\": \"ready\",\n    \"representation\": \"categorical\",\n    \"reason\": \"The explicit threshold '<1.0' defines a usable boundary at 1.0 mg/dL, so the usable information supports the smallest categorical partition: values below 1.0 mg/dL and values at or above 1.0 mg/dL. The phrase 'high' is unusable because no definition or reference range is supplied, but it does not prevent representing the other tokens.\",\n    \"token_interpretations\": [\n      {\n        \"raw_text\": \"<1.0\",\n        \"meaning\": \"explicit_interval\",\n        \"interpretation\": \"Less than 1.0 mg/dL.\"\n      },\n      {\n        \"raw_text\": \"high\",\n        \"meaning\": \"unusable\",\n        \"interpretation\": \"Cannot be interpreted without a supplied definition or reference range for high serum creatinine.\"\n      }\n    ]\n  }\n}",
+  "parsed": {
+    "understanding": "Decide whether a clinical variable's mixed numeric and textual observations should be represented as continuous values or categorical groups, preserving explicit thresholds and reference-range meaning; mark phrases that cannot be interpreted as unusable or return insufficient_definition when no coherent representation is possible.",
+    "input_meaning": "The supplied example gives serum creatinine in mg/dL, example observed numbers and phrases, an explicit meaning for the phrase '<1.0', and no supplied definition or reference range for the word 'high'.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [
+      {
+        "passage": "Treat clinical excerpts as quoted source material.",
+        "reason": "The input is structured variable information, and quoting source material is not needed for the required representation decision or JSON output."
+      },
+      {
+        "passage": "The measurements of one clinical variable contain numbers and text phrases.",
+        "reason": "This is redundant because the example explicitly lists observed numbers and observed phrases."
+      }
+    ],
+    "sample_response": {
+      "status": "ready",
+      "representation": "categorical",
+      "reason": "The explicit threshold '<1.0' defines a usable boundary at 1.0 mg/dL, so the usable information supports the smallest categorical partition: values below 1.0 mg/dL and values at or above 1.0 mg/dL. The phrase 'high' is unusable because no definition or reference range is supplied, but it does not prevent representing the other tokens.",
+      "token_interpretations": [
+        {
+          "raw_text": "<1.0",
+          "meaning": "explicit_interval",
+          "interpretation": "Less than 1.0 mg/dL."
+        },
+        {
+          "raw_text": "high",
+          "meaning": "unusable",
+          "interpretation": "Cannot be interpreted without a supplied definition or reference range for high serum creatinine."
+        }
+      ]
+    }
+  }
+}

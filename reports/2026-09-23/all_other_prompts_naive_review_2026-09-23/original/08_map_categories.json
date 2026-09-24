@@ -1,0 +1,10 @@
+[
+  {
+    "role": "system",
+    "content": "You normalize previously extracted categorical values to a closed ontology. Return JSON only."
+  },
+  {
+    "role": "user",
+    "content": "{\"items\": [{\"allowed_categories\": [\"Present\", \"Absent\"], \"description\": \"Documented emphysema.\", \"feature_name\": \"emphysema\", \"mapping_id\": \"category_mapping_0000\", \"measurement_definition\": \"Explicit pretreatment documentation of emphysema presence or absence.\", \"missing_value_rule\": \"Null if unreported; silence is not absence.\", \"occurrence_count\": 3, \"prior_extracted_value\": \"present on CT\", \"value_type\": \"binary\"}], \"job\": \"map_extracted_values_to_declared_category_ontology\", \"response\": {\"corrections\": [{\"mapping_id\": \"one supplied mapping_id\", \"value\": \"one exact allowed category or null\"}]}, \"rules\": [\"Use only the feature definition, allowed categories, and prior extracted value.\", \"Do not perform clinical extraction and do not infer any new patient information.\", \"Map by semantic equivalence to exactly one allowed category.\", \"Return null when the prior value does not map unambiguously.\", \"Return every mapping_id exactly once and no additional mapping IDs.\"]}"
+  }
+]

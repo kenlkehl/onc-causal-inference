@@ -1,0 +1,20 @@
+{
+  "themes": [
+    {
+      "name": "Renal function",
+      "members": [
+        "Serum creatinine"
+      ],
+      "interpretation": "Pretreatment laboratory measurement of kidney function, represented here by serum creatinine.",
+      "disagreements": "Main-effect selection was observed for both treatment and outcome prediction, but evidence concerning treatment-effect heterogeneity was mixed: unadjusted log-odds interaction screens showed some signal, while the univariable R-learner showed no positive validation gain and the other heterogeneity methods showed limited or inconsistent support."
+    },
+    {
+      "name": "Pulmonary structural disease",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "interpretation": "Pretreatment imaging evidence of emphysematous lung disease.",
+      "disagreements": "The evaluated heterogeneity methods were broadly supportive, although nominal univariable interaction results were not positive in every split. Treatment main-effect evidence was unavailable and therefore does not provide negative evidence, while outcome main-effect selection was observed in only part of the evaluated splits."
+    }
+  ]
+}

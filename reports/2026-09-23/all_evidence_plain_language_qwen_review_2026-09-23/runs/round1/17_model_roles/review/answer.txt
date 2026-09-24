@@ -1,0 +1,29 @@
+
+
+{
+  "confounder": {
+    "assign": false,
+    "assessment": "not_supported",
+    "stability": "insufficient",
+    "rationale": "Emphysema is categorized as pulmonary disease, and the study description supports a prognostic role for pulmonary disease but not a treatment-choice role. Treatment-choice main-effect results are unavailable, and outcome main effects show only partial support, so the evidence does not justify retaining emphysema as a credible common cause of treatment choice and outcome.",
+    "evidence_comments": [
+      "Penalized main effects for treatment are unavailable.",
+      "Penalized main effects for outcome were nonzero in only 1 of 3 analyses.",
+      "The study description identifies renal function as able to influence both treatment choice and prognosis.",
+      "Pulmonary disease/emphysema is described as affecting prognosis, not treatment choice."
+    ]
+  },
+  "effect_modifier": {
+    "assign": true,
+    "assessment": "supported",
+    "stability": "consistent",
+    "rationale": "Validation evidence for treatment-effect heterogeneity agrees across methods: penalized treatment interactions were nonzero in 3/3 analyses, univariable R-learner validation gains were positive in 3/3 analyses, and causal-forest permutation increases were positive in 3/3 analyses. The univariable interaction screen was borderline in one analysis, and q-values are unavailable, but this does not outweigh broad validation agreement. The gains are modest and analyses overlap, so the strength is limited but consistent.",
+    "evidence_comments": [
+      "Penalized treatment interactions met the nonzero interaction criterion in 3/3 analyses.",
+      "Univariable R-learner validation R-loss gains were positive in 3/3 analyses: 0.004, 0.006, 0.003.",
+      "Causal-forest permutation R-loss increases were positive in 3/3 analyses: 0.003, 0.004, 0.002.",
+      "Univariable interaction p-values were nominally significant in 2/3 analyses (0.03, 0.04), with one borderline 0.06.",
+      "Multiplicity-adjusted q-values are unavailable."
+    ]
+  }
+}

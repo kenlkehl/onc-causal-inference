@@ -1,0 +1,12 @@
+
+
+{
+  "action": "merge",
+  "reason": "Both fields record the same clinical attribute (latest serum creatinine), have identical timing and units (mg/dL), use exact numbers, and show no disagreement in paired values. Combining them preserves all nonmissing information.",
+  "members": [
+    "Creatinine level",
+    "Serum creatinine"
+  ],
+  "canonical_label": "Serum creatinine",
+  "category_equivalences": []
+}

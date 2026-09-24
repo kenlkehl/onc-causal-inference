@@ -1,0 +1,240 @@
+{
+  "date": "2026-09-23",
+  "review_model": "gpt-5.6-sol",
+  "fresh_original_reviews": 22,
+  "fresh_replacement_reviews": 22,
+  "additional_fresh_final_reviews": 1,
+  "targeted_followups": 10,
+  "final_example_responses_checked": 22,
+  "discovery_adopted_verbatim": true,
+  "discovery_version": "semantic_cards_single_card_discovery_v13",
+  "production_test_result": {
+    "passed": 245,
+    "warnings": 11,
+    "command": "MPLCONFIGDIR=/tmp/stage2-prompt-review-mpl /home/klkehl/thisenv/bin/python -m pytest tests/test_plain_handoff_stage2.py tests/test_plain_handoff_stage2_evidence.py tests/test_stage2_runtime_regressions.py -q --disable-warnings --maxfail=3",
+    "note": "Previously completed in this task; artifact verification does not rerun the tests."
+  },
+  "limitations": "Invented miniature examples; schema and comprehension checks, not an extraction or causal-estimation benchmark. Semantic role/ranking judgments are recorded without requiring a favored answer.",
+  "proposals": [
+    {
+      "prompt": "02_audit_unmapped",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/02_original.md",
+      "fresh_replacement_check": "checks/02_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/02_response.json",
+      "sha256": "6af2ee385317e278c15a04c67dc69327aeaf29b49afeed53d99341e5431ecafd"
+    },
+    {
+      "prompt": "03_merge_aliases",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/03_original.md",
+      "fresh_replacement_check": "checks/03_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/03_response.json",
+      "sha256": "30ba6d47cea3bb8e8d41cb11bd1dec49c5045365199ad9c6b9e07654e167f842"
+    },
+    {
+      "prompt": "04_define_ontology",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/04_original.md",
+      "fresh_replacement_check": "checks/04_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/04_response.json",
+      "sha256": "5179b1e0194ed145a43eb558ed6e4df7cfaf7f0e718049c7e36d09b051a725cb"
+    },
+    {
+      "prompt": "05_extract_patient",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/05_original.md",
+      "fresh_replacement_check": "checks/05_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": "checks/05_final_fresh.md",
+      "verified_example_response": "checks/05_final_response.json",
+      "sha256": "764675a69754bcd0d770f2a38cc67003c33faa6c6db6dce27f702c6fa2b7f9d9"
+    },
+    {
+      "prompt": "06_serial_chunk",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/06_original.md",
+      "fresh_replacement_check": "checks/06_revised.md",
+      "targeted_followup": "checks/06_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/06_final_response.json",
+      "sha256": "4321317894cfb0f455d9cb5f53bf3c1d52122d155cb58220c1b9260f5d40c656"
+    },
+    {
+      "prompt": "07_page_observations",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/07_original.md",
+      "fresh_replacement_check": "checks/07_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/07_response.json",
+      "sha256": "7c48b8b3705d7368ac8389993684096d592dc995b166e0bf109664e3cf6c1e52"
+    },
+    {
+      "prompt": "08_map_categories",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/08_original.md",
+      "fresh_replacement_check": "checks/08_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/08_response.json",
+      "sha256": "ff6e58b6eaba90ca060b5a57c881b2ddabcd23a4c81694e85f8789f9ca36157c"
+    },
+    {
+      "prompt": "09_refine_ontology",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/09_original.md",
+      "fresh_replacement_check": "checks/09_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/09_response.json",
+      "sha256": "dd0df59924166c61d5a4b7eb41d155b00e9ab127d7b496ca33916e9ed3f93f32"
+    },
+    {
+      "prompt": "10_harmonize_values",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/10_original.md",
+      "fresh_replacement_check": "checks/10_revised.md",
+      "targeted_followup": "checks/10_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/10_final_response.json",
+      "sha256": "e5ea052f305c1befc3b69ff3d958a4d2d14e7950c7aa6d448c4155a5ebc88ec0"
+    },
+    {
+      "prompt": "11_extend_value_map",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/11_original.md",
+      "fresh_replacement_check": "checks/11_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/11_response.json",
+      "sha256": "f8450719d2327ccc449e1c1c289ccbdbb9e12a47b416122bbdc5829b14740b1b"
+    },
+    {
+      "prompt": "12_supervise_ontology",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/12_original.md",
+      "fresh_replacement_check": "checks/12_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/12_response.json",
+      "sha256": "1d17d197e75866082a74234b67b6c7a8923d79f19a553a28361fb31323afa305"
+    },
+    {
+      "prompt": "13_post_extraction_aliases",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/13_original.md",
+      "fresh_replacement_check": "checks/13_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/13_response.json",
+      "sha256": "1722c0ba660616c59a7b51df278d4b92f4d697b68498924a8a3dd4618709e6f5"
+    },
+    {
+      "prompt": "14_default_roles",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/14_original.md",
+      "fresh_replacement_check": "checks/14_revised.md",
+      "targeted_followup": "checks/14_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/14_final_response.json",
+      "sha256": "26bbddd8f6f811e69f00fcee75dc2e69e22eb8fce1f8f5ba60842ae9fa1cb09e"
+    },
+    {
+      "prompt": "15_model_themes",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/15_original.md",
+      "fresh_replacement_check": "checks/15_revised.md",
+      "targeted_followup": "checks/15_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/15_final_response.json",
+      "sha256": "12e98edaff6cf43d93d8b2a74d2bd64c4b8c0b8f7d2dbf797d52f66525556e8a"
+    },
+    {
+      "prompt": "16_merge_themes",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/16_original.md",
+      "fresh_replacement_check": "checks/16_revised.md",
+      "targeted_followup": "checks/16_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/16_final_response.json",
+      "sha256": "843d263093bc49772189198f78d14a05104580f4778dc620ccaeeb5dd7526f08"
+    },
+    {
+      "prompt": "17_model_roles",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/17_original.md",
+      "fresh_replacement_check": "checks/17_revised.md",
+      "targeted_followup": "checks/17_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/17_final_response.json",
+      "sha256": "38012dea4c4b27fbb80a9757d9d4e8b82f52608e4c7372930778b1e43cf02ede"
+    },
+    {
+      "prompt": "18_rank_modifiers",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/18_original.md",
+      "fresh_replacement_check": "checks/18_revised.md",
+      "targeted_followup": "checks/18_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/18_final_response.json",
+      "sha256": "96d74937953036ce2678c2ad67b7bfc067dd9941a4cf78a6f086cc487df66af6"
+    },
+    {
+      "prompt": "19_merge_rankings",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/19_original.md",
+      "fresh_replacement_check": "checks/19_revised.md",
+      "targeted_followup": "checks/19_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/19_final_response.json",
+      "sha256": "c2abe63221ee9018d7ef4604a3df8cf12b272680b3c735cbf9bdacdbbcdb4987"
+    },
+    {
+      "prompt": "20_advisory_roles",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/20_original.md",
+      "fresh_replacement_check": "checks/20_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/20_response.json",
+      "sha256": "032693016860912da674bcc10c1c927dbfb13025e0c07b3efd160a41df723044"
+    },
+    {
+      "prompt": "21_cross_fold_concepts",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/21_original.md",
+      "fresh_replacement_check": "checks/21_revised.md",
+      "targeted_followup": null,
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/21_response.json",
+      "sha256": "99ef39fdfe6646b38070200683bcb98ec91ae8c4d218d354aae2c72be1354ba0"
+    },
+    {
+      "prompt": "22_validation_repair",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/22_original.md",
+      "fresh_replacement_check": "checks/22_revised.md",
+      "targeted_followup": "checks/22_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/22_final_response.json",
+      "sha256": "a4a04c08650e73890971ea7b8e141347d3791e066a4a5e2261ff8b73c9e04670"
+    },
+    {
+      "prompt": "23_length_repair",
+      "status": "reviewed_proposal_not_integrated",
+      "original_review": "reviews/23_original.md",
+      "fresh_replacement_check": "checks/23_revised.md",
+      "targeted_followup": "checks/23_followup.md",
+      "extra_fresh_check": null,
+      "verified_example_response": "checks/23_final_response.json",
+      "sha256": "3a472a998ddc9979016dd99ed3f57fc71e09edcf21661b90ec6d7917ceaffeb9"
+    }
+  ]
+}

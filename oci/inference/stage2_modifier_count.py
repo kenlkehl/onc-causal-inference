@@ -18,11 +18,13 @@ from threadpoolctl import threadpool_limits
 
 from . import stage2_multi_model_selection as numerical
 from . import stage2_modifier_ranking as ranking
+from . import stage2_modifier_concepts as concepts
+from .stage2_prompt_catalog import PROMPT_VERSION
 from .stage2_effect_estimators import fit_interaction_effect
 from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = "stage2_nested_modifier_count_v2"
+SCHEMA_VERSION = "stage2_nested_modifier_count_v3_concepts"
 
 
 def choose_modifier_count(fold_losses, *, rule):
@@ -289,6 +291,7 @@ def select_modifier_count(
 
     identity = {
         "schema_version": SCHEMA_VERSION,
+        "prompt_version": PROMPT_VERSION,
         "numerical_input_fingerprint": base_fingerprint,
         "count_policy": cfg.public_dict(),
         "role_policy": role_policy.public_dict(),
@@ -301,6 +304,7 @@ def select_modifier_count(
             for p in (
                 __file__,
                 ranking.__file__,
+                concepts.__file__,
                 analysis.__file__,
                 Path(__file__).with_name("stage2_effect_estimators.py"),
             )
@@ -322,6 +326,13 @@ def select_modifier_count(
         run_numerical = lambda arguments: numerical.select_stage2_features_multi_model(**arguments)
 
     def get_ranking(report, root):
+        report = {**report, "study_context": statistical_report.get("study_context", {"outcome_type": outcome_type})}
+        if cfg.concept_review:
+            return concepts.infer_modifier_concepts(
+                definitions=definitions, statistical_report=report, request_json=request_json,
+                output_dir=root / "concepts", role_policy=role_policy,
+                top_n=cfg.concept_top_n_per_fold, maximum=maximum,
+                maximum_chars=policy.multi_model.max_prompt_chars, model_identity=model_identity)
         return ranking.rank_modifier_candidates(
             definitions=definitions,
             statistical_report=report,
@@ -396,7 +407,8 @@ def select_modifier_count(
                 nested_report = {"input_fingerprint": None}
                 ranked = {"ranking": []}
             keys = [r["feature_id"] for r in ranked["ranking"]]
-            assert len(keys) == maximum
+            if not cfg.concept_review and len(keys) != maximum:
+                raise RuntimeError("modifier ranking did not cover the requested budget")
             # These are the already-computed, training-only nuisance models of
             # the parent numerical pass, reused with their original seed/hash.
             nuisance = numerical._checkpoint(
@@ -453,6 +465,8 @@ def select_modifier_count(
                     "eligible_scoring_row_ids": fv._oci_row_id.tolist(),
                     "nested_evidence_fingerprint": nested_report["input_fingerprint"],
                     "ranking": ranked["ranking"],
+                    "concept_review": ranked.get("concept_review"),
+                    "actual_additional_counts": {str(k): min(k, len(keys)) for k in counts},
                     "nuisance_sha256": _fingerprint(nuisance),
                     "ranking_path": str(root / "ranking/ranking.json"),
                 }
@@ -533,7 +547,10 @@ def select_modifier_count(
             "input_fingerprint": fingerprint,
             "choice": choice,
             "chosen_estimator": choice["chosen_estimator"],
-            "chosen_modifier_count": len(locked_modifiers) + choice["chosen_additional_count"],
+            "chosen_modifier_count": len(locked_modifiers) + min(choice["chosen_additional_count"], len(full_rank["ranking"])),
+            "requested_additional_budget": choice["chosen_additional_count"],
+            "actual_additional_count": min(choice["chosen_additional_count"], len(full_rank["ranking"])),
+            "concept_review_enabled": cfg.concept_review,
             "locked_modifier_ids": locked_modifiers,
             "full_training_ranking": full_rank,
             "folds": fold_records,
@@ -546,6 +563,7 @@ def select_modifier_count(
             "confounder_policy": "preserve every confounder retained by the full-training role adjudication",
             "boundaries": {
                 "ranking_and_numerical_evidence_nested_within_count_training": True,
+                "concept_review_nested_within_count_training": cfg.concept_review,
                 "nuisances_and_eligible_rows_fixed_across_counts": True,
                 "nuisances_and_eligible_rows_fixed_across_architectures": True,
                 "oracle_or_outer_test_labels_used": False,

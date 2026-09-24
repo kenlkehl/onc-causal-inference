@@ -1,0 +1,41 @@
+{
+  "http_status": 200,
+  "request_sha256": "2663ce2ef939e236a6a106e68b9ba37f4ec27d0cb48052d7a9046a391a2af11c",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 62.228,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 791,
+    "total_tokens": 3500,
+    "completion_tokens": 2709,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 2434
+    }
+  },
+  "reasoning_characters": 11255,
+  "content": "\n\n{\n  \"understanding\": \"Extract distinct clinical attributes that can be measured from a patient record excerpt and return each as a candidate with a name, description, basis, and uncertainty.\",\n  \"input_meaning\": \"A dated clinical excerpt reporting two serum creatinine measurements and a CT imaging finding of emphysema.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"candidates\": [\n      {\n        \"name\": \"Serum creatinine concentration\",\n        \"description\": \"The measured concentration of creatinine in a serum or blood sample.\",\n        \"basis\": \"The excerpt reports serum creatinine values of 1.0 mg/dL on 2025-01-01 and 1.2 mg/dL on 2025-01-10.\",\n        \"uncertainty\": \"\"\n      },\n      {\n        \"name\": \"Emphysema on imaging\",\n        \"description\": \"A computed tomography imaging finding indicating the presence of emphysema.\",\n        \"basis\": \"The excerpt states that CT documents emphysema.\",\n        \"uncertainty\": \"\"\n      }\n    ]\n  }\n}",
+  "parsed": {
+    "understanding": "Extract distinct clinical attributes that can be measured from a patient record excerpt and return each as a candidate with a name, description, basis, and uncertainty.",
+    "input_meaning": "A dated clinical excerpt reporting two serum creatinine measurements and a CT imaging finding of emphysema.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "candidates": [
+        {
+          "name": "Serum creatinine concentration",
+          "description": "The measured concentration of creatinine in a serum or blood sample.",
+          "basis": "The excerpt reports serum creatinine values of 1.0 mg/dL on 2025-01-01 and 1.2 mg/dL on 2025-01-10.",
+          "uncertainty": ""
+        },
+        {
+          "name": "Emphysema on imaging",
+          "description": "A computed tomography imaging finding indicating the presence of emphysema.",
+          "basis": "The excerpt states that CT documents emphysema.",
+          "uncertainty": ""
+        }
+      ]
+    }
+  }
+}

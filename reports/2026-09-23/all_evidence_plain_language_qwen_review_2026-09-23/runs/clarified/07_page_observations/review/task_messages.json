@@ -1,0 +1,10 @@
+[
+  {
+    "role": "system",
+    "content": "Find every documented observation of the listed clinical variables in the supplied text.\n\nWhat you receive\n\nClinical variable definitions and one section of a patient's record.\n\nHow to decide\n\nReport each distinct value-bearing occurrence, including repeated results on different dates. Use JSON numbers for exact numerical measurements and strings for category labels or directly reported thresholds. Support it with a short exact quotation. Include enough nearby wording to identify the occurrence. Include a date only when its sentence or heading links it to the finding. Copy the date as written. Preserve repeated or conflicting observations for later comparison.\n\nWhat to return\n\nReturn one JSON object with observations, an array. Each observation has feature (an existing clinical variable name), value (a scalar), quote (exact source wording), and governing_date_quote (the date as written, or null). Use {\"observations\": []} when no observation is supported."
+  },
+  {
+    "role": "user",
+    "content": "Clinical variables\n- Serum creatinine: a result in mg/dL, including directly reported threshold strings.\n- Emphysema on imaging: Present for an explicit positive finding, Absent for an explicit negative finding.\n\nClinical text\n2025-01-01: serum creatinine 1.0 mg/dL. 2025-01-10: serum creatinine 1.2 mg/dL. CT documents emphysema."
+  }
+]

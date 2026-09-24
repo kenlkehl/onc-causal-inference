@@ -24,38 +24,11 @@ from .stage2_role_adjudication import (
     _write_json,
 )
 
-SYSTEM_PROMPT = """You review pretreatment candidate measurements using modeling evidence
-from one outer-training fold. First identify themes across candidates; then
-reconcile their roles as confounder, effect_modifier, both, or neither.
-All evidence is fallible. No individual family, p-value, or support frequency is
-a hard selection gate. A credible complementary signal can justify retention
-even when other methods shrink it away. Do not mistake correlated aliases or
-proxies for multiple independent discoveries. Themes organize evidence; they
-do not establish equivalence, merge measurements, or transfer a role to every
-theme member. Preserve investigator-locked roles exactly.
+from . import stage2_clinical_prompts as clinical_prompts
+from .stage2_prompt_io import request_review
 
-Treatment prediction, outcome prognosis, and confounding are distinct. Discuss
-whether a candidate could be a common cause rather than an instrument or only a
-prognostic factor. Effect modification needs treatment-heterogeneity evidence;
-outcome main-effect importance alone does not establish it. Univariable logistic
-interactions are on the log-odds scale and unadjusted for other covariates.
-Orthogonal linear models, candidate R-learners, and causal forests assess the
-probability/outcome scale after elastic-net nuisance adjustment. Their targets
-and biases differ. A model family is evidence, not an independent replication.
-All modifier evidence uses the supplied propensity-eligible population. Treatment
-and outcome association screens use all sampled training patients; main effects
-from the joint interaction model instead share its restricted population.
-
-Use exposure and evaluability denominators. Missing or nonconverged fits are not
-negative votes. Repeated samples and folds overlap; support fractions are not
-causal probabilities or formal stability-selection error guarantees. Raw and BH
-p-values do not correct the upstream adaptive discovery process. Permutation
-importance can be diluted by correlated alternatives and does not prove a
-causal role. Compare fold consistency, methods, subsets, and conflicting facts.
-Definitions and theme names cannot establish a role without the supplied
-empirical evidence. Never invent an oracle, data-generating process, or hidden
-truth. Return the requested JSON and cite only supplied evidence IDs.
-""".strip()
+PROMPT_VERSION = clinical_prompts.PROMPT_VERSION
+SYSTEM_PROMPT = clinical_prompts.SYSTEM_PROMPTS["17_model_roles"]
 
 
 def _number(value, *, integer=False):
@@ -131,6 +104,7 @@ def build_multi_model_role_evidence(*, definitions, statistical_report, policy):
         )
     return {
         "schema_version": SCHEMA_VERSION,
+        "study_context": clinical_prompts.study_context(statistical_report),
         "candidates": cards,
         "analysis_populations": {
             "modifier_min_propensity": _number(
@@ -170,14 +144,16 @@ def build_multi_model_role_evidence(*, definitions, statistical_report, policy):
     }
 
 
-def _text(value, limit):
-    if not isinstance(value, str) or not value.strip() or len(value) > limit:
-        raise ValueError(f"expected nonempty text no longer than {limit} characters")
+def _text(value, limit=4000, *, empty=False):
+    if not isinstance(value, str) or (not empty and not value.strip()) or len(value) > limit:
+        raise ValueError(f"expected text no longer than {limit} characters")
     return value.strip()
 
 
-def _themes_validator(member_ids, evidence_ids, *, maximum):
+def _themes_validator(member_ids, evidence_ids, *, maximum, cards=()):
     member_ids, evidence_ids = set(member_ids), set(evidence_ids)
+    labels = {clinical_prompts.label(c["definition"]): c["feature_id"] for c in cards}
+    by_id = {c["feature_id"]: c for c in cards}
 
     def validate(response):
         themes = response.get("themes")
@@ -185,326 +161,165 @@ def _themes_validator(member_ids, evidence_ids, *, maximum):
             raise ValueError(f"theme review requires 1 through {maximum} themes")
         cleaned, covered = [], set()
         for theme in themes:
-            members = theme.get("member_feature_ids")
-            cites = theme.get("evidence_ids")
-            if (
-                not isinstance(members, list)
-                or not members
-                or len(set(members)) != len(members)
-                or not set(members) <= member_ids
-            ):
-                raise ValueError("theme contains unknown, duplicate, or missing member IDs")
-            if not isinstance(cites, list) or len(cites) > 12 or not set(cites) <= evidence_ids:
-                raise ValueError("theme cites unknown modeling evidence")
+            if "members" in theme:
+                members = [clinical_prompts.resolve_label(x, labels) for x in theme["members"]]
+                cites = [r["evidence_id"] for key in members for r in by_id[key]["modeling_evidence"]]
+            else:
+                members, cites = theme.get("member_feature_ids"), theme.get("evidence_ids")
+            if (not isinstance(members, list) or not members or len(set(members)) != len(members)
+                    or not set(members) <= member_ids or covered & set(members)):
+                raise ValueError("each clinical variable must appear in exactly one theme")
+            if not isinstance(cites, list) or not set(cites) <= evidence_ids:
+                raise ValueError("theme provenance contains unknown evidence")
             covered.update(members)
-            cleaned.append(
-                {
-                    "name": _text(theme.get("name"), 200),
-                    "member_feature_ids": members,
-                    "evidence_ids": list(dict.fromkeys(cites)),
-                    "interpretation": _text(theme.get("interpretation"), 1600),
-                    "disagreements": _text(theme.get("disagreements"), 1600),
-                }
-            )
+            cleaned.append({"name": _text(theme.get("name"), 300), "member_feature_ids": members,
+                "evidence_ids": list(dict.fromkeys(cites)), "interpretation": _text(theme.get("interpretation")),
+                "disagreements": _text(theme.get("disagreements"), empty=True),
+                "evidence_attachment": "Available member evidence attached by Python."})
         if covered != member_ids:
-            raise ValueError("theme synthesis must preserve every supplied candidate")
+            raise ValueError("include every supplied variable in a theme")
         return {"themes": cleaned}
-
     return validate
 
 
 def _bounded_batches(items, payload_builder, *, maximum_items, maximum_chars):
     batches, current = [], []
+    def size(batch):
+        payload = payload_builder(batch)
+        return sum(len(m["content"]) for m in payload) if isinstance(payload, list) else len(_canonical_json(payload)) + len(SYSTEM_PROMPT)
     for item in items:
-        trial = [*current, item]
-        too_large = (
-            len(trial) > maximum_items
-            or len(SYSTEM_PROMPT) + len(_canonical_json(payload_builder(trial))) > maximum_chars
-        )
-        if too_large and current:
+        if current and (len(current) >= maximum_items or size([*current, item]) > maximum_chars):
             batches.append(current)
-            current = [item]
-        else:
-            current = trial
-        if len(SYSTEM_PROMPT) + len(_canonical_json(payload_builder(current))) > maximum_chars:
-            raise ValueError(
-                "one multi-model prompt item exceeds max_prompt_chars; increase the explicit budget"
-            )
+            current = []
+        current.append(item)
+        if size(current) > maximum_chars:
+            raise ValueError("one clinical review item exceeds max_prompt_chars")
     if current:
         batches.append(current)
     return batches
 
 
-def _request(directory, name, payload, validate, *, request_json, maximum_chars, identity):
-    if len(SYSTEM_PROMPT) + len(_canonical_json(payload)) > maximum_chars:
-        raise ValueError(
-            "multi-model prompt exceeds max_prompt_chars; no candidate evidence was truncated"
-        )
-    fingerprint = _fingerprint(
-        {
-            "payload": payload,
-            "system": SYSTEM_PROMPT,
-            "identity": identity,
-            "version": PROMPT_VERSION,
-        }
-    )
-    directory = directory / name
-    response_path, complete_path = directory / "response.json", directory / "complete.json"
-    _write_json(
-        directory / "prompt.json",
-        {"system": SYSTEM_PROMPT, "payload": payload, "input_fingerprint": fingerprint},
-    )
-    if response_path.is_file() and complete_path.is_file():
-        complete = json.loads(complete_path.read_text())
-        response = json.loads(response_path.read_text())
-        if complete.get("input_fingerprint") == fingerprint:
-            if complete.get("response_sha256") != _fingerprint(response):
-                raise ValueError("corrupt multi-model LLM response checkpoint")
-            return validate(response)
-    response = validate(
-        request_json(
-            [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": _canonical_json(payload)},
-            ],
-            validate,
-            request_kind="interpretation",
-        )
-    )
-    _write_json(response_path, response)
-    _write_json(
-        complete_path,
-        {
-            "status": "complete",
-            "input_fingerprint": fingerprint,
-            "response_sha256": _fingerprint(response),
-        },
-    )
-    return response
-
-
 def _decision_validator(definitions, cards):
     base = _role_response_validator(definitions=definitions)
-    allowed = {
-        card["feature_id"]: {r["evidence_id"] for r in card["modeling_evidence"]} for card in cards
-    }
-    roles_by_evidence = {
-        r["evidence_id"]: r["role"] for card in cards for r in card["modeling_evidence"]
-    }
-    locked = {_feature_id(f) for f in definitions if f.get("configured_explicit_feature") is True}
-
+    available = {c["feature_id"]: c["modeling_evidence"] for c in cards}
     def validate(response):
+        if set(response) == {"confounder", "effect_modifier"} and len(definitions) == 1:
+            feature = definitions[0]
+            response = {"summary": "Clinical role review", "decisions": [clinical_prompts.role_decision(
+                response, feature, modeling_evidence=available[_feature_id(feature)])]}
+        for raw in response.get("decisions", []):
+            if "evidence_ids" in raw:
+                allowed = {x["evidence_id"] for x in available.get(raw.get("feature_id"), [])}
+                if not isinstance(raw["evidence_ids"], list) or not set(raw["evidence_ids"]) <= allowed:
+                    raise ValueError("role provenance must use this variable's supplied evidence")
         cleaned = base(response)
-        raw = {row["feature_id"]: row for row in response["decisions"]}
         for row in cleaned["decisions"]:
-            original = raw[row["feature_id"]]
-            citations = original.get("evidence_ids")
-            if not isinstance(citations, list) or not set(citations) <= allowed[row["feature_id"]]:
-                raise ValueError(
-                    "role decision must cite only this candidate's supplied evidence IDs"
-                )
-            if row["roles"] and not citations and row["feature_id"] not in locked:
-                raise ValueError("retained roles require empirical evidence references")
-            cited_roles = {roles_by_evidence[k] for k in citations}
-            if row["feature_id"] not in locked:
-                if "effect_modifier" in row["roles"] and "effect" not in cited_roles:
-                    raise ValueError("modifier roles must cite treatment-heterogeneity evidence")
-                if "confounder" in row["roles"] and not {"treatment", "outcome"} <= cited_roles:
-                    raise ValueError(
-                        "confounder roles must discuss both treatment and outcome evidence"
-                    )
-            stability = original.get("stability")
-            if stability not in {"consistent", "mixed", "insufficient"}:
-                raise ValueError(
-                    "role decision requires stability: consistent, mixed, or insufficient"
-                )
-            row.update({"evidence_ids": list(dict.fromkeys(citations)), "stability": stability})
+            # These references describe the input, not model-authored citations.
+            row["evidence_ids"] = [x["evidence_id"] for x in available[row["feature_id"]]]
+            row["evidence_attachment"] = "Available input evidence attached by Python; consult role_assessments for the model's explanation."
         return cleaned
-
     return validate
 
 
-def adjudicate_multi_model_roles(
-    *, definitions, statistical_report, request_json, output_dir, policy
-):
+def theme_text(themes, by_id):
+    return "\n\n".join(t["name"] + "\nVariables: "
+        + "; ".join(clinical_prompts.label(by_id[key]["definition"]) for key in t["member_feature_ids"])
+        + "\nInterpretation: " + t["interpretation"] + "\nDisagreements: " + (t["disagreements"] or "None stated.") for t in themes)
+
+
+def _merge_validator(themes):
+    by_name = {t["name"]: t for t in themes}
+    if len(by_name) != len(themes):
+        raise ValueError("theme names must be distinct before requesting a merge")
+    def validate(response):
+        if "themes" in response:  # already normalized checkpoint
+            candidates = {x for t in themes for x in t["member_feature_ids"]}
+            refs = {x for t in themes for x in t["evidence_ids"]}
+            return _themes_validator(candidates, refs, maximum=len(themes))(response)
+        if set(response) != {"merges"} or not isinstance(response["merges"], list):
+            raise ValueError("return merges, an array of overlapping clinical themes")
+        used, result = set(), []
+        for group in response["merges"]:
+            sources = group.get("source_themes")
+            if (not isinstance(sources, list) or len(sources) < 2 or len(set(sources)) != len(sources)
+                    or not set(sources) <= set(by_name) or used & set(sources)):
+                raise ValueError("a merge requires at least two distinct supplied themes, each used once")
+            used.update(sources)
+            result.append({"name": _text(group.get("name"), 300),
+                "member_feature_ids": [key for source in sources for key in by_name[source]["member_feature_ids"]],
+                "evidence_ids": list(dict.fromkeys(key for source in sources for key in by_name[source]["evidence_ids"])),
+                "interpretation": _text(group.get("interpretation")),
+                "disagreements": _text(group.get("disagreements"), empty=True)})
+        result.extend(t for t in themes if t["name"] not in used)
+        return {"themes": result}
+    return validate
+
+
+def adjudicate_multi_model_roles(*, definitions, statistical_report, request_json, output_dir, policy):
     policy.validate()
     if not policy.enabled:
         raise ValueError("multi_model requires LLM role adjudication")
-    evidence = build_multi_model_role_evidence(
-        definitions=definitions, statistical_report=statistical_report, policy=policy
-    )
-    cfg = statistical_report["policy"]["multi_model"]
-    maximum_chars = int(cfg["max_prompt_chars"])
+    evidence = build_multi_model_role_evidence(definitions=definitions, statistical_report=statistical_report, policy=policy)
+    maximum_chars = int(statistical_report["policy"]["multi_model"]["max_prompt_chars"])
     maximum_items = max(2, int(policy.max_candidates_per_request))
     directory = Path(output_dir)
-    identity = {
-        "evidence": _fingerprint(evidence),
-        "policy": policy.public_dict(),
-        "prompt": PROMPT_VERSION,
-        "model": statistical_report.get("adjudication_model_identity"),
-        "source_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
-    }
+    identity = {"evidence": _fingerprint(evidence), "policy": policy.public_dict(), "prompt": PROMPT_VERSION,
+                "model": statistical_report.get("adjudication_model_identity"),
+                "source_sha256": sha256(Path(__file__).read_bytes()).hexdigest()}
     _write_json(directory / "evidence.json", evidence)
     cards = evidence["candidates"]
-
-    def theme_payload(batch):
-        return {
-            "task": "review_stage2_multi_model_themes",
-            "prompt_version": PROMPT_VERSION,
-            "score_meaning": evidence["score_meaning"],
-            "analysis_populations": evidence["analysis_populations"],
-            "candidates": batch,
-            "required_response": {
-                "themes": [
-                    {
-                        "name": "theme",
-                        "member_feature_ids": ["candidate IDs"],
-                        "evidence_ids": [
-                            "at most 12 representative supplied modeling evidence IDs"
-                        ],
-                        "interpretation": "common or complementary evidence",
-                        "disagreements": "contradictions, weak signals, and proxy distinctions",
-                    }
-                ]
-            },
-            "coverage": "Cover every supplied candidate, including weak/unevaluable candidates.",
-        }
-
-    batches = _bounded_batches(
-        cards, theme_payload, maximum_items=maximum_items, maximum_chars=maximum_chars
-    )
+    by_id = {c["feature_id"]: c for c in cards}
+    def request(name, messages, validate):
+        return request_review(directory / name, messages, validate, request_json=request_json,
+                              identity=identity, maximum_chars=maximum_chars)
+    def theme_messages(batch):
+        return clinical_prompts.messages("15_model_themes", clinical_prompts.evidence_input(evidence, batch))
+    batches = _bounded_batches(cards, theme_messages, maximum_items=maximum_items, maximum_chars=maximum_chars)
     themes = []
     for index, batch in enumerate(batches):
-        response = _request(
-            directory,
-            f"themes/initial_{index:03d}",
-            theme_payload(batch),
-            _themes_validator(
-                [c["feature_id"] for c in batch],
-                {r["evidence_id"] for c in batch for r in c["modeling_evidence"]},
-                maximum=len(batch),
-            ),
-            request_json=request_json,
-            maximum_chars=maximum_chars,
-            identity=identity,
-        )
+        response = request(f"themes/initial_{index:03d}", theme_messages(batch),
+            _themes_validator([c["feature_id"] for c in batch],
+                {r["evidence_id"] for c in batch for r in c["modeling_evidence"]}, maximum=len(batch), cards=batch))
         themes.extend(response["themes"])
-    # A hierarchical reduction exposes cross-batch themes without a giant prompt.
+    # Summarize overlaps when useful. Context limits never force unrelated merges.
     level = 0
-    while len(themes) > maximum_items:
-
-        def merge_payload(batch):
-            return {
-                "task": "merge_stage2_multi_model_themes",
-                "themes": batch,
-                "maximum_output_themes": max(1, len(batch) // 2),
-                "instructions": "Preserve all candidate IDs and distinctions. Broader parent themes organize evidence; they do not imply measurement equivalence.",
-                "required_response": theme_payload([])["required_response"],
-            }
-
-        batches = _bounded_batches(
-            themes, merge_payload, maximum_items=maximum_items, maximum_chars=maximum_chars
-        )
-        if all(len(batch) == 1 for batch in batches):
-            raise ValueError("theme merge cannot fit two summaries; increase max_prompt_chars")
+    while len(themes) > 1:
+        counts = {name: sum(t["name"] == name for t in themes) for name in {t["name"] for t in themes}}
+        themes = [{**t, "name": t["name"] + (" (" + clinical_prompts.label(by_id[t["member_feature_ids"][0]]["definition"]) + ")" if counts[t["name"]] > 1 else "")} for t in themes]
+        def merge_messages(batch):
+            return clinical_prompts.messages("16_merge_themes", theme_text(batch, by_id))
+        batches = _bounded_batches(sorted(themes, key=lambda t: t["name"].casefold()), merge_messages,
+            maximum_items=max(len(themes), maximum_items), maximum_chars=maximum_chars)
         reduced = []
         for index, batch in enumerate(batches):
             if len(batch) == 1:
                 reduced.extend(batch)
-                continue
-            response = _request(
-                directory,
-                f"themes/merge_{level:03d}_{index:03d}",
-                merge_payload(batch),
-                _themes_validator(
-                    {k for t in batch for k in t["member_feature_ids"]},
-                    {k for t in batch for k in t["evidence_ids"]},
-                    maximum=max(1, len(batch) // 2),
-                ),
-                request_json=request_json,
-                maximum_chars=maximum_chars,
-                identity=identity,
-            )
-            reduced.extend(response["themes"])
+            else:
+                reduced.extend(request(f"themes/merge_{level:03d}_{index:03d}", merge_messages(batch), _merge_validator(batch))["themes"])
+        changed = len(reduced) < len(themes)
         themes = reduced
+        if not changed:
+            break
         level += 1
     _write_json(directory / "themes.json", {"themes": themes, "all_candidate_ids_preserved": True})
-    by_id = {_feature_id(f): f for f in definitions}
-
-    def role_payload(batch):
-        ids = {c["feature_id"] for c in batch}
-        relevant = [t for t in themes if ids & set(t["member_feature_ids"])]
-        return {
-            "task": "adjudicate_stage2_multi_model_roles",
-            "prompt_version": PROMPT_VERSION,
-            "score_meaning": evidence["score_meaning"],
-            "analysis_populations": evidence["analysis_populations"],
-            "candidates": batch,
-            "themes": relevant,
-            "required_response": {
-                "summary": "overall interpretation",
-                "decisions": [
-                    {
-                        "feature_id": "each supplied candidate exactly once",
-                        "roles": ["confounder and/or effect_modifier, or empty"],
-                        "evidence_ids": [
-                            "this candidate's evidence IDs; modifiers cite effect evidence; confounders cite treatment and outcome evidence"
-                        ],
-                        "evidence_for": ["specific facts"],
-                        "evidence_against": ["specific facts"],
-                        "inner_fold_consistency": "compare folds and subset exposures",
-                        "cross_method_reconciliation": "reconcile disagreements",
-                        "rationale": "justify roles from evidence",
-                        "stability": "consistent, mixed, or insufficient",
-                    }
-                ],
-            },
-        }
-
-    batches = _bounded_batches(
-        cards,
-        role_payload,
-        maximum_items=int(policy.max_candidates_per_request),
-        maximum_chars=maximum_chars,
-    )
-    decisions, summaries = [], []
-    for index, batch in enumerate(batches):
-        response = _request(
-            directory,
-            f"roles/batch_{index:03d}",
-            role_payload(batch),
-            _decision_validator([by_id[c["feature_id"]] for c in batch], batch),
-            request_json=request_json,
-            maximum_chars=maximum_chars,
-            identity=identity,
-        )
+    decisions = []
+    definitions_by_id = {_feature_id(f): f for f in definitions}
+    for index, card in enumerate(cards):
+        relevant = [t for t in themes if card["feature_id"] in t["member_feature_ids"]]
+        messages = clinical_prompts.messages("17_model_roles", clinical_prompts.evidence_input(evidence, [card])
+            + "\n\nRelated clinical themes\n" + theme_text(relevant, by_id))
+        response = request(f"roles/batch_{index:03d}", messages,
+            _decision_validator([definitions_by_id[card["feature_id"]]], [card]))
         decisions.extend(response["decisions"])
-        summaries.append(response["summary"])
-    combined = _decision_validator(definitions, cards)(
-        {"summary": " ".join(summaries), "decisions": decisions}
-    )
+    combined = _decision_validator(definitions, cards)({"summary": "Clinical role reviews", "decisions": decisions})
     selected = _selected_from_adjudication(definitions=definitions, adjudication=combined)
     for feature in selected:
         if feature.get("configured_explicit_feature") is not True:
             feature["selection_source"] = "multi_model_llm_adjudication"
-    report = {
-        "schema_version": SCHEMA_VERSION,
-        "prompt_version": PROMPT_VERSION,
-        "status": "complete",
-        "evidence_fingerprint": identity["evidence"],
-        "themes": themes,
-        "decisions": combined["decisions"],
-        "summary": combined["summary"],
-        "retained_feature_ids": [_feature_id(f) for f in selected],
-    }
+    report = {"schema_version": SCHEMA_VERSION, "prompt_version": PROMPT_VERSION, "status": "complete",
+              "evidence_fingerprint": identity["evidence"], "themes": themes, **combined,
+              "retained_feature_ids": [_feature_id(f) for f in selected]}
     _write_json(directory / "response.json", report)
-    _write_json(
-        directory / "complete.json",
-        {
-            "status": "complete",
-            "identity": identity,
-            "candidate_count": len(definitions),
-            "retained_count": len(selected),
-        },
-    )
+    _write_json(directory / "complete.json", {"status": "complete", "identity": identity,
+        "candidate_count": len(definitions), "retained_count": len(selected)})
     return selected, report, evidence

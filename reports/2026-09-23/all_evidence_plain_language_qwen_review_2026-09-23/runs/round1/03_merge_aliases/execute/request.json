@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Identify clinical variable names that describe the same measurement and can share one definition.\n\nWhat you receive\n\nA list of names and descriptions. Protected names, when present, must remain recognizable in the result.\n\nHow to decide\n\nGroup synonyms, abbreviations, and detailed/coarsened names when one measurement definition can represent them. Keep independently varying findings separate. Leave uncertain matches ungrouped. Each group needs at least two supplied names. A name can belong to one group. A group containing a protected name uses that name as its canonical label; two protected names remain separate.\n\nWhat to return\n\nReturn one object with the key merges, an array. Each group has members (existing names) and canonical_label (a clear clinical name). Omit unchanged variables. Use {\"merges\": []} when no merge is justified."
+    },
+    {
+      "role": "user",
+      "content": "Variables\n- Creatinine level: Serum creatinine concentration.\n- Serum creatinine: Serum creatinine concentration.\n- Emphysema: Documented emphysema.\n\nProtected names: none."
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

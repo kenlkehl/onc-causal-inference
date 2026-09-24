@@ -1,0 +1,16 @@
+
+
+{
+  "action": "revise",
+  "reason": "The failed outputs are semantically compatible with the existing binary categories but reveal that the instructions need clearer exact-output and synonym mapping guidance. Phrases like positive and present on CT should be mapped to the exact label Present rather than returned as free text.",
+  "definition": {
+    "description": "Imaging documentation of emphysema presence or absence.",
+    "value_type": "binary",
+    "categories_or_unit": [
+      "Present",
+      "Absent"
+    ],
+    "measurement_definition": "Use only the exact labels Present or Absent. Assign Present when the imaging report explicitly documents emphysema for this patient, including equivalent wording such as positive, present on CT, emphysema noted, or findings consistent with emphysema. Assign Absent only when the imaging report explicitly documents a negative finding for this patient, including equivalent wording such as no emphysema, negative for emphysema, absent on CT, or no imaging evidence of emphysema. Do not add modifiers, modality details, explanations, or any text outside the allowed labels.",
+    "missing_value_rule": "Use null when emphysema status is unreported or unresolved on imaging."
+  }
+}

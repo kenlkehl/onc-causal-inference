@@ -1,0 +1,29 @@
+{
+  "http_status": 200,
+  "request_sha256": "01cdd338f6e0168b9fcd95405405cc17ea1574e75e413ca529f413518c545ade",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 4.473,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 263,
+    "total_tokens": 377,
+    "completion_tokens": 114,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 82
+    }
+  },
+  "reasoning_characters": 422,
+  "content": "\n\n{\"merges\": [{\"members\": [\"Creatinine level\", \"Serum creatinine\"], \"canonical_label\": \"Serum creatinine\"}]}",
+  "parsed": {
+    "merges": [
+      {
+        "members": [
+          "Creatinine level",
+          "Serum creatinine"
+        ],
+        "canonical_label": "Serum creatinine"
+      }
+    ]
+  }
+}

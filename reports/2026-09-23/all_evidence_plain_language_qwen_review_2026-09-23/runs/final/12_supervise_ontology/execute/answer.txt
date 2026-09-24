@@ -1,0 +1,6 @@
+
+
+{
+  "action": "keep",
+  "reason": "The failed answers \"positive\" and \"present on CT\" are ordinary synonyms for an explicit positive imaging finding for emphysema. The current binary value type and requirement to use explicit positive or negative imaging statements are clear, and unreported or unresolved findings should still be null."
+}

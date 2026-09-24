@@ -1,0 +1,4 @@
+{
+  "action": "keep",
+  "reason": "The historical failures are synonymous expressions of the declared Present category and can be handled by the available normalization step; the supplied aggregates do not identify a correctable schema problem."
+}

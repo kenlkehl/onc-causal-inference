@@ -1,0 +1,28 @@
+
+
+{
+  "concepts": [
+    {
+      "name": "Kidney function reflected by pretreatment serum creatinine",
+      "members": [
+        "Serum creatinine"
+      ],
+      "modifier_recommendation": "exclude",
+      "rationale": "Serum creatinine shows strong repeated selection as a prognostic or treatment-association main-effect variable, but the usable treatment-effect-heterogeneity evidence is weak and mostly nonconfirmatory: penalized treatment interactions were nonzero in only 1/3 analyses, univariable R-learner validation R-loss gains were not positive in any analysis (-0.002, 0.0, -0.001), and causal-forest permutation R-loss increases were positive in only 1/3 analyses with near-zero or negative values in the other analyses. Nominal interaction p-values were inconsistent (0.02, 0.04, 0.2) and are not multiplicity-adjusted. Its 2/3 list recurrence is repeated selection within overlapping training data and does not establish treatment-effect modification. Because the direct heterogeneity metrics do not support improved treatment-effect prediction, the usable evidence supports deprioritizing serum creatinine as a treatment-effect modifier, despite its prognostic value.",
+      "representatives": [],
+      "unresolved_questions": "Multiplicity-adjusted q-values are unavailable, nominal p-values are uncalibrated, and missing score calibration or minimum meaningful R-loss improvement prevents interpretation of any small heterogeneity signals. Measured redundancy with other candidates is unavailable."
+    },
+    {
+      "name": "Radiographic evidence of emphysema or lung parenchymal disease",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "modifier_recommendation": "retain",
+      "rationale": "Emphysema on imaging provides credible convergent evidence for treatment-effect modification across analyses that directly assess effect heterogeneity: penalized treatment interactions were nonzero in 3/3 analyses, univariable R-learner validation R-loss gains were positive in 3/3 analyses (0.004, 0.006, 0.003), and causal-forest permutation R-loss increases were positive in 3/3 analyses (0.003, 0.004, 0.002). Nominal univariable interaction p-values were supportive in 2/3 analyses (0.03, 0.06, 0.04), with one result above 0.05 and no adjusted q-values available. Its 3/3 candidate-list recurrence is descriptive repeated selection within this dataset but is consistent with the other heterogeneity metrics. Missing measured redundancy and missing score calibration or minimum meaningful R-loss improvement leave the practical size and independent contribution unresolved, but the direction and consistency across methods support further evaluation.",
+      "representatives": [
+        "Emphysema on imaging"
+      ],
+      "unresolved_questions": "Measured redundancy with other candidate variables is unavailable; R-loss gains lack baseline-loss context, uncertainty estimates, score calibration, and a minimum meaningful improvement threshold; and multiplicity-adjusted q-values are unavailable."
+    }
+  ]
+}

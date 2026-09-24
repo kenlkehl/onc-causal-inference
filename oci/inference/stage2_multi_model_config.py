@@ -5,7 +5,7 @@ import math
 from typing import Any, Mapping
 
 SCHEMA_VERSION = "stage2_multi_model_selection_v3"
-PROMPT_VERSION = "stage2_multi_model_themes_v1"
+from .stage2_prompt_catalog import PROMPT_VERSION
 FAMILIES = (
     "univariable",
     "penalized_main",
@@ -28,10 +28,12 @@ class ModifierCountConfig:
     selection_rule: str = "minimum_r_loss"
     forest_seeds: int = 3
     estimators: tuple[str, ...] = FINAL_ESTIMATORS
+    concept_review: bool = False
+    concept_top_n_per_fold: int = 100
 
     def validate(self) -> None:
-        if not isinstance(self.enabled, bool):
-            raise ValueError("multi_model.modifier_count.enabled must be boolean")
+        if not isinstance(self.enabled, bool) or not isinstance(self.concept_review, bool):
+            raise ValueError("multi_model.modifier_count.enabled and concept_review must be boolean")
         if (
             not isinstance(self.estimators, tuple)
             or not self.estimators
@@ -41,7 +43,7 @@ class ModifierCountConfig:
             raise ValueError(
                 "modifier_count.estimators must be a nonempty unique list of causal_forest and/or linear_interactions"
             )
-        for name in ("max_ranked_modifiers", "forest_seeds"):
+        for name in ("max_ranked_modifiers", "forest_seeds", "concept_top_n_per_fold"):
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"modifier_count.{name} must be a positive integer")

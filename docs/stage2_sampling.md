@@ -3,7 +3,7 @@
 Stage 2 looks up a checked-in publisher profile after resolving the serving model
 through `/models`. It uses the advertised backing model when available, so a
 served alias can still select the appropriate model/version. Primary and
-extraction endpoints resolve separately. Profiles were verified on 2026-09-12;
+extraction endpoints resolve separately. The Gemma 4 and Qwen Flash Next profiles were verified on 2026-09-23;
 inference does not need internet access or scrape mutable model cards.
 
 | Model | Mode | Temperature | Top-p | Top-k | Presence penalty | Repetition penalty |
@@ -12,7 +12,7 @@ inference does not need internet access or scrape mutable model cards.
 | Qwen 3 | Thinking | 0.6 | 0.95 | 20 | 0 | 1.0 |
 | Qwen 3 | Non-thinking | 0.7 | 0.8 | 20 | 0 | 1.0 |
 | Qwen 3.5 | Thinking | 1.0 | 0.95 | 20 | 1.5 | 1.0 |
-| Qwen 3.6 / 3.8 | Thinking | 1.0 | 0.95 | 20 | 0 | 1.0 |
+| Qwen 3.6 / 3.8 (including Flash Next) | Thinking | 1.0 | 0.95 | 20 | 0 | 1.0 |
 | Qwen 3.5 / 3.6 / 3.8 | Non-thinking | 0.7 | 0.8 | 20 | 1.5 | 1.0 |
 | LFM 2.5 2.6B | Either | 0.1 | 1.0 | 50 | 0 | 1.1 |
 | LFM 2.5 1.2B | Either | 0.1 | 1.0 | 50 | 0 | 1.05 |
@@ -22,6 +22,7 @@ Sources: [Google Gemma 4](https://huggingface.co/google/gemma-4-31B-it#best-prac
 [Qwen 3.5](https://huggingface.co/Qwen/Qwen3.5-27B#best-practices),
 [Qwen 3.6](https://huggingface.co/Qwen/Qwen3.6-27B#best-practices),
 [Qwen 3.8](https://huggingface.co/Qwen/Qwen3.8-27B#best-practices),
+[Qwen 3.8 Flash Next](https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices),
 [Liquid 2.6B](https://huggingface.co/LiquidAI/LFM2.5-2.6B), and
 [Liquid 1.2B](https://huggingface.co/LiquidAI/LFM2.5-1.2B-Instruct).
 
@@ -51,3 +52,18 @@ until removed or set to null. Stage 1 artifacts are unaffected.
 Compatible endpoints receive top-k, min-p, and repetition penalty through
 `extra_body`. An endpoint rejecting these extensions can reach the existing
 logged compatibility fallback, which omits them and uses its server defaults.
+
+Reasoning defaults to `auto` for both interpretation and extraction. For
+Qwen3.8 Flash Next, including the Inferact NVFP4 checkpoint, this resolves to
+`xhigh` in both roles, with thinking and `preserve_thinking` enabled. Its
+thinking profile sends temperature 1.0, top-p 0.95, top-k 20, min-p 0,
+presence/frequency penalties 0, and repetition penalty 1. Other recognized
+models retain high interpretation and initially disabled extraction reasoning.
+Explicit reasoning settings override these defaults.
+
+Flash Next requests keep their reasoning and sampling controls on compatibility
+retries. Rejection of those controls fails the request visibly. Only the optional
+JSON response-format hint may be removed. The general compatibility fallback
+above continues to apply to other families. `model_identity.json` records both
+resolved request policies and profile provenance; request events record the
+controls actually sent on each attempt.

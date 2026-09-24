@@ -1,0 +1,13 @@
+
+
+{
+  "understanding": "Extract the requested clinical variables from the provided patient note and return one JSON object containing every requested variable name with its supported value or null.",
+  "input_meaning": "The supplied information includes clinical variable definitions and a short patient record with laboratory values and an imaging finding, from which the values must be inferred.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "date": "2026-09-23",
+  "baseline_commit": "e5466c4",
+  "scope": "Revise the 01_discover prompt as a reviewable exercise; leave production execution unchanged.",
+  "review_model": "gpt-5.6-sol",
+  "reviewer": "/root/naive_discovery_review",
+  "history_inheritance": "none",
+  "reviewer_allowed_input": "original_messages.json",
+  "input_sha256": "aa8c44c167d3c4f895a5083875a9c29c4d27af8b91bbb40f00429b94f39699fb",
+  "reviewer_context": "Only original system/user messages and their invented clinical example. No repository code, other prompt documentation, oracle data, or prior experiment results.",
+  "user_constraint": "LLM must not track identifiers or indices that Python can attach.",
+  "planned_validation": "Use a fresh recipient to assess the revised prompt and try independent clinical examples; distinguish prompt clarity from extraction accuracy.",
+  "reviewers": [
+    {
+      "name": "/root/naive_discovery_review",
+      "fresh": true,
+      "input": "original_messages.json"
+    },
+    {
+      "name": "/root/fresh_revised_discovery_review",
+      "fresh": true,
+      "input": "revised_messages_v1.json"
+    },
+    {
+      "name": "/root/fresh_final_discovery_review",
+      "fresh": true,
+      "inputs": [
+        "revised_messages_v2.json",
+        "additional_user_example.txt"
+      ],
+      "followup_input": "revised_messages_v3.json",
+      "followup_is_fresh": false
+    }
+  ],
+  "final_version": "v3",
+  "status": "complete"
+}

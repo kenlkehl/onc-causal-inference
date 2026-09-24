@@ -1,0 +1,6 @@
+[
+  {
+    "role": "user",
+    "content": "The previous JSON failed validation. Correct this exact error: ValueError: missing required feature serum_creatinine in row 1. Return one corrected JSON object only."
+  }
+]

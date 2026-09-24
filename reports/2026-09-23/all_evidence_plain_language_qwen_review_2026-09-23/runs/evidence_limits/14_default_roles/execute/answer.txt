@@ -1,0 +1,27 @@
+
+
+{
+  "confounder": {
+    "assign": true,
+    "assessment": "supported",
+    "stability": "consistent",
+    "rationale": "Serum creatinine/renal function is clinically credible as a common cause that can influence both treatment choice and favorable outcome. The main-effect penalized analyses support this role: creatinine was selected in the treatment model in 2 of 3 analyses and in the outcome model in 3 of 3 analyses. These associations are not direct proof of confounding, but together with the clinical description they provide a credible basis for retaining the variable as a confounder adjustment.",
+    "evidence_comments": [
+      "Clinical background: renal function can influence treatment choice and outcome.",
+      "Penalized main-effect treatment selection: nonzero creatinine coefficient group in 2 of 3 analyses.",
+      "Penalized main-effect outcome selection: nonzero creatinine coefficient group in 3 of 3 analyses."
+    ]
+  },
+  "effect_modifier": {
+    "assign": false,
+    "assessment": "not_supported",
+    "stability": "mixed",
+    "rationale": "The clinical description supports creatinine as related to treatment and outcome, but not necessarily as an indicator of differential treatment benefit. Evidence for treatment-effect heterogeneity is weak: penalized treatment interactions showed a nonzero interaction in only 1 of 3 analyses, and these interactions are on the log-odds scale rather than the probability-difference scale. The validation-focused univariable R-learner, which addresses differences in treatment benefit after accounting for treatment and outcome predictions, found no positive validation R-loss gains in any of 3 analyses. Because the validation evidence does not support improved prediction of probability-difference treatment effects, the modifier role is not supported. The exact practical magnitude remains unresolved due to the small gains and lack of baseline loss or uncertainty estimates, but the direction of validation evidence is consistently non-positive.",
+    "evidence_comments": [
+      "Penalized treatment interaction: nonzero interaction group in 1 of 3 analyses, log-odds scale.",
+      "Univariable R-learner validation: 0 of 3 analyses had validation R-loss gain > 0.",
+      "Univariable R-learner validation R-loss gains: -0.002, 0.0, -0.001.",
+      "Main-effect outcome association does not by itself establish effect modification."
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "http_status": 200,
+  "request_sha256": "bc45933f5d12b3b0f1661b655af50a3b2acb8146d967c61e4cc3e4bd17bed512",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 74.838,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 850,
+    "total_tokens": 4049,
+    "completion_tokens": 3199,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 2967
+    }
+  },
+  "reasoning_characters": 13477,
+  "content": "\n\n{\n  \"understanding\": \"Update each clinical variable from the new record section while preserving prior values unless the new note provides a later or otherwise decisive observation, then return the updated scalar/null values and brief decision notes.\",\n  \"input_meaning\": \"The input gives variable definitions, previously extracted measurements, and the next clinical text, which reports a dated serum creatinine result and a CT statement about emphysema.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [],\n  \"sample_response\": {\n    \"values\": {\n      \"Serum creatinine\": 1.2,\n      \"Emphysema on imaging\": \"Present\"\n    },\n    \"decision_notes\": {\n      \"Serum creatinine\": \"Latest dated result, 2025-01-10, supersedes 2025-01-01.\",\n      \"Emphysema on imaging\": \"Explicit positive CT finding; CT date is not explicitly linked.\"\n    }\n  }\n}",
+  "parsed": {
+    "understanding": "Update each clinical variable from the new record section while preserving prior values unless the new note provides a later or otherwise decisive observation, then return the updated scalar/null values and brief decision notes.",
+    "input_meaning": "The input gives variable definitions, previously extracted measurements, and the next clinical text, which reports a dated serum creatinine result and a CT statement about emphysema.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [],
+    "sample_response": {
+      "values": {
+        "Serum creatinine": 1.2,
+        "Emphysema on imaging": "Present"
+      },
+      "decision_notes": {
+        "Serum creatinine": "Latest dated result, 2025-01-10, supersedes 2025-01-01.",
+        "Emphysema on imaging": "Explicit positive CT finding; CT date is not explicitly linked."
+      }
+    }
+  }
+}

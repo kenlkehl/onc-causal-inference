@@ -1,0 +1,19 @@
+
+
+{
+  "description": "Extract the latest serum creatinine measurement from the patient's medical record as a continuous numeric value. Include directly reported threshold strings when they are explicitly documented, such as '<1.0'. Ignore unrelated findings such as CT reports of emphysema.",
+  "value_type": "continuous",
+  "unit": "mg/dL",
+  "categories": [],
+  "measurement_definition": "Serum creatinine reported in the record. Extract numerical results and explicitly stated threshold results such as '<1.0'. Report values in mg/dL. If a value is reported in micromoles per liter (µmol/L), convert to mg/dL by dividing by 88.4. If a nonnumeric threshold is reported with a valid unit, preserve the threshold string unchanged in the same unit or in the converted unit if conversion is unambiguous.",
+  "missing_value_rule": "Return null when no serum creatinine measurement is documented, when the finding is unresolved or indeterminate, when the unit is missing or incompatible, or when the reported value cannot be interpreted as a creatinine measurement or threshold. For example, 'Serum creatinine <1.0 mg/dL.' may be extracted as the threshold string '<1.0' in mg/dL, whereas an ambiguous unit yields null.",
+  "conflict_resolution": {
+    "strategy": "latest",
+    "positive_category": null
+  },
+  "caveats": [
+    "Preserve explicitly reported threshold strings, such as '<1.0', rather than converting them to a numeric value.",
+    "If multiple creatinine observations are present, select the latest dated observation. If equal dates occur, use the last mention on that date. If all observations are undated, use the last text-ordered observation.",
+    "Do not extract creatinine from unrelated clinical information or from diagnostic statements such as 'CT documents emphysema.'"
+  ]
+}

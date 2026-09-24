@@ -1,0 +1,22 @@
+
+
+{
+  "themes": [
+    {
+      "name": "Kidney function: serum creatinine",
+      "members": [
+        "Serum creatinine"
+      ],
+      "interpretation": "Serum creatinine appears primarily as a patient-characteristic measurement rather than a consistently demonstrated treatment-effect modifier. It was selected as a main effect for outcome in all three analyses and for treatment in most analyses, suggesting a reproducible association with either baseline risk or treatment assignment. Evidence for heterogeneity in the treatment effect was weaker and mixed: one penalized interaction analysis selected it, two nominal univariable interaction p-values were below 0.05 without adjusted q-values, but the univariable R-learner showed no positive validation R-loss gain in any analysis, and only one of three causal-forest permutation tests showed a positive increase near zero.",
+      "disagreements": "The penalized interaction result and two nominal univariable interaction p-values suggest possible treatment-effect modification, but this is not supported by the R-learner validation results and is only weakly supported by causal-forest permutation. The R-loss gains are negative or zero, and causal-forest R-loss increases are small or zero, leaving the practical evidence for effect heterogeneity unresolved."
+    },
+    {
+      "name": "Pulmonary imaging: emphysema status",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "interpretation": "Emphysema on imaging is the stronger candidate treatment-effect modifier. It was selected as a treatment interaction in all three penalized interaction analyses, had positive univariable R-learner validation R-loss gains in all three analyses, and showed positive causal-forest permutation R-loss increases in all three analyses. These directions are consistent with treatment effects varying with emphysema status. Its main-effect role is less clear: main-effect treatment results are unavailable, and it was selected as an outcome main effect in only one of three analyses, so the evidence mostly supports effect modification rather than a robust main prognostic or treatment-assignment association.",
+      "disagreements": "The main-effect evidence is sparse, with treatment main effects unavailable and outcome main effect selected in only one of three analyses. One nominal univariable interaction p-value was not below 0.05, and multiplicity-adjusted q-values are unavailable. The R-loss gains and causal-forest permutation increases are consistently positive but modest in absolute terms, so the practical magnitude of the effect heterogeneity remains unresolved."
+    }
+  ]
+}

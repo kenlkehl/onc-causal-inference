@@ -1,0 +1,24 @@
+{
+  "passed": true,
+  "messages": [
+    {
+      "role": "system",
+      "content": "Read the patient's clinical text and report a value for each listed clinical variable.\n\nWhat you receive\n\nThe clinical variable definitions and the text from one patient's record.\n\nHow to decide\n\nFollow each variable's definition. Use the wording in the patient's text to determine its value. An explicit date belongs to a finding when the sentence or record heading links them. An undated CT sentence therefore keeps an unknown date even when it follows a dated laboratory result.\n\nUse the defined category labels exactly. Write numerical measurements as JSON numbers in the required unit; a definition may also allow a reported threshold string. Use null according to the variable's missing-value rule.\n\nWhat to return\n\nReturn one JSON object whose top-level keys are exactly the supplied clinical variable names. Each value is a scalar or null. Include every requested variable."
+    },
+    {
+      "role": "user",
+      "content": "Clinical variables\n\nperformance status\n- Meaning: ECOG performance status.\n- Value type: ordinal\n- Measurement rule: Extract the most recently documented ECOG performance status.\n- Missing-value rule: Use null when undocumented.\n- Allowed categories: 0; 1; 2; 3; 4\n- Choose among repeated observations using this rule: Use the latest dated observation; break equal-date ties using the last mention. If all observations are undated, use the last mention.\n\nemphysema on imaging\n- Meaning: Emphysema documented on imaging.\n- Value type: binary\n- Measurement rule: Use Present for imaging describing emphysema and Absent for explicit absence on imaging.\n- Missing-value rule: Use null when imaging does not address emphysema.\n- Allowed categories: Present; Absent\n- Choose among repeated observations using this rule: Use the latest dated observation; break equal-date ties using the last mention. If all observations are undated, use the last mention.\n\nPatient record\nECOG performance status is 1. CT chest shows moderate emphysema."
+    }
+  ],
+  "result": {
+    "rows": [
+      {
+        "row_id": 71,
+        "values": {
+          "performance_status": "1",
+          "emphysema_on_imaging": "Present"
+        }
+      }
+    ]
+  }
+}

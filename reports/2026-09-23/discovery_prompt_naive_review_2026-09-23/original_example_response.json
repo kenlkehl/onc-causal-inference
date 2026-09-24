@@ -1,0 +1,16 @@
+{
+  "candidates": [
+    {
+      "name": "Serum creatinine",
+      "description": "The concentration of creatinine measured in the patient's serum.",
+      "basis": "The text reports serum creatinine measurements on two dates.",
+      "uncertainty": ""
+    },
+    {
+      "name": "Emphysema on imaging",
+      "description": "The presence or absence of emphysema on imaging.",
+      "basis": "The CT is stated to document emphysema.",
+      "uncertainty": ""
+    }
+  ]
+}

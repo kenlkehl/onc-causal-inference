@@ -34,6 +34,7 @@ from .nuisance_diagnostics import (
     validate_propensity_bounds,
 )
 from . import stage2_request_audit as request_audit
+from . import stage2_clinical_prompts as clinical_prompts
 
 from ..models.causal_forest_head import CausalForestHead
 from ..models.elastic_net_nuisance import (
@@ -66,22 +67,12 @@ LOGGER = logging.getLogger(__name__)
 # to use separate cores. Small selectors stay in-process to avoid spawn cost.
 STATISTICAL_SELECTION_PROCESS_ISOLATION_MIN_CANDIDATES = 64
 
-EXTRACTION_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_single_patient_extraction_v6_conflict_resolution_independent_small_model"
-)
-EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_single_patient_feature_batch_extraction_v5_conflict_resolution_independent_small_model"
-)
-PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_single_patient_page_observations_v5_provenance"
-)
-PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_single_patient_page_observation_feature_batch_v1_provenance"
-)
-PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_deterministic_page_reconciliation_v6_provenance"
-)
-REVIEW_CHECKPOINT_SCHEMA_VERSION = "stage2_aggregate_ontology_supervisor_v1"
+EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_extraction_v6_conflict_resolution_independent_small_model_clinical_prompts_20260923'
+EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_feature_batch_extraction_v5_conflict_resolution_independent_small_model_clinical_prompts_20260923'
+PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_page_observations_v5_provenance_clinical_prompts_20260923'
+PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_page_observation_feature_batch_v1_provenance_clinical_prompts_20260923'
+PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_deterministic_page_reconciliation_v6_provenance_clinical_prompts_20260923'
+REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v1_clinical_prompts_20260923'
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
 ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v9_architecture_search"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
@@ -94,14 +85,12 @@ HELDOUT_MEASUREMENT_REUSE_SCHEMA_VERSION = (
 )
 STAGE2_RESELECTION_MIGRATION_SCHEMA_VERSION = "stage2_reselection_migration_v1"
 EXTRACTION_ISSUE_SCHEMA_VERSION = "stage2_extraction_issues_v1"
-PENDING_CATEGORY_ONTOLOGY_SCHEMA_VERSION = "stage2_pending_category_ontology_v1"
-ONTOLOGY_REFINEMENT_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_training_failure_ontology_refinement_v2_request_policy"
-)
+PENDING_CATEGORY_ONTOLOGY_SCHEMA_VERSION = 'stage2_pending_category_ontology_v1_clinical_prompts_20260923'
+ONTOLOGY_REFINEMENT_CHECKPOINT_SCHEMA_VERSION = 'stage2_training_failure_ontology_refinement_v2_request_policy_clinical_prompts_20260923'
 INCREMENTAL_REFINEMENT_EXTRACTION_SCHEMA_VERSION = (
     "stage2_incremental_refinement_extraction_v1_feature_delta"
 )
-HARMONIZATION_CHECKPOINT_SCHEMA_VERSION = "stage2_mixed_value_harmonization_v1_llm_training_only"
+HARMONIZATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mixed_value_harmonization_v1_llm_training_only_clinical_prompts_20260923'
 HARMONIZATION_FALLBACK_SCHEMA_VERSION = "stage2_mixed_value_harmonization_fallback_v1"
 # Compatibility defaults for Stage 2 config objects created before ontology
 # refinement was added.  Keeping this boundary tolerant also protects a
@@ -113,12 +102,8 @@ DEFAULT_EXTRACTION_CHUNK_SIZE_TOKENS = 50_000
 DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS = 131_072
 DEFAULT_EXTRACTION_MAX_TOKENS = 75_000
 DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS = 1_024
-SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION = (
-    "stage2_serial_patient_feature_chunk_v1_carried_validated_state"
-)
-SERIAL_EXTRACTION_MANIFEST_SCHEMA_VERSION = (
-    "stage2_serial_patient_feature_extraction_v1_lossless_ordered_chunks"
-)
+SERIAL_EXTRACTION_CHUNK_CHECKPOINT_SCHEMA_VERSION = 'stage2_serial_patient_feature_chunk_v1_carried_validated_state_clinical_prompts_20260923'
+SERIAL_EXTRACTION_MANIFEST_SCHEMA_VERSION = 'stage2_serial_patient_feature_extraction_v1_lossless_ordered_chunks_clinical_prompts_20260923'
 MAX_SERIAL_FEATURE_STATE_CHARS = 2_048
 DEFAULT_SCREENING_TREES = 200
 DEFAULT_MAX_EVALUATION_ROUNDS = 10
@@ -1211,37 +1196,12 @@ def _category_ontology_plan(
 
 
 def _category_ontology_prompt(items: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
-    """Ask the configured Stage 2 LLM to normalize values without patient text."""
-
-    body = {
-        "job": "map_extracted_values_to_declared_category_ontology",
-        "rules": [
-            "Use only the feature definition, allowed categories, and prior extracted value.",
-            "Do not perform clinical extraction and do not infer any new patient information.",
-            "Map by semantic equivalence to exactly one allowed category.",
-            "Return null when the prior value does not map unambiguously.",
-            "Return every mapping_id exactly once and no additional mapping IDs.",
-        ],
-        "items": [dict(item) for item in items],
-        "response": {
-            "corrections": [
-                {
-                    "mapping_id": "one supplied mapping_id",
-                    "value": "one exact allowed category or null",
-                }
-            ]
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You normalize previously extracted categorical values to a closed ontology. "
-                "Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True)},
-    ]
+    if len(items) != 1:
+        raise ValueError("category interpretation requires one phrase per call")
+    item = items[0]
+    feature = {**item, "name": item["feature_name"], "categories_or_unit": item["allowed_categories"]}
+    return clinical_prompts.messages("08_map_categories", clinical_prompts.feature_text(feature)
+        + "\n\nPhrase to interpret\n" + clinical_prompts.scalar(item["prior_extracted_value"]))
 
 
 def _validate_category_ontology(
@@ -1249,6 +1209,9 @@ def _validate_category_ontology(
     *,
     items: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
+    if set(value) == {"value"} and len(items) == 1:
+        value = {"corrections": [{"mapping_id": items[0]["mapping_id"], "value": value["value"]}]}
+
     raw_corrections = value.get("corrections")
     if not isinstance(raw_corrections, list):
         raise ValueError("category ontology response requires a corrections array")
@@ -1550,13 +1513,14 @@ def _request_validated_extraction(
         },
     )
     try:
-        corrections = request_json(
-            _category_ontology_prompt(items),
-            lambda value: _validate_category_ontology(value, items=items),
-            # This is ontology judgment over aggregate invalid values, not raw
-            # patient extraction, so it belongs to the primary supervisor.
-            request_kind="interpretation",
-        )
+        corrections = {"corrections": []}
+        for item in items:
+            mapped = request_json(
+                _category_ontology_prompt([item]),
+                lambda value, item=item: _validate_category_ontology(value, items=[item]),
+                request_kind="interpretation",
+            )
+            corrections["corrections"].extend(mapped["corrections"])
         resolution = "llm_category_ontology"
     except Stage2ResponseValidationError as exc:
         ontology_error = f"{type(exc).__name__}: {exc}"
@@ -1717,188 +1681,28 @@ def _ensure_extraction_issue_audit(directory: Path) -> dict[str, Any]:
     return reconstructed
 
 
-def _extraction_prompt(
-    *,
-    definitions: Sequence[Mapping[str, Any]],
-    rows: Sequence[Mapping[str, Any]],
-) -> list[dict[str, str]]:
+def _extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], rows: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     if len(rows) != 1:
         raise ValueError("Stage 2 extraction prompts must contain exactly one patient's record")
-    body = {
-        "job": "extract_stage2_patient_variables",
-        "rules": [
-            "Use only the supplied clinical text for the patient in that row.",
-            "Apply the measurement definition and missing-value rule literally.",
-            "Consider every explicitly supported observation for a feature before "
-            "selecting its one output value.",
-            "When multiple supported observations remain, apply that feature's "
-            "conflict_resolution policy literally. The conflict_resolution policy "
-            "governs if prose in the measurement definition is ambiguous or inconsistent "
-            "about how to choose among observations.",
-            "For latest or earliest conflict resolution, prefer observations with an "
-            "explicit governing date or time. If none are dated, use clinical-text source "
-            "order and the declared source_order_tie_breaker; do not treat the first mention, "
-            "diagnosis value, or demographics value as automatically authoritative.",
-            "For a binary, categorical, or ordinal feature, return one declared category exactly.",
-            "Do not substitute 0/1 or true/false for a declared category unless that "
-            "exact value is declared.",
-            *_SCALAR_EXTRACTION_RULES,
-            "Return null when the record does not support a value.",
-            "Return every row and every feature exactly once.",
-        ],
-        "features": _prompt_feature_definitions(definitions),
-        "patients": list(rows),
-        "response": {
-            "rows": [
-                {
-                    "row_id": "one supplied integer row_id",
-                    "values": {"every supplied feature name": "scalar value or null"},
-                }
-            ]
-        },
-    }
-    # Keep clinical text as Unicode. ASCII escaping can expand multilingual
-    # notes several-fold and consumes model tokens on literal ``\\uXXXX``
-    # sequences without adding information.
-    return [
-        {
-            "role": "system",
-            "content": "You extract prespecified variables from supplied clinical text. Return JSON only.",
-        },
-        {
-            "role": "user",
-            "content": json.dumps(body, sort_keys=True, ensure_ascii=False),
-        },
-    ]
+    return clinical_prompts.messages("05_extract_patient",
+        clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
+        + "\n\nPatient record\n" + str(rows[0].get("text") or ""))
 
 
-def _serial_extraction_prompt(
-    *,
-    definitions: Sequence[Mapping[str, Any]],
-    row_id: int,
-    chunk_text: str,
-    prior_values: Mapping[str, Any],
-    prior_feature_state: Mapping[str, Any],
-    chunk_index: int,
-    char_start: int,
-    char_end: int,
-    document_chars: int,
-) -> list[dict[str, str]]:
-    """Update one validated cumulative extraction with the next source chunk."""
-
-    body = {
-        "job": "update_stage2_patient_variables_serially",
-        "rules": [
-            "Process this clinical-text chunk after every earlier chunk and before every later chunk.",
-            "prior_extraction contains the validated cumulative scalar values from all earlier contiguous chunks; it is state, not additional clinical text.",
-            "prior_feature_state contains concise decision metadata retained from earlier chunks, such as the governing date and source order for latest/earliest or value counts for mode.",
-            "Use only prior_extraction and the supplied current_chunk. Never infer evidence from a feature description or from chunk metadata.",
-            "For each feature, combine supported evidence in the current chunk with the prior cumulative value and apply that feature's conflict_resolution policy literally.",
-            "Preserve a nonnull prior value exactly when this chunk supplies no evidence that changes the policy-selected cumulative value.",
-            "A null prior value means no supported cumulative value has been retained yet; it is not evidence of a negative clinical finding.",
-            "For latest or earliest, compare explicit governing dates when available. Otherwise treat current_chunk as later in source order than prior_extraction and apply source_order_tie_breaker.",
-            "For maximum, minimum, mode, any_positive, and single_or_null, update the cumulative value according to the named policy rather than automatically preferring the current chunk.",
-            "Return carry_forward_state for every feature as a concise string or null. Preserve enough metadata to apply its conflict policy in later chunks, but do not quote or summarize unrelated record text.",
-            f"Each carry_forward_state string must be at most {MAX_SERIAL_FEATURE_STATE_CHARS} characters.",
-            "For a binary, categorical, or ordinal feature, return one declared category exactly.",
-            "Do not substitute 0/1 or true/false for a declared category unless that exact value is declared.",
-            *_SCALAR_EXTRACTION_RULES,
-            "Return null only when the combined prior state and current chunk do not support a retained value under the feature policy.",
-            "Return the row and every supplied feature exactly once.",
-        ],
-        "features": _prompt_feature_definitions(definitions),
-        "patient": {
-            "row_id": int(row_id),
-            "prior_extraction": dict(prior_values),
-            "prior_feature_state": dict(prior_feature_state),
-            "current_chunk": chunk_text,
-            "chunk": {
-                "chunk_index": int(chunk_index),
-                "char_start": int(char_start),
-                "char_end": int(char_end),
-                "document_chars": int(document_chars),
-                "is_final_chunk": int(char_end) == int(document_chars),
-            },
-        },
-        "response": {
-            "rows": [
-                {
-                    "row_id": "the supplied integer row_id",
-                    "values": {"every supplied feature name": "cumulative scalar value or null"},
-                    "carry_forward_state": {
-                        "every supplied feature name": "concise policy state string or null"
-                    },
-                }
-            ]
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You update a validated structured patient extraction from consecutive "
-                "clinical-record chunks. Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True, ensure_ascii=False)},
-    ]
+def _serial_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row_id: int,
+    chunk_text: str, prior_values: Mapping[str, Any], prior_feature_state: Mapping[str, Any],
+    chunk_index: int, char_start: int, char_end: int, document_chars: int) -> list[dict[str, str]]:
+    prior = "\n".join(f"- {clinical_prompts.label(d)}: {clinical_prompts.scalar(prior_values.get(d['name']))}; "
+        f"decision note: {clinical_prompts.scalar(prior_feature_state.get(d['name']))}" for d in definitions)
+    return clinical_prompts.messages("06_serial_chunk",
+        clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
+        + "\n\nValues found so far\n" + prior + "\n\nNext section of the record\n" + chunk_text)
 
 
-def _page_extraction_prompt(
-    *,
-    definitions: Sequence[Mapping[str, Any]],
-    row: Mapping[str, Any],
-) -> list[dict[str, str]]:
-    """Request every supported page observation with verifiable provenance."""
-
-    body = {
-        "job": "extract_stage2_patient_variable_observations",
-        "rules": [
-            "Use only the supplied clinical-text page for this patient.",
-            "Return every distinct explicitly supported observation for every supplied feature; do not collapse conflicting or repeated longitudinal values.",
-            "conflict_resolution is applied later by deterministic code. Do not apply it within this page and do not discard an otherwise supported observation because another value is newer, earlier, larger, smaller, or more frequent.",
-            "Do not return an observation when the page does not support a nonmissing value.",
-            "Each value must be one scalar. For closed ontologies, use one declared category exactly.",
-            "For each observation, quote a short exact contiguous evidence substring from patient.text.",
-            "evidence_start and evidence_end are zero-based Python-style character offsets into patient.text, with evidence_end exclusive.",
-            "Set recorded_at only when a date or time explicitly governs that observation, such as an encounter, specimen, measurement, or result date.",
-            "When recorded_at is set, normalize it to ISO-8601 and provide the exact source date text plus its offsets. Do not borrow an unrelated date.",
-            "Use null for recorded_at and recorded_at_evidence when no governing date is explicit on this page.",
-            "Return an empty observations array when no supplied feature has supported evidence on this page.",
-        ],
-        "features": _page_prompt_feature_definitions(definitions),
-        "patient": dict(row),
-        "response": {
-            "rows": [
-                {
-                    "row_id": "the supplied integer row_id",
-                    "observations": [
-                        {
-                            "feature_name": "one supplied feature name",
-                            "value": "one supported scalar value",
-                            "evidence": "exact quote from patient.text",
-                            "evidence_start": "zero-based inclusive integer",
-                            "evidence_end": "zero-based exclusive integer",
-                            "recorded_at": "ISO-8601 date/time, year-month, year, or null",
-                            "recorded_at_evidence": "exact source date/time quote or null",
-                            "recorded_at_start": "inclusive integer or null",
-                            "recorded_at_end": "exclusive integer or null",
-                        }
-                    ],
-                }
-            ]
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You extract all supported clinical variable observations with exact "
-                "source provenance. Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True, ensure_ascii=False)},
-    ]
+def _page_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row: Mapping[str, Any]) -> list[dict[str, str]]:
+    return clinical_prompts.messages("07_page_observations",
+        clinical_prompts.definitions_text(_page_prompt_feature_definitions(definitions), include_conflict=False)
+        + "\n\nRecord section\n" + str(row.get("text") or ""))
 
 
 def _prompt_chars(messages: Sequence[Mapping[str, str]]) -> int:
@@ -2010,6 +1814,12 @@ def _validate_extraction(
     row_ids: Sequence[int],
     definitions: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
+    if len(row_ids) == 1 and "rows" not in value and "values" not in value:
+        request_audit.event("response_shape_normalized", original_shape="clinical_variable_map",
+                            features=len(definitions), inferred_measurements=0)
+        value = {"rows": [{"row_id": int(row_ids[0]),
+                  "values": clinical_prompts.named_values(value, definitions)}]}
+
     value = _normalize_single_patient_wrapper(
         value, row_ids=row_ids, feature_names=[str(feature["name"]) for feature in definitions],
     )
@@ -2121,6 +1931,11 @@ def _validate_serial_extraction(
     definitions: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Validate cumulative values plus bounded policy metadata for the next chunk."""
+    if set(value) == {"values", "decision_notes"}:
+        value = {"rows": [{"row_id": int(row_id),
+            "values": clinical_prompts.named_values(value["values"], definitions),
+            "carry_forward_state": clinical_prompts.named_values(value["decision_notes"], definitions)}]}
+
 
     validated = _validate_extraction(
         value,
@@ -2237,7 +2052,7 @@ def _exact_quote_span(
     if start is None:
         if len(matches) != 1:
             raise ValueError(
-                f"{label} occurs more than once; exact offsets are required to prove provenance"
+                f"{label} occurs more than once; quote more surrounding words to identify this occurrence"
             )
         selected = matches[0]
         method = "unique_exact_match"
@@ -2335,6 +2150,8 @@ def _validate_page_observations(
 ) -> dict[str, Any]:
     """Validate values and prove each observation against an exact page quote."""
 
+    if set(value) == {"observations"}:
+        value = {"rows": [{"row_id": int(page["row_id"]), "observations": value["observations"]}]}
     rows = value.get("rows")
     if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
         raise ValueError("page extraction response requires exactly one row object")
@@ -2362,6 +2179,23 @@ def _validate_page_observations(
         try:
             if not isinstance(raw, Mapping):
                 raise ValueError("observation must be an object")
+            if "feature" in raw:
+                if set(raw) != {"feature", "value", "quote", "governing_date_quote"}:
+                    raise ValueError("each observation requires feature, value, quote, and governing_date_quote")
+                feature_name = clinical_prompts.resolve_label(raw["feature"], clinical_prompts.label_map(definitions))
+                date_quote = raw["governing_date_quote"]
+                quote, quote_start, quote_end, _ = _exact_quote_span(text=text, quote=raw["quote"],
+                    reported_start=None, reported_end=None, label="observation quote")
+                date_start = date_end = None
+                if isinstance(date_quote, str) and text.count(date_quote) > 1:
+                    if quote.count(date_quote) != 1:
+                        raise ValueError("the governing date occurs repeatedly; include its governing heading in the observation quote")
+                    date_start = quote_start + quote.index(date_quote)
+                    date_end = date_start + len(date_quote)
+                raw = {"feature_name": feature_name, "value": raw["value"], "evidence": quote,
+                       "evidence_start": quote_start, "evidence_end": quote_end,
+                       "recorded_at": _canonical_time_evidence(date_quote) if date_quote is not None else None,
+                       "recorded_at_evidence": date_quote, "recorded_at_start": date_start, "recorded_at_end": date_end}
             feature_name = str(raw.get("feature_name") or "")
             if feature_name not in definition_by_name:
                 raise ValueError("feature_name is not one of the supplied features")
@@ -2871,8 +2705,10 @@ def _lossless_extraction_pages(
     *,
     definition_batches: Sequence[Sequence[Mapping[str, Any]]],
     max_prompt_chars: int,
+    tokenizer: Any = None,
+    input_token_budget: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Split one note into the largest exact prompt-sized contiguous pages."""
+    """Split one note into exact contiguous pages within character and token caps."""
 
     source = str(row.get("text") or "")
     row_id = int(row["row_id"])
@@ -2899,16 +2735,11 @@ def _lossless_extraction_pages(
                     "document_chars": len(source),
                 },
             }
-            prompt_sizes = (
-                _prompt_chars(
-                    _page_extraction_prompt(
-                        definitions=batch_definitions,
-                        row=candidate,
-                    )
-                )
-                for batch_definitions in definition_batches
-            )
-            if all(size <= int(max_prompt_chars) for size in prompt_sizes):
+            prompts = [_page_extraction_prompt(definitions=batch_definitions, row=candidate)
+                       for batch_definitions in definition_batches]
+            if all(_prompt_chars(prompt) <= int(max_prompt_chars)
+                   and (tokenizer is None or prompt_token_count(tokenizer, prompt) <= int(input_token_budget))
+                   for prompt in prompts):
                 best = candidate
                 low = end + 1
             else:
@@ -3534,6 +3365,10 @@ def extract_rows(
             definition_batches=definition_batches,
         )
 
+    if any(_resolved_conflict_resolution(d)["strategy"] == "mode" for d in definitions):
+        batches = [[row] for row in request_rows if not row["text"]]
+        oversized_rows = [row for row in request_rows if row["text"]]
+
     page_requests: list[dict[str, Any]] = []
     for row in oversized_rows:
         page_requests.extend(
@@ -3541,6 +3376,8 @@ def extract_rows(
                 row,
                 definition_batches=definition_batches,
                 max_prompt_chars=int(max_prompt_chars),
+                tokenizer=tokenizer,
+                input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
             )
         )
 
@@ -4507,146 +4344,20 @@ def _mixed_value_observations(
     }
 
 
-def _harmonization_prompt(
-    *,
-    feature: Mapping[str, Any],
-    observations: Mapping[str, Any],
-    prior_plan: Mapping[str, Any] | None,
-) -> list[dict[str, str]]:
-    body = {
-        "job": "harmonize_stage2_mixed_numeric_and_categorical_values",
-        "information_boundary": (
-            "The values and summaries come only from outer-training patients. "
-            "No treatment, outcome, held-out text, or held-out values are supplied."
-        ),
-        "feature": {
-            key: copy.deepcopy(feature.get(key))
-            for key in (
-                "feature_id",
-                "name",
-                "description",
-                "categories_or_unit",
-                "measurement_definition",
-                "missing_value_rule",
-            )
-        },
-        "observed_training_representations": copy.deepcopy(observations),
-        "prior_plan_to_extend_or_replace": copy.deepcopy(prior_plan),
-        "rules": [
-            "Choose one common modeling representation for every observed value.",
-            "Use target_representation=continuous only when every nonnumeric token "
-            "has an unambiguous exact numeric meaning in the feature's stated unit. "
-            "Do not invent midpoints for ranges, inequalities, or qualitative labels.",
-            "Otherwise use target_representation=categorical. Define clinically "
-            "coherent canonical categories, map every exact observed text token, and "
-            "supply ordered, exhaustive, nonoverlapping numeric bins.",
-            "For categorical numeric bins, the first lower_bound and final upper_bound "
-            "must be null. Adjacent bins must share a boundary with exactly one side inclusive.",
-            "Map an unusable text token to null rather than guessing.",
-            "This is generic value harmonization. Base the plan only on the supplied "
-            "feature definition and observed representations.",
-        ],
-        "response_schema": {
-            "target_representation": "continuous or categorical",
-            "reason": "concise scientific rationale",
-            "canonical_categories": ["empty for continuous; at least two strings for categorical"],
-            "categorical_value_map": [
-                {
-                    "raw_value": "one exact observed text token",
-                    "canonical_value": (
-                        "finite number/null for continuous; canonical category/null "
-                        "for categorical"
-                    ),
-                }
-            ],
-            "numeric_bin_rules": [
-                {
-                    "lower_bound": "number or null",
-                    "lower_inclusive": "boolean",
-                    "upper_bound": "number or null",
-                    "upper_inclusive": "boolean",
-                    "canonical_value": "canonical category",
-                }
-            ],
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You harmonize mixed representations of one clinical variable into "
-                "a loss-aware, machine-readable ontology. Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True)},
-    ]
+def _harmonization_prompt(*, feature: Mapping[str, Any], observations: Mapping[str, Any],
+    prior_plan: Mapping[str, Any] | None) -> list[dict[str, str]]:
+    return clinical_prompts.messages("10_harmonize_values", clinical_prompts.feature_text(feature)
+        + "\n\nObserved values\n" + clinical_prompts.readable(observations))
 
 
-def _harmonization_delta_prompt(
-    *,
-    feature: Mapping[str, Any],
-    prior_plan: Mapping[str, Any],
-    new_categorical_values: Sequence[Mapping[str, Any]],
-) -> list[dict[str, str]]:
-    body = {
-        "job": "extend_stage2_harmonization_map_for_new_text_values",
-        "information_boundary": (
-            "The values come only from outer-training patients. No treatment, outcome, "
-            "held-out text, or held-out values are supplied."
-        ),
-        "feature": {
-            key: copy.deepcopy(feature.get(key))
-            for key in (
-                "feature_id",
-                "name",
-                "description",
-                "categories_or_unit",
-                "measurement_definition",
-                "missing_value_rule",
-            )
-        },
-        "frozen_harmonization_plan": {
-            key: copy.deepcopy(prior_plan.get(key))
-            for key in (
-                "target_representation",
-                "reason",
-                "canonical_categories",
-                "numeric_bin_rules",
-                "unmapped_value_rule",
-            )
-        },
-        "new_observed_training_text_values": copy.deepcopy(list(new_categorical_values)),
-        "rules": [
-            "Do not revise the frozen target representation, categories, or numeric bins.",
-            "Return exactly one mapping for each supplied raw_value and no other raw values.",
-            "Copy every raw_value exactly, including punctuation, spacing, and case.",
-            "For a continuous target, use a finite number only when the exact text has "
-            "an unambiguous value in the feature's stated unit.",
-            "For a categorical target, use only a frozen canonical category.",
-            "Map an unusable or ambiguous text token to null rather than guessing.",
-        ],
-        "response_schema": {
-            "categorical_value_map": [
-                {
-                    "raw_value": "one exact supplied text token",
-                    "canonical_value": (
-                        "finite number/null for continuous; frozen canonical category/null "
-                        "for categorical"
-                    ),
-                }
-            ]
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You extend one frozen clinical value map without revising its ontology. "
-                "Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True)},
-    ]
+def _harmonization_delta_prompt(*, feature: Mapping[str, Any], prior_plan: Mapping[str, Any],
+    new_categorical_values: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    if len(new_categorical_values) != 1:
+        raise ValueError("value-map extension requires one phrase per call")
+    representation = {key: prior_plan[key] for key in ("target_representation", "canonical_categories", "numeric_bin_rules")}
+    return clinical_prompts.messages("11_extend_value_map", clinical_prompts.feature_text(feature)
+        + "\n\nRepresentation and category definitions\n" + clinical_prompts.readable(representation)
+        + "\n\nPhrase to interpret\n" + str(new_categorical_values[0]["raw_value"]))
 
 
 def _bin_contains(value: float, rule: Mapping[str, Any]) -> bool:
@@ -4822,6 +4533,10 @@ def _validate_harmonization_plan(
     feature: Mapping[str, Any],
     observations: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if "status" in value:
+        from .stage2_value_interpretation import compile_value_interpretations
+        value = compile_value_interpretations(value, observations=observations)
+
     target = str(value.get("target_representation") or "").strip().lower()
     if target not in {"continuous", "categorical"}:
         raise ValueError("harmonization target_representation must be continuous or categorical")
@@ -4871,8 +4586,10 @@ def _validate_harmonization_plan(
                         raise ValueError(f"numeric bin {label} must be finite or null")
             lower = float(lower) if lower is not None else None
             upper = float(upper) if upper is not None else None
-            if lower is not None and upper is not None and lower >= upper:
-                raise ValueError("numeric bins require lower_bound < upper_bound")
+            if lower is not None and upper is not None and (
+                lower > upper or (lower == upper and not (raw_rule["lower_inclusive"] and raw_rule["upper_inclusive"]))
+            ):
+                raise ValueError("numeric bins require ordered bounds; a point interval must include its boundary")
             canonical = str(raw_rule.get("canonical_value") or "")
             if canonical not in categories:
                 raise ValueError("numeric bin values must be canonical categories")
@@ -4944,6 +4661,9 @@ def _validate_harmonization_delta(
     prior_plan: Mapping[str, Any],
     new_raw_values: Sequence[str],
 ) -> dict[str, Any]:
+    if set(value) == {"value"} and len(new_raw_values) == 1:
+        value = {"categorical_value_map": [{"raw_value": str(new_raw_values[0]), "canonical_value": value["value"]}]}
+
     mapping_by_raw, normalization = _normalize_harmonization_value_map(
         value.get("categorical_value_map"),
         expected_raw_values=new_raw_values,
@@ -5140,7 +4860,7 @@ def _request_harmonization_plan(
         messages = _harmonization_delta_prompt(
             feature=feature,
             prior_plan=validated_prior,
-            new_categorical_values=new_rows,
+            new_categorical_values=new_rows[:1],
         )
         request_mode = "prior_plan_delta"
     else:
@@ -5173,15 +4893,16 @@ def _request_harmonization_plan(
         request_performed = True
         if validated_prior is not None:
             new_raw_values = [str(row["raw_value"]) for row in new_rows]
-            delta = request_json(
-                messages,
-                lambda response: _validate_harmonization_delta(
-                    response,
-                    prior_plan=validated_prior,
-                    new_raw_values=new_raw_values,
-                ),
-                request_kind="interpretation",
-            )
+            delta = {"categorical_value_map": []}
+            for new_row in new_rows:
+                token_delta = request_json(
+                    _harmonization_delta_prompt(feature=feature, prior_plan=validated_prior,
+                                               new_categorical_values=[new_row]),
+                    lambda response, raw=str(new_row["raw_value"]): _validate_harmonization_delta(
+                        response, prior_plan=validated_prior, new_raw_values=[raw]),
+                    request_kind="interpretation",
+                )
+                delta["categorical_value_map"].extend(token_delta["categorical_value_map"])
             candidate = copy.deepcopy(validated_prior)
             candidate["categorical_value_map"] = [
                 *[dict(row) for row in validated_prior["categorical_value_map"]],
@@ -7301,75 +7022,10 @@ def _apply_empirical_signal_pruning(
     return retained, report
 
 
-def _ontology_refinement_prompt(
-    *,
-    feature: Mapping[str, Any],
-    failure_patterns: Sequence[Mapping[str, Any]],
-) -> list[dict[str, str]]:
-    """Request a same-feature ontology repair from repeated training failures."""
-
-    body = {
-        "job": "refine_stage2_feature_ontology_from_repeated_extraction_failures",
-        "information_boundary": (
-            "These aggregate diagnostics come only from outer-training patients. "
-            "No held-out patient text, treatment, or outcome is supplied."
-        ),
-        "feature": {
-            key: copy.deepcopy(feature.get(key))
-            for key in (
-                "feature_id",
-                "name",
-                "description",
-                "value_type",
-                "categories_or_unit",
-                "measurement_definition",
-                "missing_value_rule",
-            )
-        },
-        "repeated_failure_patterns": [
-            {
-                key: copy.deepcopy(pattern.get(key))
-                for key in (
-                    "failure_kind",
-                    "reason",
-                    "patient_count",
-                    "example_values",
-                    "allowed_categories",
-                )
-            }
-            for pattern in failure_patterns
-        ],
-        "rules": [
-            "Refine only the supplied feature's extraction ontology; do not rename, merge, split, add, or drop a feature and do not change its causal roles.",
-            "The example values are prior model outputs that failed validation, not verified patient facts.",
-            "Use revise only when the repeated failures identify a correctable mismatch in value type, closed categories or unit, measurement definition, or missing-value rule.",
-            "Use keep when the current ontology is already appropriate and the failures do not justify a change.",
-            "A revised ontology must still define exactly one reusable patient-level scalar measurement.",
-            "Prefer a numeric continuous ontology when the named measurement is realistically extractable as one number; include one unit when applicable.",
-            "For binary variables return exactly two distinct extractable scalar categories; for categorical or ordinal variables return at least two.",
-            "Do not blindly add every failed output as a category; choose a stable, reproducible ontology and clarify how source documentation maps to it.",
-            "Return JSON only.",
-        ],
-        "response": {
-            "action": "keep|revise",
-            "reason": "why the ontology is retained or changed",
-            "description": "required for revise",
-            "value_type": "binary|categorical|continuous|ordinal; required for revise",
-            "categories_or_unit": ["required for revise; empty only for unitless continuous"],
-            "measurement_definition": "required for revise",
-            "missing_value_rule": "required for revise",
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You refine one clinical extraction ontology from repeated validation "
-                "failures on training patients. Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True, ensure_ascii=False)},
-    ]
+def _ontology_refinement_prompt(*, feature: Mapping[str, Any], failure_patterns: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    patterns = [{k: copy.deepcopy(p.get(k)) for k in ("failure_kind", "reason", "patient_count", "example_values", "allowed_categories")} for p in failure_patterns]
+    return clinical_prompts.messages("09_refine_ontology", clinical_prompts.feature_text(feature)
+        + "\n\nFailed answers\n" + clinical_prompts.readable(patterns))
 
 
 def _validate_ontology_refinement(
@@ -7378,6 +7034,12 @@ def _validate_ontology_refinement(
     feature: Mapping[str, Any],
 ) -> dict[str, Any]:
     """Validate a bounded same-feature ontology decision."""
+    if value.get("action") == "revise" and "definition" in value:
+        fields = {"description", "value_type", "categories_or_unit", "measurement_definition", "missing_value_rule"}
+        if set(value) != {"action", "reason", "definition"} or not isinstance(value["definition"], Mapping) or set(value["definition"]) != fields:
+            raise ValueError("a revision requires reason and a complete clinical definition")
+        value = {"action": "revise", "reason": value["reason"], **value["definition"]}
+
 
     if feature.get("configured_explicit_feature") is True:
         raise ValueError("investigator-configured feature ontology cannot be revised")
@@ -7429,76 +7091,13 @@ def _validate_ontology_refinement(
     return decision
 
 
-def _aggregate_ontology_supervisor_prompt(
-    *,
-    feature: Mapping[str, Any],
-    summary: Mapping[str, Any],
-    failure_patterns: Sequence[Mapping[str, Any]],
-) -> list[dict[str, str]]:
-    """Ask the primary model to audit one small-model extraction schema."""
-
-    body = {
-        "job": "review_stage2_small_model_extraction_ontology",
-        "information_boundary": (
-            "Only aggregate extraction values and validation failures from outer-training "
-            "patients are supplied. No patient text, treatment values, outcome values, "
-            "causal-role evidence, model performance, or p-values are supplied."
-        ),
-        "feature": {
-            key: copy.deepcopy(feature.get(key))
-            for key in (
-                "feature_id",
-                "name",
-                "description",
-                "value_type",
-                "categories_or_unit",
-                "measurement_definition",
-                "missing_value_rule",
-            )
-        },
-        "aggregate_extraction_summary": copy.deepcopy(dict(summary)),
-        "aggregate_validation_failures": [
-            {
-                key: copy.deepcopy(pattern.get(key))
-                for key in (
-                    "failure_kind",
-                    "reason",
-                    "patient_count",
-                    "example_values",
-                    "allowed_categories",
-                )
-            }
-            for pattern in failure_patterns
-        ],
-        "rules": [
-            "Return keep unless the aggregates demonstrate a correctable extraction-schema mismatch.",
-            "You may revise only description, value_type, categories_or_unit, measurement_definition, and missing_value_rule.",
-            "Never add, drop, split, merge, or rename a feature and never infer or change a causal role.",
-            "A revision must remain one reusable pretreatment patient-level scalar variable.",
-            "Do not optimize for association with treatment or outcome; neither is available.",
-            "For binary variables return exactly two distinct scalar categories; for categorical or ordinal variables return at least two.",
-            "Return JSON only.",
-        ],
-        "response": {
-            "action": "keep|revise",
-            "reason": "schema-quality rationale",
-            "description": "required for revise",
-            "value_type": "binary|categorical|continuous|ordinal; required for revise",
-            "categories_or_unit": ["required for revise"],
-            "measurement_definition": "required for revise",
-            "missing_value_rule": "required for revise",
-        },
-    }
-    return [
-        {
-            "role": "system",
-            "content": (
-                "You supervise extraction ontologies using aggregate small-model outputs. "
-                "You cannot select features or causal roles. Return JSON only."
-            ),
-        },
-        {"role": "user", "content": json.dumps(body, sort_keys=True, ensure_ascii=False)},
-    ]
+def _aggregate_ontology_supervisor_prompt(*, feature: Mapping[str, Any], summary: Mapping[str, Any],
+    failure_patterns: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    patterns = [{k: copy.deepcopy(p.get(k)) for k in ("failure_kind", "reason", "patient_count", "example_values", "allowed_categories")} for p in failure_patterns]
+    return clinical_prompts.messages("12_supervise_ontology", clinical_prompts.feature_text(feature)
+        + "\n\nCurrent extracted values\n" + clinical_prompts.readable(summary)
+        + "\n\nEarlier failed answers (patients can also appear in the current summary)\n"
+        + clinical_prompts.readable(patterns))
 
 
 def _request_aggregate_ontology_supervisor(
@@ -9711,7 +9310,7 @@ def run_fold_analysis(
 ) -> dict[str, Any]:
     """Run extraction supervision, fold-local selection, and causal-forest estimation."""
 
-    del clinical_question  # Deliberately excluded from extraction-supervisor prompts.
+    # Study context is supplied only to modeling reviews, never extraction supervision.
     (
         ontology_refinement_min_failure_patients,
         max_ontology_refinement_rounds,
@@ -9977,6 +9576,8 @@ def run_fold_analysis(
         raise ValueError("Stage 2 config is missing selection_consolidation policy")
     selection_input = {
         "schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
+        "prompt_version": clinical_prompts.PROMPT_VERSION,
+        "study_context": {"clinical_question": clinical_question, "outcome_type": outcome_type},
         "temporal_scope": TEMPORAL_SCOPE,
         "extracted_fit_fingerprint": _frame_fingerprint(final_fit_all),
         "treatment_outcome_fingerprint": _frame_fingerprint(
@@ -10126,6 +9727,7 @@ def run_fold_analysis(
                 ),
             }
         )
+        elastic_net_report["study_context"] = {"clinical_question": str(clinical_question), "outcome_type": str(outcome_type)}
         _write_json(
             selection_dir / "statistical_evidence.json",
             elastic_net_report,

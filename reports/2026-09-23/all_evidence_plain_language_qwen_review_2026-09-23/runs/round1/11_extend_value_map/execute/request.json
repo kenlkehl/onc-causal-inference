@@ -1,0 +1,26 @@
+{
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "messages": [
+    {
+      "role": "system",
+      "content": "Map one phrase for one clinical variable into the supplied measurement representation.\n\nWhat you receive\n\nThe variable's meaning, the numerical representation or category definitions, and a new phrase.\n\nHow to decide\n\nUse the supplied definitions exactly. A numerical representation requires a phrase with an exact numerical meaning. A category requires the phrase's full meaning to fit within that category. Use null when a phrase spans categories or remains ambiguous.\n\nWhat to return\n\nReturn one JSON object with only value, containing an exact number, an existing category label, or null."
+    },
+    {
+      "role": "user",
+      "content": "Clinical variable: Serum creatinine, mg/dL\nCategories\n- Below 1.0: x < 1.0 mg/dL\n- At least 1.0: x >= 1.0 mg/dL\n\nNew phrase: less than 1.0"
+    }
+  ],
+  "temperature": 1.0,
+  "top_p": 0.95,
+  "top_k": 20,
+  "min_p": 0.0,
+  "presence_penalty": 0.0,
+  "repetition_penalty": 1.0,
+  "frequency_penalty": 0.0,
+  "reasoning_effort": "xhigh",
+  "chat_template_kwargs": {
+    "enable_thinking": true,
+    "preserve_thinking": true
+  },
+  "max_tokens": 65536
+}

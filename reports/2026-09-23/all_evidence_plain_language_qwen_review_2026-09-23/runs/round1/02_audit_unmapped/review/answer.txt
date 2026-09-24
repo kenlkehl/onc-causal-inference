@@ -1,0 +1,25 @@
+
+
+{
+  "understanding": "Extract distinct clinical attributes that can be measured from a patient record excerpt and return each as a candidate with a name, description, basis, and uncertainty.",
+  "input_meaning": "A dated clinical excerpt reporting two serum creatinine measurements and a CT imaging finding of emphysema.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "candidates": [
+      {
+        "name": "Serum creatinine concentration",
+        "description": "The measured concentration of creatinine in a serum or blood sample.",
+        "basis": "The excerpt reports serum creatinine values of 1.0 mg/dL on 2025-01-01 and 1.2 mg/dL on 2025-01-10.",
+        "uncertainty": ""
+      },
+      {
+        "name": "Emphysema on imaging",
+        "description": "A computed tomography imaging finding indicating the presence of emphysema.",
+        "basis": "The excerpt states that CT documents emphysema.",
+        "uncertainty": ""
+      }
+    ]
+  }
+}

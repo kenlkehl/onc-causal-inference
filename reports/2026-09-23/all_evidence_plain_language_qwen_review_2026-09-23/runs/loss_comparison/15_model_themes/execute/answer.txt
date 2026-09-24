@@ -1,0 +1,22 @@
+
+
+{
+  "themes": [
+    {
+      "name": "Renal function marker",
+      "members": [
+        "Serum creatinine"
+      ],
+      "interpretation": "Serum creatinine behaves chiefly as a prognostic marker rather than a consistent effect modifier. It was selected in all penalized outcome analyses and in two of three treatment models, so baseline creatinine is associated with the favorable event and may also reflect treatment selection. Evidence for heterogeneity in the A-versus-B treatment effect is weak: only one penalized interaction model was nonzero, the univariable R-learner validation R-loss gains were not above zero, and the causal forest showed essentially no consistent permutation importance. Two of three nominal univariable interaction p-values below 0.05 are insufficient on their own to establish a robust modifier.",
+      "disagreements": "The nominal univariable interaction p-values point mildly toward heterogeneity in two analyses, but penalized interaction selection, R-learner R-loss gains, and causal forest permutation changes mostly do not. Multiplicity-adjusted q-values are unavailable, and the small negative or zero R-loss gains leave practical importance unresolved."
+    },
+    {
+      "name": "Pulmonary structural disease",
+      "members": [
+        "Emphysema on imaging"
+      ],
+      "interpretation": "Imaging evidence of emphysema shows the most consistent evidence for treatment-effect modification among the supplied variables. It was selected in all penalized treatment-interaction analyses, all three univariable R-learner analyses had positive validation R-loss gains, and all three causal forest permutation tests showed increased validation R-loss after shuffling, indicating consistent predictive information about treatment differences within these overlapping analyses. The positive R-loss gains indicate direction and consistency relative to a constant treatment effect, but their practical size remains unresolved. By contrast, its independent prognostic role is less clear: only one of three penalized outcome analyses selected it, and treatment-model main effects were unavailable.",
+      "disagreements": "The pattern separates effect modification from main-effect prognosis: heterogeneity signals are strong and consistent across penalized interactions, R-learner, and causal forest, while penalized outcome main effects are mostly not selected. One univariable interaction p-value is 0.06 rather than below 0.05, and treatment-selection information is missing, so residual confounding or prognostic confounding cannot be fully ruled out."
+    }
+  ]
+}

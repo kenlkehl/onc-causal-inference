@@ -1,0 +1,6 @@
+[
+  {
+    "role": "user",
+    "content": "The previous JSON exceeded the available response length. _Stage2OutputLengthError: response reached the configured completion-token limit. Return one materially shorter corrected JSON object using the same required schema. Remove redundancy, merge duplicate entries, and keep descriptions and rationales concise. Do not omit required records or fields. Return JSON only."
+  }
+]

@@ -1,0 +1,21 @@
+{
+  "http_status": 200,
+  "request_sha256": "23ab4ebae9a754759cdd0bab044d11ef45bdf79145c8c9f9e1ced96a1a735730",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 3.078,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 177,
+    "total_tokens": 276,
+    "completion_tokens": 99,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 91
+    }
+  },
+  "reasoning_characters": 409,
+  "content": "\n\n{\"value\":\"Present\"}",
+  "parsed": {
+    "value": "Present"
+  }
+}

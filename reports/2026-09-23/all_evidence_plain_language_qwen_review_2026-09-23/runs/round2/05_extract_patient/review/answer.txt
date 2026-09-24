@@ -1,0 +1,16 @@
+
+
+{
+  "understanding": "Extract the specified clinical variables from one patient’s clinical text and return them as a JSON object.",
+  "input_meaning": "The input provides two variable definitions and a patient record containing two serum creatinine results with dates and one CT imaging finding.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    "What you receive: The clinical variable definitions and the text from one patient's record. — This section is redundant because the task content already makes this clear.",
+    "For example, a request for a variable named Age has the shape {\"Age\": 60}. — The example is unnecessary because the required output keys are already supplied."
+  ],
+  "sample_response": {
+    "Serum creatinine": 1.2,
+    "Emphysema on imaging": "Present"
+  }
+}

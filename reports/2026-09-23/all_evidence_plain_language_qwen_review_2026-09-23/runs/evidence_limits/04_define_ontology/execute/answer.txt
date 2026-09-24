@@ -1,0 +1,20 @@
+
+
+{
+  "description": "Extract one serum creatinine measurement per patient, using the latest documented serum or plasma creatinine result. Exclude urine creatinine, creatinine clearance, and estimated glomerular filtration rate (eGFR).",
+  "value_type": "continuous",
+  "unit": "mg/dL",
+  "categories": [],
+  "measurement_definition": "Identify all serum creatinine results, including plasma creatinine when clearly referring to serum/plasma creatinine. If any result has a date, select the latest dated result; if multiple dated results share the same latest date, use the last mention. If all results are undated, use the last undated result in text order. Report the value in mg/dL. If the original unit is umol/L, convert by dividing the numeric value by 88.4; if the original unit is mg/L, convert by dividing by 10. Preserve directly reported thresholds such as '<1.0 mg/dL' by retaining the comparator, numeric threshold, and unit after unit conversion when needed (e.g., '<80 umol/L' becomes '<0.90 mg/dL'). Do not replace a threshold with an assumed point value.",
+  "missing_value_rule": "Return null if no serum creatinine measurement is documented, if only excluded creatinine-related labs are available, if the value or threshold cannot be extracted, if the unit is missing/unresolvable or incompatible with creatinine, or if the selected latest serum creatinine observation is uninterpretable. A directly reported threshold such as '<1.0 mg/dL' is a valid measurement and is not missing as long as the comparator, numeric value, and unit are unambiguous.",
+  "conflict_resolution": {
+    "strategy": "latest",
+    "positive_category": null
+  },
+  "caveats": [
+    "The variable is serum/plasma creatinine, not total creatinine from urine or derived renal function measures.",
+    "Threshold measurements should be preserved as threshold strings; do not convert them to only the numeric boundary value.",
+    "If a unitless creatinine value cannot be confidently resolved from context, return null rather than assuming a unit.",
+    "If the latest serum creatinine observation is unresolved or invalid, return null rather than falling back to an earlier observation."
+  ]
+}

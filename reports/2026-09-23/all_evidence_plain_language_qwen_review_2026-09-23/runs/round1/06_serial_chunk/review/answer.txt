@@ -1,0 +1,19 @@
+
+
+{
+  "understanding": "Update each clinical variable from the new record section while preserving prior values unless the new note provides a later or otherwise decisive observation, then return the updated scalar/null values and brief decision notes.",
+  "input_meaning": "The input gives variable definitions, previously extracted measurements, and the next clinical text, which reports a dated serum creatinine result and a CT statement about emphysema.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "values": {
+      "Serum creatinine": 1.2,
+      "Emphysema on imaging": "Present"
+    },
+    "decision_notes": {
+      "Serum creatinine": "Latest dated result, 2025-01-10, supersedes 2025-01-01.",
+      "Emphysema on imaging": "Explicit positive CT finding; CT date is not explicitly linked."
+    }
+  }
+}

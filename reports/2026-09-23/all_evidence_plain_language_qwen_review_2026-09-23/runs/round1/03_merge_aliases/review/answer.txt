@@ -1,0 +1,20 @@
+
+
+{
+  "understanding": "The task is to group supplied clinical variable names that refer to the same measurement under a single canonical clinical label, while leaving unrelated or uncertain variables separate.",
+  "input_meaning": "The input lists clinical variable names with brief descriptions of what they measure, plus any protected names that must remain recognizable and define canonical labels.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "merges": [
+      {
+        "members": [
+          "Creatinine level",
+          "Serum creatinine"
+        ],
+        "canonical_label": "Serum creatinine"
+      }
+    ]
+  }
+}

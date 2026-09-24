@@ -1,0 +1,117 @@
+[
+  {
+    "slug": "01_discover",
+    "title": "Discover clinical variables",
+    "integration_notes": "Use one evidence card per call. Attach provenance and machine names in Python. The response schema matches the adopted discovery validator. The caller determines when a second review is needed."
+  },
+  {
+    "slug": "02_audit_unmapped",
+    "title": "Review excerpts for overlooked clinical variables",
+    "integration_notes": "Use one evidence card per call. Attach provenance and machine names in Python. The response schema matches the adopted discovery validator. The caller determines when a second review is needed."
+  },
+  {
+    "slug": "03_merge_aliases",
+    "title": "Group names for the same clinical variable",
+    "integration_notes": "Resolve semantic labels, enforce disjoint membership/protections, preserve unmentioned variables, and normalize names in Python."
+  },
+  {
+    "slug": "04_define_ontology",
+    "title": "Define how to measure one clinical variable",
+    "integration_notes": "Keep identity/protections in Python; validate the definition and conflict rules. Translate the model's unit string or category list into the legacy categories_or_unit array. Latest is the proposed prompt default for ordinary repeated measurements. Study-specific measurement restrictions must be written directly into a feature definition when needed."
+  },
+  {
+    "slug": "05_extract_patient",
+    "title": "Extract one patient's declared variables",
+    "integration_notes": "Python owns patient identity, internal column names, envelopes, and validation. Supply the appropriate record text; omit record_scope and any explanation of upstream eligibility handling."
+  },
+  {
+    "slug": "06_serial_chunk",
+    "title": "Update values after reading more of a patient's record",
+    "integration_notes": "Python keeps patient/chunk IDs and ordering. Route mode aggregation through occurrence extraction so Python can count observations. State translation and bookkeeping are excluded from the model instructions."
+  },
+  {
+    "slug": "07_page_observations",
+    "title": "Extract clinical observations and their supporting words",
+    "integration_notes": "Python locates exact quotations, attaches source/patient/page IDs, normalizes dates, and reconciles observations. Validate ambiguous quote matches rather than assigning arbitrary offsets."
+  },
+  {
+    "slug": "08_map_categories",
+    "title": "Match a phrase to an existing clinical category",
+    "integration_notes": "Deduplicate tokens and handle IDs/occurrences in Python. Use deterministic normalization where it suffices."
+  },
+  {
+    "slug": "09_refine_ontology",
+    "title": "Clarify instructions after extraction failures",
+    "integration_notes": "Python attaches identity and restricts revisions to the allowed definition fields, then controls re-extraction. Ordinary category synonyms can use the category-mapping path."
+  },
+  {
+    "slug": "10_harmonize_values",
+    "title": "Choose a common representation for one clinical variable",
+    "integration_notes": "Python parses supported numerical constraints and creates exhaustive, nonoverlapping intervals, including complements. A typed adapter or explicit clarification path is required for unparsed semantics. Insufficient definitions must be handled explicitly; the LLM does not need to know the bin-construction mechanism."
+  },
+  {
+    "slug": "11_extend_value_map",
+    "title": "Interpret a new phrase using defined categories",
+    "integration_notes": "Python keeps the representation fixed, extends the token map, and handles identities. This proposed call remains limited to training map construction."
+  },
+  {
+    "slug": "12_supervise_ontology",
+    "title": "Review a clinical measurement definition using extraction summaries",
+    "integration_notes": "Python preserves the clinical target and roles, distinguishes current/historical count populations, and controls revisions and re-extraction."
+  },
+  {
+    "slug": "13_post_extraction_aliases",
+    "title": "Combine equivalent extracted measurements",
+    "integration_notes": "Python computes paired agreement, compiles deterministic coalescing/recodes, checks losslessness, and retains IDs. This proposal requires those diagnostics and adapters before use."
+  },
+  {
+    "slug": "14_default_roles",
+    "title": "Assess a clinical variable's confounder and modifier roles",
+    "integration_notes": "Python supplies genuine study context and coherent evidence availability, attaches identity/provenance, preserves investigator-locked roles, and validates assignments. Qualitative assessments require evaluation before adoption."
+  },
+  {
+    "slug": "15_model_themes",
+    "title": "Group variables into clinical themes",
+    "integration_notes": "Python checks coverage, assigns theme IDs, and attaches member evidence. Theme grouping leaves measurement columns intact."
+  },
+  {
+    "slug": "16_merge_themes",
+    "title": "Combine overlapping clinical themes",
+    "integration_notes": "Python unions members/provenance and preserves unchanged themes. Context limits are handled by batching/retrieval rather than forcing unrelated semantic merges."
+  },
+  {
+    "slug": "17_model_roles",
+    "title": "Assess roles using several models and clinical themes",
+    "integration_notes": "Python attaches feature/evidence IDs, retains locked roles, and applies routing. This prompt only contains the clinical decision and evidence needed to make it."
+  },
+  {
+    "slug": "18_rank_modifiers",
+    "title": "Rank clinical variables by modifier evidence",
+    "integration_notes": "Python resolves labels, orders genuine ties deterministically, assigns numerical ranks, and chooses a modifier count through validation. Those mechanics are absent from the model task."
+  },
+  {
+    "slug": "19_merge_rankings",
+    "title": "Compare two potential effect modifiers",
+    "integration_notes": "Python selects the current front candidates, preserves within-list order, caches comparisons, and produces the merged ranking. Pairwise merging still requires cost and order-sensitivity evaluation."
+  },
+  {
+    "slug": "20_advisory_roles",
+    "title": "Explain a variable's recorded selection decision",
+    "integration_notes": "Python attaches this explanation without changing fixed numerical decisions. A failed annotation does not alter selection."
+  },
+  {
+    "slug": "21_cross_fold_concepts",
+    "title": "Identify clinical concepts behind candidate modifiers",
+    "integration_notes": "Python computes recurrence and coverage, keeps the review blinded to oracle/test outcomes, and checks membership. This remains an experimental interpretation proposal."
+  },
+  {
+    "slug": "22_validation_repair",
+    "title": "Correct an extraction response after a validation error",
+    "integration_notes": "Python retains the original task/input, formats precise errors, controls reasoning and retry budgets, and validates the complete response. Split requests or increase output space when necessary; the repair prompt does not explain those mechanics."
+  },
+  {
+    "slug": "23_length_repair",
+    "title": "Complete a truncated extraction response",
+    "integration_notes": "Python retains the original task/input, formats precise errors, controls reasoning and retry budgets, and validates the complete response. Split requests or increase output space when necessary; the repair prompt does not explain those mechanics."
+  }
+]

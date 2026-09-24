@@ -1,0 +1,52 @@
+{
+  "http_status": 200,
+  "request_sha256": "9e0d7acb51445e99b68d524f52ebb81ce416cafce830e2ef94b983e6d666bd83",
+  "model": "Inferact/Qwen3.8-Flash-Next-NVFP4",
+  "elapsed_seconds": 58.954,
+  "finish_reason": "stop",
+  "usage": {
+    "prompt_tokens": 537,
+    "total_tokens": 3037,
+    "completion_tokens": 2500,
+    "prompt_tokens_details": null,
+    "completion_tokens_details": {
+      "reasoning_tokens": 2126
+    }
+  },
+  "reasoning_characters": 8993,
+  "content": "\n\n{\n  \"understanding\": \"Extract each documented occurrence of the specified clinical variables from the supplied text as structured observations, with exact supporting quotes and any directly linked dates.\",\n  \"input_meaning\": \"The supplied information defines two target clinical findings and provides a short patient record section containing creatinine results and an imaging finding.\",\n  \"can_complete\": true,\n  \"questions\": [],\n  \"unnecessary_context\": [\n    {\n      \"passage\": \"What you receive\\n\\nClinical variable definitions and one section of a patient's record.\",\n      \"reason\": \"This is a meta description of the input; the actual clinical variables and record text are supplied directly.\"\n    }\n  ],\n  \"sample_response\": {\n    \"observations\": [\n      {\n        \"feature\": \"Serum creatinine\",\n        \"value\": 1.0,\n        \"quote\": \"2025-01-01: serum creatinine 1.0 mg/dL.\",\n        \"governing_date_quote\": \"2025-01-01\"\n      },\n      {\n        \"feature\": \"Serum creatinine\",\n        \"value\": 1.2,\n        \"quote\": \"2025-01-10: serum creatinine 1.2 mg/dL.\",\n        \"governing_date_quote\": \"2025-01-10\"\n      },\n      {\n        \"feature\": \"Emphysema on imaging\",\n        \"value\": \"Present\",\n        \"quote\": \"CT documents emphysema.\",\n        \"governing_date_quote\": null\n      }\n    ]\n  }\n}",
+  "parsed": {
+    "understanding": "Extract each documented occurrence of the specified clinical variables from the supplied text as structured observations, with exact supporting quotes and any directly linked dates.",
+    "input_meaning": "The supplied information defines two target clinical findings and provides a short patient record section containing creatinine results and an imaging finding.",
+    "can_complete": true,
+    "questions": [],
+    "unnecessary_context": [
+      {
+        "passage": "What you receive\n\nClinical variable definitions and one section of a patient's record.",
+        "reason": "This is a meta description of the input; the actual clinical variables and record text are supplied directly."
+      }
+    ],
+    "sample_response": {
+      "observations": [
+        {
+          "feature": "Serum creatinine",
+          "value": 1.0,
+          "quote": "2025-01-01: serum creatinine 1.0 mg/dL.",
+          "governing_date_quote": "2025-01-01"
+        },
+        {
+          "feature": "Serum creatinine",
+          "value": 1.2,
+          "quote": "2025-01-10: serum creatinine 1.2 mg/dL.",
+          "governing_date_quote": "2025-01-10"
+        },
+        {
+          "feature": "Emphysema on imaging",
+          "value": "Present",
+          "quote": "CT documents emphysema.",
+          "governing_date_quote": null
+        }
+      ]
+    }
+  }
+}

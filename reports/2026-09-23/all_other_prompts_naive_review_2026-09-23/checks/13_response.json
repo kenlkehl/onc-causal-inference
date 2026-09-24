@@ -1,0 +1,10 @@
+{
+  "action": "merge",
+  "reason": "Both labels describe the latest eligible serum creatinine in mg/dL using exact numeric values or null, and the paired diagnostics show identical timing and units, no unsupported text values, and no disagreements among 40 jointly observed patients while preserving the union of nonmissing values.",
+  "members": [
+    "Creatinine level",
+    "Serum creatinine"
+  ],
+  "canonical_label": "Serum creatinine",
+  "category_equivalences": []
+}

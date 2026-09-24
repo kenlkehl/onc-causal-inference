@@ -461,7 +461,8 @@ def test_logical_request_excludes_queue_time_and_keeps_slot_through_retries(monk
             raise TemporaryTransportError("slow server")
         if len(calls) == 2:
             return "invalid JSON"
-        assert "repair sentinel" in messages[-1]["content"]
+        assert "one final JSON object" in messages[-1]["content"]
+        assert "repair sentinel" not in messages[-1]["content"]
         return '{"ok": true}'
 
     limiter = stage2_workflow._ConcurrencyLimitedCompletion(completion, 1)

@@ -1,0 +1,28 @@
+
+
+{
+  "understanding": "Create one clear extraction rule set for a single clinical variable using its name and example clinical documentation, specifying value type, units/labels, definition, missing-value handling, and repeated-observation resolution.",
+  "input_meaning": "The supplied variable name identifies the target clinical value, and the example excerpts are illustrative source text showing how that value may be documented, possibly including unrelated information.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [
+    {
+      "passage": "CT documents emphysema.",
+      "reason": "Unrelated to serum creatinine extraction; the extraction result would not change without it."
+    }
+  ],
+  "sample_response": {
+    "description": "Extract the serum creatinine concentration from the medical record.",
+    "value_type": "continuous",
+    "categories_or_unit": [
+      "mg/dL"
+    ],
+    "measurement_definition": "Extract one serum/plasma creatinine concentration per patient. Use only explicit serum, plasma, or blood creatinine values from notes, labs, or tables; ignore urine creatinine, creatinine clearance, eGFR, BUN, and unrelated findings. If observations are repeated, use the latest dated observation; if some observations are dated, choose among dated observations. If no dates are available, use the last mention in text order. For equal dates, use the last mention on that date. Report the numeric concentration in mg/dL. If the source unit is umol/L, convert with mg/dL = umol/L / 88.4. If the source unit is mg/L, convert with mg/dL = mg/L * 0.1. If a unit is missing, ambiguous, incompatible, or the specimen cannot be confirmed, return null. If only a directly reported threshold is available and no exact measurement is present, use the threshold bound number and note the comparison operator and direction in caveats.",
+    "missing_value_rule": "Return null when the patient has no extractable serum/plasma creatinine observation, when the unit is missing or incompatible, or when the observation cannot be attributed to serum/plasma creatinine. Do not infer creatinine from eGFR, BUN, clinical context, or unrelated findings.",
+    "conflict_resolution": {
+      "strategy": "latest",
+      "positive_category": null
+    },
+    "caveats": "For the provided example, extract 1.2 mg/dL from the 2025-01-10 serum creatinine observation because it is the latest dated creatinine result. Ignore the CT emphysema statement."
+  }
+}

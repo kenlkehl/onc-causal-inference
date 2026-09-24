@@ -1,0 +1,6 @@
+
+
+{
+  "action": "keep",
+  "reason": "The failed answers 'positive' and 'present on CT' are ordinary equivalent wording for an imaging finding of emphysema present and do not reveal an unclear measurement rule, unsuitable type, or missing distinction. The current binary categories Present and Absent remain appropriate."
+}

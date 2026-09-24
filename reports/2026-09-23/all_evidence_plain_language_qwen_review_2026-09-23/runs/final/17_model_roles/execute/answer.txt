@@ -1,0 +1,27 @@
+
+
+{
+  "confounder": {
+    "assign": false,
+    "assessment": "uncertain",
+    "stability": "insufficient",
+    "rationale": "Emphysema may have prognostic relevance because pulmonary disease can affect outcomes, but the evidence needed to classify it as a confounder is incomplete. Penalized outcome selection showed only one of three nonzero outcome associations, and no penalized treatment-selection results are available. Since the relationship between emphysema and treatment choice is unknown and unmeasured, a common-cause confounding role cannot be retained confidently.",
+    "evidence_comments": [
+      "Penalized treatment main effects: results unavailable, so no direct evidence that emphysema predicts treatment choice.",
+      "Penalized outcome main effects: nonzero in only 1 of 3 analyses, providing weak and inconsistent outcome evidence.",
+      "Clinical background: pulmonary disease may affect prognosis, but treatment-choice relationship is unknown."
+    ]
+  },
+  "effect_modifier": {
+    "assign": true,
+    "assessment": "supported",
+    "stability": "consistent",
+    "rationale": "The available effect-heterogeneity evidence agrees across multiple analyses and supports using emphysema to predict differences in treatment benefit. Validation R-loss gains and causal-forest permutation increases are positive in all three overlapping analyses, and penalized treatment interactions are nonzero in all three. Interaction p-values are mostly nominally significant, although the magnitude of improvement is modest and adjusted multiplicity-control information is unavailable. Because validation R-loss directly evaluates treatment-effect prediction, these positive probability-scale results support the modifier role despite the log-odds interaction scale used in some interaction tests.",
+    "evidence_comments": [
+      "Penalized treatment interactions: nonzero interaction group in 3 of 3 analyses.",
+      "Univariable R-learner: validation R-loss gains positive in 3 of 3 analyses, with gains of 0.003 to 0.006.",
+      "Causal forest: permutation R-loss increases positive in 3 of 3 analyses, with increases of 0.002 to 0.004.",
+      "Univariable interaction: p-values of 0.03, 0.06, and 0.04; 2 of 3 are nominally significant, but adjusted q-values are unavailable."
+    ]
+  }
+}

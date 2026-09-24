@@ -1,0 +1,12 @@
+
+
+{
+  "understanding": "Map a supplied phrase to the correct clinical measurement representation, using the provided numerical definition or category definitions exactly, and return either an exact number, an existing category label, or null.",
+  "input_meaning": "The input describes a clinical variable, gives the allowed numerical representation or category definitions, and provides a new phrase to classify.",
+  "can_complete": true,
+  "questions": [],
+  "unnecessary_context": [],
+  "sample_response": {
+    "value": "Below 1.0"
+  }
+}

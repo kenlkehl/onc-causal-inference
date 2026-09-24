@@ -1,4 +1,4 @@
-"""Publisher sampling recommendations, verified 2026-09-12.
+"""Publisher sampling recommendations, verified 2026-09-23.
 
 Profiles are checked in for reproducible/offline runs, rather than scraping a
 mutable model card during inference. Unrecognized models use server defaults.
@@ -20,6 +20,27 @@ SAMPLING_FIELDS = (
     "frequency_penalty",
     "repetition_penalty",
 )
+
+
+def is_qwen_flash_next(model: str) -> bool:
+    return bool(re.search(r"qwen[-_ ]?3[._]8[-_ ]flash[-_ ]next", str(model), re.I))
+
+
+def default_reasoning(model: str, request_kind: str) -> str:
+    if is_qwen_flash_next(model):
+        return "xhigh"
+    return "none" if request_kind == "extraction" else "high"
+
+
+def sampling_provenance(model: str, family: str) -> dict[str, Any]:
+    if is_qwen_flash_next(model):
+        return {"profile": "qwen3.8_flash_next", "verified_on": "2026-09-23",
+                "source": "https://huggingface.co/Qwen/Qwen3.8-Flash-Next#best-practices"}
+    if family == "gemma4":
+        return {"profile": "gemma4", "verified_on": "2026-09-23",
+                "source": "https://huggingface.co/google/gemma-4-31B-it#best-practices"}
+    return {"profile": family if family in {"qwen3", "lfm2.5"} else "server_defaults",
+            "verified_on": "2026-09-12" if family in {"qwen3", "lfm2.5"} else None}
 
 
 def recommended_sampling(model: str, family: str, thinking: bool) -> dict[str, Any]:
