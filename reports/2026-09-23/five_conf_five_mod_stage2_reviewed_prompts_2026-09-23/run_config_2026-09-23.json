@@ -168,6 +168,22 @@
       "early_stop_min_rounds": 3,
       "early_stop_patience": 2,
       "early_stop_min_reduction": 0.005
+    },
+    "estimand_ontology": {
+      "enabled": true,
+      "max_features_per_role": 8,
+      "max_alternatives_per_feature": 2,
+      "minimum_nonmissing_fraction": 0.2,
+      "minimum_relative_gain": 0.005,
+      "paired_se_multiplier": 1.0,
+      "minimum_winning_fold_fraction": 0.6,
+      "maximum_propensity_loss_increase": 0.01,
+      "maximum_overlap_fraction_drop": 0.05,
+      "ridge_penalty": 10.0,
+      "nuisance_crossfit_folds": 3,
+      "minimum_training_rows": 20,
+      "minimum_overlap_rows": 10,
+      "max_prompt_chars": 40000
     }
   },
   "concurrency_control_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/five_conf_five_mod_stage2_reviewed_prompts_2026-09-23/concurrency_control_2026-09-24.json"
