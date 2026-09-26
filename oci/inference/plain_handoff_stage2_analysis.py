@@ -802,6 +802,8 @@ def _prompt_feature_definitions(
                 "the numeric measurement is unavailable"
             )
         row["conflict_resolution"] = _resolved_conflict_resolution(definition)
+        if definition.get("clinical_label"):
+            row["clinical_label"] = definition["clinical_label"]
         output.append(row)
     return output
 
@@ -9550,6 +9552,60 @@ def run_fold_analysis(
             final_fit_all,
         )
 
+    # Supervised definition search is separate from the outcome-blind ontology
+    # supervisor. Keep the latter's cache reusable when this search is enabled.
+    from .stage2_estimand_ontology_config import EstimandOntologyConfig
+
+    estimand_policy = getattr(config, "estimand_ontology", EstimandOntologyConfig())
+    estimand_report = {"status": "disabled"}
+    estimand_matrix_relative = None
+    if estimand_policy.enabled or any(f.get("estimand_ontology") for f in current):
+        from .stage2_estimand_ontology import refine_estimand_ontologies
+
+        def extract_ontology_alternatives(alternatives, directory):
+            # This callback exposes only training text to extraction. Its
+            # definition stays frozen during comparison; harmonization observes
+            # values without access to treatment or outcome.
+            measured = extract_rows(
+                dataset=dataset[[text_column]], row_ids=fit_ids, text_column=text_column,
+                definitions=alternatives, output_dir=directory / "extraction",
+                request_json=request_json, workers=extraction_workers,
+                max_prompt_chars=int(config.extraction_max_prompt_chars),
+                feature_batch_size=extraction_feature_batch_size,
+                request_identity=extraction_identity, tokenizer=extraction_tokenizer,
+                **serial_extraction,
+            )
+            measured, harmonized_definitions, _ = _harmonize_training_extraction(
+                extracted=measured, definitions=alternatives,
+                output_dir=directory / "harmonization", request_json=request_json,
+                max_prompt_chars=int(config.max_prompt_chars),
+            )
+            return measured, harmonized_definitions
+
+        search_labels = dataset.iloc[fit_ids][[treatment_column, outcome_column]].copy()
+        search_labels.columns = ["treatment", "outcome"]
+        search_labels.insert(0, "_oci_row_id", fit_ids)
+        final_fit_all, current, estimand_report = refine_estimand_ontologies(
+            extracted_fit=final_fit_all, labels=search_labels.reset_index(drop=True),
+            definitions=current, inner_splits=inner_splits, outcome_type=outcome_type,
+            clinical_question=clinical_question, request_json=request_json,
+            extract_alternatives=extract_ontology_alternatives,
+            output_dir=output_dir / "estimand_ontology", policy=estimand_policy,
+            source_text_fingerprint=_frame_fingerprint(dataset.iloc[fit_ids][[text_column]]),
+            request_identity={"primary": primary_identity, "extraction": extraction_identity},
+            seed=seed,
+            proposal_workers=int(getattr(config, "workers", 1)),
+            propensity_bounds=(
+                getattr(config, "min_propensity", None) if getattr(config, "min_propensity", None) is not None else 0.1,
+                getattr(config, "max_propensity", None) if getattr(config, "max_propensity", None) is not None else 0.9,
+            ),
+        )
+        # A frozen preselection snapshot may point at the original matrix.
+        # Never overwrite it when adding/removing alternative measurements.
+        estimand_matrix_relative = (Path("extraction") / "estimand_candidates_fit"
+                                    / _frame_fingerprint(final_fit_all) / "extracted.csv")
+        _write_frame(output_dir / estimand_matrix_relative, final_fit_all)
+
     selection_dir = output_dir / "selection"
     legacy_selection_path = selection_dir / "statistical_selection.json"
     if legacy_selection_path.exists():
@@ -9588,6 +9644,11 @@ def run_fold_analysis(
         "inner_splits": inner_splits,
         "outcome_type": outcome_type,
         "selection_consolidation_policy": consolidation_policy.scientific_dict(),
+        **({"preselection_matrix_path": str(estimand_matrix_relative)}
+           if estimand_matrix_relative is not None else {}),
+        **({"estimand_ontology": {"policy": estimand_policy.public_dict(),
+                                   "search_fingerprint": estimand_report.get("input_fingerprint")}}
+           if estimand_policy.enabled else {}),
         "selection_consolidation_llm_model": str(getattr(config, "model", "")),
         "statistical_component_schema_version": (
             statistical_policy.multi_model.public_dict()["schema_version"]
@@ -9838,6 +9899,7 @@ def run_fold_analysis(
                 else "disabled"
             ),
             "preselection_consolidation": consolidation_report,
+            **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),
             "candidate_counts": {
                 "before_consolidation": len(current),
                 "after_consolidation": len(consolidated_definitions),
@@ -10008,6 +10070,7 @@ def run_fold_analysis(
             "review_convergence": review_convergence,
             "ontology_refinement_rounds": ontology_refinement_rounds,
             "selection_artifact": str(selection_dir / "elastic_net_selection.json"),
+            **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),
             "screening_model_family": (
                 "multi_model_evidence_with_llm_theme_adjudication"
                 if statistical_policy.selection_mode == "multi_model" else
@@ -10057,6 +10120,7 @@ def run_fold_analysis(
         "selection": selection_report,
         "measurement_dependencies": measurement_definitions,
         "harmonization_validation_fallbacks": harmonization_validation_fallbacks,
+        **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),
         "estimation": diagnostics,
     }
 

@@ -80,6 +80,10 @@ from .stage2_sequential_consolidation import (
     Stage2SequentialConsolidationConfig,
     sequential_consolidation_config_from_mapping,
 )
+from .stage2_estimand_ontology_config import (
+    EstimandOntologyConfig,
+    estimand_ontology_config_from_mapping,
+)
 from .vllm_server_pool import (
     ManagedVLLMConfig,
     launch_managed_vllm_servers,
@@ -902,6 +906,7 @@ class PlainHandoffStage2Config:
     max_review_rounds: int = 2
     ontology_refinement_min_failure_patients: int = DEFAULT_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS
     max_ontology_refinement_rounds: int = DEFAULT_MAX_ONTOLOGY_REFINEMENT_ROUNDS
+    estimand_ontology: EstimandOntologyConfig = field(default_factory=EstimandOntologyConfig)
     # This is a hard upstream invariant. Historical treatments remain valid;
     # Stage 2 never guesses timepoints from feature semantics.
     input_temporal_scope: str = TEMPORAL_SCOPE
@@ -1224,6 +1229,11 @@ class PlainHandoffStage2Config:
                 "Stage2SequentialConsolidationConfig object"
             )
         self.selection_consolidation.validate()
+        if not isinstance(self.estimand_ontology, EstimandOntologyConfig):
+            raise ValueError("stage2.estimand_ontology must be an EstimandOntologyConfig")
+        self.estimand_ontology.validate()
+        if self.estimand_ontology.enabled and self.runtime_disable_extraction:
+            raise ValueError("estimand ontology search requires extraction of alternative definitions")
         if not isinstance(
             self.statistical_selection, Stage2ElasticNetSelectionConfig
         ):
@@ -1319,6 +1329,7 @@ class PlainHandoffStage2Config:
         values["selection_consolidation"] = (
             self.selection_consolidation.public_dict()
         )
+        values["estimand_ontology"] = self.estimand_ontology.public_dict()
         values["statistical_selection"] = self.statistical_selection.public_dict()
         values["role_adjudication"] = self.role_adjudication.public_dict()
         return values
@@ -1625,6 +1636,7 @@ def plain_stage2_config_from_mapping(
         selection_consolidation=sequential_consolidation_config_from_mapping(
             raw.get("selection_consolidation")
         ),
+        estimand_ontology=estimand_ontology_config_from_mapping(raw.get("estimand_ontology")),
         statistical_selection=statistical_selection_config_from_mapping(
             statistical_selection_value
         ),

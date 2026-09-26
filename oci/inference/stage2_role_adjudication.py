@@ -142,6 +142,7 @@ def _prompt_safe_definition(
     return {
         "feature_id": _feature_id(feature),
         "name": _bounded_text(feature.get("name"), 300),
+        **({"clinical_label": str(feature["clinical_label"])} if feature.get("clinical_label") else {}),
         "description": _bounded_text(
             feature.get("description"), policy.max_description_chars
         ),

@@ -53,6 +53,11 @@
     "max_review_rounds": 2,
     "ontology_refinement_min_failure_patients": 3,
     "max_ontology_refinement_rounds": 2,
+    "estimand_ontology": {
+      "enabled": false,
+      "max_features_per_role": 8,
+      "max_alternatives_per_feature": 2
+    },
     "input_temporal_scope": "pre_index_treatment",
     "selection_consolidation": {
       "enabled": true,

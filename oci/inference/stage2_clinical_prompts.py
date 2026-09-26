@@ -16,7 +16,7 @@ def messages(slug: str, clinical_input: str) -> list[dict[str, str]]:
 
 
 def label(value) -> str:
-    name = value.get("name") if isinstance(value, Mapping) else value
+    name = (value.get("clinical_label") or value.get("name")) if isinstance(value, Mapping) else value
     return str(name or "").replace("_", " ").strip()
 
 

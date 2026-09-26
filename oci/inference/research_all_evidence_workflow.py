@@ -2038,6 +2038,8 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
                 else {}
             ),
             "review_policy": frozen_preselection_review_policy(config.stage2),
+            **({"estimand_ontology": config.stage2.estimand_ontology.public_dict()}
+               if config.stage2.estimand_ontology.enabled else {}),
             "primary_model": config.stage2.model,
             "extraction_model": extraction_model,
             "clinical_question": config.clinical_question,
@@ -2618,8 +2620,14 @@ def prepare_stage2_reselection(
         ):
             raise RuntimeError(f"outer fold {outer_fold} selection feature names are invalid")
 
-        matrix_relative = Path("extraction") / "all_candidates_fit" / "extracted.csv"
+        matrix_relative = Path(str(selection_input.get("preselection_matrix_path")
+                                   or "extraction/all_candidates_fit/extracted.csv"))
+        if (matrix_relative.is_absolute() or ".." in matrix_relative.parts
+                or not matrix_relative.is_relative_to(Path("extraction"))):
+            raise RuntimeError("preselection matrix path must remain under the fold extraction directory")
         matrix_path = outer_dir / matrix_relative
+        if not matrix_path.resolve().is_relative_to((outer_dir / "extraction").resolve()):
+            raise RuntimeError("preselection matrix path escapes the fold extraction directory")
         if not matrix_path.is_file():
             raise RuntimeError(
                 f"outer fold {outer_fold} has no frozen all-candidate training matrix"
@@ -2819,6 +2827,8 @@ def prepare_stage2_reselection(
             "outer_*/consolidation",
             "outer_*/ontology_supervision/round_*",
             "outer_*/extraction/all_candidates_fit*",
+            "outer_*/extraction/estimand_candidates_fit",
+            "outer_*/estimand_ontology",
             "outer_*/preselection",
         ],
     }

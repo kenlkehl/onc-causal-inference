@@ -408,6 +408,7 @@ def _prompt_feature(
         "feature_id": _feature_key(feature),
         "name": str(feature.get("name") or ""),
         "display_name": str(feature.get("display_name") or feature.get("name") or ""),
+        **({"clinical_label": str(feature["clinical_label"])} if feature.get("clinical_label") else {}),
         "description": str(feature.get("description") or ""),
         "value_type": str(feature.get("value_type") or "ambiguous"),
         "categories_or_unit": list(feature.get("categories_or_unit") or []),

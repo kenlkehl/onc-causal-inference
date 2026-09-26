@@ -1105,6 +1105,14 @@ raw training matrix, and repeats for at most
 `max_review_rounds`; `ontology_supervision/convergence.json` records whether the
 latest aggregate ontology was stable.
 
+An opt-in [estimand-informed ontology search](stage2_estimand_ontology.md) runs
+next when `stage2.estimand_ontology.enabled=true`. It compares clinically
+justified alternative measurements using inner-fold nuisance losses for
+confounding adjustment and fixed-reference R-loss for effect modification.
+It preserves original measurements, extracts only proposed alternatives, and
+passes accepted additions into downstream selection. Its supervised evidence
+and checkpoints are separate from the outcome-blind aggregate supervisor.
+
 Before supervised evidence construction, `selection/candidate_consolidation/`
 records the optional sequential, outer-training-only pass. When disabled, its
 report records that status and the candidate set passes through unchanged.

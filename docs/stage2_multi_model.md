@@ -12,6 +12,9 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
 2. Use existing consolidated, ontology-reviewed, extracted measurements. This
    mode does not repeat discovery/extraction. It can now select the final CATE
    estimator as well as its modifier inputs.
+   An optional upstream [estimand-informed ontology search](stage2_estimand_ontology.md)
+   can compare alternative definitions and add supported measurements before
+   this selector runs.
 3. Work separately inside each outer-training population. The numerical selector
    reads only observed treatment/outcome from the source dataset. Patient text,
    outer-test data, oracle columns, and generation metadata cannot enter its
