@@ -33,7 +33,7 @@ def runner(**kwargs):
     )
 
 
-def test_mixed_round_covers_all_candidates_once_with_little_random_and_changes_next_round():
+def test_mixed_round_uses_only_semantic_and_alphabetical_and_changes_next_round():
     source = groups(200)
     matrix = encoder([item["name"] for item in source], "", "")
     matrix /= np.linalg.norm(matrix, axis=1, keepdims=True)
@@ -41,8 +41,8 @@ def test_mixed_round_covers_all_candidates_once_with_little_random_and_changes_n
     first, methods = mixed_batches(source, round_number=1, **args)
     second, _ = mixed_batches(source, round_number=2, **args)
     assert methods.count("semantic") == 6
-    assert methods.count("alphabetical") == 3
-    assert methods.count("random") == 1
+    assert methods.count("alphabetical") == 4
+    assert set(methods) == {"semantic", "alphabetical"}
     assert sorted(item["name"] for batch in first for item in batch) == [item["name"] for item in source]
     assert all(len(batch) == 20 for batch in first)
     assert first != second
@@ -119,9 +119,54 @@ def test_failed_review_does_not_count_as_convergence(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("settings", [
     {"semantic_fraction": .95, "random_fraction": .1}, {"random_fraction": float("nan")},
+    {"random_fraction": .1},
     {"early_stop_patience": 0}, {"early_stop_min_reduction": -1},
     {"unknown": True},
 ])
 def test_invalid_policy_is_rejected(settings):
     with pytest.raises(ValueError):
         policy_from_mapping(settings)
+
+
+@pytest.mark.parametrize("canonical", ["renal function", "estimated GFR"])
+def test_alias_response_cannot_invent_or_borrow_a_broader_canonical_label(canonical):
+    with pytest.raises(ValueError):
+        workflow._validate_global_candidate_pool_directives(
+            {"merges": [{"members": ["cr clearance", "creatinine clearance"],
+                         "canonical_label": canonical}]},
+            group_names=["cr_clearance", "creatinine_clearance", "estimated_gfr"],
+        )
+
+
+def test_exact_alias_merge_preserves_distinct_related_measurement_and_discovery_cache(tmp_path):
+    config = workflow.PlainHandoffStage2Config(endpoint="http://test/v1", model="test-model")
+    calls = []
+    def complete(messages, _config):
+        calls.append(messages)
+        return json.dumps({"candidates": []})
+    leaf = dict(output_dir=tmp_path/'discovery', input_value={"phase": "discovery"},
+                messages=workflow.clinical_prompts.messages("01_discover", "A clinical excerpt."),
+                config=config, validate=lambda value: value)
+    workflow._checkpointed_request_json(**leaf, completion=complete)
+    model = workflow.PlainHandoffStage2(config=config, clinical_question="Unused", completion=complete)
+    source = workflow._materialize_exact_name_groups([
+        {"candidate_id": f"c{i}", "name": name, "description": description,
+         "architecture": "test", "supporting_packet_ids": [], "evidence_axes": ["outcome"]}
+        for i, (name, description) in enumerate([
+            ("cr_clearance", "Creatinine clearance in mL/min."),
+            ("creatinine_clearance", "Creatinine clearance in mL/min."),
+            ("estimated_gfr", "Estimated glomerular filtration rate in mL/min/1.73 m2."),
+        ])])
+    def aliases(messages, _config):
+        calls.append(messages)
+        text = messages[0]["content"]
+        assert "Keep creatinine clearance and estimated GFR separate." in text
+        if "- cr clearance:" in messages[1]["content"]:
+            return json.dumps({"merges": [{"members": ["cr clearance", "creatinine clearance"],
+                                          "canonical_label": "creatinine clearance"}]})
+        return json.dumps({"merges": []})
+    model.completion = aliases
+    result = model._consolidate_candidate_pool(outer_fold=1, groups=source, output_dir=tmp_path/'merges')
+    assert {f["name"] for f in result} == {"creatinine_clearance", "estimated_gfr"}
+    workflow._checkpointed_request_json(**leaf, completion=lambda *_: pytest.fail("Discovery was rerun"))
+    assert len(calls) == 3  # discovery, duplicate merge, final no-merge review

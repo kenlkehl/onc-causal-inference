@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import Mapping, Sequence
 
-from .stage2_prompt_catalog import PROMPT_VERSION, SYSTEM_PROMPTS
+from .stage2_prompt_catalog import ALIAS_MERGE_PROMPT_VERSION, PROMPT_VERSION, SYSTEM_PROMPTS
 
 
 def messages(slug: str, clinical_input: str) -> list[dict[str, str]]:

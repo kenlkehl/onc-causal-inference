@@ -1,7 +1,7 @@
 STAGE 2 PIPELINE REPORT
 =======================
 
-Current implementation as of 25 September 2026
+Current implementation as of 26 September 2026
 
 
 PURPOSE
@@ -57,12 +57,16 @@ CURRENT FLOW FOR ONE OUTER FOLD
 
    Exact normalized names are coalesced first. The remaining names enter
    repeated merge-only batches mixing approximately 60% semantic-neighbor,
-   30% alphabetical, and 10% seeded-random grouping in each round. Every
+   40% alphabetical grouping in each round. Every
    candidate is reviewed once per round. After at least three rounds, two
    consecutive successful rounds reducing the pool by less than 0.5% stop the
    pass; failed-review rounds do not count toward this low-yield streak. The
    hard cap remains 55 rounds. Names and descriptions alone determine semantic
-   retrieval, with cached Qwen3-Embedding-0.6B vectors. A directive may merge aliases but
+   retrieval, with cached Qwen3-Embedding-0.6B vectors. A directive may merge only
+   exact duplicate concepts whose labels differ in spelling, wording, or
+   abbreviation, retaining an existing member name. Creatinine clearance and
+   estimated GFR remain distinct, as do differences in scale, method, timing,
+   or specificity. A directive
    cannot exclude a candidate; every unmentioned candidate passes through.
 
    Explicit investigator definitions are protected. They cannot be renamed,

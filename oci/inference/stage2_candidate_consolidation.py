@@ -14,14 +14,14 @@ from typing import Any, Callable, Mapping, Sequence
 
 import numpy as np
 
-MIXED_SCHEMA = "mixed_semantic_alphabetical_random_candidate_batches_v1"
+MIXED_SCHEMA = "mixed_semantic_alphabetical_exact_alias_candidate_batches_v2"
 
 
 @dataclass(frozen=True)
 class CandidateConsolidationPolicy:
     strategy: str = "mixed"
     semantic_fraction: float = 0.6
-    random_fraction: float = 0.1
+    random_fraction: float = 0.0
     embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
     embedding_device: str = "cpu"
     early_stop_min_rounds: int = 3
@@ -37,6 +37,8 @@ class CandidateConsolidationPolicy:
                 raise ValueError(f"consolidation_policy.{name} must be between 0 and 1")
         if self.semantic_fraction + self.random_fraction > 1:
             raise ValueError("consolidation_policy grouping fractions must sum to at most 1")
+        if self.random_fraction != 0:
+            raise ValueError("consolidation_policy.random_fraction must be 0; mixed grouping uses only semantic and alphabetical batches")
         for name in ("early_stop_min_rounds", "early_stop_patience"):
             value = getattr(self, name)
             if type(value) is not int or value < 1:
@@ -108,8 +110,8 @@ def mixed_batches(groups: Sequence[Mapping[str, Any]], *, batch_size: int,
     """Partition a name-sorted pool once, interleaving weighted grouping methods.
 
     Semantic batches retrieve the nearest still-unassigned candidates to a
-    pivot. Alphabetical batches follow a rotating lexical order. Random batches
-    use seeded hashes. Round-dependent pivots and order expose new neighbors.
+    pivot. Alphabetical batches follow a rotating lexical order.
+    Round-dependent pivots and order expose new neighbors.
     """
     if batch_size < 2 or round_number < 1:
         raise ValueError("Invalid mixed consolidation batch size or round")
@@ -123,8 +125,7 @@ def mixed_batches(groups: Sequence[Mapping[str, Any]], *, batch_size: int,
     if policy.semantic_fraction and (embeddings is None or len(embeddings) != len(groups)):
         raise ValueError("Mixed consolidation requires an embedding for every candidate")
     weights = {"semantic": policy.semantic_fraction,
-               "alphabetical": 1 - policy.semantic_fraction - policy.random_fraction,
-               "random": policy.random_fraction}
+               "alphabetical": 1 - policy.semantic_fraction}
     methods = [method for method, weight in weights.items() if weight > 0]
     # An odd step coprime to the pool length changes which semantic pivots and
     # alphabetical boundaries are considered first on subsequent rounds.
@@ -133,8 +134,6 @@ def mixed_batches(groups: Sequence[Mapping[str, Any]], *, batch_size: int,
         step += 1
     offset = ((round_number - 1) * step + seed % len(groups)) % len(groups)
     lexical = list(range(offset, len(groups))) + list(range(offset))
-    random_order = sorted(range(len(groups)), key=lambda i: (
-        hashlib.sha256(f"{seed}\0{round_number}\0{names[i]}".encode()).hexdigest(), names[i]))
     available = set(lexical)
     counts: Counter[str] = Counter()
     batches, orderings = [], []
@@ -142,9 +141,7 @@ def mixed_batches(groups: Sequence[Mapping[str, Any]], *, batch_size: int,
         method = max(methods, key=lambda key: weights[key] * (len(batches) + 1) - counts[key])
         counts[method] += 1
         pivot = next(i for i in lexical if i in available)
-        if method == "random":
-            selected = [i for i in random_order if i in available][:batch_size]
-        elif method == "alphabetical":
+        if method == "alphabetical":
             selected = [i for i in lexical if i in available][:batch_size]
         else:
             similarities = embeddings @ embeddings[pivot]

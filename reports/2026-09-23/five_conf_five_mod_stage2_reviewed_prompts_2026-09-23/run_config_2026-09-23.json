@@ -162,7 +162,7 @@
     "consolidation_policy": {
       "strategy": "mixed",
       "semantic_fraction": 0.6,
-      "random_fraction": 0.1,
+      "random_fraction": 0.0,
       "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
       "embedding_device": "cuda:1",
       "early_stop_min_rounds": 3,

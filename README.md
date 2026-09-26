@@ -777,7 +777,7 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
     "consolidation_policy": {
       "strategy": "mixed",
       "semantic_fraction": 0.6,
-      "random_fraction": 0.1,
+      "random_fraction": 0.0,
       "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
       "embedding_device": "cpu",
       "early_stop_min_rounds": 3,
@@ -1068,7 +1068,7 @@ Stage 2 then consolidates the candidates discovered from compiled packets into
 operational patient-level definitions. After exact-name
 coalescing, each consolidation round reviews every candidate once in batches
 of up to 20. By default approximately 60% of batches retrieve semantic neighbors,
-30% use alphabetical neighborhoods, and 10% use seeded random groups. The
+40% use alphabetical neighborhoods. The
 Qwen3-Embedding-0.6B model embeds candidate names and a bounded sample of their
 descriptions; vectors are cached and only new or changed text is re-embedded.
 Pivots and alphabetical boundaries rotate between rounds. Embeddings arrange
@@ -1077,8 +1077,13 @@ After at least three mixed rounds, consolidation stops when two consecutive
 successful rounds each reduce the candidate count by less than 0.5%. A round
 with a failed review does not count toward this low-yield streak. The hard cap
 remains 55 rounds. A single batch covering the full pool can stop after a
-successful no-merge review. The batches can merge synonymous, thresholded, categorical,
-quantitative-score, and value-encoded representations. They cannot exclude any
+successful no-merge review. The LLM merges only exact duplicates differing in
+spelling, wording, or abbreviation, and chooses an existing member name as the
+canonical label. Creatinine-clearance aliases can merge; creatinine clearance
+and estimated GFR remain separate. Differences in measurement, scale, method,
+timing, or specificity remain separate, including numerical measurements versus
+threshold categories and named scores versus general functional assessments.
+The batches cannot exclude any
 candidate: every unmerged feature passes through unchanged. Explicit
 investigator-configured features are hard invariants in every round: they
 cannot be renamed, distinct configured features cannot be merged, and their

@@ -2508,6 +2508,7 @@ def _feature_definition_input_value(
     return {
         "feature_definition_input_schema": FEATURE_DEFINITION_INPUT_SCHEMA_VERSION,
         "prompt_catalog_version": clinical_prompts.PROMPT_VERSION,
+        "alias_merge_prompt_version": clinical_prompts.ALIAS_MERGE_PROMPT_VERSION,
         "outer_fold": int(outer_fold),
         "compiler": config.evidence_compiler,
         "candidate_discovery_source": "all_semantic_evidence_cards",
@@ -5065,9 +5066,11 @@ def _validate_global_candidate_pool_directives(
                 raise ValueError("each merge requires members and canonical_label")
             if not isinstance(row["members"], list) or not isinstance(row["canonical_label"], str):
                 raise ValueError("members must be an array and canonical_label must be text")
-            output = row["canonical_label"]
-            output = names.get(output, _snake_case_name(output, fallback=""))
-            directives.append({"inputs": [clinical_prompts.resolve_label(n, names) for n in row["members"]], "output": output})
+            inputs = [clinical_prompts.resolve_label(n, names) for n in row["members"]]
+            output = clinical_prompts.resolve_label(row["canonical_label"], names)
+            if output not in inputs:
+                raise ValueError("canonical_label must be one of the merge's supplied member names")
+            directives.append({"inputs": inputs, "output": output})
         value = {"merge_directives": directives}
     available = [str(name) for name in group_names]
     if len(available) != len(set(available)):
@@ -7265,6 +7268,7 @@ class PlainHandoffStage2:
         embedding_cache = None
         process_input = {
             "phase": "iterative_candidate_pool_merge_only_consolidation",
+            "alias_merge_prompt_version": clinical_prompts.ALIAS_MERGE_PROMPT_VERSION,
             "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
             "global_candidate_pool_schema": pool_schema,
             **({"consolidation_policy": policy.public_dict()} if is_mixed else {}),

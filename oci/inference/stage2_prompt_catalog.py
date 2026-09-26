@@ -1,10 +1,14 @@
-"""Standard Stage 2 system prompts reviewed with Qwen on 2026-09-23.
+"""Standard Stage 2 system prompts, initially reviewed with Qwen on 2026-09-23.
+
+The exact-duplicate consolidation prompt was tightened on 2026-09-26.
 
 Inputs, identity assignment, and validation live in the Python callers.
 The review artifacts preserve the exact example conversations and model replies.
 """
 
 PROMPT_VERSION = "stage2_clinical_prompts_v1_20260923"
+# Revision of this leaf only: unchanged discovery checkpoints remain reusable.
+ALIAS_MERGE_PROMPT_VERSION = "stage2_exact_duplicate_aliases_v2_20260926"
 
 SYSTEM_PROMPTS = {
     '01_discover': """You identify clinical variables that could be measured from individual patients' medical records. Read all supplied excerpts and name each distinct clinical attribute they support.
@@ -65,19 +69,27 @@ Return one object with the key candidates, an array. Each candidate has exactly 
 - uncertainty: ambiguity in what the excerpt means, or an empty string when its meaning is clear.
 
 Return each distinct attribute once. An excerpt containing several findings can support several candidates. Use {"candidates": []} when the text supports none.""",
-    '03_merge_aliases': """Identify clinical variable names that describe the same measurement and can share one definition.
+    '03_merge_aliases': """Find duplicate clinical variables whose names differ only in spelling, wording, or abbreviation. These variables will later be extracted from individual patients' medical records. A merge must preserve exactly what is measured.
 
 What you receive
 
-A list of names and descriptions. Protected names, when present, must remain recognizable in the result.
+A list of candidate variable names with descriptions of their meaning. A candidate can have several descriptions collected from earlier mentions. Read those descriptions together. Protected names, when present, must keep their supplied name.
 
 How to decide
 
-Group synonyms, abbreviations, and detailed/coarsened names when one measurement definition can represent them. Keep independently varying findings separate. Leave uncertain matches ungrouped. Each group needs at least two supplied names. A name can belong to one group. A group containing a protected name uses that name as its canonical label; two protected names remain separate.
+Merge only exact duplicates of the same clinical attribute. Differences may consist of spelling, capitalization, separators, abbreviations, or synonymous wording. For example, cr_clearance and creatinine_clearance can merge when their descriptions both mean creatinine clearance. Hemoglobin concentration and haemoglobin concentration can merge when they describe the same measurement.
+
+Check that the descriptions agree on the measured quantity, specimen or anatomical site, scale or categories, method when specified, and timing or clinical context when specified. A generic label with an unclear description leaves equivalence uncertain; retain it separately.
+
+Keep creatinine clearance and estimated GFR separate. Keep a numerical laboratory value, an abnormal/normal category, and a general organ-function assessment separate. Keep a named clinical score and a general functional-status assessment separate. Keep a test result and whether the test was performed separate. Keep a disease's presence, subtype, severity, and response to treatment separate. Keep current treatment and prior treatment history separate. A specific subtype or threshold and a broader variable remain separate.
+
+Related clinical meaning, correlation, a shared organ system, or overlapping descriptions are insufficient grounds for merging. Every member of a proposed group must be an exact duplicate of every other member. Retain uncertain or internally conflicting candidates unchanged. Preserve the existing level of detail and scope.
+
+Each group needs at least two supplied names. A name can belong to only one group. Choose an existing member name as canonical_label, preferring the clearest expanded name. A group containing a protected name uses that name; two protected names remain separate.
 
 What to return
 
-Return one object with the key merges, an array. Each group has members (existing names) and canonical_label (a clear clinical name). Omit unchanged variables. Use {"merges": []} when no merge is justified.""",
+Return one object with the key merges, an array. Each group has members (an array of supplied names) and canonical_label (one of that group's supplied member names). Copy names from the input. Omit unchanged variables. Use {"merges": []} when there are no exact duplicates.""",
     '04_define_ontology': """Write clear instructions for extracting one clinical variable from a patient's medical record.
 
 What you receive

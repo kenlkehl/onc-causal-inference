@@ -220,7 +220,7 @@ An external endpoint configuration is:
     "consolidation_policy": {
       "strategy": "mixed",
       "semantic_fraction": 0.6,
-      "random_fraction": 0.1,
+      "random_fraction": 0.0,
       "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
       "embedding_device": "cpu",
       "early_stop_min_rounds": 3,
@@ -529,10 +529,15 @@ Python first coalesces only exact normalized-name duplicates; this is identity
 bookkeeping and makes no semantic decision between distinct names. It then
 uses a reproducible mixture of nonoverlapping batches of
 `consolidation_batch_size` candidates (20 by default). Every candidate appears
-once per round. Approximately 60% of batches use semantic neighbors, 30% use
-alphabetical neighborhoods, and 10% use seeded random grouping. Semantic
+once per round. Approximately 60% of batches use semantic neighbors and 40% use
+alphabetical neighborhoods. Semantic
 retrieval embeds candidate names and descriptions with Qwen3-Embedding-0.6B;
-the LLM judges equivalence using the same clinical descriptions as before.
+the LLM reviews the clinical descriptions for exact duplicate variables whose
+names differ only in spelling, synonymous wording, or abbreviation. Each merge
+retains an existing member name. Creatinine-clearance aliases can merge;
+creatinine clearance and estimated GFR remain separate. Different scales,
+methods, timing, and levels of specificity remain separate. Uncertain matches
+pass through unchanged.
 Each semantic pivot retrieves its closest still-unassigned candidates. Pivots
 and lexical boundaries rotate each round. Batches run concurrently without
 overlapping merge directives. Saved embeddings are reused across rounds and
@@ -544,11 +549,12 @@ less than 0.5% candidate-count reduction stop consolidation. The reduction is
 Validation-fallback rounds break the low-yield streak. A single batch containing
 the whole pool can stop immediately after a successful no-merge review. The hard
 cap is `consolidation_max_rounds` (55). Controls live in
-`stage2.consolidation_policy`: `semantic_fraction`, `random_fraction` (the
-remaining fraction is alphabetical), `embedding_model`, `embedding_device`,
+`stage2.consolidation_policy`: `semantic_fraction` (the remaining fraction is
+alphabetical), `embedding_model`, `embedding_device`,
 `early_stop_min_rounds`, `early_stop_patience`, and `early_stop_min_reduction`.
-The default strategy is `mixed`; `strategy: "legacy"` reproduces the historical
-five alphabetical rounds followed by seeded shuffles, governed by
+The compatibility field `random_fraction` must be zero. The default strategy is
+`mixed`; `strategy: "legacy"` reproduces the historical
+grouping of five alphabetical rounds followed by seeded shuffles, governed by
 `consolidation_alphabetical_rounds`. Mixed results use
 `consolidation/candidate_pool_consolidation_mixed/`; legacy artifacts are retained.
 The process also stops when the pool is empty or only configured features remain. Identical
