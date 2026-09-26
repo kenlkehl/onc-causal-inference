@@ -39,6 +39,49 @@ def _runner(**config_overrides) -> PlainHandoffStage2:
     )
 
 
+@pytest.mark.parametrize("kind", ["discovery", "consolidation"])
+@pytest.mark.parametrize("filename", ["input.json", "complete.json", "result.json"])
+@pytest.mark.parametrize("persistent", [False, True])
+def test_checkpoint_permission_errors_retry_without_repeating_inference(
+    tmp_path, monkeypatch, kind, filename, persistent,
+):
+    runner = _runner()
+    packet = {"packet_id": "card_1", "architecture": "bow_r_loss", "outer_fold": 1,
+              "observable_axes": ["outcome"],
+              "content": {"representative_evidence": [{"text": "Serum albumin 3 g/dL."}]}}
+    runner.completion = lambda *_: json.dumps({"candidates": [{
+        "name": "serum albumin", "description": "Serum albumin concentration.",
+        "basis": "Explicit lab result.", "uncertainty": ""}]})
+    def request():
+        if kind == "discovery":
+            return runner._interpret_batch(architecture="bow_r_loss", packets=[packet], output_dir=tmp_path)
+        return stage2_workflow._checkpointed_request_json(
+            output_dir=tmp_path, input_value={"phase": "test"},
+            messages=[{"role": "user", "content": "Test checkpoint."}],
+            config=runner.config, completion=runner.completion, validate=lambda value: value)
+    original = request()
+    before = {p.name: p.read_bytes() for p in tmp_path.glob('*.json')}
+    runner.completion = lambda *_: pytest.fail("A filesystem error repeated inference")
+    read_text = Path.read_text
+    attempts, sleeps = [], []
+    def flaky(path, *args, **kwargs):
+        if path == tmp_path/filename:
+            attempts.append(path)
+            if persistent or len(attempts) == 1:
+                raise PermissionError(1, "Operation not permitted", str(path))
+        return read_text(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", flaky)
+    monkeypatch.setattr(stage2_workflow.time, "sleep", sleeps.append)
+    if persistent:
+        with pytest.raises(PermissionError):
+            request()
+        assert len(attempts) == 3 and sleeps == [0.25, 0.5]
+    else:
+        assert request() == original
+        assert len(attempts) == 2 and sleeps == [0.25]
+    assert {p.name: p.read_bytes() for p in tmp_path.glob('*.json')} == before
+
+
 def test_completed_outer_fold_revalidates_selection_and_estimation_inputs(
     tmp_path: Path,
     monkeypatch,

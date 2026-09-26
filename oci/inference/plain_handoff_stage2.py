@@ -88,6 +88,9 @@ from .vllm_server_pool import (
 )
 
 LOGGER = logging.getLogger(__name__)
+# Checkpoint reads share a smaller filesystem budget across all outer folds.
+# LLM request concurrency is controlled independently.
+_CHECKPOINT_READ_SLOTS = threading.BoundedSemaphore(16)
 
 ALLOWED_VALUE_TYPES = {"binary", "categorical", "continuous", "ordinal", "ambiguous"}
 ALLOWED_EVIDENCE_AXES = {
@@ -508,6 +511,27 @@ def _iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return list(_iter_jsonl(path))
+
+
+def _read_checkpoint_jsons(paths: Sequence[Path]) -> list[Any] | None:
+    """Read a cache entry with bounded retries for transient mount denials.
+
+    Missing or malformed files make an entry incomplete. Access failures must
+    propagate after retries, rather than causing expensive inference to repeat.
+    """
+    for attempt in range(3):
+        try:
+            with _CHECKPOINT_READ_SLOTS:
+                return [json.loads(path.read_text(encoding="utf-8")) for path in paths]
+        except PermissionError:
+            if attempt == 2:
+                raise
+            delay = 0.25 * (2 ** attempt)
+            LOGGER.warning("Checkpoint read denied; retrying attempt %s/3 after %.2fs: %s",
+                           attempt + 2, delay, paths[0].parent)
+            time.sleep(delay)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return None
 
 
 @dataclass(frozen=True)
@@ -3694,11 +3718,10 @@ def _checkpointed_request_json(
     input_path = output_dir / "input.json"
     result_path = output_dir / "result.json"
     complete_path = output_dir / "complete.json"
-    if input_path.is_file() and result_path.is_file() and complete_path.is_file():
+    cached_files = _read_checkpoint_jsons([input_path, complete_path, result_path])
+    if cached_files is not None:
         try:
-            previous_input = json.loads(input_path.read_text(encoding="utf-8"))
-            completion_state = json.loads(complete_path.read_text(encoding="utf-8"))
-            cached_result = json.loads(result_path.read_text(encoding="utf-8"))
+            previous_input, completion_state, cached_result = cached_files
             if (
                 previous_input.get("input_fingerprint") == input_fingerprint
                 and completion_state.get("input_fingerprint") == input_fingerprint
@@ -3706,7 +3729,7 @@ def _checkpointed_request_json(
                 validated = validate(cached_result)
                 LOGGER.info("skip completed Stage 2 consolidation request: %s", output_dir)
                 return validated
-        except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError):
             pass
         LOGGER.info("rerun stale or inconsistent Stage 2 consolidation request: %s", output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -6991,9 +7014,9 @@ class PlainHandoffStage2:
         complete_path = output_dir / "complete.json"
         result_path = output_dir / "result.json"
         input_path = output_dir / "input.json"
-        if complete_path.is_file() and result_path.is_file() and input_path.is_file():
-            previous = json.loads(input_path.read_text(encoding="utf-8"))
-            completion_state = json.loads(complete_path.read_text(encoding="utf-8"))
+        cached_files = _read_checkpoint_jsons([input_path, complete_path, result_path])
+        if cached_files is not None:
+            previous, completion_state, cached_result = cached_files
             previous_fingerprint = previous.get("input_fingerprint")
             if previous_fingerprint is None:
                 previous_fingerprint = _value_fingerprint(
@@ -7007,10 +7030,6 @@ class PlainHandoffStage2:
                 previous_fingerprint == input_fingerprint
                 and completion_state.get("input_fingerprint") == input_fingerprint
             ):
-                try:
-                    cached_result = json.loads(result_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    cached_result = None
                 if _cached_interpretation_matches_packets(
                     cached_result,
                     packet_ids=packet_id_set,
