@@ -6,6 +6,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from oci.inference.neural_query_evidence_contract import query_retrieval_policy
+
 from oci.inference.all_evidence_fusion import (
     BOW_NUISANCE,
     BOW_R_LOSS,
@@ -109,6 +111,7 @@ def test_neural_query_ngrams_are_compacted_before_exact_member_aggregation(
             "evidence": {
                 "evidence": [
                     {
+                        "retrieval_policy": query_retrieval_policy(1),
                         "query_id": "treatment_query",
                         "bank": "treatment",
                         "fit_standardized_score": 2.0,
@@ -118,6 +121,7 @@ def test_neural_query_ngrams_are_compacted_before_exact_member_aggregation(
                         ],
                     },
                     {
+                        "retrieval_policy": query_retrieval_policy(1),
                         "query_id": "outcome_query",
                         "bank": "outcome",
                         "fit_standardized_score": 3.0,
@@ -368,6 +372,7 @@ def test_compiler_preserves_all_ten_architectures_as_independent_interpretation_
             "evidence": {
                 "evidence": [
                     {
+                        "retrieval_policy": query_retrieval_policy(1),
                         "query_id": "effect_query_1",
                         "bank": "effect",
                         "top_chunks": [

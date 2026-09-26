@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from oci.inference.neural_query_evidence_contract import query_retrieval_policy
+
 from oci.inference.all_evidence_fusion import PRIMARY_SOURCE_FAMILIES
 from oci.inference.plain_handoff_stage2_evidence import (
     SUPPORTED_STAGE2_ARCHITECTURES,
@@ -168,6 +170,7 @@ def test_neural_query_architecture_artifact_uses_compact_occurrence_records(
             "evidence": {
                 "evidence": [
                     {
+                        "retrieval_policy": query_retrieval_policy(1),
                         "query_id": "effect_query",
                         "bank": "effect",
                         "top_contrastive_ngrams": [

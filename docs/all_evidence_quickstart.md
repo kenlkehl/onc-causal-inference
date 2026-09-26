@@ -80,7 +80,7 @@ and evaluated on outer-held-out records. The common controls are:
     "repetition_penalty": null,
     "interpretation_reasoning_effort": "high",
     "extraction_reasoning_effort": "none",
-    "evidence_compiler": "semantic_cluster_cards_v2",
+    "evidence_compiler": "semantic_cluster_cards_v3",
     "evidence_max_cards_per_fold": 400,
     "extraction_feature_batch_size": 10,
     "extraction_chunk_size_tokens": 50000,

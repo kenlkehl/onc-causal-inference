@@ -766,7 +766,7 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
     "repetition_penalty": null,
     "interpretation_reasoning_effort": "high",
     "extraction_reasoning_effort": "none",
-    "evidence_compiler": "semantic_cluster_cards_v2",
+    "evidence_compiler": "semantic_cluster_cards_v3",
     "evidence_max_cards_per_fold": 400,
     "evidence_max_exemplars_per_card": 4,
     "evidence_max_exemplar_chars": 2400,
@@ -1053,7 +1053,7 @@ support many candidates. There is no ColBERT routing, evidence-community graph,
 candidate retrieval, candidate-count cap, or causal-role filter. All discovered
 candidates enter merge-only consolidation; oracle metadata never participates.
 
-`semantic_cluster_cards_v2` is the only supported Stage 2 evidence compiler.
+`semantic_cluster_cards_v3` is the only supported Stage 2 evidence compiler.
 Before any interpretation request, it compares the architectures present in
 each outer fold with the run's frozen Stage 1 selection: either the explicit
 selector or, for legacy runs, the resolved enable flags. A missing selected

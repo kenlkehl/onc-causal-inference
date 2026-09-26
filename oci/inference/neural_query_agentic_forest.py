@@ -23,6 +23,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from ..config import ExplicitFeatureSpec
 from .neural_cohort_witness import pad_chunk_embeddings
+from .neural_query_evidence_contract import query_retrieval_policy
 
 
 QUERY_FEATURE_PROMPT_VERSION = "neural_query_feature_v1"
@@ -139,6 +140,10 @@ class NeuralQueryAgenticForestConfig:
     retrieval_patient_batch_size: int = 128
     evidence_patient_batch_size: int = 96
     evidence_top_patients: int = 10
+    # Scientific retrieval selection, distinct from capacity/length ceilings.
+    # Preserve the complete text of each selected chunk, not every chunk of a
+    # patient whose best chunk matched. Both contrastive arms use this rule.
+    evidence_retrieval_top_k: int = 1
     # ``None`` is an explicit lossless allocation: retain every remaining
     # patient/positive term. A finite value is an acceptance ceiling and is
     # never permission for silent selection.
@@ -258,6 +263,7 @@ class NeuralQueryAgenticForestConfig:
             "consensus_kmeans_max_iter",
             "retrieval_patient_batch_size",
             "evidence_patient_batch_size",
+            "evidence_retrieval_top_k",
         ):
             value = getattr(self, field_name)
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -707,15 +713,15 @@ def build_query_evidence(
             "neural-query embedding/text cache chunk counts are inconsistent"
         )
     maximum_chunks = max(max(chunk_counts), 1)
+    retrieval_chunks = min(int(config.evidence_retrieval_top_k), maximum_chunks)
     configured_chunks = config.evidence_chunks_per_patient_per_query
-    if configured_chunks is not None and maximum_chunks > int(configured_chunks):
+    if configured_chunks is not None and retrieval_chunks > int(configured_chunks):
         raise NeuralQueryEvidenceCapacityOverflowError(
-            "complete neural-query evidence requires "
-            f"{maximum_chunks} chunks for at least one fit row, exceeding "
+            "selected neural-query evidence requires "
+            f"{retrieval_chunks} chunks for at least one fit row, exceeding "
             "configured evidence_chunks_per_patient_per_query allocation "
             f"{int(configured_chunks)}; no chunks were silently discarded"
         )
-    retrieval_chunks = maximum_chunks
     scores, indices = query_patient_top_chunks(
         chunk_matrices,
         queries,
@@ -786,6 +792,9 @@ def build_query_evidence(
             {
                 "query_id": str(record["query_id"]),
                 "bank": str(bank),
+                "retrieval_policy": query_retrieval_policy(
+                    int(config.evidence_retrieval_top_k)
+                ),
                 "mechanical_role": mechanical_role_for_bank(bank),
                 "statistical_gate_applied": False,
                 "member_count": int(record.get("member_count", 0)),

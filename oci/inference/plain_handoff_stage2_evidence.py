@@ -50,8 +50,9 @@ from .stage1_architectures import (
     TFIDF_ORPHAN_NGRAMS,
     TFIDF_SEMANTIC_RETRIEVAL,
 )
+from .neural_query_evidence_contract import validate_query_retrieval_policy
 
-EVIDENCE_COMPILER_VERSION = "semantic_cluster_cards_v2"
+EVIDENCE_COMPILER_VERSION = "semantic_cluster_cards_v3"
 SUPPORTED_STAGE2_ARCHITECTURES = STAGE1_ARCHITECTURES
 ALLOWED_AXES = {
     "treatment",
@@ -1045,15 +1046,26 @@ def _extract_neural_query_occurrences(
     for query_index, query in enumerate(values):
         if not isinstance(query, Mapping):
             continue
+        retrieval_policy = query.get("retrieval_policy")
+        validate_query_retrieval_policy(retrieval_policy)
         bank = str(query.get("bank") or "semantic")
         axes = _axes_for_bank(bank)
         query_id = str(query.get("query_id") or f"query_{query_index + 1}")
         chunks = query.get("top_chunks")
         if isinstance(chunks, Sequence) and not isinstance(chunks, (str, bytes)):
+            patient_chunk_counts: Counter[Any] = Counter()
             for chunk_index_in_query, raw in enumerate(chunks):
                 if not isinstance(raw, Mapping):
                     continue
                 row_id = raw.get("_oci_row_id", raw.get("row_id"))
+                if row_id is None:
+                    raise ValueError("ranked neural-query chunks require patient row provenance")
+                patient_chunk_counts[row_id] += 1
+                if patient_chunk_counts[row_id] > retrieval_policy["chunks_per_patient"]:
+                    raise ValueError(
+                        "neural-query evidence exceeds its declared retrieval top-k; "
+                        "regenerate query evidence before compiling cards"
+                    )
                 chunk_index = raw.get("chunk_index")
                 occurrence = _occurrence(
                     text=raw.get("text") or raw.get("chunk_text"),
@@ -1067,7 +1079,10 @@ def _extract_neural_query_occurrences(
                         handoff_row=handoff_row,
                         json_path=(f"evidence[{query_index}].top_chunks[{chunk_index_in_query}]"),
                     ),
-                    details={"query_id": query_id, "bank": bank},
+                    details={
+                        "query_id": query_id, "bank": bank,
+                        "retrieval_policy": dict(retrieval_policy),
+                    },
                     scores=_finite_scores(raw),
                     patient_row_id=row_id,
                     cache_coordinate=(row_id, chunk_index),
@@ -1089,7 +1104,10 @@ def _extract_neural_query_occurrences(
                     handoff_row=handoff_row,
                     json_path=(f"evidence[{query_index}].top_contrastive_ngrams[{term_index}]"),
                 ),
-                details={"term": compact.get("term"), "query_id": query_id, "bank": bank},
+                details={
+                    "term": compact.get("term"), "query_id": query_id, "bank": bank,
+                    "retrieval_policy": dict(retrieval_policy),
+                },
                 scores={**_finite_scores(compact), **_finite_scores(query)},
             )
             if occurrence is not None:
@@ -1151,6 +1169,10 @@ def _extract_occurrences(rows: Iterable[Mapping[str, Any]]) -> dict[int, list[di
             if str(occurrence.get("architecture") or "") != architecture:
                 raise ValueError(
                     f"handoff row {handoff_row} architecture envelope is inconsistent"
+                )
+            if architecture == NEURAL_QUERY_MOMENTS:
+                validate_query_retrieval_policy(
+                    (occurrence.get("details") or {}).get("retrieval_policy")
                 )
             _rebind_compact_handoff_references(
                 occurrence,

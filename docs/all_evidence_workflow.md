@@ -149,13 +149,28 @@ predictions supply cross-fitted AIPW scores. Stage 2 is enabled by specifying `s
 `stage2.vllm`; dataset-backed execution additionally requires a separate
 `stage2.extraction_llm` model configuration.
 
-The only supported compiler is `semantic_cluster_cards_v2`. It checks each
+The only supported compiler is `semantic_cluster_cards_v3`. It checks each
 outer fold for every architecture in the frozen Stage 1 selection (or the
 resolved legacy enable flags) before making an interpretation request. Missing evidence fails
 with a readable Stage 1 rerun instruction. This is an in-process set comparison,
 not an artifact-authentication, byte-attestation, or deployment-gate system.
 The former `raw_packets_v1` compatibility option is intentionally unsupported
 because it combined scientifically distinct architectures.
+
+Neural-query evidence uses `ranked_query_chunks_v1`: patients are ranked by
+their maximum chunk cosine, and `science.neural_queries.evidence_retrieval_top_k`
+selects the highest-cosine chunks within each selected patient (default **1**).
+The same chunk rule applies to the background used for contrastive phrases.
+Selected chunks retain their complete text. The existing
+`evidence_chunks_per_patient_per_query` and excerpt-length fields remain
+capacity ceilings; they do not expand retrieval to the patient's other text.
+Compiler v3 requires this selection provenance on raw queries and canonical
+neural-query occurrences. Old all-history evidence, its phrase contrasts, and
+v2 card caches must be regenerated; filtering old foreground chunks alone does
+not repair phrase contrasts computed from the old full-history background.
+Saved query vectors and training scores can be retained when rebuilding only
+the evidence. Rebuild in a new output directory, and do not reuse downstream
+discovery/ontology checkpoints based on the previous cards.
 
 For initial feature discovery, Python sends one compiled card per request,
 containing only its readable representative texts. Card and packet IDs,
@@ -209,7 +224,7 @@ An external endpoint configuration is:
     "repetition_penalty": null,
     "interpretation_reasoning_effort": "auto",
     "extraction_reasoning_effort": "auto",
-    "evidence_compiler": "semantic_cluster_cards_v2",
+    "evidence_compiler": "semantic_cluster_cards_v3",
     "evidence_max_cards_per_fold": 400,
     "evidence_max_exemplars_per_card": 4,
     "evidence_max_exemplar_chars": 2400,

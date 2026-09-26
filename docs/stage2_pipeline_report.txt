@@ -27,7 +27,7 @@ CURRENT FLOW FOR ONE OUTER FOLD
 
 1. Compile Stage 1 evidence
 
-   The only supported compiler is semantic_cluster_cards_v2. It applies the
+   The only supported compiler is semantic_cluster_cards_v3. It applies the
    scientific allowlist, removes exact duplicates while retaining provenance,
    and creates a fold-local semantic-card atlas. It verifies that every frozen
    Stage 1 architecture selected for the run is present. Cards, exact members,
