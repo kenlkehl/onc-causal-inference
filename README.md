@@ -172,8 +172,8 @@ scientific settings. Endpoint addresses, worker counts, and request timeouts do
 not invalidate completed interpretation checkpoints.
 
 Both launchers preset Stage 2 to consolidation batches of 20, extraction
-feature batches of 10, five shifted-alphabetical plus up to fifty seeded-shuffle
-consolidation rounds, a three-training-patient ontology feedback threshold, and
+feature batches of 10, mixed semantic/alphabetical/random consolidation with
+early stopping, a three-training-patient ontology feedback threshold, and
 at most two refinement rounds. Override these with
 `STAGE2_CONSOLIDATION_BATCH_SIZE`,
 `STAGE2_CONSOLIDATION_ALPHABETICAL_ROUNDS`,
@@ -774,6 +774,16 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
     "consolidation_batch_size": 20,
     "consolidation_alphabetical_rounds": 5,
     "consolidation_max_rounds": 55,
+    "consolidation_policy": {
+      "strategy": "mixed",
+      "semantic_fraction": 0.6,
+      "random_fraction": 0.1,
+      "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+      "embedding_device": "cpu",
+      "early_stop_min_rounds": 3,
+      "early_stop_patience": 2,
+      "early_stop_min_reduction": 0.005
+    },
     "extraction_feature_batch_size": 10,
     "extraction_chunk_size_tokens": 50000,
     "extraction_context_window_tokens": 131072,
@@ -1056,13 +1066,18 @@ into broad prompt buckets.
 
 Stage 2 then consolidates the candidates discovered from compiled packets into
 operational patient-level definitions. After exact-name
-coalescing, consolidation alphabetically sorts candidates into batches of 20
-by default, applies each batch's merge directives, re-sorts the consolidated
-versions, and repeats for up to 55 rounds. The first five rounds shift
-alphabetical boundaries; the remaining 50 use reproducible seeded shuffles of
-the remaining pool so lexically distant aliases can be considered together
-without requiring one large response. There are no fuzzy-blocked or pairwise
-alias requests. The batches can merge synonymous, thresholded, categorical,
+coalescing, each consolidation round reviews every candidate once in batches
+of up to 20. By default approximately 60% of batches retrieve semantic neighbors,
+30% use alphabetical neighborhoods, and 10% use seeded random groups. The
+Qwen3-Embedding-0.6B model embeds candidate names and a bounded sample of their
+descriptions; vectors are cached and only new or changed text is re-embedded.
+Pivots and alphabetical boundaries rotate between rounds. Embeddings arrange
+reviews; the LLM still decides whether candidates are equivalent.
+After at least three mixed rounds, consolidation stops when two consecutive
+successful rounds each reduce the candidate count by less than 0.5%. A round
+with a failed review does not count toward this low-yield streak. The hard cap
+remains 55 rounds. A single batch covering the full pool can stop after a
+successful no-merge review. The batches can merge synonymous, thresholded, categorical,
 quantitative-score, and value-encoded representations. They cannot exclude any
 candidate: every unmerged feature passes through unchanged. Explicit
 investigator-configured features are hard invariants in every round: they
@@ -1089,8 +1104,13 @@ extraction and aggregate supervision instead of aborting the outer fold.
 Every consolidation round/batch and one-group operationalization request is
 input-fingerprinted separately, so a retry skips successful leaves instead of
 repeating the whole fan-out. Batch size and maximum rounds are configurable as
-`stage2.consolidation_batch_size`, `stage2.consolidation_alphabetical_rounds`,
-and `stage2.consolidation_max_rounds`. When a
+`stage2.consolidation_batch_size` and `stage2.consolidation_max_rounds`.
+`stage2.consolidation_policy` controls the grouping fractions, embedding model,
+and stopping rule. Set its `strategy` to `legacy` to reproduce the former
+alphabetical-then-shuffled schedule; `consolidation_alphabetical_rounds` applies
+only to that legacy strategy. Mixed checkpoints use
+`consolidation/candidate_pool_consolidation_mixed/`, keeping earlier legacy
+consolidation results separate. When a
 model copies a uniquely supplied candidate description where an exact name was
 requested, Python maps that description back to its name; it also restores a
 reused output omitted from its own merge inputs. Degenerate one-feature merges

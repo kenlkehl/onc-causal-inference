@@ -17,12 +17,12 @@
     "endpoint": "http://sn4622130540:8001/v1",
     "model": "",
     "api_key": "EMPTY",
-    "workers": 12,
+    "workers": 128,
     "extraction_llm": {
       "endpoint": "http://sn4622130540:8001/v1",
       "model": "",
       "api_key": "EMPTY",
-      "workers": 12
+      "workers": 32
     },
     "max_tokens": 100000,
     "extraction_max_tokens": 75000,
@@ -158,6 +158,17 @@
       "tfidf_topics",
       "tfidf_orphan_ngrams",
       "neural_query_moments"
-    ]
-  }
+    ],
+    "consolidation_policy": {
+      "strategy": "mixed",
+      "semantic_fraction": 0.6,
+      "random_fraction": 0.1,
+      "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+      "embedding_device": "cuda:1",
+      "early_stop_min_rounds": 3,
+      "early_stop_patience": 2,
+      "early_stop_min_reduction": 0.005
+    }
+  },
+  "concurrency_control_path": "/data1/ken/pcori_dev/causal-dragonnet-text/reports/2026-09-23/five_conf_five_mod_stage2_reviewed_prompts_2026-09-23/concurrency_control_2026-09-24.json"
 }

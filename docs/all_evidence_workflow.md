@@ -217,6 +217,16 @@ An external endpoint configuration is:
     "consolidation_batch_size": 20,
     "consolidation_alphabetical_rounds": 5,
     "consolidation_max_rounds": 55,
+    "consolidation_policy": {
+      "strategy": "mixed",
+      "semantic_fraction": 0.6,
+      "random_fraction": 0.1,
+      "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+      "embedding_device": "cpu",
+      "early_stop_min_rounds": 3,
+      "early_stop_patience": 2,
+      "early_stop_min_reduction": 0.005
+    },
     "extraction_feature_batch_size": 10,
     "extraction_chunk_size_tokens": 50000,
     "extraction_context_window_tokens": 131072,
@@ -517,19 +527,31 @@ abort immediately.
 
 Python first coalesces only exact normalized-name duplicates; this is identity
 bookkeeping and makes no semantic decision between distinct names. It then
-sorts the distinct candidates by normalized feature name and sends
-nonoverlapping batches of `consolidation_batch_size` candidates (20 by default).
-Batches within a round are independent and may run concurrently. After applying
-their directives, Python re-sorts the consolidated versions and repeats for up
-to `consolidation_max_rounds` rounds (55 by default). The first
-`consolidation_alphabetical_rounds` rounds (5 by default) shift alphabetical
-boundaries so adjacent candidates split at one boundary can meet in another.
-The remaining 50 default rounds assign the re-sorted pool to new pseudorandom
-batches using the run seed and outer-fold number. These seeded shuffles are exactly
-reproducible but allow lexically distant aliases to be considered together. A
-no-change round does not stop the process until its complete partition repeats;
-this prevents one boundary layout from declaring false convergence. The process
-also stops when the pool is empty or only configured features remain. Identical
+uses a reproducible mixture of nonoverlapping batches of
+`consolidation_batch_size` candidates (20 by default). Every candidate appears
+once per round. Approximately 60% of batches use semantic neighbors, 30% use
+alphabetical neighborhoods, and 10% use seeded random grouping. Semantic
+retrieval embeds candidate names and descriptions with Qwen3-Embedding-0.6B;
+the LLM judges equivalence using the same clinical descriptions as before.
+Each semantic pivot retrieves its closest still-unassigned candidates. Pivots
+and lexical boundaries rotate each round. Batches run concurrently without
+overlapping merge directives. Saved embeddings are reused across rounds and
+restarts; new/changed candidate descriptions are embedded when needed.
+
+After at least three mixed rounds, two consecutive successful rounds with
+less than 0.5% candidate-count reduction stop consolidation. The reduction is
+`(input_groups - output_groups) / input_groups`, including exact-name coalescing.
+Validation-fallback rounds break the low-yield streak. A single batch containing
+the whole pool can stop immediately after a successful no-merge review. The hard
+cap is `consolidation_max_rounds` (55). Controls live in
+`stage2.consolidation_policy`: `semantic_fraction`, `random_fraction` (the
+remaining fraction is alphabetical), `embedding_model`, `embedding_device`,
+`early_stop_min_rounds`, `early_stop_patience`, and `early_stop_min_reduction`.
+The default strategy is `mixed`; `strategy: "legacy"` reproduces the historical
+five alphabetical rounds followed by seeded shuffles, governed by
+`consolidation_alphabetical_rounds`. Mixed results use
+`consolidation/candidate_pool_consolidation_mixed/`; legacy artifacts are retained.
+The process also stops when the pool is empty or only configured features remain. Identical
 canonical output names produced by independent batches are coalesced exactly
 while retaining all provenance and candidate descriptions.
 
@@ -600,7 +622,7 @@ operational controls include `request_timeout` (7200 seconds by default),
 `consolidation_max_prompt_chars`,
 `operationalization_max_prompt_chars`,
 `consolidation_batch_size`, `consolidation_alphabetical_rounds`,
-`consolidation_max_rounds`,
+`consolidation_max_rounds`, `consolidation_policy`,
 `extraction_max_prompt_chars`, `extraction_feature_batch_size`,
 `extraction_chunk_size_tokens`, `extraction_context_window_tokens`,
 `extraction_context_margin_tokens`,

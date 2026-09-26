@@ -4569,6 +4569,7 @@ def test_iterative_consolidation_finds_aliases_across_a_shifted_batch_boundary(
             workers=1,
             consolidation_batch_size=3,
             consolidation_max_rounds=3,
+            consolidation_policy=stage2_workflow.CandidateConsolidationPolicy(strategy="legacy"),
         ),
         clinical_question="Not supplied to consolidation.",
         completion=completion,
@@ -4681,6 +4682,7 @@ def test_seeded_shuffle_round_can_merge_candidates_from_distant_alphabetical_bat
             consolidation_batch_size=3,
             consolidation_alphabetical_rounds=1,
             consolidation_max_rounds=2,
+            consolidation_policy=stage2_workflow.CandidateConsolidationPolicy(strategy="legacy"),
         ),
         clinical_question="Not supplied to consolidation.",
         completion=completion,
@@ -5279,7 +5281,7 @@ def test_redesigned_consolidation_assembles_provenance_roles_and_dispositions_in
         "operationalize_stage2_candidate_group",
     }
     global_input = json.loads(
-        (checkpoint_dir / "candidate_pool_consolidation" / "input.json").read_text(encoding="utf-8")
+        (checkpoint_dir / "candidate_pool_consolidation_mixed" / "input.json").read_text(encoding="utf-8")
     )
     assert "clinical_question" not in global_input
     assert len(list(checkpoint_dir.rglob("complete.json"))) == 8
@@ -5424,6 +5426,7 @@ def test_shifted_consolidation_round_preserves_explicit_feature_name_ontology_an
             "workers": 1,
             "consolidation_batch_size": 2,
             "consolidation_max_rounds": 2,
+            "consolidation_policy": {"strategy": "legacy"},
             "explicit_features": [
                 {
                     "name": "ecog_performance_status",

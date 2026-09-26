@@ -21,7 +21,7 @@ import re
 import threading
 import time
 from collections import Counter, defaultdict
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -69,6 +69,11 @@ from .stage2_sampling import (
     is_qwen_flash_next, sampling_provenance,
 )
 from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
+from .stage2_candidate_consolidation import (
+    MIXED_SCHEMA, CandidateConsolidationPolicy, CandidateEmbeddingCache,
+    policy_from_mapping as consolidation_policy_from_mapping,
+    mixed_batches, diminishing_returns,
+)
 from . import stage2_clinical_prompts as clinical_prompts
 from . import stage2_request_audit as request_audit
 from .stage2_sequential_consolidation import (
@@ -848,6 +853,7 @@ class PlainHandoffStage2Config:
     consolidation_batch_size: int = DEFAULT_CONSOLIDATION_BATCH_SIZE
     consolidation_alphabetical_rounds: int = DEFAULT_CONSOLIDATION_ALPHABETICAL_ROUNDS
     consolidation_max_rounds: int = DEFAULT_CONSOLIDATION_MAX_ROUNDS
+    consolidation_policy: CandidateConsolidationPolicy = field(default_factory=CandidateConsolidationPolicy)
     # Extraction keeps patients isolated and slices the frozen ontology across
     # independently checkpointed prompts. Keep its context allowance separate
     # so discovery batching and its evidence-compilation fingerprints remain stable.
@@ -1081,6 +1087,8 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.consolidation_alphabetical_rounds must be nonnegative")
         if self.consolidation_max_rounds < 1:
             raise ValueError("stage2.consolidation_max_rounds must be positive")
+        if not isinstance(self.consolidation_policy, CandidateConsolidationPolicy):
+            raise ValueError("stage2.consolidation_policy must be a CandidateConsolidationPolicy")
         if self.extraction_max_prompt_chars < 4_000:
             raise ValueError("stage2.extraction_max_prompt_chars must be at least 4000")
         if (
@@ -1529,6 +1537,7 @@ def plain_stage2_config_from_mapping(
         consolidation_max_rounds=int(
             raw.get("consolidation_max_rounds", DEFAULT_CONSOLIDATION_MAX_ROUNDS)
         ),
+        consolidation_policy=consolidation_policy_from_mapping(raw.get("consolidation_policy")),
         extraction_max_prompt_chars=int(
             raw.get(
                 "extraction_max_prompt_chars",
@@ -2515,6 +2524,9 @@ def _feature_definition_input_value(
         "consolidation_batch_size": int(config.consolidation_batch_size),
         "consolidation_alphabetical_rounds": int(config.consolidation_alphabetical_rounds),
         "consolidation_max_rounds": int(config.consolidation_max_rounds),
+        **({"consolidation_policy": config.consolidation_policy.public_dict(),
+            "mixed_consolidation_schema": MIXED_SCHEMA}
+           if config.consolidation_policy.strategy == "mixed" else {}),
         "consolidation_seed": int(seed),
         "extraction_ontology_feedback_schema": EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION,
         "ontology_refinement_min_failure_patients": int(
@@ -2981,11 +2993,14 @@ class _ConcurrencyLimitedCompletion:
     def __init__(self, completion: CompletionFunction, max_concurrency: int) -> None:
         self.completion = completion
         self._semaphore = threading.BoundedSemaphore(max(1, int(max_concurrency)))
+        # Optional live admission policy, installed before starting the run.
+        self.admission_gate: Callable[[], Any] | None = None
 
     @contextmanager
     def request_slot(self) -> Iterator[CompletionFunction]:
         queued_at = time.monotonic()
-        with self._semaphore:
+        gate = self.admission_gate() if self.admission_gate is not None else nullcontext()
+        with gate, self._semaphore:
             waited = time.monotonic() - queued_at
             if waited >= 1.0:
                 LOGGER.info(
@@ -3000,8 +3015,8 @@ class _ConcurrencyLimitedCompletion:
         messages: Sequence[Mapping[str, str]],
         config: PlainHandoffStage2Config,
     ) -> str:
-        with self._semaphore:
-            return self.completion(messages, config)
+        with self.request_slot() as completion:
+            return completion(messages, config)
 
 
 class _DisabledExtractionCompletion:
@@ -6849,6 +6864,11 @@ class PlainHandoffStage2:
         }
         signature_fingerprint = _value_fingerprint(signature)
         handoff_size = handoff_path.stat().st_size
+        LOGGER.info(
+            "fingerprinting Stage 1 handoff bytes=%s path=%s",
+            handoff_size,
+            handoff_path,
+        )
         hash_started = time.monotonic()
         handoff_sha256 = _file_sha256(handoff_path)
         LOGGER.info(
@@ -6882,8 +6902,12 @@ class PlainHandoffStage2:
                     "rebuild incomplete Stage 2 evidence compilation; missing manifests=%s",
                     [str(path) for path in manifest_paths if not path.is_file()][:8],
                 )
-
         compile_started = time.monotonic()
+        LOGGER.info(
+            "compiling Stage 2 evidence cards from raw handoff bytes=%s path=%s",
+            handoff_size,
+            handoff_path,
+        )
         compiled = compile_stage2_handoff_evidence(
             _iter_jsonl(handoff_path),
             handoff_path=handoff_path,
@@ -7225,7 +7249,7 @@ class PlainHandoffStage2:
         output_dir: Path | None = None,
         seed: int = 42,
     ) -> list[dict[str, Any]]:
-        """Losslessly merge aliases across shifted and seeded-shuffled batches."""
+        """Review bounded candidate groups, preserving all unmerged candidates."""
 
         current = [dict(group) for group in sorted(groups, key=_candidate_group_sort_key)]
         if not current or all(_configured_feature_definitions(group) for group in current):
@@ -7235,10 +7259,15 @@ class PlainHandoffStage2:
         no_change_partitions: set[tuple[tuple[str, ...], ...]] = set()
         round_summaries: list[dict[str, Any]] = []
         stopped_reason = "maximum_rounds_reached"
+        policy = self.config.consolidation_policy
+        is_mixed = policy.strategy == "mixed"
+        pool_schema = MIXED_SCHEMA if is_mixed else GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION
+        embedding_cache = None
         process_input = {
             "phase": "iterative_candidate_pool_merge_only_consolidation",
             "consolidation_schema": CONSOLIDATION_SCHEMA_VERSION,
-            "global_candidate_pool_schema": GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION,
+            "global_candidate_pool_schema": pool_schema,
+            **({"consolidation_policy": policy.public_dict()} if is_mixed else {}),
             "outer_fold": int(outer_fold),
             "consolidation_batch_size": int(self.config.consolidation_batch_size),
             "consolidation_alphabetical_rounds": int(self.config.consolidation_alphabetical_rounds),
@@ -7258,23 +7287,42 @@ class PlainHandoffStage2:
             )
 
         for round_number in range(1, int(self.config.consolidation_max_rounds) + 1):
+            round_dir = output_dir / f"round_{round_number:03d}" if output_dir is not None else None
             if not current:
                 stopped_reason = "candidate_pool_empty"
                 break
             if all(_configured_feature_definitions(group) for group in current):
                 stopped_reason = "only_explicit_features_remain"
                 break
-            ordering, boundary_offset, shuffle_round, batches = _candidate_consolidation_batches(
-                current,
-                batch_size=int(self.config.consolidation_batch_size),
-                round_number=round_number,
-                alphabetical_rounds=int(self.config.consolidation_alphabetical_rounds),
-                seed=int(seed) + 1_000_003 * int(outer_fold),
-            )
+            if is_mixed:
+                matrix = None
+                if len(current) > self.config.consolidation_batch_size and policy.semantic_fraction:
+                    if embedding_cache is None:
+                        embedding_cache = CandidateEmbeddingCache(
+                            output_dir / "semantic_embeddings.npz" if output_dir is not None else None,
+                            policy, _encode_candidate_selection_texts,
+                        )
+                    LOGGER.info("Stage 2 semantic grouping fold=%s round=%s candidates=%s", outer_fold, round_number, len(current))
+                    matrix = embedding_cache.matrix([_candidate_registry_text(group) for group in current])
+                batches, batch_orderings = mixed_batches(
+                    current, batch_size=self.config.consolidation_batch_size,
+                    round_number=round_number, seed=int(seed) + 1_000_003 * int(outer_fold),
+                    policy=policy, embeddings=matrix,
+                )
+                ordering, boundary_offset, shuffle_round = "mixed", None, None
+            else:
+                ordering, boundary_offset, shuffle_round, batches = _candidate_consolidation_batches(
+                    current,
+                    batch_size=int(self.config.consolidation_batch_size),
+                    round_number=round_number,
+                    alphabetical_rounds=int(self.config.consolidation_alphabetical_rounds),
+                    seed=int(seed) + 1_000_003 * int(outer_fold),
+                )
+                batch_orderings = [ordering] * len(batches)
             partition_signature = tuple(
                 tuple(str(group["name"]) for group in batch) for batch in batches
             )
-            if partition_signature in no_change_partitions:
+            if not is_mixed and partition_signature in no_change_partitions:
                 stopped_reason = "repeated_no_change_partition"
                 LOGGER.info(
                     "Stage 2 iterative consolidation converged before round=%s; "
@@ -7283,7 +7331,6 @@ class PlainHandoffStage2:
                 )
                 break
 
-            round_dir = output_dir / f"round_{round_number:03d}" if output_dir is not None else None
             batch_responses: dict[int, dict[str, Any]] = {}
             jobs: list[dict[str, Any]] = []
             for batch_number, batch in enumerate(batches, start=1):
@@ -7297,7 +7344,7 @@ class PlainHandoffStage2:
                 messages = _global_candidate_pool_prompt(
                     groups=batch,
                     configured_feature_names=configured_feature_names,
-                    batch_ordering=ordering,
+                    batch_ordering=batch_orderings[batch_number - 1],
                 )
                 prompt_chars = sum(len(message["content"]) for message in messages)
                 if prompt_chars > prompt_limit:
@@ -7323,11 +7370,12 @@ class PlainHandoffStage2:
                         ),
                         "input_value": {
                             "phase": "iterative_candidate_pool_batch_consolidation",
-                            "global_candidate_pool_schema": (GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION),
+                            "global_candidate_pool_schema": pool_schema,
+                            **({"consolidation_policy": policy.public_dict()} if is_mixed else {}),
                             "outer_fold": int(outer_fold),
                             "round": round_number,
                             "batch": batch_number,
-                            "ordering": ordering,
+                            "ordering": batch_orderings[batch_number - 1],
                             "boundary_offset": boundary_offset,
                             "shuffle_round": shuffle_round,
                             "consolidation_batch_size": int(self.config.consolidation_batch_size),
@@ -7463,6 +7511,8 @@ class PlainHandoffStage2:
                 "validation_fallback_batch_numbers": sorted(validation_fallbacks),
                 "output_groups": len(next_groups),
                 "changed": changed,
+                **({"grouping_batches": dict(Counter(batch_orderings)),
+                    "relative_reduction": (len(current) - len(next_groups)) / len(current)} if is_mixed else {}),
             }
             round_summaries.append(round_summary)
             if round_dir is not None:
@@ -7471,7 +7521,7 @@ class PlainHandoffStage2:
                     {
                         "status": "complete",
                         "completed_at": _now(),
-                        "global_candidate_pool_schema": (GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION),
+                        "global_candidate_pool_schema": pool_schema,
                         **round_summary,
                     },
                 )
@@ -7490,6 +7540,11 @@ class PlainHandoffStage2:
                 changed,
             )
             current = next_groups
+            if is_mixed and diminishing_returns(round_summaries, policy):
+                stopped_reason = "diminishing_returns"
+                LOGGER.info("Stage 2 mixed consolidation stopped fold=%s round=%s: last %s successful rounds each removed <%.3f%%",
+                            outer_fold, round_number, policy.early_stop_patience, 100 * policy.early_stop_min_reduction)
+                break
             if not current:
                 stopped_reason = "candidate_pool_empty"
                 break
@@ -7521,7 +7576,8 @@ class PlainHandoffStage2:
                     "status": "complete",
                     "completed_at": _now(),
                     "input_fingerprint": process_fingerprint,
-                    "global_candidate_pool_schema": GLOBAL_CANDIDATE_POOL_SCHEMA_VERSION,
+                    "global_candidate_pool_schema": pool_schema,
+                    **({"consolidation_policy": policy.public_dict()} if is_mixed else {}),
                     "rounds_executed": len(round_summaries),
                     "stopped_reason": stopped_reason,
                     "output_groups": len(current),
@@ -7592,11 +7648,13 @@ class PlainHandoffStage2:
             len(all_candidates),
             len(groups),
         )
+        is_mixed = self.config.consolidation_policy.strategy == "mixed"
         retained_groups = self._consolidate_candidate_pool(
             outer_fold=outer_fold,
             groups=groups,
             output_dir=(
-                output_dir / "candidate_pool_consolidation" if output_dir is not None else None
+                output_dir / ("candidate_pool_consolidation_mixed" if is_mixed else "candidate_pool_consolidation")
+                if output_dir is not None else None
             ),
             seed=seed,
         )
@@ -7866,6 +7924,7 @@ class PlainHandoffStage2:
                         self.config.consolidation_alphabetical_rounds
                     ),
                     "consolidation_max_rounds": int(self.config.consolidation_max_rounds),
+                    "consolidation_policy": self.config.consolidation_policy.public_dict(),
                     "extraction_ontology_feedback_schema": (
                         EXTRACTION_ONTOLOGY_FEEDBACK_SCHEMA_VERSION
                     ),

@@ -431,7 +431,8 @@ def test_managed_vllm_pools_reject_overlapping_internal_ranges(
     )
 
 
-def test_logical_request_excludes_queue_time_and_keeps_slot_through_retries(monkeypatch):
+@pytest.mark.parametrize("slot_gate", ["semaphore", "admission"])
+def test_logical_request_excludes_queue_time_and_keeps_slot_through_retries(monkeypatch, slot_gate):
     clock = [0.0]
     slot_entries = []
     slot_held = [False]
@@ -466,7 +467,10 @@ def test_logical_request_excludes_queue_time_and_keeps_slot_through_retries(monk
         return '{"ok": true}'
 
     limiter = stage2_workflow._ConcurrencyLimitedCompletion(completion, 1)
-    monkeypatch.setattr(limiter, "_semaphore", BusySemaphore())
+    if slot_gate == "semaphore":
+        monkeypatch.setattr(limiter, "_semaphore", BusySemaphore())
+    else:
+        limiter.admission_gate = BusySemaphore
     monkeypatch.setattr(stage2_workflow.time, "monotonic", lambda: clock[0])
     monkeypatch.setattr(
         stage2_workflow.time, "sleep", lambda delay: clock.__setitem__(0, clock[0] + delay)
