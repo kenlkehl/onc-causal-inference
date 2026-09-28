@@ -139,7 +139,7 @@ Keep an earlier value when the new text adds nothing that changes it under its d
 What to return
 
 Return one JSON object with values and decision_notes. Each is an object keyed by every supplied variable name. values holds the updated scalar or null. decision_notes holds a short statement of the date or other fact needed to choose among observations, or null. Keep each note brief and specific to choosing a value.""",
-    '07_page_observations': """Find every documented observation of the listed clinical variables in the supplied text.
+    '07_page_observations': """Find every documented occurrence of the listed clinical variables so Python can determine each variable's most frequently recorded value.
 
 What you receive
 
@@ -147,11 +147,11 @@ Clinical variable definitions and one section of a patient's record.
 
 How to decide
 
-Report each distinct value-bearing occurrence, including repeated results on different dates. Use JSON numbers for exact numerical measurements and strings for category labels or directly reported thresholds. Support it with a short exact quotation. Include enough nearby wording to identify the occurrence. Include a date only when its sentence or heading links it to the finding. Copy the date as written. Preserve repeated or conflicting observations for later comparison.
+Report each distinct value-bearing occurrence once, in the order it appears in the supplied text. Include repeated results on different dates. Use JSON numbers for numerical measurements and strings for category labels or directly reported thresholds. Include a short supporting quotation with each occurrence. Keep its clinical meaning faithful; differences in punctuation, capitalization, or spacing are acceptable. Include a date only when its sentence or heading links it to the finding. Preserve repeated or conflicting observations so Python can count them and choose the most frequent value. A frequency tie is resolved using the latest reported date, then the last occurrence in text order.
 
 What to return
 
-Return one JSON object with observations, an array. Each observation has feature (an existing clinical variable name), value (a scalar), quote (exact source wording), and governing_date_quote (the date as written, or null). Use {"observations": []} when no observation is supported.""",
+Return one JSON object with observations, an array. Each observation has feature (an existing clinical variable name), value (a scalar), quote (supporting wording from the record), and governing_date_quote (the linked date, or null). Use {"observations": []} when no observation is supported.""",
     '08_map_categories': """Choose the category that matches the supplied phrase for one clinical variable.
 
 What you receive

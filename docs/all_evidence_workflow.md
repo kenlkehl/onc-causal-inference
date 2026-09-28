@@ -719,23 +719,38 @@ continue at the first unfinished compatible chunk without dropping source text.
 The exact extraction tokenizer must be present locally under the configured
 model ID, either in the managed vLLM download directory or Hugging Face cache.
 
-Provenance-page extraction plans one patient inside each extraction worker,
-so it can submit requests before page planning finishes for the cohort. The
-planner prepares the fixed instruction/feature prefixes once and checks whether
-the whole remaining record fits before searching for a page boundary. Every
-feature batch still receives an exact rendered-character and chat-token budget
-check. Per-patient `planning_status.json` records planning progress and elapsed
-time; existing page and feature-batch checkpoints remain reusable after a retry.
+Extraction separates variables whose conflict strategy is `mode` (most frequent
+value) from the other measurements. Only mode variables use observation-by-
+observation extraction with supporting quotations. Other variables return scalar
+values, using ordered chunks and carried decision notes when the record is long.
+This also applies to character-budget callers without a tokenizer. A single mode
+variable therefore cannot switch the entire candidate set to observation extraction.
+Mixed sets run under separate `by_strategy/values` and `by_strategy/mode` checkpoint
+trees, with a combined patient matrix and failure summary at the extraction root.
+The two groups share the configured request admission limits.
 
-Cross-page reconciliation is local and deterministic; it does not make another
-LLM request. Each frozen ontology carries a conflict strategy (`latest`,
-`earliest`, `maximum`, `minimum`, `mode`, `any_positive`, or
-`single_or_null`). Verified dates take precedence for temporal strategies and
-absolute source order is the documented fallback. Stage 2 writes every
-observation, the selected observation ID, policy, and selection basis to the
-patient's `reconciliation/decisions.json`. Historical feature definitions
-without the structured field receive an explicit, audited compatibility rule
-derived from their measurement definition.
+Mode extraction plans one patient inside each worker, so requests can start before
+page planning finishes for the cohort. The planner prepares fixed prompt prefixes
+once and checks the whole remaining record before searching for a page boundary.
+Every feature batch receives the rendered-character budget check and, when a
+tokenizer is available, the chat-token budget check. Per-patient
+`planning_status.json` records preparation progress.
+
+Mode quotations are model-reported supporting evidence. They need not match the
+source text exactly; punctuation, spacing, capitalization, and other wording
+mismatches do not trigger repairs. Python records source offsets when it can locate
+the quotation unambiguously, and otherwise leaves them null. Offsets are audit
+metadata, not an acceptance condition. Valid feature names, scalar types, category
+ontologies, nonempty supporting text, and parseable supplied dates remain checked.
+
+Python counts the reported occurrences and chooses the most frequent value without
+another LLM call. Ties use the latest reported governing date, then the last reported
+occurrence in source order. Repeated occurrences remain separate even when their
+quotations cannot be located. The resulting `reconciliation/decisions.json` records
+the observations, selected observation, policy, and selection basis. These dates
+and quotations are not described as source-verified. New mode checkpoint versions
+invalidate the older strict-quotation results; mixed-set routing excludes old
+all-variable quotation failures from the new measurement-quality summary.
 
 Clinical
 text remains Unicode instead of expanding into token-heavy ASCII escape

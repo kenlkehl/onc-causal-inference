@@ -70,9 +70,10 @@ STATISTICAL_SELECTION_PROCESS_ISOLATION_MIN_CANDIDATES = 64
 
 EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_extraction_v6_conflict_resolution_independent_small_model_clinical_prompts_20260923'
 EXTRACTION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_feature_batch_extraction_v5_conflict_resolution_independent_small_model_clinical_prompts_20260923'
-PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_page_observations_v5_provenance_clinical_prompts_20260923'
-PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_single_patient_page_observation_feature_batch_v1_provenance_clinical_prompts_20260923'
-PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_deterministic_page_reconciliation_v6_provenance_clinical_prompts_20260923'
+PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observations_v6_advisory_quotes'
+PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observation_feature_batch_v2_advisory_quotes'
+PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v7_reported_occurrences'
+EXTRACTION_ROUTING_SCHEMA_VERSION = 'stage2_extraction_mode_split_v1'
 REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v1_clinical_prompts_20260923'
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
 ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v9_architecture_search"
@@ -2026,18 +2027,18 @@ def _page_observation_error_from_exception(
     return None
 
 
-def _exact_quote_span(
+def _quote_span(
     *,
     text: str,
     quote: Any,
     reported_start: Any,
     reported_end: Any,
     label: str,
-) -> tuple[str, int, int, str]:
-    """Resolve a model-provided exact quote to deterministic page offsets."""
+) -> tuple[str, int | None, int | None, str]:
+    """Keep supplied evidence; locate it opportunistically for the audit only."""
 
-    if not isinstance(quote, str) or not quote:
-        raise ValueError(f"{label} must be a nonempty exact quote")
+    if not isinstance(quote, str) or not quote.strip():
+        raise ValueError(f"{label} must be nonempty text")
     start: int | None = None
     end: int | None = None
     if not isinstance(reported_start, bool) and isinstance(reported_start, int):
@@ -2061,21 +2062,16 @@ def _exact_quote_span(
         matches.append(match)
         cursor = match + 1
     if not matches:
-        raise ValueError(f"{label} is not an exact substring of the supplied page")
+        return quote, None, None, "not_located"
     if start is None:
         if len(matches) != 1:
-            raise ValueError(
-                f"{label} occurs more than once; quote more surrounding words to identify this occurrence"
-            )
+            return quote, None, None, "ambiguous_location"
         selected = matches[0]
         method = "unique_exact_match"
     else:
         ranked = sorted(matches, key=lambda candidate: (abs(candidate - start), candidate))
         if len(ranked) > 1 and abs(ranked[0] - start) == abs(ranked[1] - start):
-            raise ValueError(
-                f"{label} offsets are equidistant from repeated exact quotes; "
-                "return the exact occurrence offsets"
-            )
+            return quote, None, None, "ambiguous_location"
         selected = ranked[0]
         method = "nearest_exact_match"
     return quote, selected, selected + len(quote), method
@@ -2113,7 +2109,7 @@ def _canonical_observation_time(value: Any) -> str | None:
 
 
 def _canonical_time_evidence(value: str) -> str:
-    """Normalize an exact source date quote locally instead of trusting the model."""
+    """Normalize the model-supplied date text locally."""
 
     text = value.strip()
     if re.fullmatch(r"\d{4}", text):
@@ -2161,7 +2157,7 @@ def _validate_page_observations(
     page: Mapping[str, Any],
     definitions: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Validate values and prove each observation against an exact page quote."""
+    """Validate reported observations, retaining quotations without a match gate."""
 
     if set(value) == {"observations"}:
         value = {"rows": [{"row_id": int(page["row_id"]), "observations": value["observations"]}]}
@@ -2197,12 +2193,11 @@ def _validate_page_observations(
                     raise ValueError("each observation requires feature, value, quote, and governing_date_quote")
                 feature_name = clinical_prompts.resolve_label(raw["feature"], clinical_prompts.label_map(definitions))
                 date_quote = raw["governing_date_quote"]
-                quote, quote_start, quote_end, _ = _exact_quote_span(text=text, quote=raw["quote"],
+                quote, quote_start, quote_end, _ = _quote_span(text=text, quote=raw["quote"],
                     reported_start=None, reported_end=None, label="observation quote")
                 date_start = date_end = None
-                if isinstance(date_quote, str) and text.count(date_quote) > 1:
-                    if quote.count(date_quote) != 1:
-                        raise ValueError("the governing date occurs repeatedly; include its governing heading in the observation quote")
+                if (quote_start is not None and isinstance(date_quote, str)
+                        and text.count(date_quote) > 1 and quote.count(date_quote) == 1):
                     date_start = quote_start + quote.index(date_quote)
                     date_end = date_start + len(date_quote)
                 raw = {"feature_name": feature_name, "value": raw["value"], "evidence": quote,
@@ -2229,7 +2224,7 @@ def _validate_page_observations(
                 raise ValueError("a page observation must contain a supported nonmissing value")
 
             evidence, evidence_start, evidence_end, evidence_offset_resolution = (
-                _exact_quote_span(
+                _quote_span(
                     text=text,
                     quote=raw.get("evidence"),
                     reported_start=raw.get("evidence_start"),
@@ -2248,7 +2243,7 @@ def _validate_page_observations(
                     recorded_at_start,
                     recorded_at_end,
                     recorded_at_offset_resolution,
-                ) = _exact_quote_span(
+                ) = _quote_span(
                     text=text,
                     quote=raw.get("recorded_at_evidence"),
                     reported_start=raw.get("recorded_at_start"),
@@ -2258,7 +2253,7 @@ def _validate_page_observations(
                 source_recorded_at = _canonical_time_evidence(recorded_at_evidence)
                 if recorded_at != source_recorded_at:
                     raise ValueError(
-                        "recorded_at does not match its exact recorded_at_evidence quote"
+                        "recorded_at is inconsistent with the supplied date text"
                     )
                 recorded_at = source_recorded_at
             elif any(
@@ -2277,8 +2272,8 @@ def _validate_page_observations(
                 "row_id": row_id,
                 "feature_name": feature_name,
                 "value": scalar,
-                "source_start": page_char_start + evidence_start,
-                "source_end": page_char_start + evidence_end,
+                "page_index": page_index,
+                "observation_index": observation_index,
                 "recorded_at": recorded_at,
             }
             normalized.append(
@@ -2289,9 +2284,11 @@ def _validate_page_observations(
                     "evidence": evidence,
                     "evidence_start": evidence_start,
                     "evidence_end": evidence_end,
-                    "source_start": page_char_start + evidence_start,
-                    "source_end": page_char_start + evidence_end,
+                    "source_start": page_char_start + evidence_start if evidence_start is not None else None,
+                    "source_end": page_char_start + evidence_end if evidence_end is not None else None,
                     "page_index": page_index,
+                    "observation_index": observation_index,
+                    "evidence_status": "model_reported",
                     "recorded_at": recorded_at,
                     "recorded_at_evidence": recorded_at_evidence,
                     "recorded_at_start": recorded_at_start,
@@ -2327,11 +2324,7 @@ def _validate_page_observations(
                 "row_id": row_id,
                 "observations": sorted(
                     by_id.values(),
-                    key=lambda observation: (
-                        int(observation["source_start"]),
-                        str(observation["feature_name"]),
-                        str(observation["observation_id"]),
-                    ),
+                    key=lambda observation: int(observation["observation_index"]),
                 ),
             }
         ]
@@ -2349,7 +2342,7 @@ def _request_validated_page_observations(
     request_json: RequestJSON,
     audit_dir: Path,
 ) -> dict[str, Any]:
-    """Request page observations, retaining valid provenance after exhausted repairs."""
+    """Request mode observations, retaining valid values after exhausted repairs."""
 
     issue_path = audit_dir / "extraction_issues.json"
     try:
@@ -2385,7 +2378,7 @@ def _request_validated_page_observations(
         if observation_error is not None:
             events = [
                 {
-                    "failure_kind": "invalid_page_observation_provenance",
+                    "failure_kind": "invalid_page_observation",
                     "row_id": row_id,
                     "feature_name": issue.get("feature_name"),
                     "reason": str(issue.get("reason") or ""),
@@ -2397,7 +2390,7 @@ def _request_validated_page_observations(
                 audit_dir / "invalid_page_observation_repair.json",
                 {
                     "schema_version": "stage2_invalid_page_observation_repair_v1",
-                    "resolution": "retain_valid_drop_unverifiable",
+                    "resolution": "retain_valid_drop_invalid",
                     "original_validation_error": str(exc),
                     "issues": [dict(issue) for issue in observation_error.issues],
                 },
@@ -2412,7 +2405,7 @@ def _request_validated_page_observations(
             )
             LOGGER.warning(
                 "Stage 2 page extraction retained valid observations and dropped %s "
-                "unverifiable observation(s) for row %s",
+                "invalid observation(s) for row %s",
                 len(observation_error.issues),
                 row_id,
             )
@@ -2471,6 +2464,14 @@ def _observation_time_sort_value(observation: Mapping[str, Any]) -> int | None:
     return int(timestamp.value)
 
 
+def _observation_order(observation: Mapping[str, Any], *, latest: bool = False) -> tuple[int, int]:
+    # Current observations use the requested source-order response sequence.
+    # Historical observations may only carry absolute source offsets.
+    if "observation_index" in observation:
+        return int(observation["page_index"]), int(observation["observation_index"])
+    return 0, int(observation["source_end" if latest else "source_start"])
+
+
 def _select_temporal_observation(
     observations: Sequence[Mapping[str, Any]],
     *,
@@ -2487,7 +2488,7 @@ def _select_temporal_observation(
                 dated,
                 key=lambda item: (
                     int(item[1]),
-                    int(item[0]["source_end"]),
+                    _observation_order(item[0], latest=True),
                     str(item[0]["observation_id"]),
                 ),
             )
@@ -2496,19 +2497,19 @@ def _select_temporal_observation(
                 dated,
                 key=lambda item: (
                     int(item[1]),
-                    int(item[0]["source_start"]),
+                    _observation_order(item[0]),
                     str(item[0]["observation_id"]),
                 ),
             )
-        return dict(selected), "verified_recorded_at"
+        return dict(selected), "reported_recorded_at"
     selected = (max if latest else min)(
         observations,
         key=lambda observation: (
-            int(observation["source_end"] if latest else observation["source_start"]),
+            _observation_order(observation, latest=latest),
             str(observation["observation_id"]),
         ),
     )
-    return dict(selected), "absolute_source_order"
+    return dict(selected), "reported_source_order"
 
 
 def _resolve_feature_observations(
@@ -2523,8 +2524,7 @@ def _resolve_feature_observations(
     ordered = sorted(
         unique.values(),
         key=lambda observation: (
-            int(observation["source_start"]),
-            int(observation["source_end"]),
+            _observation_order(observation),
             str(observation["observation_id"]),
         ),
     )
@@ -2827,6 +2827,8 @@ def _serial_extraction_required(
 
     text = str(row.get("text") or "")
     messages = _extraction_prompt(definitions=definitions, rows=[row])
+    if tokenizer is None:
+        return _prompt_chars(messages) > int(max_prompt_chars)
     return (
         _text_token_count(tokenizer, text) > int(chunk_size_tokens)
         or prompt_token_count(tokenizer, messages) > int(input_token_budget)
@@ -2867,16 +2869,16 @@ def _next_serial_extraction_chunk(
             "text": chunk_text,
             "char_start": int(cursor),
             "char_end": int(end),
-            "source_tokens": _text_token_count(tokenizer, chunk_text),
-            "prompt_tokens": prompt_token_count(tokenizer, messages),
+            "source_tokens": _text_token_count(tokenizer, chunk_text) if tokenizer is not None else None,
+            "prompt_tokens": prompt_token_count(tokenizer, messages) if tokenizer is not None else None,
             "prompt_chars": _prompt_chars(messages),
             "messages": messages,
         }
 
     def fits(value: Mapping[str, Any]) -> bool:
         return (
-            int(value["source_tokens"]) <= int(chunk_size_tokens)
-            and int(value["prompt_tokens"]) <= int(input_token_budget)
+            (tokenizer is None or int(value["source_tokens"]) <= int(chunk_size_tokens))
+            and (tokenizer is None or int(value["prompt_tokens"]) <= int(input_token_budget))
             and int(value["prompt_chars"]) <= int(max_prompt_chars)
         )
 
@@ -2965,6 +2967,7 @@ def _serial_extract_feature_batch(
         "context_margin_tokens": int(context_margin_tokens),
         "input_token_budget": int(input_token_budget),
         "max_prompt_chars": int(max_prompt_chars),
+        "token_budget_enforced": tokenizer is not None,
     }
     serial_fingerprint = _value_fingerprint(serial_input)
     if not source:
@@ -3018,8 +3021,8 @@ def _serial_extract_feature_batch(
                 "char_start": int(planned["char_start"]),
                 "char_end": int(planned["char_end"]),
                 "document_chars": len(source),
-                "source_tokens": int(planned["source_tokens"]),
-                "prompt_tokens": int(planned["prompt_tokens"]),
+                "source_tokens": planned["source_tokens"],
+                "prompt_tokens": planned["prompt_tokens"],
                 "prompt_chars": int(planned["prompt_chars"]),
                 "boundary": str(planned["boundary"]),
                 "text": str(planned["text"]),
@@ -3126,8 +3129,8 @@ def _serial_extract_feature_batch(
                     "chunk_index": chunk_index,
                     "char_start": int(planned["char_start"]),
                     "char_end": int(planned["char_end"]),
-                    "source_tokens": int(planned["source_tokens"]),
-                    "prompt_tokens": int(planned["prompt_tokens"]),
+                    "source_tokens": planned["source_tokens"],
+                    "prompt_tokens": planned["prompt_tokens"],
                     "structural_failure_carried_prior_state": failure_path.is_file(),
                 },
             )
@@ -3138,8 +3141,8 @@ def _serial_extract_feature_batch(
                 "chunk_index": chunk_index,
                 "char_start": int(planned["char_start"]),
                 "char_end": int(planned["char_end"]),
-                "source_tokens": int(planned["source_tokens"]),
-                "prompt_tokens": int(planned["prompt_tokens"]),
+                "source_tokens": planned["source_tokens"],
+                "prompt_tokens": planned["prompt_tokens"],
                 "boundary": str(planned["boundary"]),
                 "input_fingerprint": input_fingerprint,
             }
@@ -3206,7 +3209,10 @@ def _summarize_extraction_failures(
     definition_names = {str(definition["name"]) for definition in definitions}
     patterns: dict[tuple[str, str, str], dict[str, Any]] = {}
     structural_rows: set[int] = set()
-    issue_files = sorted(output_dir.rglob("extraction_issues.json"))
+    # A split run supersedes the old all-variable page path. Historical failed
+    # quote checks must not enter the new measurement-quality review.
+    issue_root = output_dir / "by_strategy" if (output_dir / "extraction_routing.json").is_file() else output_dir
+    issue_files = sorted(issue_root.rglob("extraction_issues.json"))
     for path in issue_files:
         if not path.is_file() or path.is_symlink():
             continue
@@ -3320,6 +3326,65 @@ def extract_rows(
     if (isinstance(deferred_retry_passes, bool) or not isinstance(deferred_retry_passes, int)
             or deferred_retry_passes < 0):
         raise ValueError("deferred_retry_passes must be a nonnegative integer")
+    mode_definitions = [d for d in definitions if _resolved_conflict_resolution(d)["strategy"] == "mode"]
+    value_definitions = [d for d in definitions if _resolved_conflict_resolution(d)["strategy"] != "mode"]
+    if mode_definitions and value_definitions:
+        # Use disjoint feature sets and checkpoint trees. Each child retains
+        # patient/chunk recovery; both share the caller's request admission cap.
+        _write_json(output_dir / "extraction_routing.json", {
+            "schema_version": EXTRACTION_ROUTING_SCHEMA_VERSION,
+            "mode_features": [d["name"] for d in mode_definitions],
+            "value_features": [d["name"] for d in value_definitions],
+            "quotation_policy": "mode_only_advisory",
+        })
+        LOGGER.info("Stage 2 extraction routing root=%s scalar_features=%s mode_features=%s quotation_policy=mode_only_advisory",
+                    output_dir, len(value_definitions), len(mode_definitions))
+        cancelled = threading.Event()
+
+        def split_request(*args, **kwargs):
+            if cancelled.is_set():
+                raise _ExtractionCancelledError("Sibling extraction strategy failed")
+            return request_json(*args, **kwargs)
+
+        def extract_group(name, group, group_workers):
+            return extract_rows(
+                dataset=dataset, row_ids=row_ids, text_column=text_column,
+                definitions=group, output_dir=output_dir / "by_strategy" / name,
+                request_json=split_request, workers=group_workers,
+                max_prompt_chars=max_prompt_chars, feature_batch_size=feature_batch_size,
+                request_identity=request_identity, tokenizer=tokenizer,
+                chunk_size_tokens=chunk_size_tokens, context_window_tokens=context_window_tokens,
+                max_output_tokens=max_output_tokens, context_margin_tokens=context_margin_tokens,
+                deferred_retry_passes=deferred_retry_passes,
+            )
+
+        mode_workers = max(1, int(workers) // 8)
+        value_workers = max(1, int(workers) - mode_workers)
+        frames = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, max(1, int(workers)))) as pool:
+            futures = [pool.submit(extract_group, name, group, n) for name, group, n in (
+                ("values", value_definitions, value_workers), ("mode", mode_definitions, mode_workers))]
+            try:
+                for future in concurrent.futures.as_completed(futures):
+                    frames.append(future.result())
+            except BaseException:
+                cancelled.set()
+                for future in futures:
+                    future.cancel()
+                raise
+        frame = frames[0].merge(frames[1], on="_oci_row_id", validate="one_to_one")
+        frame = frame.set_index("_oci_row_id").loc[list(row_ids)].reset_index()
+        frame = frame[["_oci_row_id", *[str(d["name"]) for d in definitions]]]
+        _write_frame(output_dir / "extracted.csv", frame)
+        summary = _summarize_extraction_failures(output_dir=output_dir, definitions=definitions)
+        _write_json(output_dir / "complete.json", {
+            "status": "complete", "schema_version": EXTRACTION_ROUTING_SCHEMA_VERSION,
+            "completed_at": _now(), "rows": len(frame), "features": len(definitions),
+            "mode_features": len(mode_definitions), "value_features": len(value_definitions),
+            "feature_failure_patterns": len(summary["feature_failure_patterns"]),
+            "structural_failure_patients": summary["structural_failure_patient_count"],
+        })
+        return frame
     infrastructure_affected = _infrastructure_affected_directories(output_dir)
     if infrastructure_affected:
         LOGGER.warning(
@@ -3402,12 +3467,11 @@ def extract_rows(
         # within that task execute strictly in source order.
         batches = [[row] for row in request_rows]
         oversized_rows: list[Mapping[str, Any]] = []
-    elif not requires_page_observations:
-        batches, oversized_rows = _partition_rows_for_prompt(
-            request_rows,
-            max_prompt_chars=int(max_prompt_chars),
-            definition_batches=definition_batches,
-        )
+    else:
+        # Character-only callers also use scalar carried state for long records.
+        # Quotations are reserved for mode variables, regardless of note length.
+        batches = [[row] for row in request_rows]
+        oversized_rows = []
 
     if requires_page_observations:
         batches = [[row] for row in request_rows if not row["text"]]
@@ -3567,7 +3631,7 @@ def extract_rows(
                     feature_dir / "input.json",
                     {**batch_input, "input_fingerprint": input_fingerprint},
                 )
-                use_serial = tokenizer is not None and _serial_extraction_required(
+                use_serial = _serial_extraction_required(
                     row=row,
                     definitions=batch_definitions,
                     tokenizer=tokenizer,
@@ -3873,7 +3937,7 @@ def extract_rows(
         batch_dir.mkdir(parents=True, exist_ok=True)
         _write_json(batch_dir / "row_ids.json", row_ids)
         if len(definition_batches) == 1:
-            use_serial = tokenizer is not None and _serial_extraction_required(
+            use_serial = _serial_extraction_required(
                 row=batch[0],
                 definitions=definitions,
                 tokenizer=tokenizer,
@@ -4241,7 +4305,7 @@ def extract_rows(
                     int(decision["resolution"] == "conflict_null")
                     for decision in decisions.values()
                 ),
-                "reconciliation_method": "deterministic_provenance",
+                "reconciliation_method": "deterministic_reported_occurrences",
             },
         )
         return dict(result["rows"][0]["values"])

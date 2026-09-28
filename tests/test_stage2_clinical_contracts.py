@@ -32,7 +32,7 @@ def test_clinical_names_are_mapped_to_trusted_patient_and_feature_keys():
     assert serial["rows"][0]["carry_forward_state"] == {"serum_creatinine": "Dated 2025-03-02."}
 
 
-def test_occurrence_quotes_get_python_offsets_and_repeated_dates_need_context():
+def test_occurrence_quotes_keep_optional_offsets_without_requiring_date_matches():
     text = "2025-03-02: Creatinine 1.4.\n2025-03-02: Creatinine 1.8."
     page = {"row_id": 921, "text": text, "page": {"page_index": 1, "char_start": 100, "char_end": 100+len(text), "document_chars": 100+len(text)}}
     observation = {"feature": "serum creatinine", "value": 1.8,
@@ -42,8 +42,9 @@ def test_occurrence_quotes_get_python_offsets_and_repeated_dates_need_context():
     assert row["value"] == 1.8 and row["feature_name"] == "serum_creatinine"
     assert row["recorded_at"] == "2025-03-02"
     assert row["evidence_start"] == text.index("2025-03-02: Creatinine 1.8.")
-    with pytest.raises(ValueError, match="governing date occurs repeatedly"):
-        extraction._validate_page_observations({"observations": [{**observation, "quote": "Creatinine 1.8."}]}, page=page, definitions=[measurement()])
+    result = extraction._validate_page_observations(
+        {"observations": [{**observation, "quote": "Creatinine 1.8."}]}, page=page, definitions=[measurement()])
+    assert result["rows"][0]["observations"][0]["recorded_at_offset_resolution"] == "ambiguous_location"
 
 
 def meanings(rows, representation="categorical"):

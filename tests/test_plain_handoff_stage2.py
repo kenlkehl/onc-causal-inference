@@ -3878,7 +3878,8 @@ def test_stage2_pages_oversized_unicode_note_without_dropping_text(tmp_path: Pat
         "categories_or_unit": ["ECOG 0", "ECOG 1", "ECOG 2"],
         "roles": ["confounder"],
         "measurement_definition": "Extract the last pretreatment ECOG score.",
-        "missing_value_rule": "Return null when undocumented.",
+        "conflict_resolution": {"strategy": "mode"},
+            "missing_value_rule": "Return null when undocumented.",
     }
     page_bodies = []
     prompt_sizes = []
@@ -3946,6 +3947,7 @@ def test_stage2_feature_batch_limit_is_preserved_across_lossless_pages(tmp_path:
             "value_type": "continuous",
             "categories_or_unit": ["score"],
             "measurement_definition": "Extract the documented score.",
+            "conflict_resolution": {"strategy": "mode"},
             "missing_value_rule": "Return null when undocumented.",
         }
         for index in range(11)
@@ -4014,7 +4016,7 @@ def test_stage2_feature_batch_limit_is_preserved_across_lossless_pages(tmp_path:
             encoding="utf-8"
         )
     )
-    assert reconciliation_completion["reconciliation_method"] == "deterministic_provenance"
+    assert reconciliation_completion["reconciliation_method"] == "deterministic_reported_occurrences"
     assert reconciliation_completion["features"] == 11
 
 
@@ -4037,7 +4039,8 @@ def test_stage2_reconciles_oversized_page_observations_without_another_llm_reque
                 "categories_or_unit": [selected, f"other_state_{index}"],
                 "roles": ["confounder"],
                 "measurement_definition": "m" * 350,
-                "missing_value_rule": "z" * 100,
+                "conflict_resolution": {"strategy": "mode"},
+            "missing_value_rule": "z" * 100,
             }
         )
 
@@ -4092,102 +4095,43 @@ def test_stage2_reconciles_oversized_page_observations_without_another_llm_reque
             encoding="utf-8"
         )
     )
-    assert completion["reconciliation_method"] == "deterministic_provenance"
+    assert completion["reconciliation_method"] == "deterministic_reported_occurrences"
     assert completion["features"] == 2
 
 
-def test_stage2_oversized_note_uses_verified_dates_instead_of_page_order(tmp_path: Path):
+def test_stage2_oversized_scalar_note_preserves_dated_state_and_resumes(tmp_path: Path):
     newest = "2024-02-01 PD-L1 TPS 50%"
     older = "2023-01-01 PD-L1 TPS 10%"
     note = newest + (" x" * 5_000) + older
     definition = {
-        "name": "pd_l1_tps",
-        "description": "PD-L1 tumor proportion score.",
-        "value_type": "continuous",
-        "categories_or_unit": ["percent"],
+        "name": "pd_l1_tps", "description": "PD-L1 tumor proportion score.",
+        "value_type": "continuous", "categories_or_unit": ["percent"],
         "measurement_definition": "Extract the latest documented PD-L1 TPS.",
         "missing_value_rule": "Return null when undocumented.",
         "conflict_resolution": {"strategy": "latest", "positive_category": None},
     }
-    page_prompts = []
-
+    chunks = []
     def request_json(messages, validate, *, request_kind="interpretation"):
         body = prompt_inputs(messages)
-        assert body["job"] == "extract_stage2_patient_variable_observations"
-        page_prompts.append(body)
+        assert body["job"] == "update_stage2_patient_variables_serially"
         patient = body["patient"]
-        observations = []
-        for evidence, value, recorded_at in (
-            (newest, 50, "2024-02-01"),
-            (older, 10, "2023-01-01"),
-        ):
-            if evidence in patient["text"]:
-                observations.append(
-                    _page_observation(
-                        feature_name="pd_l1_tps",
-                        value=value,
-                        text=patient["text"],
-                        evidence=evidence,
-                        recorded_at=recorded_at,
-                        recorded_at_evidence=recorded_at,
-                    )
-                )
-        return validate(
-            {
-                "rows": [
-                    {
-                        "row_id": patient["row_id"],
-                        "observations": observations,
-                    }
-                ]
-            }
-        )
-
-    output = tmp_path / "extraction"
-    frame = extract_rows(
-        dataset=pd.DataFrame({"clinical_text": [note]}),
-        row_ids=[0],
-        text_column="clinical_text",
-        definitions=[definition],
-        output_dir=output,
-        request_json=request_json,
-        workers=4,
-        max_prompt_chars=5_000,
-    )
-
-    assert len(page_prompts) >= 2
+        chunks.append(patient["current_chunk"])
+        prior = patient["prior_extraction"]["pd_l1_tps"]
+        value = 50 if newest in patient["current_chunk"] else prior
+        if older in patient["current_chunk"]:
+            assert prior == 50  # Earlier-in-text, later-in-time value survived.
+        return validate({"values": {"pd l1 tps": value},
+                         "decision_notes": {"pd l1 tps": "Latest result: 2024-02-01."}})
+    args = dict(dataset=pd.DataFrame({"clinical_text": [note]}), row_ids=[0],
+                text_column="clinical_text", definitions=[definition],
+                output_dir=tmp_path / "extraction", request_json=request_json,
+                workers=4, max_prompt_chars=5_000)
+    frame = extract_rows(**args)
+    assert len(chunks) >= 2 and "".join(chunks) == note
     assert frame.loc[0, "pd_l1_tps"] == 50.0
-    decisions = json.loads(
-        (
-            output / "pages" / "row_00000000" / "reconciliation" / "decisions.json"
-        ).read_text(encoding="utf-8")
-    )
-    decision = decisions["decisions"]["pd_l1_tps"]
-    assert decision["distinct_value_count"] == 2
-    assert decision["selection_basis"] == "verified_recorded_at"
-    assert decision["value"] == 50.0
-    selected = next(
-        observation
-        for observation in decision["observations"]
-        if observation["observation_id"] == decision["selected_observation_id"]
-    )
-    assert selected["recorded_at"] == "2024-02-01"
-    assert note[selected["source_start"] : selected["source_end"]] == newest
-
-    def unexpected_request(*_args, **_kwargs):
-        raise AssertionError("completed page observations and reconciliation must resume")
-
-    resumed = extract_rows(
-        dataset=pd.DataFrame({"clinical_text": [note]}),
-        row_ids=[0],
-        text_column="clinical_text",
-        definitions=[definition],
-        output_dir=output,
-        request_json=unexpected_request,
-        workers=4,
-        max_prompt_chars=5_000,
-    )
-    assert resumed.loc[0, "pd_l1_tps"] == 50.0
+    before = len(chunks)
+    resumed = extract_rows(**args)
+    assert resumed.loc[0, "pd_l1_tps"] == 50.0 and len(chunks) == before
 
 
 def test_stage2_single_or_null_conflict_policy_is_conservative_and_audited():
@@ -4230,7 +4174,7 @@ def test_stage2_single_or_null_conflict_policy_is_conservative_and_audited():
     assert decision["selected_observation_id"] is None
 
 
-def test_stage2_page_provenance_requires_exact_quotes_and_repairs_offsets():
+def test_stage2_page_quotes_are_advisory_and_available_offsets_are_recorded():
     text = "Encounter 2024-06-03: ECOG was 2."
     page = {
         "row_id": 4,
@@ -4282,20 +4226,17 @@ def test_stage2_page_provenance_requires_exact_quotes_and_repairs_offsets():
         ]
     }
 
-    with pytest.raises(stage2_analysis._PageObservationValidationError) as error:
-        stage2_analysis._validate_page_observations(
-            response,
-            page=page,
-            definitions=[definition],
-        )
-
-    retained = error.value.response["rows"][0]["observations"]
-    assert len(retained) == 1
+    result = stage2_analysis._validate_page_observations(
+        response, page=page, definitions=[definition])
+    retained = result["rows"][0]["observations"]
+    assert len(retained) == 2
     assert retained[0]["offset_resolution"] == "nearest_exact_match"
     assert retained[0]["recorded_at_offset_resolution"] == "nearest_exact_match"
     assert retained[0]["source_start"] == 100 + text.index("ECOG was 2")
     assert retained[0]["recorded_at_source_start"] == 100 + text.index("2024-06-03")
-    assert "not an exact substring" in error.value.issues[0]["reason"]
+    assert retained[1]["offset_resolution"] == "not_located"
+    assert retained[1]["source_start"] is None and retained[1]["source_end"] is None
+    assert retained[1]["evidence_status"] == "model_reported"
 
 
 def test_stage2_iterative_consolidation_does_not_lose_candidates():
