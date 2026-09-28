@@ -137,6 +137,17 @@ class Stage2ResponseValidationError(ValueError):
     """A completed model response remained semantically invalid after repairs."""
 
 
+EXTRACTION_FIELD_REPAIR_LIMIT = 3
+
+
+class _ExtractionFieldError(ValueError):
+    """A response error attributable to specific supplied measurement fields."""
+
+    def __init__(self, message: str, *, feature_names: Sequence[str]) -> None:
+        self.feature_names = tuple(sorted(set(feature_names)))
+        super().__init__(message)
+
+
 class _ExtractionCancelledError(RuntimeError):
     """Cooperatively stop sibling extraction tasks after one task fails."""
 
@@ -1116,15 +1127,20 @@ class _ExtractionValueError(ValueError):
 
 def _extraction_error_from_exception(
     exc: BaseException,
-    error_type: type[_ExtractionCategoryError] | type[_ExtractionValueError],
-) -> _ExtractionCategoryError | _ExtractionValueError | None:
+    error_type: type[_ExtractionCategoryError] | type[_ExtractionValueError] | type[_ExtractionFieldError],
+) -> _ExtractionCategoryError | _ExtractionValueError | _ExtractionFieldError | None:
     current: BaseException | None = exc
     seen: set[int] = set()
     while current is not None and id(current) not in seen:
         if isinstance(current, error_type):
             return current
         seen.add(id(current))
-        current = current.__cause__ or current.__context__
+        # Reduced requests run while handling an earlier field failure. That
+        # incidental context must not attribute a new malformed response to an
+        # already excluded field; the request layer explicitly chains causes.
+        current = current.__cause__ or (
+            current.__context__ if error_type is not _ExtractionFieldError else None
+        )
     return None
 
 
@@ -1281,9 +1297,11 @@ def _request_validated_extraction(
     definitions: Sequence[Mapping[str, Any]],
     request_json: RequestJSON,
     ontology_audit_path: Path,
-    validate_response: Callable[[Mapping[str, Any]], dict[str, Any]] | None = None,
+    messages_for_definitions: Callable[[Sequence[Mapping[str, Any]]], Sequence[Mapping[str, str]]],
+    validate_response: Callable[..., dict[str, Any]] | None = None,
+    prior_response: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Extract rows, then recover closed-category failures without resending notes."""
+    """Recover field failures with smaller prompts and category failures by mapping."""
 
     issue_audit_path = ontology_audit_path.with_name("extraction_issues.json")
     pending_path = ontology_audit_path.with_name("pending_category_ontology.json")
@@ -1298,7 +1316,7 @@ def _request_validated_extraction(
 
     def validate_candidate(value: Mapping[str, Any]) -> dict[str, Any]:
         if validate_response is not None:
-            return validate_response(value)
+            return validate_response(value, definitions=definitions)
         return _validate_extraction(
             value,
             row_ids=row_ids,
@@ -1379,9 +1397,65 @@ def _request_validated_extraction(
         return validated
     except (
         Stage2ResponseValidationError,
+        _ExtractionFieldError,
         _ExtractionCategoryError,
         _ExtractionValueError,
     ) as exc:
+        field_error = _extraction_error_from_exception(exc, _ExtractionFieldError)
+        if field_error is not None:
+            excluded = set(field_error.feature_names)
+            feature_names = [str(definition["name"]) for definition in definitions]
+            if not excluded or not excluded <= set(feature_names):
+                raise
+            remaining = [d for d in definitions if str(d["name"]) not in excluded]
+            audit = {
+                "schema_version": "stage2_extraction_field_recovery_v1",
+                "status": "retrying_remaining_fields",
+                "started_at": _now(),
+                "excluded_features": sorted(excluded),
+                "remaining_features": [str(d["name"]) for d in remaining],
+                "validation_error": str(exc),
+                "repair_limit": EXTRACTION_FIELD_REPAIR_LIMIT,
+            }
+            recovery_path = ontology_audit_path.with_name("field_recovery.json")
+            _write_json(recovery_path, audit)
+            LOGGER.warning(
+                "Stage 2 extraction excludes unresolved fields %s and retries %s remaining fields",
+                sorted(excluded), len(remaining),
+            )
+            if remaining:
+                recovery_dir = ontology_audit_path.parent / "field_recovery" / _value_fingerprint(sorted(excluded))[:16]
+                recovered = _request_validated_extraction(
+                    messages=messages_for_definitions(remaining), row_ids=row_ids,
+                    definitions=remaining, request_json=request_json,
+                    ontology_audit_path=recovery_dir / "category_ontology_repair.json",
+                    messages_for_definitions=messages_for_definitions,
+                    validate_response=validate_response, prior_response=prior_response,
+                )
+            else:
+                recovered = {"rows": [{"row_id": int(row_id), "values": {}} for row_id in row_ids]}
+            prior_rows = {int(row["row_id"]): row for row in (prior_response or {}).get("rows", [])}
+            for row in recovered["rows"]:
+                prior = prior_rows.get(int(row["row_id"]), {})
+                for name in excluded:
+                    row["values"][name] = prior.get("values", {}).get(name)
+                if validate_response is not None:
+                    state = row.setdefault("carry_forward_state", {})
+                    for name in excluded:
+                        state[name] = prior.get("carry_forward_state", {}).get(name)
+            validated = validate_candidate(recovered)
+            issue_events.extend({
+                "failure_kind": "unresolved_field_after_repairs",
+                "row_id": int(row_id), "feature_name": name,
+                "reason": str(field_error),
+            } for row_id in row_ids for name in sorted(excluded))
+            _write_json(issue_audit_path, {
+                "schema_version": EXTRACTION_ISSUE_SCHEMA_VERSION,
+                "completed_at": _now(), "events": issue_events,
+            })
+            _write_json(recovery_path, {**audit, "status": "complete", "completed_at": _now(),
+                "resolution": "reextract_remaining_fields_preserve_prior_or_null_excluded"})
+            return validated
         value_error = _value_error_from_exception(exc)
         value_repair_audit: dict[str, Any] | None = pending_value_repair_audit
         category_error = _category_error_from_exception(exc)
@@ -1437,6 +1511,14 @@ def _request_validated_extraction(
                     for row_id in row_ids
                 ]
             }
+            if validate_response is not None and prior_response is not None:
+                prior_rows = {int(row["row_id"]): row for row in prior_response.get("rows", [])}
+                for row in conservative["rows"]:
+                    prior = prior_rows.get(row["row_id"], {})
+                    row["values"] = {name: prior.get("values", {}).get(name) for name in feature_names}
+                    row["carry_forward_state"] = {
+                        name: prior.get("carry_forward_state", {}).get(name) for name in feature_names
+                    }
             validated = _validate_extraction(
                 conservative,
                 row_ids=row_ids,
@@ -1822,6 +1904,30 @@ def _normalize_single_patient_wrapper(value, *, row_ids, feature_names):
     return {"rows": [normalized]}
 
 
+def _named_extraction_values(values, definitions):
+    """Attribute name failures by exact alignment; never guess a renamed value."""
+    try:
+        return clinical_prompts.named_values(values, definitions)
+    except ValueError as exc:
+        if not isinstance(values, Mapping):
+            raise
+        names = clinical_prompts.label_map(definitions)
+        matched: set[str] = set()
+        duplicates: set[str] = set()
+        for key in values:
+            try:
+                name = clinical_prompts.resolve_label(key, names)
+            except ValueError:
+                continue
+            if name in matched:
+                duplicates.add(name)
+            matched.add(name)
+        affected = (set(names.values()) - matched) | duplicates
+        if affected:
+            raise _ExtractionFieldError(str(exc), feature_names=sorted(affected)) from exc
+        raise
+
+
 def _validate_extraction(
     value: Mapping[str, Any],
     *,
@@ -1832,7 +1938,7 @@ def _validate_extraction(
         request_audit.event("response_shape_normalized", original_shape="clinical_variable_map",
                             features=len(definitions), inferred_measurements=0)
         value = {"rows": [{"row_id": int(row_ids[0]),
-                  "values": clinical_prompts.named_values(value, definitions)}]}
+                  "values": _named_extraction_values(value, definitions)}]}
 
     value = _normalize_single_patient_wrapper(
         value, row_ids=row_ids, feature_names=[str(feature["name"]) for feature in definitions],
@@ -1947,8 +2053,8 @@ def _validate_serial_extraction(
     """Validate cumulative values plus bounded policy metadata for the next chunk."""
     if set(value) == {"values", "decision_notes"}:
         value = {"rows": [{"row_id": int(row_id),
-            "values": clinical_prompts.named_values(value["values"], definitions),
-            "carry_forward_state": clinical_prompts.named_values(value["decision_notes"], definitions)}]}
+            "values": _named_extraction_values(value["values"], definitions),
+            "carry_forward_state": _named_extraction_values(value["decision_notes"], definitions)}]}
 
 
     validated = _validate_extraction(
@@ -1986,9 +2092,9 @@ def _validate_serial_extraction(
             continue
         rendered = raw.strip()
         if len(rendered) > MAX_SERIAL_FEATURE_STATE_CHARS:
-            raise ValueError(
+            raise _ExtractionFieldError(
                 f"serial carry_forward_state for {name!r} exceeds "
-                f"{MAX_SERIAL_FEATURE_STATE_CHARS} characters"
+                f"{MAX_SERIAL_FEATURE_STATE_CHARS} characters", feature_names=[name],
             )
         state[name] = rendered or None
     row["carry_forward_state"] = state
@@ -3091,11 +3197,19 @@ def _serial_extract_feature_batch(
                 definitions=definitions,
                 request_json=request_json,
                 ontology_audit_path=ontology_audit_path,
-                validate_response=lambda value: _validate_serial_extraction(
+                messages_for_definitions=lambda subset: _serial_extraction_prompt(
+                    definitions=subset, row_id=row_id, chunk_text=str(planned["text"]),
+                    prior_values=prior_values, prior_feature_state=prior_feature_state,
+                    chunk_index=chunk_index, char_start=int(planned["char_start"]),
+                    char_end=int(planned["char_end"]), document_chars=len(source),
+                ),
+                validate_response=lambda value, *, definitions: _validate_serial_extraction(
                     value,
                     row_id=row_id,
                     definitions=definitions,
                 ),
+                prior_response={"rows": [{"row_id": row_id, "values": prior_values,
+                    "carry_forward_state": prior_feature_state}]},
             )
             if failure_path.is_file():
                 # A malformed later response must not erase validated state from
@@ -3672,6 +3786,9 @@ def extract_rows(
                         definitions=batch_definitions,
                         request_json=guarded_request_json,
                         ontology_audit_path=ontology_audit_path,
+                        messages_for_definitions=lambda subset: _extraction_prompt(
+                            definitions=subset, rows=[row],
+                        ),
                     )
                 _write_json(result_path, result)
                 _supersede_stale_category_ontology_audit(
@@ -3974,6 +4091,9 @@ def extract_rows(
                     definitions=definitions,
                     request_json=guarded_request_json,
                     ontology_audit_path=ontology_audit_path,
+                    messages_for_definitions=lambda subset: _extraction_prompt(
+                        definitions=subset, rows=batch,
+                    ),
                 )
                 if _prompt_chars(messages) > int(max_prompt_chars):  # pragma: no cover
                     raise RuntimeError("Stage 2 extraction planner emitted an oversized batch")

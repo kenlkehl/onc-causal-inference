@@ -1323,7 +1323,18 @@ same fallback audit trail.
 
 Every single-patient extraction writes `extraction_issues.json`, including
 feature-attributable invalid scalar/type values and values outside a declared
-closed ontology. The extraction directory aggregates those events by feature,
+closed ontology. A field-specific name or serial-state validation failure gets
+up to three repair attempts. If it remains unresolved, Python rebuilds the
+extraction prompt without that field and re-extracts the remaining fields from
+the same record or chunk. Only excluded fields become null; serial extraction
+preserves any validated value and decision note from earlier chunks.
+Exclusions apply to that request only; the candidate catalog is unchanged.
+`field_recovery.json` records the excluded fields and each reduced request.
+Further field failures can reduce the batch again, with at most one exclusion
+per field. Scalar/type and closed-category failures retain their existing
+field-level recovery. Unattributable malformed responses use the ordinary
+bounded repair policy; transport failures propagate for checkpoint recovery.
+The extraction directory aggregates those events by feature,
 failure kind, and distinct patient in `failure_summary.json`. A generic malformed
 response is counted separately as a structural transport/format failure and
 cannot trigger an ontology change. When the same attributable pattern occurs in

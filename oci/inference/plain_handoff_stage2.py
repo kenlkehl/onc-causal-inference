@@ -44,6 +44,8 @@ from .plain_handoff_stage2_evidence import (
     stage1_embedding_cache_dependency_identity,
 )
 from .plain_handoff_stage2_analysis import (
+    EXTRACTION_FIELD_REPAIR_LIMIT,
+    _ExtractionFieldError,
     Stage2RequestExhaustedError,
     Stage2ResponseValidationError,
     infrastructure_failure_audit_paths,
@@ -3464,6 +3466,7 @@ def _request_json(
     logical_deadline = time.monotonic() + float(config.request_timeout)
     request_audit.event("request_admitted", logical_budget_seconds=config.request_timeout)
     validation_error_counts: Counter[str] = Counter()
+    field_error_counts: Counter[str] = Counter()
     validation_failure_count = 0
     if fallback_after_same_error < 1:
         raise ValueError("fallback_after_same_error must be a positive integer")
@@ -3576,6 +3579,18 @@ def _request_json(
                         "parsed_response": parsed_response,
                     }
                 )
+            if request_kind == "extraction" and isinstance(exc, _ExtractionFieldError):
+                field_error_counts.update(exc.feature_names)
+                exhausted_fields = [name for name in exc.feature_names
+                    if field_error_counts[name] > EXTRACTION_FIELD_REPAIR_LIMIT]
+                if exhausted_fields:
+                    # Leave the logical request and release its admission slot.
+                    # The extraction caller will rebuild a smaller fresh prompt.
+                    error = _ExtractionFieldError(str(exc), feature_names=exhausted_fields)
+                    raise Stage2ResponseValidationError(
+                        f"Stage 2 field validation remained invalid after "
+                        f"{EXTRACTION_FIELD_REPAIR_LIMIT} repairs: {exc}"
+                    ) from error
             fallback_trigger: str | None = None
             if conservative_validation_fallback is not None:
                 if repeated_error_count >= int(fallback_after_same_error):
