@@ -256,7 +256,10 @@ def test_guarded_reselection_uses_versioned_matrix_and_rejects_path_escape(tmp_p
     assert all(path.read_bytes() == content for path, content in old_paths)
 
 
-def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_selection(tmp_path, monkeypatch):
+@pytest.mark.parametrize("estimand_enabled,sparse_alternative", [(False, False), (True, False), (True, True)])
+def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_selection(
+    tmp_path, monkeypatch, estimand_enabled, sparse_alternative,
+):
     from oci.inference import plain_handoff_stage2_analysis as analysis
     from oci.inference.plain_handoff_stage2 import PlainHandoffStage2Config
     from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
@@ -267,24 +270,31 @@ def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_select
                             "oracle": ["DO_NOT_READ"] * 40})
     train_ids, test_ids = list(range(24)), list(range(24, 40))
     events = []
+    selected_count = 1 + int(estimand_enabled and not sparse_alternative)
 
     def initial(**kw):
         assert kw["row_ids"] == train_ids
         path = kw["feedback_dir"] / "final_failure_summary.json"
         analysis._write_json(path, {})
-        return pd.DataFrame({"_oci_row_id": train_ids, "c": np.arange(24)}), kw["definitions"], 0
+        return pd.DataFrame({"_oci_row_id": train_ids, "c": np.arange(24),
+                             "rare": [1] + [None] * 23}), kw["definitions"], 0
 
     def measure(**kw):
         events.append(("extract", kw["row_ids"], [f["name"] for f in kw["definitions"]]))
+        assert all(f["name"] != "rare" for f in kw["definitions"])
         if kw["row_ids"] == train_ids:
             assert list(kw["dataset"].columns) == ["text"]
             assert all(f.get("estimand_ontology") for f in kw["definitions"])
         else:
             assert kw["row_ids"] == test_ids and any(event[0] == "selected" for event in events)
         return pd.DataFrame({"_oci_row_id": kw["row_ids"], **{
-            f["name"]: np.arange(len(kw["row_ids"])) for f in kw["definitions"]}})
+            f["name"]: ([1] + [None] * 23 if sparse_alternative and kw["row_ids"] == train_ids
+                        else np.arange(len(kw["row_ids"]))) for f in kw["definitions"]}})
 
     def refine(**kw):
+        assert estimand_enabled
+        assert [f["name"] for f in kw["definitions"]] == ["c"]
+        assert list(kw["extracted_fit"].columns) == ["_oci_row_id", "c"]
         assert kw["labels"]._oci_row_id.tolist() == train_ids
         assert list(kw["labels"].columns) == ["_oci_row_id", "treatment", "outcome"]
         assert kw["extracted_fit"]._oci_row_id.tolist() == train_ids
@@ -296,14 +306,15 @@ def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_select
             "status": "complete", "input_fingerprint": "accepted-definition-search"}
 
     def select(arguments):
-        assert len(arguments["definitions"]) == 2
+        assert len(arguments["definitions"]) == selected_count
+        assert "rare" not in arguments["extracted_fit"]
         assert arguments["extracted_fit"]._oci_row_id.tolist() == train_ids
         selected = [{**f, "roles": ["confounder", "effect_modifier"]} for f in arguments["definitions"]]
         events.append(("selected", selected))
         return selected, {"schema_version": analysis.STAGE2_ROLE_SELECTION_SCHEMA_VERSION}, selected, []
 
     def estimate(**kw):
-        assert len(kw["definitions"]) == 2
+        assert len(kw["definitions"]) == selected_count
         assert kw["extracted_heldout"]._oci_row_id.tolist() == test_ids
         assert (tmp_path / "final_definitions.json").is_file()
         events.append(("estimated",))
@@ -317,16 +328,25 @@ def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_select
     monkeypatch.setattr(analysis, "estimate_outer_fold", estimate)
     monkeypatch.setattr(search, "refine_estimand_ontologies", refine)
     result = analysis.run_fold_analysis(
-        dataset=dataset, definitions=[definition], split={"fit_row_ids": train_ids, "heldout_row_ids": test_ids},
+        dataset=dataset, definitions=[definition, feature("rare")],
+        split={"fit_row_ids": train_ids, "heldout_row_ids": test_ids},
         clinical_question="Compare A and B.", unit_id_column="id", text_column="text", treatment_column="t",
         outcome_column="y", outcome_type="binary", inner_folds=2, seed=1, output_dir=tmp_path,
         request_json=lambda *a, **k: pytest.fail("unexpected LLM request"),
         config=PlainHandoffStage2Config(endpoint="http://test/v1", model="test", max_review_rounds=1,
-            estimand_ontology=EstimandOntologyConfig(enabled=True),
+            estimand_ontology=EstimandOntologyConfig(enabled=estimand_enabled),
             role_adjudication=Stage2RoleAdjudicationConfig(enabled=False)),
     )
-    assert result["estimand_ontology"]["status"] == "complete" and events[-1] == ("estimated",)
+    assert events[-1] == ("estimated",)
+    assert result["candidate_missingness_filter"]["dropped_feature_ids"] == ["private_rare"]
+    audit = json.loads((tmp_path / "extraction/candidate_missingness_filter.json").read_text())
+    assert audit["rows"] == 24 and audit["features"][1]["observed_rows"] == 1
     saved = json.loads((tmp_path / "selection/input.json").read_text())
-    assert saved["estimand_ontology"]["search_fingerprint"] == "accepted-definition-search"
-    assert pd.read_csv(tmp_path / "extraction/all_candidates_fit/extracted.csv").shape[1] == 2
-    assert pd.read_csv(tmp_path / saved["preselection_matrix_path"]).shape[1] == 3
+    if estimand_enabled:
+        assert result["estimand_ontology"]["status"] == "complete"
+        assert saved["estimand_ontology"]["search_fingerprint"] == "accepted-definition-search"
+        assert result["candidate_missingness_filter"]["after_estimand_refinement"]["candidates_dropped"] == int(sparse_alternative)
+    assert saved["candidate_missingness_filter"]["maximum_missing_fraction"] == 0.95
+    assert pd.read_csv(tmp_path / "extraction/all_candidates_fit/extracted.csv").shape[1] == 3
+    assert list(pd.read_csv(tmp_path / saved["preselection_matrix_path"]).columns) == [
+        "_oci_row_id", *[f["name"] for f in saved["definitions"]]]

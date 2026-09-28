@@ -132,6 +132,19 @@ Only candidates whose prompt-facing schema changed are re-extracted; unchanged
 raw columns are reused and merged with the refreshed columns. Extraction remains
 one patient per prompt, with the existing per-patient feature batching.
 
+After extraction repair, harmonization, and aggregate ontology review, Stage 2
+drops candidates with **more than 95% missing values in the outer-training
+patients**. Exactly 95% missing is retained. This outcome-blind filter applies
+to confounders, modifiers, and investigator-specified variables; valid zero,
+negative, and absent values count as observed. It precedes estimand-informed
+ontology refinement and selection. Newly added ontology alternatives must also
+pass this filter. Held-out patients never determine which features are dropped.
+The full measurements remain saved; `extraction/candidate_missingness_filter.json`
+records each candidate's counts and decision, with a separate
+`extraction/estimand_candidate_missingness_filter.json` for the refined catalog.
+The filtered matrix has its own versioned path recorded in `selection/input.json`,
+so guarded reselection can reuse it. Losing every candidate fails the fold.
+
 Once ontologies are frozen, an optional second pass consolidates equivalent
 extracted measurements. Inner-fold grouped elastic nets, candidate-wise tests,
 and R-loss models then produce selection evidence. The default `llm_roles`
@@ -140,7 +153,7 @@ separate numerical treatment, outcome, and effect selections with optional
 advisory annotations. The opt-in `multi_model` mode combines several model
 families, clinical theme review, and nested selection of modifier count and
 final estimator. P/q values contribute evidence.
-Explicit investigator variables retain their configured ontologies and roles
+Explicit investigator variables that pass the missingness filter retain their configured ontologies and roles
 regardless of selection evidence. Only the retained variables are
 extracted from outer-held-out text. The final heterogeneous-effect model is an
 honest causal forest by default. Multi-model architecture search can select a
@@ -332,9 +345,11 @@ alias, Python retains one consolidated feature, attaches the discovered packet
 and architecture provenance, keeps the configured name and roles, and uses the
 supplied ontology without making the one-feature ontology request. They still
 undergo training-fold extraction, but ontology supervision and statistical
-selection must keep them without revising the supplied ontology or roles. If a required feature cannot
-be extracted well enough for the workflow's health checks, the run fails
-visibly rather than silently dropping or redefining it.
+selection must keep them without revising the supplied ontology or roles.
+The post-extraction missingness filter still drops an investigator-specified
+variable when it is more than 95% missing, recording that decision in its audit.
+If every candidate is dropped or final extraction fails the row-level health
+checks, the run fails visibly.
 
 `stage2.model` is optional. If it is empty or omitted, Stage 2 queries the
 OpenAI-compatible `/models` endpoint once at startup and uses the result when

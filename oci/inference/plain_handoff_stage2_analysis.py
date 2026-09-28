@@ -5510,6 +5510,80 @@ def _assert_extraction_health(
     return audit
 
 
+def _filter_sparse_training_candidates(
+    frame: pd.DataFrame,
+    definitions: Sequence[Mapping[str, Any]],
+    *,
+    audit_path: Path,
+    health_audit_path: Path,
+    minimum_row_nonmissing_fraction: float,
+) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Any]]:
+    """Drop candidates observed in fewer than 5% of outer-training patients."""
+
+    names = [str(feature["name"]) for feature in definitions]
+    # A missing column is a malformed extraction, not an all-null measurement.
+    values = frame[names]
+    rows = len(frame)
+    if not rows:
+        raise ValueError("Stage 2 missingness filtering requires training rows")
+    counts = values.notna().sum()
+    retained = []
+    decisions = []
+    for feature in definitions:
+        name = str(feature["name"])
+        observed = int(counts[name])
+        # Integer arithmetic preserves the strict boundary at exactly 95%.
+        drop = observed * 20 < rows
+        decisions.append({
+            "feature_id": str(feature["feature_id"]),
+            "name": name,
+            "observed_rows": observed,
+            "missing_rows": rows - observed,
+            "missing_fraction": (rows - observed) / rows,
+            "configured_explicit_feature": bool(feature.get("configured_explicit_feature")),
+            "action": "drop" if drop else "keep",
+            "reason": "more_than_95_percent_missing" if drop else "at_least_5_percent_observed",
+        })
+        if not drop:
+            retained.append(dict(feature))
+    summary = {
+        "schema_version": "stage2_candidate_missingness_filter_v1",
+        "status": "failed" if definitions and not retained else "complete",
+        "scope": "outer_training",
+        "maximum_missing_fraction": 0.95,
+        "drop_comparison": "strictly_greater_than",
+        "rows": rows,
+        "candidates_before": len(definitions),
+        "candidates_retained": len(retained),
+        "candidates_dropped": len(definitions) - len(retained),
+        "dropped_feature_ids": [d["feature_id"] for d in decisions if d["action"] == "drop"],
+        "input_matrix_fingerprint": _frame_fingerprint(frame),
+        "audit_path": str(audit_path),
+    }
+    _write_json(audit_path, {**summary, "features": decisions})
+    LOGGER.info(
+        "Stage 2 candidate missingness filter retained %d/%d features on %d training rows",
+        len(retained), len(definitions), rows,
+    )
+    if definitions and not retained:
+        # Preserve the existing catastrophic-extraction diagnostic. Even when
+        # the union has adequate coverage, losing every candidate must not
+        # silently turn an extraction failure into an unadjusted analysis.
+        health = _assert_extraction_health(
+            frame, definitions, scope="training",
+            minimum_row_nonmissing_fraction=minimum_row_nonmissing_fraction,
+            audit_path=health_audit_path,
+        )
+        _write_json(health_audit_path, {
+            **health, "status": "failed", "reason": "all_candidates_more_than_95_percent_missing",
+        })
+        raise ValueError(
+            "Stage 2 training extraction is catastrophically sparse: "
+            "all candidates are more than 95% missing"
+        )
+    return frame[["_oci_row_id", *[f["name"] for f in retained]]].copy(), retained, summary
+
+
 class _FeatureEncoder:
     def __init__(self, definitions: Sequence[Mapping[str, Any]]) -> None:
         self.definitions = list(definitions)
@@ -9797,13 +9871,26 @@ def run_fold_analysis(
             final_fit_all,
         )
 
+    # Measure coverage after repair/review, before any supervised modeling.
+    # Keep the complete extraction checkpoint available for audit and reuse.
+    final_fit_all, current, missingness_report = _filter_sparse_training_candidates(
+        final_fit_all, current,
+        audit_path=output_dir / "extraction" / "candidate_missingness_filter.json",
+        health_audit_path=output_dir / "extraction" / "fit_health.json",
+        minimum_row_nonmissing_fraction=float(config.min_nonmissing_fraction),
+    )
+    preselection_matrix_relative = (
+        Path("extraction") / "coverage_filtered_fit"
+        / _frame_fingerprint(final_fit_all) / "extracted.csv"
+    )
+    _write_frame(output_dir / preselection_matrix_relative, final_fit_all)
+
     # Supervised definition search is separate from the outcome-blind ontology
     # supervisor. Keep the latter's cache reusable when this search is enabled.
     from .stage2_estimand_ontology_config import EstimandOntologyConfig
 
     estimand_policy = getattr(config, "estimand_ontology", EstimandOntologyConfig())
     estimand_report = {"status": "disabled"}
-    estimand_matrix_relative = None
     if estimand_policy.enabled or any(f.get("estimand_ontology") for f in current):
         from .stage2_estimand_ontology import refine_estimand_ontologies
 
@@ -9845,11 +9932,20 @@ def run_fold_analysis(
                 getattr(config, "max_propensity", None) if getattr(config, "max_propensity", None) is not None else 0.9,
             ),
         )
+        # Alternative definitions create new measurements; enforce the same
+        # coverage requirement before they reach downstream selection.
+        final_fit_all, current, alternative_missingness_report = _filter_sparse_training_candidates(
+            final_fit_all, current,
+            audit_path=output_dir / "extraction" / "estimand_candidate_missingness_filter.json",
+            health_audit_path=output_dir / "extraction" / "fit_health.json",
+            minimum_row_nonmissing_fraction=float(config.min_nonmissing_fraction),
+        )
+        missingness_report["after_estimand_refinement"] = alternative_missingness_report
         # A frozen preselection snapshot may point at the original matrix.
         # Never overwrite it when adding/removing alternative measurements.
-        estimand_matrix_relative = (Path("extraction") / "estimand_candidates_fit"
+        preselection_matrix_relative = (Path("extraction") / "estimand_candidates_fit"
                                     / _frame_fingerprint(final_fit_all) / "extracted.csv")
-        _write_frame(output_dir / estimand_matrix_relative, final_fit_all)
+        _write_frame(output_dir / preselection_matrix_relative, final_fit_all)
 
     selection_dir = output_dir / "selection"
     legacy_selection_path = selection_dir / "statistical_selection.json"
@@ -9889,8 +9985,14 @@ def run_fold_analysis(
         "inner_splits": inner_splits,
         "outcome_type": outcome_type,
         "selection_consolidation_policy": consolidation_policy.scientific_dict(),
-        **({"preselection_matrix_path": str(estimand_matrix_relative)}
-           if estimand_matrix_relative is not None else {}),
+        "preselection_matrix_path": str(preselection_matrix_relative),
+        "candidate_missingness_filter": {
+            "schema_version": missingness_report["schema_version"],
+            "maximum_missing_fraction": 0.95,
+            "drop_comparison": "strictly_greater_than",
+            "scope": "outer_training",
+            "audit_fingerprint": _value_fingerprint(missingness_report),
+        },
         **({"estimand_ontology": {"policy": estimand_policy.public_dict(),
                                    "search_fingerprint": estimand_report.get("input_fingerprint")}}
            if estimand_policy.enabled else {}),
@@ -10150,6 +10252,7 @@ def run_fold_analysis(
                 else "disabled"
             ),
             "preselection_consolidation": consolidation_report,
+            "candidate_missingness_filter": missingness_report,
             **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),
             "candidate_counts": {
                 "before_consolidation": len(current),
@@ -10321,6 +10424,7 @@ def run_fold_analysis(
             "review_convergence": review_convergence,
             "ontology_refinement_rounds": ontology_refinement_rounds,
             "selection_artifact": str(selection_dir / "elastic_net_selection.json"),
+            "candidate_missingness_filter": missingness_report,
             **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),
             "screening_model_family": (
                 "multi_model_evidence_with_llm_theme_adjudication"
@@ -10369,6 +10473,7 @@ def run_fold_analysis(
             "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
         ),
         "selection": selection_report,
+        "candidate_missingness_filter": missingness_report,
         "measurement_dependencies": measurement_definitions,
         "harmonization_validation_fallbacks": harmonization_validation_fallbacks,
         **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),

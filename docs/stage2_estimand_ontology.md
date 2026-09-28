@@ -2,7 +2,8 @@
 
 `stage2.estimand_ontology.enabled=true` adds a bounded search for useful
 alternative definitions of confounder and modifier candidates. It runs after
-extraction-failure repair, value harmonization, and aggregate ontology review,
+extraction-failure repair, value harmonization, aggregate ontology review, and
+removal of candidates more than 95% missing in outer-training patients,
 and before empirical alias consolidation and final role/model selection.
 
 The search uses treatment and outcome information from outer-training patients.
@@ -13,7 +14,8 @@ components have separate prompts, configuration, and checkpoints.
 
 1. **Establish a reference in each inner fold.** Ridge logistic models predict
    treatment; ridge logistic or linear models predict the outcome. Predictors
-   include all original extracted candidates. Encoding, imputation, scaling,
+   include all original extracted candidates that pass the missingness filter.
+   Encoding, imputation, scaling,
    and rare-category handling use only the fitting rows. Three further
    training-only splits produce cross-fitted training residuals. Reference
    regularization is fixed in advance (`ridge_penalty=10`).
@@ -58,7 +60,8 @@ components have separate prompts, configuration, and checkpoints.
    improve at least 60% of folds. These are tuning heuristics, not hypothesis
    tests. Choose at most one winning alternative per role per variable. A
    shared winner is added once. Original measurements remain unchanged.
-7. **Continue selection and estimation.** The expanded catalog enters empirical
+7. **Continue selection and estimation.** Newly added measurements must also
+   pass the outer-training filter of no more than 95% missing. The expanded catalog enters empirical
    alias consolidation, multi-model evidence, role adjudication, modifier-count
    selection, and final architecture search. A search win records a supported
    use; it does not lock a causal role. Only definitions required by final

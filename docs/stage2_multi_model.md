@@ -9,7 +9,10 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
 1. Build a reproducible confounder/modifier list from complementary empirical
    evidence and LLM interpretation. A candidate discarded by one model remains
    available to other models and final review.
-2. Use existing consolidated, ontology-reviewed, extracted measurements. This
+2. Use existing consolidated, ontology-reviewed, extracted measurements.
+   An upstream filter drops candidates more than 95% missing across
+   outer-training patients, before any numerical or LLM selection. Exactly
+   95% missing is retained; held-out missingness cannot alter the catalog. This
    mode does not repeat discovery/extraction. It can now select the final CATE
    estimator as well as its modifier inputs.
    An optional upstream [estimand-informed ontology search](stage2_estimand_ontology.md)
