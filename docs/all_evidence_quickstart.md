@@ -67,9 +67,11 @@ and evaluated on outer-held-out records. The common controls are:
       "model": "small-extractor",
       "workers": 32
     },
-    "request_timeout": 7200,
-    "request_attempt_timeout": 900,
+    "request_timeout": 14400,
+    "request_attempt_timeout": 3600,
     "transport_max_attempts": 6,
+    "outer_fold_recovery_attempts": 2,
+    "outer_fold_recovery_backoff": 60,
     "max_tokens": 100000,
     "extraction_max_tokens": 4096,
     "extraction_reasoning_max_tokens": 32768,

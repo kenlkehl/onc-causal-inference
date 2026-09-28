@@ -211,9 +211,11 @@ An external endpoint configuration is:
       "api_key": "EMPTY",
       "workers": 32
     },
-    "request_timeout": 7200,
-    "request_attempt_timeout": 900,
+    "request_timeout": 14400,
+    "request_attempt_timeout": 3600,
     "transport_max_attempts": 6,
+    "outer_fold_recovery_attempts": 2,
+    "outer_fold_recovery_backoff": 60,
     "max_tokens": 100000,
     "extraction_max_tokens": 4096,
     "extraction_reasoning_max_tokens": 32768,
@@ -499,11 +501,11 @@ Qwen 3.8 translates an explicit `high` policy to its accepted wire value
 enabled-only effort enum. Effective policies and publisher sources appear in
 `model_identity.json`; request events record the controls sent on each attempt.
 
-A complete logical request is bounded by `request_timeout` (7200 seconds by
+A complete logical request is bounded by `request_timeout` (14400 seconds by
 default), including transport retries and response-repair turns. Individual
-HTTP calls use `request_attempt_timeout` (900 seconds by default) for transport
+HTTP calls use `request_attempt_timeout` (3600 seconds by default) for transport
 timeouts. With `extraction_stream: true`, this bounds waiting for the next network
-read, so active streaming can continue longer than 900 seconds, up to the shared
+read, so active streaming can continue longer than 3600 seconds, up to the shared
 logical deadline. Streaming is opt-in (false when omitted) for endpoint
 compatibility; the recommended example enables it. Retryable transport failures
 receive at most `transport_max_attempts` (6 by default) per response attempt,
@@ -517,6 +519,25 @@ structural extraction errors such as a missing `rows` array, row object, or
 `values` object. Reasoning-enabled extraction repairs use
 `extraction_reasoning_max_tokens` when configured, within the available context
 and the same logical request deadline.
+
+After a `Stage2RequestExhaustedError`, the outer-fold runner resumes that fold
+from its completed checkpoints. `outer_fold_recovery_attempts` permits two
+additional attempts by default (three fold attempts total per runner invocation).
+`outer_fold_recovery_backoff` starts at 60 seconds and is multiplied by the retry
+number: 60 seconds, then 120 seconds. Other outer folds continue during this
+wait. New logical requests receive a fresh request budget; completed requests,
+extractions, and compatible downstream checkpoints are reused. Recovery does
+not rerun Stage 1 or rebuild the compiled evidence plan. Changing these timeout
+and recovery settings leaves scientific cache identities unchanged.
+
+`outer_NNN/recovery_status.json` reports the current attempt and terminal state;
+`recovery_events.jsonl` retains the history across invocations. Setting the
+recovery count to zero disables this additional recovery layer. Configuration,
+filesystem, and completed-response validation errors are surfaced immediately.
+If the recovery limit is exhausted, the fold's failure is logged and propagated;
+the executor lets sibling folds finish saving their work before the invocation
+exits with an error. An explicit restart can resume those checkpoints with a
+new bounded recovery budget.
 
 For a single patient, an exact, complete feature-value map, a single `values`
 object, or a `rows` object instead of an array can be wrapped into the canonical
@@ -632,10 +653,11 @@ still returns an invalid ontology after all bounded repairs, Stage 2 writes
 extraction and aggregate supervision rather than aborting the fold.
 
 The API key may be set as `stage2.api_key` or in `OCI_STAGE2_API_KEY`. Other
-operational controls include `request_timeout` (7200 seconds by default),
-`request_attempt_timeout` (900 seconds by default),
+operational controls include `request_timeout` (14400 seconds by default),
+`request_attempt_timeout` (3600 seconds by default),
 `transport_max_attempts` (6 by default),
-`transport_retry_backoff`, `max_response_repairs`,
+`transport_retry_backoff`, `outer_fold_recovery_attempts`,
+`outer_fold_recovery_backoff`, `max_response_repairs`,
 `thinking_after_response_repairs`, `max_tokens`, `extraction_max_tokens`,
 `extraction_reasoning_max_tokens`,
 `extraction_stream`, `extraction_deferred_retry_passes`,
@@ -696,6 +718,14 @@ markers are checkpointed, and fingerprints include the prior state, so restarts
 continue at the first unfinished compatible chunk without dropping source text.
 The exact extraction tokenizer must be present locally under the configured
 model ID, either in the managed vLLM download directory or Hugging Face cache.
+
+Provenance-page extraction plans one patient inside each extraction worker,
+so it can submit requests before page planning finishes for the cohort. The
+planner prepares the fixed instruction/feature prefixes once and checks whether
+the whole remaining record fits before searching for a page boundary. Every
+feature batch still receives an exact rendered-character and chat-token budget
+check. Per-patient `planning_status.json` records planning progress and elapsed
+time; existing page and feature-batch checkpoints remain reusable after a retry.
 
 Cross-page reconciliation is local and deterministic; it does not make another
 LLM request. Each frozen ontology carries a conflict strategy (`latest`,

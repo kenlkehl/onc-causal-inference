@@ -718,7 +718,7 @@ def test_transport_feedback_fails_closed_when_prompt_is_full():
     assert original == [{"role": "user", "content": "x" * 100}]
 
 
-def test_default_deadline_allows_six_full_timeout_attempts(monkeypatch):
+def test_default_deadline_allows_six_long_attempts(monkeypatch):
     clock = [0.0]
     timeouts = []
 
@@ -727,7 +727,7 @@ def test_default_deadline_allows_six_full_timeout_attempts(monkeypatch):
             assert f"timeout {len(timeouts)}" in messages[-1]["content"]
             assert len(messages) == 2
         timeouts.append(config.request_timeout)
-        clock[0] += config.request_timeout
+        clock[0] += 1800.0
         if len(timeouts) == 6:
             return '{"ok": true}'
         raise stage2_workflow._RetryableStage2ResponseError(f"timeout {len(timeouts)}")
@@ -742,8 +742,8 @@ def test_default_deadline_allows_six_full_timeout_attempts(monkeypatch):
         completion=completion,
         validate=dict,
     ) == {"ok": True}
-    assert timeouts == [900.0] * 6
-    assert clock[0] == 5462.0
+    assert timeouts == [3600.0] * 6
+    assert clock[0] == 10862.0
 
 
 def test_extraction_failure_is_logged_before_executor_shutdown(tmp_path, monkeypatch, caplog):

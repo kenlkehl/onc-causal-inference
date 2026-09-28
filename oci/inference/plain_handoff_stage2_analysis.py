@@ -17,6 +17,7 @@ import math
 import os
 import re
 import threading
+import time
 from collections import Counter
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
@@ -1701,10 +1702,20 @@ def _serial_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row_i
         + "\n\nValues found so far\n" + prior + "\n\nNext section of the record\n" + chunk_text)
 
 
-def _page_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row: Mapping[str, Any]) -> list[dict[str, str]]:
-    return clinical_prompts.messages("07_page_observations",
+def _page_extraction_prompt_template(*, definitions: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    messages = clinical_prompts.messages("07_page_observations", "")
+    # Preserve the separator here; messages() normally strips trailing whitespace
+    # after the patient text has been appended.
+    messages[-1]["content"] = (
         clinical_prompts.definitions_text(_page_prompt_feature_definitions(definitions), include_conflict=False)
-        + "\n\nRecord section\n" + str(row.get("text") or ""))
+        + "\n\nRecord section\n")
+    return messages
+
+
+def _page_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row: Mapping[str, Any]) -> list[dict[str, str]]:
+    messages = _page_extraction_prompt_template(definitions=definitions)
+    messages[-1]["content"] = (messages[-1]["content"] + str(row.get("text") or "")).strip()
+    return messages
 
 
 def _prompt_chars(messages: Sequence[Mapping[str, str]]) -> int:
@@ -2709,6 +2720,7 @@ def _lossless_extraction_pages(
     max_prompt_chars: int,
     tokenizer: Any = None,
     input_token_budget: int | None = None,
+    prompt_templates: Sequence[Sequence[Mapping[str, str]]] | None = None,
 ) -> list[dict[str, Any]]:
     """Split one note into exact contiguous pages within character and token caps."""
 
@@ -2719,11 +2731,42 @@ def _lossless_extraction_pages(
             "an empty Stage 2 row exceeded the prompt budget before note text was added; "
             "increase stage2.extraction_max_prompt_chars or shorten the feature definitions"
         )
+    # The page prompt contains a fixed instruction/definition prefix followed
+    # by the source text. Prepare that prefix once per feature batch, rather
+    # than rebuilding all clinical definitions at every binary-search step.
+    if prompt_templates is None:
+        prompt_templates = [
+            _page_extraction_prompt_template(definitions=batch)
+            for batch in definition_batches
+        ]
+
+    def fits(text: str) -> bool:
+        for template in prompt_templates:
+            messages = [dict(message) for message in template]
+            messages[-1]["content"] = (messages[-1]["content"] + text).strip()
+            if _prompt_chars(messages) > int(max_prompt_chars):
+                return False
+            if tokenizer is not None:
+                if prompt_token_count(tokenizer, messages) > int(input_token_budget):
+                    return False
+        return True
+
     pages: list[dict[str, Any]] = []
     cursor = 0
     while cursor < len(source):
+        # Most records fit in one page. Checking that first avoids repeatedly
+        # tokenizing near-identical prefixes just to rediscover the document end.
+        if fits(source[cursor:]):
+            pages.append({
+                "row_id": row_id,
+                "text": source[cursor:],
+                "page": {"page_index": len(pages) + 1, "char_start": cursor,
+                         "char_end": len(source), "document_chars": len(source)},
+            })
+            cursor = len(source)
+            break
         low = cursor + 1
-        high = len(source)
+        high = len(source) - 1
         best: dict[str, Any] | None = None
         while low <= high:
             end = (low + high) // 2
@@ -2737,11 +2780,7 @@ def _lossless_extraction_pages(
                     "document_chars": len(source),
                 },
             }
-            prompts = [_page_extraction_prompt(definitions=batch_definitions, row=candidate)
-                       for batch_definitions in definition_batches]
-            if all(_prompt_chars(prompt) <= int(max_prompt_chars)
-                   and (tokenizer is None or prompt_token_count(tokenizer, prompt) <= int(input_token_budget))
-                   for prompt in prompts):
+            if fits(candidate["text"]):
                 best = candidate
                 low = end + 1
             else:
@@ -3344,6 +3383,9 @@ def extract_rows(
     ]
     extraction_definitions = _prompt_feature_definitions(definitions)
     page_extraction_definitions = _page_prompt_feature_definitions(definitions)
+    requires_page_observations = any(
+        _resolved_conflict_resolution(d)["strategy"] == "mode" for d in definitions
+    )
     if tokenizer is not None:
         if int(chunk_size_tokens) < 1:
             raise ValueError("chunk_size_tokens must be positive")
@@ -3360,38 +3402,34 @@ def extract_rows(
         # within that task execute strictly in source order.
         batches = [[row] for row in request_rows]
         oversized_rows: list[Mapping[str, Any]] = []
-    else:
+    elif not requires_page_observations:
         batches, oversized_rows = _partition_rows_for_prompt(
             request_rows,
             max_prompt_chars=int(max_prompt_chars),
             definition_batches=definition_batches,
         )
 
-    if any(_resolved_conflict_resolution(d)["strategy"] == "mode" for d in definitions):
+    if requires_page_observations:
         batches = [[row] for row in request_rows if not row["text"]]
         oversized_rows = [row for row in request_rows if row["text"]]
 
-    page_requests: list[dict[str, Any]] = []
-    for row in oversized_rows:
-        page_requests.extend(
-            _lossless_extraction_pages(
-                row,
-                definition_batches=definition_batches,
-                max_prompt_chars=int(max_prompt_chars),
-                tokenizer=tokenizer,
-                input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
-            )
-        )
+    # Plan within each patient task so extraction can begin before the entire
+    # cohort has been paginated. Only immutable prompt prefixes are shared.
+    page_prompt_templates = [
+        _page_extraction_prompt_template(definitions=batch)
+        for batch in definition_batches
+    ] if oversized_rows else []
 
     if len(definition_batches) > 1:
         LOGGER.info(
             "Stage 2 extraction features=%s feature_batch_size=%s "
-            "feature_batches_per_patient=%s patients=%s pages=%s",
+            "feature_batches_per_patient=%s patients=%s paged_patients=%s; "
+            "page planning runs incrementally within patient workers",
             len(definitions),
             feature_batch_size,
             len(definition_batches),
-            len(batches),
-            len(page_requests),
+            len(request_rows),
+            len(oversized_rows),
         )
 
     # Snapshot every saved singleton result before concurrent workers begin
@@ -3984,10 +4022,33 @@ def extract_rows(
         )
         return page_meta, dict(result["rows"][0])
 
+    def run_paged_row(row: Mapping[str, Any]):
+        if cancellation.is_set():
+            raise _ExtractionCancelledError("Stage 2 extraction cancelled before page planning")
+        row_id = int(row["row_id"])
+        planning_path = output_dir / "pages" / f"row_{row_id:08d}" / "planning_status.json"
+        started = time.monotonic()
+        _write_json(planning_path, {"status": "planning", "row_id": row_id,
+                                   "started_at": _now(), "document_chars": len(row["text"])})
+        pages = _lossless_extraction_pages(
+            row, definition_batches=definition_batches,
+            max_prompt_chars=int(max_prompt_chars), tokenizer=tokenizer,
+            input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
+            prompt_templates=page_prompt_templates,
+        )
+        duration = round(time.monotonic() - started, 3)
+        _write_json(planning_path, {"status": "complete", "row_id": row_id,
+                                   "completed_at": _now(), "pages": len(pages),
+                                   "duration_seconds": duration})
+        LOGGER.info("Stage 2 extraction pages planned root=%s row_id=%s pages=%s seconds=%.3f",
+                    output_dir, row_id, len(pages), duration)
+        # Page/feature checkpoints keep partial patients reusable on a retry.
+        return [run_page(page) for page in pages]
+
     completed: list[tuple[int, list[dict[str, Any]]]] = []
     completed_pages: dict[int, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
     tasks = [("batch", index, batch) for index, batch in enumerate(batches, start=1)]
-    tasks += [("page", int(page["row_id"]), page) for page in page_requests]
+    tasks += [("paged_row", int(row["row_id"]), row) for row in oversized_rows]
     task_count = len(tasks)
     failure_path = output_dir / "deferred_extraction.json"
     failures = (list(json.loads(failure_path.read_text(encoding="utf-8"))["failures"])
@@ -4017,7 +4078,7 @@ def extract_rows(
             for retry_pass in range(deferred_retry_passes + 1):
                 task_futures = {
                     (executor.submit(run_batch, index, payload) if kind == "batch"
-                     else executor.submit(run_page, payload)): (kind, index, payload)
+                     else executor.submit(run_paged_row, payload)): (kind, index, payload)
                     for kind, index, payload in tasks
                 }
                 deferred = []
@@ -4051,7 +4112,7 @@ def extract_rows(
                     if kind == "batch":
                         completed.append((index, result))
                     else:
-                        completed_pages.setdefault(index, []).append(result)
+                        completed_pages[index] = result
                 if not deferred:
                     if failures or failure_path.exists():
                         save_deferred("resolved", retry_pass, [])
@@ -4070,7 +4131,7 @@ def extract_rows(
                 "cancelling queued work and waiting for in-flight requests",
                 output_dir,
                 active_task[1] if active_task and active_task[0] == "batch" else None,
-                active_task[1] if active_task and active_task[0] == "page" else None,
+                active_task[1] if active_task and active_task[0] == "paged_row" else None,
             )
             cancellation.set()
             for pending in task_futures:
@@ -4218,7 +4279,7 @@ def extract_rows(
             "feature_batches_per_patient": len(definition_batches),
             "batches": len(batches),
             "paged_rows": len(oversized_rows),
-            "pages": len(page_requests),
+            "pages": sum(len(pages) for pages in completed_pages.values()),
             "serial_patient_feature_passes": len(
                 list((output_dir / "batches").glob("**/serial_complete.json"))
             ),

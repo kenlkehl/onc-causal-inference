@@ -756,9 +756,11 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
       "api_key": "EMPTY",
       "workers": 32
     },
-    "request_timeout": 7200,
-    "request_attempt_timeout": 900,
+    "request_timeout": 14400,
+    "request_attempt_timeout": 3600,
     "transport_max_attempts": 6,
+    "outer_fold_recovery_attempts": 2,
+    "outer_fold_recovery_backoff": 60,
     "max_tokens": 100000,
     "extraction_max_tokens": 75000,
     "max_response_repairs": 15,
@@ -943,12 +945,12 @@ For Qwen 3.8, the model-agnostic `high` policy is translated to the endpoint's
 wire-level effort enum and uses the family-specific hard-off controls.
 
 A logical request, including transport retries and validator-guided repair
-turns, is bounded by `request_timeout` (7200 seconds by default in the core
+turns, is bounded by `request_timeout` (14400 seconds by default in the core
 configuration). The clock starts after acquiring a global request slot; time
 waiting locally for that slot is excluded and logged separately. The request
 holds its slot through retries and response repairs, so they do not requeue
 behind other folds. Server-side queueing still consumes the request budget.
-Each HTTP call is bounded by `request_attempt_timeout` (900 seconds by default), so a
+Each HTTP call is bounded by `request_attempt_timeout` (3600 seconds by default), so a
 straggling endpoint can be abandoned and retried. Transport retries include the
 latest error in the model prompt, preserving existing validation feedback. The
 original input is retained losslessly; retries stop if error feedback cannot fit
@@ -960,6 +962,14 @@ concrete validation error. Repair attempts through
 `thinking_after_response_repairs` (5 by default) retain the request's normal
 reasoning policy; later repairs force `reasoning_effort` to at least `high`,
 which enables thinking for the managed vLLM reasoning parsers.
+
+Exhausted transport/deadline budgets trigger up to two checkpointed outer-fold
+recovery attempts, controlled by `outer_fold_recovery_attempts`. The default
+`outer_fold_recovery_backoff` of 60 seconds yields waits of 60 and 120 seconds.
+Sibling folds continue; completed work is reused. Validation, configuration,
+and filesystem errors are not automatically retried at this level. Per-fold
+`recovery_status.json` and `recovery_events.jsonl` expose the recovery state and
+history. See [request recovery](docs/all_evidence_workflow.md) for the limits.
 
 The equivalent direct CLI invocation is:
 

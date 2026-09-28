@@ -108,8 +108,8 @@ ALLOWED_EVIDENCE_AXES = {
 ALLOWED_ROLES = {"confounder", "effect_modifier"}
 DEFAULT_MAX_RESPONSE_REPAIRS = 15
 DEFAULT_THINKING_AFTER_RESPONSE_REPAIRS = 5
-DEFAULT_REQUEST_TIMEOUT = 120 * 60.0
-DEFAULT_REQUEST_ATTEMPT_TIMEOUT = 15 * 60.0
+DEFAULT_REQUEST_TIMEOUT = 240 * 60.0
+DEFAULT_REQUEST_ATTEMPT_TIMEOUT = 60 * 60.0
 DEFAULT_TRANSPORT_MAX_ATTEMPTS = 6
 THINKING_RESPONSE_REPAIR_EFFORT = "high"
 # This is an output ceiling, not a requested output length. Models still stop
@@ -848,6 +848,11 @@ class PlainHandoffStage2Config:
     request_attempt_timeout: float = DEFAULT_REQUEST_ATTEMPT_TIMEOUT
     transport_max_attempts: int = DEFAULT_TRANSPORT_MAX_ATTEMPTS
     transport_retry_backoff: float = 2.0
+    # Resume a fold's checkpointed work after exhausting a logical request's
+    # transport/deadline budget. These operational controls do not change
+    # scientific cache identities. Limits apply per invocation of the runner.
+    outer_fold_recovery_attempts: int = 2
+    outer_fold_recovery_backoff: float = 60.0
     # Invalid completed responses receive validator-guided repair requests.
     # Later repairs turn reasoning on without changing the initial request's
     # request-kind policy.
@@ -1017,6 +1022,15 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.transport_max_attempts must be positive")
         if self.transport_retry_backoff < 0:
             raise ValueError("stage2.transport_retry_backoff must be nonnegative")
+        if (isinstance(self.outer_fold_recovery_attempts, bool)
+                or not isinstance(self.outer_fold_recovery_attempts, int)
+                or self.outer_fold_recovery_attempts < 0):
+            raise ValueError("stage2.outer_fold_recovery_attempts must be a nonnegative integer")
+        if (isinstance(self.outer_fold_recovery_backoff, bool)
+                or not isinstance(self.outer_fold_recovery_backoff, (int, float))
+                or not math.isfinite(self.outer_fold_recovery_backoff)
+                or self.outer_fold_recovery_backoff < 0):
+            raise ValueError("stage2.outer_fold_recovery_backoff must be finite and nonnegative")
         if not isinstance(self.extraction_stream, bool):
             raise ValueError("stage2.extraction_stream must be a boolean")
         if (isinstance(self.extraction_deferred_retry_passes, bool)
@@ -1533,6 +1547,8 @@ def plain_stage2_config_from_mapping(
             raw.get("transport_max_attempts", DEFAULT_TRANSPORT_MAX_ATTEMPTS)
         ),
         transport_retry_backoff=float(raw.get("transport_retry_backoff", 2.0)),
+        outer_fold_recovery_attempts=raw.get("outer_fold_recovery_attempts", 2),
+        outer_fold_recovery_backoff=raw.get("outer_fold_recovery_backoff", 60.0),
         max_response_repairs=int(raw.get("max_response_repairs", DEFAULT_MAX_RESPONSE_REPAIRS)),
         thinking_after_response_repairs=int(
             raw.get(
@@ -7741,6 +7757,62 @@ class PlainHandoffStage2:
             )
         return {"features": features, "candidate_dispositions": dispositions}
 
+    def _run_outer_fold_with_recovery(self, **kwargs: Any) -> Mapping[str, Any]:
+        """Retry exhausted requests by resuming the same fold's checkpoints.
+
+        Each call to _run_outer_fold finishes shutting down its own executors
+        before raising, so the retry cannot overlap writers in that fold.
+        Other outer folds keep running during the bounded backoff.
+        """
+
+        outer_fold = int(kwargs["outer_fold"])
+        output_dir = Path(kwargs["output_dir"])
+        maximum = self.config.outer_fold_recovery_attempts
+        started_at = _now()
+
+        def record(status: str, attempt: int, **fields: Any) -> None:
+            value = {
+                "schema_version": "stage2_outer_fold_recovery_v1",
+                "outer_fold": outer_fold,
+                "invocation_started_at": started_at,
+                "updated_at": _now(),
+                "status": status,
+                "attempt": attempt,
+                "recoveries_used": attempt - 1,
+                "maximum_recoveries": maximum,
+                **fields,
+            }
+            _write_json(output_dir / "recovery_status.json", value)
+            with (output_dir / "recovery_events.jsonl").open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(value, allow_nan=False) + "\n")
+
+        for attempt in range(1, maximum + 2):
+            record("running", attempt)
+            try:
+                result = self._run_outer_fold(**kwargs)
+            except Stage2RequestExhaustedError as exc:
+                error = {"error_type": type(exc).__name__, "error": str(exc)}
+                if attempt > maximum:
+                    record("failed", attempt, **error)
+                    raise
+                delay = self.config.outer_fold_recovery_backoff * attempt
+                record("retry_wait", attempt, retry_after_seconds=delay, **error)
+                LOGGER.warning(
+                    "Stage 2 recovering outer_fold=%s retry=%s/%s after %.1fs; "
+                    "resuming completed checkpoints (%s: %s)",
+                    outer_fold, attempt, maximum, delay, type(exc).__name__, exc,
+                )
+                time.sleep(delay)
+            except Exception as exc:
+                record("failed", attempt, error_type=type(exc).__name__, error=str(exc))
+                raise
+            else:
+                record("complete", attempt)
+                if attempt > 1:
+                    LOGGER.info("Stage 2 recovered outer_fold=%s retries=%s", outer_fold, attempt - 1)
+                return result
+        raise RuntimeError("unreachable Stage 2 fold recovery state")
+
     def _run_outer_fold(
         self,
         *,
@@ -8253,7 +8325,7 @@ class PlainHandoffStage2:
             ) as outer_executor:
                 futures = {
                     outer_executor.submit(
-                        self._run_outer_fold,
+                        self._run_outer_fold_with_recovery,
                         outer_fold=outer_fold,
                         packets=packets_by_outer[outer_fold],
                         output_dir=output_dir / f"outer_{outer_fold:03d}",

@@ -122,9 +122,11 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config is not None
     assert config.endpoint == "http://stage2.test/v1"
     assert config.model == ""
-    assert config.request_timeout == 7200.0
-    assert config.request_attempt_timeout == 900.0
+    assert config.request_timeout == 14400.0
+    assert config.request_attempt_timeout == 3600.0
     assert config.transport_max_attempts == 6
+    assert config.outer_fold_recovery_attempts == 2
+    assert config.outer_fold_recovery_backoff == 60.0
     assert config.max_response_repairs == 15
     assert config.thinking_after_response_repairs == 5
     assert config.max_tokens == 100_000
