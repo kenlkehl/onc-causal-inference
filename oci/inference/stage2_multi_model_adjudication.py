@@ -94,6 +94,15 @@ def build_multi_model_role_evidence(*, definitions, statistical_report, policy):
                 }
                 for fold in raw.get("folds", [])
             ]
+            if family == "matched_batch_contrast":
+                batch = raw.get("batch_diagnostics") or {}
+                row["batch_diagnostics"] = {
+                    k: _number(batch.get(k), integer=True) for k in (
+                        "filtered_evaluated", "unfiltered_evaluated", "filter_agreement_evaluated", "filter_agreement_count")}
+                row["batch_diagnostics"].update({k: _number(batch.get(k)) for k in (
+                    "mean_filtered_gain", "mean_unfiltered_gain", "mean_training_patients", "mean_validation_patients",
+                    "mean_training_batches", "mean_validation_batches", "mean_training_proposed", "mean_training_imbalance_rejected",
+                    "mean_validation_proposed", "mean_validation_imbalance_rejected")})
             rows.append(row)
         cards.append(
             {
@@ -134,6 +143,7 @@ def build_multi_model_role_evidence(*, definitions, statistical_report, policy):
             "univariable_rlearner": "heldout_R_loss_gain_over_constant_effect",
             "predictive_forest": "heldout_prediction_loss_increase_after_group_permutation",
             "causal_forest": "heldout_R_loss_increase_after_group_permutation",
+            "matched_batch_contrast": "relative_heldout_batch_deviation_MSE_gain_over_training_fitted_bin_intercepts",
         },
         "stability_contract": {
             "missing_is_not_negative": True,

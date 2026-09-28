@@ -19,7 +19,7 @@ from oci.inference.stage2_elastic_net_selection import (
     select_stage2_features_elastic_net,
     statistical_selection_config_from_mapping,
 )
-from oci.inference.stage2_multi_model_config import FAMILIES, Stage2MultiModelConfig
+from oci.inference.stage2_multi_model_config import FAMILIES, MatchedBatchConfig, Stage2MultiModelConfig
 from oci.inference.stage2_multi_model_selection import (
     aggregate_evidence,
     candidate_subsets,
@@ -97,10 +97,15 @@ def sample_inputs():
 
 
 @pytest.mark.parametrize("binary", [False, True])
+@pytest.mark.parametrize("matched", [False, True])
 def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
-    tmp_path, monkeypatch, binary
+    tmp_path, monkeypatch, binary, matched
 ):
     arguments = sample_inputs()
+    if matched:
+        cfg = MatchedBatchConfig(enabled=True, batch_size=4, bins_per_nuisance=1, min_reference_arm=2,
+            max_smd=100, min_delta=0, z_threshold=0, train_passes=3, validation_passes=3)
+        arguments["policy"] = replace(arguments["policy"], multi_model=replace(arguments["policy"].multi_model, matched_batch=cfg))
     if binary:
         arguments["outcome_type"] = "binary"
         arguments["dataset"]["outcome"] = (
@@ -113,8 +118,15 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
     result = select_stage2_features_elastic_net(**arguments, checkpoint_dir=tmp_path)
     _, report, dependencies, latents = result
     assert not latents and len(dependencies) == 4
-    assert set(report["evaluable_cells_by_family"]) == set(FAMILIES)
+    assert set(report["evaluable_cells_by_family"]) == set(arguments["policy"].multi_model.active_families())
+    if matched:
+        assert set(report["model_families"]) == set(FAMILIES)
     assert all(v > 0 for v in report["evaluable_cells_by_family"].values())
+    if matched:
+        legacy_policy = replace(arguments["policy"], multi_model=replace(
+            arguments["policy"].multi_model, matched_batch=MatchedBatchConfig()))
+        _, legacy, _, _ = select_stage2_features_elastic_net(**{**arguments, "policy": legacy_policy})
+        assert [c for c in report["cells"] if c["family"] != "matched_batch_contrast"] == legacy["cells"]
     assert {r["_oci_row_id"] for r in report["cross_fitted_nuisance_models"]["predictions"]} == set(
         range(96)
     )
@@ -133,6 +145,8 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
         "oci.inference.stage2_multi_model_selection._fit_linear",
         lambda *a, **k: pytest.fail("completed model checkpoint was refitted"),
     )
+    monkeypatch.setattr("oci.inference.stage2_matched_batch.score_candidates",
+                        lambda *a, **k: pytest.fail("completed batch checkpoint was refitted"))
     resumed = select_stage2_features_elastic_net(
         **{**arguments, "dataset": changed}, checkpoint_dir=tmp_path
     )
@@ -166,6 +180,9 @@ def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(mon
         max_propensity=0.9,
         multi_model=replace(arguments["policy"].multi_model, repeats=1),
     )
+    arguments["policy"] = replace(arguments["policy"], multi_model=replace(arguments["policy"].multi_model,
+        matched_batch=MatchedBatchConfig(enabled=True, batch_size=4, bins_per_nuisance=1,
+            min_reference_arm=2, train_passes=2, validation_passes=2)))
     probabilities = np.array([0.05, 0.1, 0.5, 0.9, 0.95, 0.5])
 
     def p(frame):
@@ -199,6 +216,7 @@ def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(mon
             "orthogonal_linear",
             "univariable_rlearner",
             "causal_forest",
+            "matched_batch_contrast",
         }:
             effect_ids = old["fit_row_ids"]
             assert all(0.1 <= probabilities[i % 6] <= 0.9 for i in old["validation_row_ids"])

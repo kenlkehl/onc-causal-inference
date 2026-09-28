@@ -34,6 +34,7 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
 | Candidate R-learners | Same cross-fitted nuisances | One candidate at a time, ridge-stabilized contrasts, held-out R-loss gain over a constant effect |
 | Predictive forests | Held-out group-permutation importance for treatment and outcome | None; these are evidence models, not causal-forest nuisances |
 | Causal forests | All-candidate elastic-net nuisance adjustment | Honest forests on residuals; held-out R-loss permutation importance and grouped split importance |
+| Matched-batch contrasts (optional) | Shared cross-fitted treatment/outcome predictions define matching bins | Candidate-wise ridge on batch-average measurements; held-out deviation prediction gain over bin intercepts |
 
 1. Categorical columns remain one candidate group. Interaction tests are omnibus;
    permutations move all encoded columns of a candidate together, preserving its
@@ -83,7 +84,7 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
    correlated alternatives can dilute or redistribute their scores.
 8. **Every modifier screen uses the same configured overlap restriction**:
    univariable `T:candidate` tests, penalized outcome interactions, orthogonal
-   linear models, candidate R-learners, and causal forests. Set
+   linear models, candidate R-learners, causal forests, and matched batches. Set
    `stage2.min_propensity: 0.1` and `stage2.max_propensity: 0.9`, as in the example,
    to retain estimated propensities **including** the endpoints. The previously
    unrestricted univariable and penalized interaction screens now honor these
@@ -98,6 +99,59 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
     Main-effect evidence from the *joint interaction* model necessarily shares
     its overlap-restricted population. Audits record the relevant row IDs, and
     LLM prompts describe these population differences without exposing row IDs.
+
+### Matched-batch contrast evidence (September 28, 2026)
+
+Enable `stage2.statistical_selection.multi_model.matched_batch.enabled`. The full
+multi-model example enables it; omitted settings preserve existing saved runs.
+This adds one modifier-evidence family and is compatible with the upstream
+estimand-informed refinement. No ontology/representation search, new extracted
+variables, correlation consolidation, or fixed modifier budget is imported from
+the experimental batch-contrast worktree.
+
+For each inner fold and its full/80%/80% training repetitions:
+
+1. Reuse the existing honest treatment and marginal-outcome nuisance predictions.
+   Apply the configured propensity bounds, then fit two quantile bins per nuisance
+   on that repetition's training patients (up to four joint bins). A bin needs
+   eight patients per treatment arm to provide a reference contrast.
+2. Shuffle each arm within bins, making batches of four treated and four control
+   patients. Reject arm differences in either nuisance exceeding 0.25 standard
+   deviations of that nuisance in training. Patients appear at most once per pass.
+3. The target is the batch's observed treated-minus-control mean outcome minus
+   the same contrast in its **training bin**, not the overall cohort contrast or
+   a known causal effect. Use 100 fresh training passes and 50 validation passes.
+4. Fit a ridge regression separately for each candidate's batch-average encoded
+   values, with bin intercepts. Keep the supplied measurement encoding; exclude
+   standalone missingness indicators. Default penalty 0.01 multiplies mean loss,
+   so additional shuffles do not weaken regularization.
+5. Primary training emphasizes absolute deviations at least both 0.10 outcome
+   units and one estimated standard error (`min_delta` and `z_threshold`). For a
+   binary outcome, 0.10 means ten percentage points. Continuous-outcome users
+   should set `min_delta` in their outcome units. Also fit on all matched training
+   batches as a sensitivity check. Validation uses all matched batches in bins
+   supported by both fits, without selecting extreme validation outcomes.
+6. Score `(bin-only validation MSE - candidate validation MSE) / bin-only MSE`.
+   Both predictions use training-fitted bin intercepts, so an intercept improvement
+   cannot count as candidate evidence. Positive gain supplies a support flag;
+   there is no automatic inclusion threshold. Lack of batches, within-bin feature
+   variation, or nonzero baseline loss produces unavailable evidence. A missing
+   filtered fit can still report an unfiltered diagnostic without a primary vote.
+7. Aggregate by fit/fold, including filtered/unfiltered agreement, unique patient
+   counts, batch counts and matching rejections. Repeated batches are dependent,
+   not extra independent patients. Raw sampling details remain in numerical cell
+   checkpoints; only allowlisted summaries reach the role and concept prompts.
+
+The same family runs inside the training-only nested modifier rankings. Final
+modifier-count and architecture selection still uses the existing individual-row
+R-loss comparison. The family runs on CPU and requests no additional LLM calls
+of its own. Config, source code and inputs participate in checkpoint identity.
+Turning it on for a saved run requires the normal scientific-policy resume guard;
+adding the code alone does not enable it in an already-running experiment.
+
+This measures within-bin observed contrast variation. Residual confounding and
+prognostic imbalance can remain, and heterogeneity primarily between bins may be
+missed. Validation is conditional on the existing upstream catalog/refinement.
 
 ## 4. Stability summaries and LLM interpretation
 
@@ -152,7 +206,7 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
    main effects but has no explicit interactions. A logistic model can still
    produce varying probability differences because baseline risk varies.
 5. Preserve the original inner folds. **Inside each fold's training portion**,
-   create subfolds with `internal_cv_folds`, rerun all seven evidence families,
+   create subfolds with `internal_cv_folds`, rerun every enabled evidence family,
    and obtain a fresh LLM modifier ranking. Every other patient's label is masked
    before the nested evidence worker runs. Neither validation outcomes nor a
    global outcome-informed ranking enter these training fits.

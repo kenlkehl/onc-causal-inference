@@ -1257,7 +1257,7 @@ minimum-CV-loss choices.
 | --- | --- | --- |
 | `llm_roles` (default when omitted) | Final adjudicated roles; if adjudication is disabled, the provisional nuisance union and candidate-wise top-N modifier union | Reconciles all aggregate evidence and assigns confounder, effect modifier, both, or neither |
 | `independent_tasks` | Separate treatment, outcome, and joint-R-loss effect supports; a nonzero group in any inner fold suffices for its task | Optional advisory annotations cannot add, remove, or reroute features |
-| `multi_model` | Final roles from seven evidence families across training resamples and forest feature subsets; no individual screen is binding | Required theme reconciliation across candidates, then evidence-cited role decisions |
+| `multi_model` | Final roles from seven evidence families plus optional matched-batch contrast evidence across training resamples and forest feature subsets; no individual screen is binding | Required theme reconciliation across candidates, then evidence-cited role decisions |
 
 In `llm_roles`, the primary LLM receives bounded slices of one allowlisted
 aggregate role-evidence artifact and assigns final roles. A slice contains at most

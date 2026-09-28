@@ -77,6 +77,8 @@ def _concept_input(evidence, cards, recurrence, list_count):
             if row.get("median_q") is not None:
                 text += f" Median adjusted q-value {row['median_q']:.5g}."
             parts.append(text)
+            if row["family"] == "matched_batch_contrast":
+                parts.append(clinical_prompts.batch_evidence_text(row))
     return "\n\n".join(parts)
 
 

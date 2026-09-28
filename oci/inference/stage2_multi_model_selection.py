@@ -23,12 +23,19 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from threadpoolctl import threadpool_limits
 
 from . import stage2_elastic_net_selection as linear
+from . import stage2_matched_batch as matched_batch
 from .stage2_multi_model_config import FAMILIES, SCHEMA_VERSION
 from .stage2_role_adjudication import _fingerprint, _write_json
 from .stage2_statistical_selection import _modifier_test_chunk
 
 LOGGER = logging.getLogger(__name__)
 ROLES = ("treatment", "outcome", "effect")
+
+
+def _matched_batch_enabled(config):
+    # A long-running extraction process may still hold the pre-extension policy
+    # class when it lazily imports numerical selection after extraction finishes.
+    return bool(getattr(getattr(config, "matched_batch", None), "enabled", False))
 
 
 class NotEstimable(ValueError):
@@ -65,6 +72,8 @@ def numerical_identity(
         "outcome_type": outcome_type,
         "component_source_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
         "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
+        **({"matched_batch_source_sha256": sha256(Path(matched_batch.__file__).read_bytes()).hexdigest()}
+           if _matched_batch_enabled(policy.multi_model) else {}),
     }
 
 
@@ -766,6 +775,24 @@ def aggregate_evidence(cells, feature_ids):
                     "folds": fold_counts,
                 }
             )
+            if family == "matched_batch_contrast":
+                # Count fits, never the dependent shuffled batches, as exposures.
+                summary = {}
+                for name in ("filtered", "unfiltered"):
+                    gains = [r[f"{name}_score"] for _, r in values if r.get(f"{name}_score") is not None]
+                    summary[f"{name}_evaluated"] = len(gains)
+                    summary[f"mean_{name}_gain"] = float(np.mean(gains)) if gains else None
+                agreement = [r["filter_agreement"] for _, r in values if r.get("filter_agreement") is not None]
+                summary.update(filter_agreement_evaluated=len(agreement), filter_agreement_count=sum(agreement))
+                for name in ("training_patients", "validation_patients", "training_batches", "validation_batches"):
+                    counts = [c.get("audit", {}).get(f"primary_{name}") for c, _ in evaluable]
+                    counts = [v for v in counts if v is not None]
+                    summary[f"mean_{name}"] = float(np.mean(counts)) if counts else None
+                for phase in ("training", "validation"):
+                    for field in ("proposed", "imbalance_rejected"):
+                        counts = [c.get("audit", {}).get(f"{phase}_sampling", {}).get(field, 0) for c, _ in values]
+                        summary[f"mean_{phase}_{field}"] = float(np.mean(counts))
+                result[feature_id][-1]["batch_diagnostics"] = summary
     return result
 
 
@@ -819,6 +846,7 @@ def select_stage2_features_multi_model(
         _write_json(directory / "input.json", {**identity, "input_fingerprint": fingerprint})
     cells, oof = [], []
     cfg = policy.multi_model
+    families = tuple(f for f in FAMILIES if f != "matched_batch_contrast" or _matched_batch_enabled(cfg))
     by_id = {_key(f): f for f in definitions}
     with threadpool_limits(limits=1):
         for position, split in enumerate(inner_splits, 1):
@@ -877,7 +905,7 @@ def select_stage2_features_multi_model(
                 subsets = candidate_subsets(
                     list(by_id), repeat=repeat, subset_size=cfg.feature_subset_size, seed=cell_seed
                 )
-                for family in FAMILIES:
+                for family in families:
                     groups = (
                         subsets
                         if family in {"predictive_forest", "causal_forest"}
@@ -894,6 +922,7 @@ def select_stage2_features_multi_model(
                                 "orthogonal_linear",
                                 "univariable_rlearner",
                                 "causal_forest",
+                                "matched_batch_contrast",
                             }
                             keep = (
                                 linear.propensity_eligibility(
@@ -969,6 +998,11 @@ def select_stage2_features_multi_model(
                                         yyval - nv["mv"],
                                         policy=policy,
                                     )
+                                elif family == "matched_batch_contrast":
+                                    result = matched_batch.score_candidates(
+                                        fit, hold, selected_definitions, tt, yy, ttval, yyval,
+                                        nuisance=nv, policy=policy, seed=cell_seed,
+                                    )
                                 else:
                                     result = _forests(
                                         family,
@@ -1033,7 +1067,7 @@ def select_stage2_features_multi_model(
         family: sum(
             any(r["status"] == "ok" for r in c["records"]) for c in cells if c["family"] == family
         )
-        for family in FAMILIES
+        for family in families
     }
     if not any(availability.values()):
         raise NotEstimable("all_model_families_were_unevaluable")
@@ -1056,7 +1090,7 @@ def select_stage2_features_multi_model(
         "policy": policy.public_dict(),
         "input_fingerprint": fingerprint,
         "inner_folds": len(inner_splits),
-        "model_families": list(FAMILIES),
+        "model_families": list(families),
         "evaluable_cells_by_family": availability,
         "multi_model_evidence": summaries,
         "cells": cells,

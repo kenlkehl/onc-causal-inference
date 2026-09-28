@@ -9909,6 +9909,12 @@ def run_fold_analysis(
         and statistical_policy.multi_model.modifier_count.enabled
     ):
         selection_input["modifier_count_estimation_trees"] = int(config.estimation_trees)
+    if statistical_policy.selection_mode == "multi_model" and getattr(
+        getattr(statistical_policy.multi_model, "matched_batch", None), "enabled", False
+    ):
+        selection_input["matched_batch_source_sha256"] = hashlib.sha256(
+            Path(__file__).with_name("stage2_matched_batch.py").read_bytes()
+        ).hexdigest()
     selection_fingerprint = _value_fingerprint(selection_input)
     selection_report_path = selection_dir / "elastic_net_selection.json"
     selected_path = selection_dir / "selected_definitions.json"

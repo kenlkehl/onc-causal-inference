@@ -11,7 +11,7 @@ import pytest
 from oci.inference import stage2_modifier_count as count
 from oci.inference import stage2_modifier_ranking as ranking
 from oci.inference import stage2_multi_model_selection as numerical
-from oci.inference.stage2_multi_model_config import ModifierCountConfig
+from oci.inference.stage2_multi_model_config import MatchedBatchConfig, ModifierCountConfig
 from oci.inference.stage2_elastic_net_selection import (
     statistical_selection_config_from_mapping,
 )
@@ -221,7 +221,10 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         arguments["policy"],
         min_propensity=0.1,
         max_propensity=0.9,
-        multi_model=replace(arguments["policy"].multi_model, repeats=1, modifier_count=cfg),
+        multi_model=replace(arguments["policy"].multi_model, repeats=1, modifier_count=cfg,
+            matched_batch=MatchedBatchConfig(enabled=True, batch_size=4, bins_per_nuisance=1,
+                min_reference_arm=2, max_smd=100, min_delta=0, z_threshold=0,
+                train_passes=3, validation_passes=3)),
     )
     numerical_root = tmp_path / "numerical"
     _, report, _, _ = numerical.select_stage2_features_multi_model(
@@ -249,7 +252,10 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
             assert set(split["fit_row_ids"]) | set(split["heldout_row_ids"]) == ids
             assert set(split["fit_row_ids"]).isdisjoint(split["heldout_row_ids"])
         nested_calls.append(ids)
-        return numerical.select_stage2_features_multi_model(**values)
+        result = numerical.select_stage2_features_multi_model(**values)
+        cells = [c for c in result[1]["cells"] if c["family"] == "matched_batch_contrast"]
+        assert cells and all(set(c["fit_row_ids"]) | set(c["validation_row_ids"]) <= ids for c in cells)
+        return result
 
     concept_inputs = []
     if cfg.concept_review:

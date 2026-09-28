@@ -138,6 +138,7 @@ METHODS = {
     "univariable_rlearner": "Univariable R-learner",
     "predictive_forest": "Predictive forest",
     "causal_forest": "Causal forest",
+    "matched_batch_contrast": "Matched patient-batch contrast model",
 }
 SCORES = {
     "univariable": "minus log10 of the association p-value",
@@ -147,7 +148,37 @@ SCORES = {
     "univariable_rlearner": "validation R-loss improvement over a constant effect",
     "predictive_forest": "validation prediction-loss increase after shuffling the variable",
     "causal_forest": "validation R-loss increase after shuffling the variable in the same fitted forest",
+    "matched_batch_contrast": "fractional reduction in validation batch-deviation error beyond bin intercepts",
 }
+
+
+def batch_evidence_text(row):
+    """Explain the additional evidence in both role and cross-fold concept reviews."""
+    lines = [
+        "Patients were grouped by predicted treatment probability and predicted outcome risk. "
+        "Within each group, random batches contained equal numbers receiving each treatment. "
+        "The target was each batch's observed treated-minus-untreated outcome contrast minus its training group's contrast. "
+        "This candidate's average values predicted that deviation in separate validation patients. "
+        "The comparison model contained the same group intercepts. Positive gain means lower prediction error; "
+        "0.10 means a 10% error reduction. This is evidence about observed contrast variation and can reflect residual confounding. "
+        "It does not measure an individual patient's causal effect. Shuffles reuse patients; support counts refer to model fits."]
+    d = row.get("batch_diagnostics") or {}
+    for name in ("filtered", "unfiltered"):
+        gain = d.get(f"mean_{name}_gain")
+        if gain is not None:
+            lines.append(f"Mean validation gain after {name} training: {gain:.5g} across {d.get(name + '_evaluated')} usable fits.")
+    lines.append("Filtered training emphasizes unusually large deviations. Validation batches are scored without filtering on outcomes.")
+    if d.get("filter_agreement_evaluated"):
+        lines.append(f"Filtered and unfiltered training agreed on whether this candidate helped in "
+                     f"{d['filter_agreement_count']} of {d['filter_agreement_evaluated']} comparable fits.")
+    for phase in ("training", "validation"):
+        if d.get(f"mean_{phase}_patients") is not None:
+            lines.append(f"Mean unique {phase} patients per usable primary fit: {d[f'mean_{phase}_patients']:.5g}; "
+                         f"mean batches: {d[f'mean_{phase}_batches']:.5g}.")
+        if d.get(f"mean_{phase}_proposed") is not None:
+            lines.append(f"Mean {phase} batches proposed per attempted fit: {d[f'mean_{phase}_proposed']:.5g}; "
+                         f"rejected for nuisance imbalance: {d[f'mean_{phase}_imbalance_rejected']:.5g}.")
+    return "\n".join(lines)
 
 
 def study_text(evidence):
@@ -193,6 +224,8 @@ def evidence_text(card):
         if row.get("folds"):
             lines.append("  Supported/usable fits across overlapping patient groups: " + "; ".join(
                 f"{f.get('supported', 0)}/{f.get('evaluated', 0)}" for f in row["folds"]) + ".")
+        if family == "matched_batch_contrast":
+            lines.append(batch_evidence_text(row))
     return "\n".join(lines)
 
 

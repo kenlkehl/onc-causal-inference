@@ -14,8 +14,46 @@ FAMILIES = (
     "univariable_rlearner",
     "predictive_forest",
     "causal_forest",
+    "matched_batch_contrast",
 )
 FINAL_ESTIMATORS = ("causal_forest", "linear_interactions")
+
+
+@dataclass(frozen=True)
+class MatchedBatchConfig:
+    """Additional evidence only; no ontology search or modifier budget."""
+
+    enabled: bool = False
+    batch_size: int = 8
+    bins_per_nuisance: int = 2
+    min_reference_arm: int = 8
+    max_smd: float = 0.25
+    min_delta: float = 0.10
+    z_threshold: float = 1.0
+    filter_training_batches: bool = True
+    train_passes: int = 100
+    validation_passes: int = 50
+    ridge_penalty: float = 0.01
+
+    def validate(self):
+        for name in ("enabled", "filter_training_batches"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"matched_batch.{name} must be boolean")
+        for name in ("batch_size", "bins_per_nuisance", "min_reference_arm",
+                     "train_passes", "validation_passes"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f"matched_batch.{name} must be a positive integer")
+        if self.batch_size < 4 or self.batch_size % 2:
+            raise ValueError("matched_batch.batch_size must be even and at least four")
+        if self.min_reference_arm < self.batch_size // 2:
+            raise ValueError("matched_batch.min_reference_arm must support a complete batch")
+        for name in ("max_smd", "min_delta", "z_threshold", "ridge_penalty"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+                raise ValueError(f"matched_batch.{name} must be finite and nonnegative")
+        if self.ridge_penalty == 0:
+            raise ValueError("matched_batch.ridge_penalty must be positive")
 
 
 @dataclass(frozen=True)
@@ -91,8 +129,14 @@ class Stage2MultiModelConfig:
     q_threshold: float = 0.1
     max_prompt_chars: int = 100_000
     modifier_count: ModifierCountConfig = field(default_factory=ModifierCountConfig)
+    # The immutable class default also supports policy instances unpickled from
+    # a running pre-extension process, whose instance state lacks this field.
+    matched_batch: MatchedBatchConfig = MatchedBatchConfig()
 
     def validate(self) -> None:
+        if not isinstance(self.matched_batch, MatchedBatchConfig):
+            raise ValueError("multi_model.matched_batch must be a MatchedBatchConfig object")
+        self.matched_batch.validate()
         if not isinstance(self.modifier_count, ModifierCountConfig):
             raise ValueError("multi_model.modifier_count must be a ModifierCountConfig object")
         self.modifier_count.validate()
@@ -133,11 +177,18 @@ class Stage2MultiModelConfig:
             raise ValueError("multi_model.l1_ratios must contain finite values in (0, 1]")
 
     def public_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "schema_version": SCHEMA_VERSION,
             **asdict(self),
             "modifier_count": self.modifier_count.public_dict(),
         }
+        # Existing saved runs keep their policy unless this family is requested.
+        if self.matched_batch == MatchedBatchConfig():
+            result.pop("matched_batch")
+        return result
+
+    def active_families(self):
+        return tuple(f for f in FAMILIES if f != "matched_batch_contrast" or self.matched_batch.enabled)
 
 
 def multi_model_config_from_mapping(
@@ -159,6 +210,14 @@ def multi_model_config_from_mapping(
         if not isinstance(raw["l1_ratios"], (list, tuple)):
             raise ValueError("multi_model.l1_ratios must be a list")
         raw["l1_ratios"] = tuple(raw["l1_ratios"])
+    if "matched_batch" in raw:
+        batch = raw["matched_batch"]
+        if not isinstance(batch, Mapping):
+            raise ValueError("multi_model.matched_batch must be a configuration object")
+        unknown = set(batch) - set(MatchedBatchConfig.__dataclass_fields__)
+        if unknown:
+            raise ValueError(f"unsupported matched_batch fields: {sorted(unknown)}")
+        raw["matched_batch"] = MatchedBatchConfig(**batch)
     if "modifier_count" in raw:
         count = raw["modifier_count"]
         if not isinstance(count, Mapping):
