@@ -47,6 +47,9 @@
     "consolidation_max_rounds": 55,
     "extraction_max_prompt_chars": 640000,
     "extraction_feature_batch_size": 10,
+    "extraction_note_search": {
+      "enabled": false
+    },
     "extraction_chunk_size_tokens": 50000,
     "extraction_context_window_tokens": 131072,
     "extraction_context_margin_tokens": 1024,

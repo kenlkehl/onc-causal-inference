@@ -120,6 +120,13 @@ reasoning during extraction repairs. Explicit overrides take precedence;
 extraction `auto` opts into Flash Next's xhigh profile.
 See [sampling profiles](stage2_sampling.md).
 
+For the optional Python REPL extraction path, set
+`stage2.extraction_note_search.enabled` to `true` and configure its MatchMiner-AI
+worker dependency. Start with fresh measurement outputs; existing full-record
+measurements cannot be mixed into the comparison. See
+[note-search extraction](stage2_note_search.md). This option keeps mode-based
+variables on full-record extraction and does not change the default workflow.
+
 The checked-in example uses an extraction output allowance of 4,096 tokens for
 non-thinking calls and 32,768 for reasoning-enabled calls. These are total
 response budgets, including reasoning. For larger reasoning allowances, set

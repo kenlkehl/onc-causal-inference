@@ -1037,6 +1037,16 @@ supporting quotations. Scalar extraction does not require quotations, and quoted
 spans are not required to match the source text exactly. Occurrences and typed
 values still undergo validation.
 
+An optional `stage2.extraction_note_search.enabled: true` path uses a persistent,
+isolated Python REPL to search the patient's full record and extract each feature
+batch from selected excerpts. It reuses the MatchMiner-AI note-search worker,
+keeps OCI's endpoint, sampling, concurrency, and field-repair handling, and
+checkpoints completed search cells. Mode-based variables retain full-record
+occurrence extraction. The standard full-record path remains the default.
+Search can miss evidence, and a speed or accuracy advantage has not been
+established. See [note-search extraction](docs/stage2_note_search.md) for setup,
+limits, and how to keep a comparison separate from existing measurements.
+
 Stage 2 preserves the outer-fold boundary throughout variable construction and
 estimation. Before the first LLM request, its default evidence compiler reuses
 the scientific allowlisting in `all_evidence_fusion`, removes exact duplicates

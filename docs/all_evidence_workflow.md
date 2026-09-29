@@ -686,7 +686,7 @@ operational controls include `request_timeout` (14400 seconds by default),
 `operationalization_max_prompt_chars`,
 `consolidation_batch_size`, `consolidation_alphabetical_rounds`,
 `consolidation_max_rounds`, `consolidation_policy`,
-`extraction_max_prompt_chars`, `extraction_feature_batch_size`,
+`extraction_max_prompt_chars`, `extraction_feature_batch_size`, `extraction_note_search`,
 `extraction_chunk_size_tokens`, `extraction_context_window_tokens`,
 `extraction_context_margin_tokens`,
 `vllm_rapid_switch_seconds`,
@@ -727,7 +727,7 @@ reservation and may require re-extraction if that reservation changes; the norma
 fingerprint check remains enforced. The chunk planner reserves the larger of the
 two configured extraction ceilings so a reasoning repair has sufficient room.
 Extraction always isolates one patient and never sends more than the configured
-feature batch. Long records are read in ordered, lossless contiguous chunks of
+feature batch. By default, long records are read in ordered, lossless contiguous chunks of
 at most `extraction_chunk_size_tokens` (50,000 by default), preferring nearby
 note, paragraph, line, sentence, or word boundaries. Each chunk receives the
 validated cumulative scalar extraction from all earlier chunks and returns the
@@ -748,6 +748,19 @@ variable therefore cannot switch the entire candidate set to observation extract
 Mixed sets run under separate `by_strategy/values` and `by_strategy/mode` checkpoint
 trees, with a combined patient matrix and failure summary at the extraction root.
 The two groups share the configured request admission limits.
+
+The opt-in `extraction_note_search` configuration replaces scalar full-record
+reading with a bounded Python search loop. Each patient/feature batch has an
+isolated local record and persistent Python variables. The LLM searches for
+relevant excerpts, then returns the same declared scalar measurements. Source
+excerpts are captured by Python; the model supplies no quotations, row IDs, or
+source indices. Mode variables still use full-record occurrence extraction.
+Training, ontology-refinement re-extraction, estimand alternatives, and held-out
+extraction receive the same selected method. Method/limit/backend changes require
+fresh measurement outputs, while discovery and variable definitions remain
+independent of the extraction choice. See [the configuration and checkpoint
+guide](stage2_note_search.md). Full-record reading remains the default, and the
+search path has not yet been benchmarked for clinical recall or throughput.
 
 Mode extraction plans one patient inside each worker, so requests can start before
 page planning finishes for the cohort. The planner prepares fixed prompt prefixes

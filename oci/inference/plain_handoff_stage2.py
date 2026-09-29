@@ -78,6 +78,11 @@ from .stage2_candidate_consolidation import (
 )
 from . import stage2_clinical_prompts as clinical_prompts
 from . import stage2_request_audit as request_audit
+from .stage2_note_search import (
+    NoteSearchConfig,
+    config_from_mapping as note_search_config_from_mapping,
+    preflight as note_search_preflight,
+)
 from .stage2_sequential_consolidation import (
     Stage2SequentialConsolidationConfig,
     sequential_consolidation_config_from_mapping,
@@ -894,6 +899,7 @@ class PlainHandoffStage2Config:
     # so discovery batching and its evidence-compilation fingerprints remain stable.
     extraction_max_prompt_chars: int = DEFAULT_EXTRACTION_MAX_PROMPT_CHARS
     extraction_feature_batch_size: int = DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE
+    extraction_note_search: NoteSearchConfig = field(default_factory=NoteSearchConfig)
     # Long records are processed in ordered, lossless source chunks. This is a
     # token cap rather than a target: the planner shrinks a chunk when feature
     # definitions and carried-forward state need more of the context window.
@@ -1035,6 +1041,9 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.outer_fold_recovery_backoff must be finite and nonnegative")
         if not isinstance(self.extraction_stream, bool):
             raise ValueError("stage2.extraction_stream must be a boolean")
+        if not isinstance(self.extraction_note_search, NoteSearchConfig):
+            raise ValueError("stage2.extraction_note_search must be a NoteSearchConfig")
+        self.extraction_note_search.validate()
         if (isinstance(self.extraction_deferred_retry_passes, bool)
                 or not isinstance(self.extraction_deferred_retry_passes, int)
                 or self.extraction_deferred_retry_passes < 0):
@@ -1563,6 +1572,7 @@ def plain_stage2_config_from_mapping(
         extraction_reasoning_max_tokens=raw.get("extraction_reasoning_max_tokens"),
         extraction_stream=raw.get("extraction_stream", False),
         extraction_deferred_retry_passes=raw.get("extraction_deferred_retry_passes", 1),
+        extraction_note_search=note_search_config_from_mapping(raw.get("extraction_note_search")),
         interpretation_reasoning_effort=interpretation_reasoning_effort,
         extraction_reasoning_effort=extraction_reasoning_effort,
         max_prompt_chars=int(raw.get("max_prompt_chars", 100_000)),
@@ -6628,6 +6638,8 @@ class PlainHandoffStage2:
         config = _resolve_stage2_model(config)
         config = _resolve_extraction_llm_model(config)
         config.validate()
+        if config.extraction_note_search.enabled and not config.runtime_disable_extraction:
+            note_search_preflight(config.extraction_note_search)
         endpoints = config.runtime_endpoints or (config.endpoint,)
         primary_identity = _endpoint_model_identity(
             config,

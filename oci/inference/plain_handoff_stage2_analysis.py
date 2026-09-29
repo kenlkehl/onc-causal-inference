@@ -36,6 +36,8 @@ from .nuisance_diagnostics import (
 )
 from . import stage2_request_audit as request_audit
 from . import stage2_clinical_prompts as clinical_prompts
+from . import stage2_note_search as note_search_extraction
+from .stage2_note_search import NoteSearchConfig
 
 from ..models.causal_forest_head import CausalForestHead
 from ..models.elastic_net_nuisance import (
@@ -353,8 +355,8 @@ def _configured_extraction_feature_batch_size(config: Any) -> int:
     )
 
 
-def _configured_serial_extraction(config: Any) -> dict[str, int]:
-    """Read token-window settings from current or pre-serial configs."""
+def _configured_serial_extraction(config: Any) -> dict[str, Any]:
+    """Read extraction settings while preserving older callers' defaults."""
 
     defaults = {
         "chunk_size_tokens": DEFAULT_EXTRACTION_CHUNK_SIZE_TOKENS,
@@ -379,6 +381,9 @@ def _configured_serial_extraction(config: Any) -> dict[str, int]:
         settings["max_output_tokens"],
         int(getattr(config, "extraction_reasoning_max_tokens", None) or 0),
     )
+    search = getattr(config, "extraction_note_search", NoteSearchConfig())
+    if search.enabled:
+        settings["note_search"] = search
     return settings
 
 
@@ -417,7 +422,7 @@ def frozen_preselection_review_policy(config: Any) -> dict[str, Any]:
     minimum_failure_patients, maximum_refinement_rounds = (
         _ontology_refinement_limits(config)
     )
-    return {
+    policy = {
         "review_schema_version": REVIEW_CHECKPOINT_SCHEMA_VERSION,
         "review_convergence_schema_version": REVIEW_CONVERGENCE_SCHEMA_VERSION,
         "ontology_refinement_schema_version": (
@@ -430,6 +435,10 @@ def frozen_preselection_review_policy(config: Any) -> dict[str, Any]:
         ),
         "max_ontology_refinement_rounds": int(maximum_refinement_rounds),
     }
+    search = getattr(config, "extraction_note_search", NoteSearchConfig())
+    if search.enabled:
+        policy["extraction_note_search"] = note_search_extraction.policy_identity(search)
+    return policy
 
 
 def _load_frozen_preselection_snapshot(
@@ -3433,10 +3442,14 @@ def extract_rows(
     max_output_tokens: int = DEFAULT_EXTRACTION_MAX_TOKENS,
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
     deferred_retry_passes: int = 1,
+    note_search: NoteSearchConfig | None = None,
 ) -> pd.DataFrame:
-    """Extract one patient at a time, serializing long records across token chunks."""
+    """Extract patient/feature batches with full-record or optional note-search reading."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    note_search = note_search or NoteSearchConfig()
+    note_search.validate()
+    measurement_method = note_search_extraction.claim_output_method(output_dir, note_search)
     if (isinstance(deferred_retry_passes, bool) or not isinstance(deferred_retry_passes, int)
             or deferred_retry_passes < 0):
         raise ValueError("deferred_retry_passes must be a nonnegative integer")
@@ -3470,6 +3483,7 @@ def extract_rows(
                 chunk_size_tokens=chunk_size_tokens, context_window_tokens=context_window_tokens,
                 max_output_tokens=max_output_tokens, context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
+                note_search=note_search,
             )
 
         mode_workers = max(1, int(workers) // 8)
@@ -3526,6 +3540,8 @@ def extract_rows(
             request_kind=request_kind,
         )
     extraction_request_identity = dict(request_identity or {})
+    if note_search.enabled:
+        extraction_request_identity["measurement_method"] = measurement_method
     feature_names = [str(feature["name"]) for feature in definitions]
     definition_batches = _partition_feature_definitions(
         definitions,
@@ -3745,7 +3761,7 @@ def extract_rows(
                     feature_dir / "input.json",
                     {**batch_input, "input_fingerprint": input_fingerprint},
                 )
-                use_serial = _serial_extraction_required(
+                use_serial = not note_search.enabled and _serial_extraction_required(
                     row=row,
                     definitions=batch_definitions,
                     tokenizer=tokenizer,
@@ -3757,7 +3773,14 @@ def extract_rows(
                     ),
                     max_prompt_chars=int(max_prompt_chars),
                 )
-                if use_serial:
+                if note_search.enabled:
+                    result = note_search_extraction.extract_feature_batch(
+                        row=row, definitions=batch_definitions, parent_dir=feature_dir,
+                        request_json=guarded_request_json, request_identity=extraction_request_identity,
+                        config=note_search, max_prompt_chars=int(max_prompt_chars), tokenizer=tokenizer,
+                        input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
+                    )
+                elif use_serial:
                     result = _serial_extract_feature_batch(
                         parent_dir=feature_dir,
                         row=row,
@@ -3983,6 +4006,8 @@ def extract_rows(
                     continue
             elif schema_version is not None:
                 continue
+            elif note_search.enabled:
+                continue  # Unversioned historical measurements used full-record extraction.
             try:
                 validated = _validate_extraction(
                     candidate["result"],
@@ -4054,7 +4079,7 @@ def extract_rows(
         batch_dir.mkdir(parents=True, exist_ok=True)
         _write_json(batch_dir / "row_ids.json", row_ids)
         if len(definition_batches) == 1:
-            use_serial = _serial_extraction_required(
+            use_serial = not note_search.enabled and _serial_extraction_required(
                 row=batch[0],
                 definitions=definitions,
                 tokenizer=tokenizer,
@@ -4066,7 +4091,14 @@ def extract_rows(
                 ),
                 max_prompt_chars=int(max_prompt_chars),
             )
-            if use_serial:
+            if note_search.enabled:
+                result = note_search_extraction.extract_feature_batch(
+                    row=batch[0], definitions=definitions, parent_dir=batch_dir,
+                    request_json=guarded_request_json, request_identity=extraction_request_identity,
+                    config=note_search, max_prompt_chars=int(max_prompt_chars), tokenizer=tokenizer,
+                    input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
+                )
+            elif use_serial:
                 result = _serial_extract_feature_batch(
                     parent_dir=batch_dir,
                     row=batch[0],
@@ -8102,6 +8134,7 @@ def _extract_changed_features_and_merge(
     max_output_tokens: int,
     context_margin_tokens: int,
     deferred_retry_passes: int = 1,
+    note_search: NoteSearchConfig | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Extract changed features only and materialize a complete merged matrix."""
 
@@ -8134,6 +8167,7 @@ def _extract_changed_features_and_merge(
             max_output_tokens=max_output_tokens,
             context_margin_tokens=context_margin_tokens,
             deferred_retry_passes=deferred_retry_passes,
+            note_search=note_search,
         )
         summary = json.loads(
             (output_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8170,6 +8204,7 @@ def _extract_changed_features_and_merge(
         max_output_tokens=max_output_tokens,
         context_margin_tokens=context_margin_tokens,
         deferred_retry_passes=deferred_retry_passes,
+        note_search=note_search,
     )
     prior_names = [str(feature["name"]) for feature in prior_definitions]
     prior_indexed = _validated_extraction_index(
@@ -8285,6 +8320,7 @@ def _extract_training_with_ontology_feedback(
     max_output_tokens: int = DEFAULT_EXTRACTION_MAX_TOKENS,
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
     deferred_retry_passes: int = 1,
+    note_search: NoteSearchConfig | None = None,
     prior_extracted: pd.DataFrame | None = None,
     prior_definitions: Sequence[Mapping[str, Any]] | None = None,
     prior_failure_summary: Mapping[str, Any] | None = None,
@@ -8338,6 +8374,7 @@ def _extract_training_with_ontology_feedback(
                 max_output_tokens=max_output_tokens,
                 context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
+                note_search=note_search,
             )
             summary = json.loads(
                 (extraction_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8365,6 +8402,7 @@ def _extract_training_with_ontology_feedback(
                 max_output_tokens=max_output_tokens,
                 context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
+                note_search=note_search,
             )
         repeated = _repeated_ontology_failure_patterns(
             summary,
@@ -9631,6 +9669,9 @@ def run_fold_analysis(
 ) -> dict[str, Any]:
     """Run extraction supervision, fold-local selection, and causal-forest estimation."""
 
+    note_search_extraction.claim_output_method(
+        output_dir, getattr(config, "extraction_note_search", NoteSearchConfig()), fold_root=True,
+    )
     # Study context is supplied only to modeling reviews, never extraction supervision.
     (
         ontology_refinement_min_failure_patients,
@@ -9655,6 +9696,9 @@ def run_fold_analysis(
         "configured_checkpoint_model": configured_extraction_model,
         "runtime_continuation_model": runtime_extraction_model or None,
     }
+    search_config = getattr(config, "extraction_note_search", NoteSearchConfig())
+    if search_config.enabled:
+        extraction_identity["measurement_method"] = note_search_extraction.policy_identity(search_config)
     primary_identity = {
         "model": str(getattr(config, "model", "")),
     }
