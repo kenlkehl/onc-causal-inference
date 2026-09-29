@@ -15,6 +15,11 @@ The experiment uses structured variables only. It does not run clinical-note
 generation, feature discovery, extraction, an LLM, or the downstream causal
 forest. Its purpose is to isolate modifier-selection behavior.
 
+The follow-on downstream experiment is in
+`downstream_effect_estimation/`. It crosses the true versus Gao-selected
+modifier support with OCI's causal forest versus a Gao-Hastie counterfactual
+estimator on both saved NSCLC mechanisms.
+
 ## Run it
 
 Requirements:
