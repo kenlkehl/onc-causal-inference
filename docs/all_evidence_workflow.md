@@ -10,9 +10,11 @@ uv run python scripts/run_all_evidence.py \
 It reads one cohort and writes everything to one output directory. With no
 Stage 2 transport configured it runs Stage 1 through the plain handoff. With an
 external endpoint or a pipeline-managed vLLM pool it continues through
-fold-scoped feature definitions, two-endpoint patient extraction and ontology
-supervision, fold-local statistical selection, and cross-fitted causal-forest
-estimation. Interruption and resume
+fold-scoped feature definitions, patient extraction and ontology
+supervision, fold-local statistical selection, and held-out causal estimation.
+The `multi_model` selector can choose a causal forest or a penalized interaction
+outcome model. See the [quickstart](all_evidence_quickstart.md) to enable the
+current multi-model path and optional refinement steps. Interruption and resume
 are automatic: run the same command again.
 
 This is the repository's only all-evidence orchestration path. It uses ordinary
@@ -120,14 +122,14 @@ interaction filter, evidence-community graph, retrieval stage, causal-role
 filter, or feature-count cap.
 
 The primary model then performs merge-only alias consolidation and defines one
-extraction ontology per consolidated candidate. A user-supplied small LLM
+extraction ontology per consolidated candidate. The configured extraction LLM
 extracts all candidate values from outer-training clinical text, one patient
-per prompt. It may use a different endpoint or another model on the same
-endpoint as the primary model. The primary model receives only aggregate extraction
-values and validation failures to review and ontologize the small model's
+per prompt. The two roles may use different endpoints or share one model and
+endpoint. The primary model receives only aggregate extraction
+values and validation failures to review the extraction model's
 output; it receives no patient text, treatment or outcome values, causal-role
 evidence, performance metrics, or p-values. It may revise only the same
-candidate's extraction schema, and a revision triggers small-model re-extraction.
+candidate's extraction schema, and a revision triggers re-extraction.
 Only candidates whose prompt-facing schema changed are re-extracted; unchanged
 raw columns are reused and merged with the refreshed columns. Extraction remains
 one patient per prompt, with the existing per-patient feature batching.
@@ -772,7 +774,7 @@ text remains Unicode instead of expanding into token-heavy ASCII escape
 sequences. Independent outer folds execute concurrently. `stage2.workers`
 controls combined primary-model concurrency, including consolidation and
 supervisor fan-outs; `stage2.extraction_llm.workers` independently controls
-small-model patient extraction without combining patients.
+patient extraction without combining patients.
 Stage 2 sequential candidate consolidation and all-evidence role selection occur
 inside each independent outer fold;
 those checkpoints are reusable independently of endpoint URLs.
@@ -792,7 +794,7 @@ uv run python scripts/run_all_evidence.py \
 The same choice can be stored as `run.mode: "full"`, `"stage1"`, or
 `"stage2"`. `--stage1-only` and `--stage2-only` override it. Endpoint and model
 values can also be supplied as `--stage2-endpoint` and `--stage2-model`.
-The small model has `--stage2-extraction-endpoint`,
+The extraction model has `--stage2-extraction-endpoint`,
 `--stage2-extraction-model`, `--stage2-extraction-api-key`, and
 `--stage2-extraction-workers`. Configure grouped selection under
 `stage2.statistical_selection` (or with a `--set` override). Configure the
@@ -879,12 +881,78 @@ measurement ontology are still learned on the outer-training set, so the inner
 R-loss comparison is conditional on that upstream adaptation. Outer-held-out
 evaluation remains the final test of the whole workflow.
 
+## Saved-artifact launcher and live request limits
+
 A fresh run against preserved Stage 1 files can use
 `scripts/run_stage2_from_artifacts.py CONFIG.json`. The launcher projects the
 dataset to the four declared patient/text/treatment/outcome columns, records
 source hashes and endpoint identities, checks tokenizer availability, and keeps
-status and logs alongside the dated run configuration. `--preflight` performs
-those checks without starting discovery or fitting.
+status and manifests in `report_dir`. Logs go to the process's standard error;
+redirect them when launching if a persistent log is needed. `--preflight`
+performs checks without starting discovery or fitting. The handoff content hash
+is computed by Stage 2 when it starts, avoiding a duplicate full-file scan in
+launcher preflight.
+
+This launcher has a separate flat schema. The following is a template; use the
+source run's clinical question, column names, inner-fold count, and seed, and
+replace the paths and endpoint URLs. `output_dir` is the Stage 2 directory
+itself, unlike the main runner's output root:
+
+```json
+{
+  "dataset": "/data/cohort.parquet",
+  "handoff_path": "/results/source_run/handoff/evidence.jsonl",
+  "split_provenance_path": "/results/source_run/components/tfidf/split_provenance.jsonl",
+  "output_dir": "/results/new_stage2",
+  "report_dir": "/results/new_stage2_report",
+  "clinical_question": "Which pretreatment characteristics confound treatment selection or modify treatment effect?",
+  "unit_id_column": "patient_id",
+  "text_column": "clinical_text",
+  "treatment_column": "treatment_indicator",
+  "outcome_column": "outcome_indicator",
+  "outcome_type": "binary",
+  "inner_folds": 5,
+  "seed": 42,
+  "stage2": {
+    "endpoint": "http://127.0.0.1:8010/v1",
+    "model": "",
+    "workers": 4,
+    "extraction_llm": {
+      "endpoint": "http://127.0.0.1:8020/v1",
+      "model": "",
+      "workers": 4
+    },
+    "extraction_stream": true,
+    "estimand_ontology": {"enabled": true},
+    "selection_consolidation": {"enabled": true},
+    "min_propensity": 0.1,
+    "max_propensity": 0.9,
+    "statistical_selection": {
+      "selection_mode": "multi_model",
+      "multi_model": {
+        "matched_batch": {"enabled": true},
+        "modifier_count": {"enabled": true, "concept_review": true}
+      }
+    }
+  }
+}
+```
+
+Use an environment with the repository dependencies already installed:
+
+```bash
+/path/to/python scripts/run_stage2_from_artifacts.py /path/to/artifact_run.json --preflight
+OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 \
+/path/to/python scripts/run_stage2_from_artifacts.py /path/to/artifact_run.json
+```
+
+The optional top-level `concurrency_control_path` points to a JSON file such as
+`{"interpretation": 4, "extraction": 4, "total": 6}`. The launcher rereads it
+while running. Role limits cannot exceed their configured worker counts, and
+the total cannot exceed their sum. A zero limit pauses new request admission;
+in-flight requests finish. Without this file, configured worker limits apply.
+Both roles sharing one endpoint can use the total limit to bound combined load.
+This live control belongs to the artifact launcher, not the main CLI.
 
 ## Parallel execution
 
@@ -900,7 +968,7 @@ the available CPUs and GPUs as follows.
 | `text_models` | An outer/full or exact-inner context, with independent BoW folds inside it | One fixed process lane per configured CUDA device; `run.workers` is divided among active lanes and bounds their combined BoW fold threads |
 | `neural_queries` | An outer/full or exact-inner context | One fixed process lane per configured CUDA device; CPU-only runs use at most `run.workers` lanes |
 | `handoff` | None | The completed JSONL files are combined serially |
-| `stage2` | Independent outer folds; deterministic pair chunks within each inner fold | Outer folds execute concurrently; primary calls are bounded by `stage2.workers`, small-model extraction calls by `stage2.extraction_llm.workers`, and pair chunks from every fold share one loky pool capped by `stage2.workers`; role passes remain ordered |
+| `stage2` | Independent outer folds; deterministic pair chunks within each inner fold | Outer folds execute concurrently; primary calls are bounded by `stage2.workers`, extraction calls by `stage2.extraction_llm.workers`, and pair chunks from every fold share one loky pool capped by `stage2.workers`; role passes remain ordered |
 
 A fixed CUDA lane processes its assigned contexts serially on one GPU. This
 provides device affinity and prevents a process queue from placing two
@@ -1368,12 +1436,16 @@ made. The held-out extraction begins only after
 `final_definitions.json` has been written. The reported average treatment effect
 is the mean of the held-out AIPW scores across outer folds; its standard error
 is the empirical standard error of those scores. `estimated_cate` in the
-prediction file comes from an honest `CausalForestDML` fit on the outer-training
-rows. Effect modifiers form its heterogeneity matrix and pure confounders form
-its controls; dual-role variables are represented once in the heterogeneity
-matrix. A constant heterogeneity design is used when no modifier survives, so
-the final model remains a causal forest. Fold diagnostics include its fit audit
-and held-out effect confidence intervals. The supported nuisance path is
+prediction file comes from the estimator selected within each outer-training
+partition. For an honest `CausalForestDML`, effect modifiers form its
+heterogeneity matrix and pure confounders form its controls; dual-role variables
+are represented once in the heterogeneity matrix. A constant heterogeneity
+design is used when no modifier survives. Multi-model architecture search can
+instead select a penalized outcome model with treatment interactions: logistic
+for binary outcomes, linear for continuous outcomes. It predicts the difference
+between treatment and control outcomes; forest-style individual-effect intervals
+are unavailable for that architecture. Fold diagnostics record the chosen model,
+its fit audit, and intervals when supported. The supported nuisance path is
 elastic-net-only; the obsolete strict random-forest runtime-config contract is
 retired. The fit audit records every fitted cross-fit nuisance clone, including
 its effective CV folds, selected regularization, and optimizer iteration-limit
@@ -1403,7 +1475,10 @@ loads oracle-bearing data. It never fits, ranks, or selects Stage 1 models. The
 per-architecture files contain native metrics appropriate to each evidence
 representation plus a common recovery view; `comparison.csv` is the compact
 cross-architecture summary. A completed legacy handoff is backfilled into the
-same additive `stage1_architectures/` contract without refitting.
+same additive `stage1_architectures/` contract without refitting, provided its
+evidence satisfies current source contracts. Legacy all-history neural-query
+evidence first needs regeneration from saved queries and chunk caches using
+query-ranked retrieval.
 
 To intentionally rerun one component, use:
 
@@ -1442,13 +1517,15 @@ of the affected components when appropriate.
 - `neural_queries` fits and saves each outer/full or exact-inner context
   independently.
 - `handoff` gathers the completed evidence into the stable Stage 2 input path.
-- `stage2` exhaustively interprets semantic cards, supervises small-model
-  extraction ontologies, builds statistical evidence, applies the configured
-  LLM-role or independent-task selection policy, and writes held-out
-  causal-forest effects and AIPW scores before aggregating the outer folds.
+- `stage2` compiles and interprets semantic cards, supervises extraction
+  ontologies, filters missing measurements, optionally refines definitions and
+  consolidates measured aliases, and applies the configured `llm_roles`,
+  `independent_tasks`, or `multi_model` selection policy. The multi-model path
+  supports concept review and modifier-count/architecture search. It writes
+  held-out effects and AIPW scores before aggregating outer folds.
 
 The Stage 1 scientific model implementations are reused. The plain Stage 2 path
 replaces the former production control plane with readable directories,
-auditable regression screens, an honest causal forest, and cross-fitted AIPW
+auditable statistical evidence, a selected CATE estimator, and cross-fitted AIPW
 scores. These choices are recorded in the fold diagnostics and final estimate
 rather than hidden in an authenticated deployment specification.
