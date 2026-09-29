@@ -1,0 +1,13 @@
+mechanism,n,nuisance,gao_sparse_m,gao_sparse_n,zhao_m,zhao_n,oci_m,oci_n
+balanced,800,estimated,3.0,0.3,3.2,0.3,4.8,9.0
+balanced,800,oracle,3.4,0.4,3.2,0.4,4.8,9.6
+balanced,3200,estimated,5.0,0.1,5.0,0.1,5.0,8.8
+balanced,3200,oracle,5.0,0.4,5.0,0.3,5.0,8.6
+balanced,12800,estimated,5.0,0.2,5.0,0.2,5.0,7.5
+balanced,12800,oracle,5.0,0.2,5.0,0.2,5.0,7.5
+nsclc,800,estimated,1.1,0.3,1.1,0.4,2.7,11.6
+nsclc,800,oracle,1.2,0.3,1.3,0.2,2.7,11.0
+nsclc,3200,estimated,2.9,0.4,3.0,0.4,4.3,9.9
+nsclc,3200,oracle,3.1,0.1,3.0,0.2,4.1,10.8
+nsclc,12800,estimated,4.6,0.2,4.6,0.3,5.0,7.2
+nsclc,12800,oracle,4.6,0.2,4.6,0.3,5.0,7.4
