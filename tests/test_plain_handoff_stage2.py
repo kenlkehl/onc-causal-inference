@@ -133,7 +133,7 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config.extraction_max_tokens == 75_000
     assert config.repetition_penalty is None
     assert config.interpretation_reasoning_effort == "auto"
-    assert config.extraction_reasoning_effort == "auto"
+    assert config.extraction_reasoning_effort == "none"
     assert config.max_prompt_chars == 100_000
     assert config.consolidation_max_prompt_chars == 640_000
     assert config.operationalization_max_prompt_chars == 640_000
@@ -850,7 +850,7 @@ def test_stage2_maps_legacy_enable_thinking_to_interpretation_effort(caplog):
 
     assert config is not None
     assert config.interpretation_reasoning_effort == "none"
-    assert config.extraction_reasoning_effort == "auto"
+    assert config.extraction_reasoning_effort == "none"
     assert "enable_thinking is deprecated" in caplog.text
 
 

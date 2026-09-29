@@ -240,7 +240,7 @@ An external endpoint configuration is:
     "thinking_after_response_repairs": 5,
     "repetition_penalty": null,
     "interpretation_reasoning_effort": "auto",
-    "extraction_reasoning_effort": "auto",
+    "extraction_reasoning_effort": "none",
     "evidence_compiler": "semantic_cluster_cards_v3",
     "evidence_max_cards_per_fold": 400,
     "evidence_max_exemplars_per_card": 4,
@@ -488,10 +488,13 @@ uses `reasoning_parser: "qwen3"` and `language_model_only: true`.
 Stage 2 selects reasoning per Chat Completions request. Evidence interpretation
 and audit, consolidation, operationalization, category mapping, aggregate
 ontology supervision, and ontology refinement go to the primary model with
-`reasoning_effort: "auto"` by default. The extraction model also uses `auto`.
-After `/models` identifies the backing model, Qwen3.8 Flash Next resolves to
-`xhigh` for both roles; other models retain high interpretation and initially
-disabled extraction reasoning. Explicit settings override these defaults. Primary-model
+`reasoning_effort: "auto"` by default. After `/models` identifies the backing
+model, Qwen3.8 Flash Next resolves to `xhigh`; other recognized models use high
+interpretation reasoning. Extraction defaults to `none`, disabling thinking on
+initial patient requests for every model. Repeated validation failures can
+still trigger the existing repair reasoning policy. Explicit settings override
+these defaults; extraction `auto` opts into the model profile, including
+Flash Next's xhigh. Primary-model
 requests receive the configured `max_tokens` ceiling (100,000 by default), while
 patient extraction receives `extraction_max_tokens` (75,000 when omitted;
 the recommended example uses 4,096 for ten-feature non-thinking requests).
@@ -506,8 +509,8 @@ Stage 2 uses [publisher sampling profiles](stage2_sampling.md), with explicit
 configuration overrides taking precedence.
 Stage 2 first verifies each live endpoint's selected model through `/models`.
 It recognizes Qwen 3 (including 3.8), Gemma 4, and LFM 2.5 model IDs and sends
-their chat-template thinking switch. Flash Next also receives `xhigh` and
-`preserve_thinking`; rejected reasoning or sampling controls cause a visible
+their chat-template thinking switch. Flash Next receives `preserve_thinking`
+and the enabled reasoning level when applicable; rejected reasoning or sampling controls cause a visible
 failure. Other families retain the portable prompt fallback and progressively
 more standard request fields when an endpoint rejects an extension. Responses are accepted whether
 reasoning is separated into `reasoning_content` or remains inline in Qwen/LFM

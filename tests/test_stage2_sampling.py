@@ -234,7 +234,8 @@ def test_live_alias_resolution_routes_primary_and_extraction_profiles(monkeypatc
 @pytest.mark.parametrize("request_kind", ["interpretation", "extraction"])
 def test_flash_next_auto_uses_xhigh_and_publisher_sampling_for_both_roles(request_kind):
     cfg = config("local-alias", runtime_model_family="qwen3",
-                 runtime_sampling_model="Inferact/Qwen3.8-Flash-Next-NVFP4")
+                 runtime_sampling_model="Inferact/Qwen3.8-Flash-Next-NVFP4",
+                 extraction_reasoning_effort="auto")
     policy = stage2._stage2_request_policy(cfg, request_kind)
     assert policy["reasoning_effort"] == "xhigh"
     assert {k: policy[k] for k in SAMPLING_FIELDS} == {
@@ -284,7 +285,12 @@ def test_live_flash_next_backing_model_controls_both_roles_and_manifest(monkeypa
     runner._check_and_record_model_identity(tmp_path)
     import json
     manifest = json.loads((tmp_path / "model_identity.json").read_text())
-    assert all(p["reasoning_effort"] == "xhigh" for p in manifest["effective_request_policies"].values())
-    explicit = replace(runner.config, extraction_reasoning_effort="none")
-    policy = stage2._stage2_request_policy(explicit, "extraction")
+    assert manifest["effective_request_policies"]["interpretation"]["reasoning_effort"] == "xhigh"
+    assert manifest["effective_request_policies"]["extraction"]["reasoning_effort"] == "none"
+    policy = stage2._stage2_request_policy(runner.extraction_request_config, "extraction")
     assert (policy["reasoning_effort"], policy["temperature"], policy["top_p"], policy["presence_penalty"]) == ("none", 0.7, 0.8, 1.5)
+    variants = stage2._openai_request_variants(base_kwargs={}, request_policy=policy, model_family="qwen3")
+    for variant in variants:
+        assert "reasoning_effort" not in variant
+        assert variant["extra_body"]["chat_template_kwargs"]["enable_thinking"] is False
+        assert variant["extra_body"]["top_k"] == 20

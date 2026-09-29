@@ -40,7 +40,7 @@
     "thinking_after_response_repairs": 5,
     "repetition_penalty": null,
     "interpretation_reasoning_effort": "auto",
-    "extraction_reasoning_effort": "auto",
+    "extraction_reasoning_effort": "none",
     "operationalization_max_prompt_chars": 640000,
     "consolidation_batch_size": 20,
     "consolidation_alphabetical_rounds": 5,

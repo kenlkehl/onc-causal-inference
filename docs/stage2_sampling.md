@@ -53,13 +53,15 @@ Compatible endpoints receive top-k, min-p, and repetition penalty through
 `extra_body`. An endpoint rejecting these extensions can reach the existing
 logged compatibility fallback, which omits them and uses its server defaults.
 
-Reasoning defaults to `auto` for both interpretation and extraction. For
-Qwen3.8 Flash Next, including the Inferact NVFP4 checkpoint, this resolves to
-`xhigh` in both roles, with thinking and `preserve_thinking` enabled. Its
-thinking profile sends temperature 1.0, top-p 0.95, top-k 20, min-p 0,
-presence/frequency penalties 0, and repetition penalty 1. Other recognized
-models retain high interpretation and initially disabled extraction reasoning.
-Explicit reasoning settings override these defaults.
+Interpretation reasoning defaults to `auto`, resolving to `xhigh` for Qwen3.8
+Flash Next (including Inferact NVFP4) and high for other recognized models.
+Extraction defaults to `none`: initial patient requests disable thinking and
+use the model's non-thinking sampling profile. Flash Next receives
+`enable_thinking: false` and omits the enabled-only reasoning-effort enum;
+its non-thinking profile uses temperature 0.7, top-p 0.8, top-k 20, and presence
+penalty 1.5. Repeated validation failures can enable repair reasoning.
+Explicit reasoning settings override the initial policy. Extraction `auto`
+opts into the model profile, including Flash Next's xhigh thinking profile.
 
 Flash Next requests keep their reasoning and sampling controls on compatibility
 retries. Rejection of those controls fails the request visibly. Only the optional

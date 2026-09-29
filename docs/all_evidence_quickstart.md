@@ -112,12 +112,13 @@ See [multi-model selection](stage2_multi_model.md),
 
 ## Model settings and extraction recovery
 
-Both reasoning policies default to `auto`. After probing `/models`, Stage 2
-selects the resolved model family's publisher sampling profile. Qwen 3.8 Flash
-Next, including the Inferact NVFP4 checkpoint, defaults to **xhigh reasoning for
-both interpretation and extraction**. Other recognized families default to
-high interpretation and initially non-thinking extraction. Explicit overrides
-take precedence. See [sampling profiles](stage2_sampling.md).
+Interpretation reasoning defaults to `auto`; extraction defaults to `none`.
+After probing `/models`, Stage 2 selects the resolved model family's publisher
+sampling profile. Qwen 3.8 Flash Next defaults to xhigh interpretation and
+non-thinking patient extraction. Repeated validation failures can still enable
+reasoning during extraction repairs. Explicit overrides take precedence;
+extraction `auto` opts into Flash Next's xhigh profile.
+See [sampling profiles](stage2_sampling.md).
 
 The checked-in example uses an extraction output allowance of 4,096 tokens for
 non-thinking calls and 32,768 for reasoning-enabled calls. These are total

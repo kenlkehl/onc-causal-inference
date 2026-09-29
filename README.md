@@ -727,7 +727,7 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
     "thinking_after_response_repairs": 5,
     "repetition_penalty": null,
     "interpretation_reasoning_effort": "auto",
-    "extraction_reasoning_effort": "auto",
+    "extraction_reasoning_effort": "none",
     "evidence_compiler": "semantic_cluster_cards_v3",
     "evidence_max_cards_per_fold": 400,
     "evidence_max_exemplars_per_card": 4,
@@ -896,11 +896,13 @@ is explicitly overridden:
 - Qwen model names: `reasoning_parser: "qwen3"` and
   `language_model_only: true`.
 
-Reasoning is selected per request. Both `interpretation_reasoning_effort` and
-`extraction_reasoning_effort` default to `auto`. Qwen 3.8 Flash Next, including
-its Inferact NVFP4 checkpoint, resolves to **xhigh reasoning for both roles**.
-Other recognized families retain high interpretation and initially disabled
-extraction reasoning. Explicit values override these defaults.
+Reasoning is selected per request. `interpretation_reasoning_effort` defaults to
+`auto`, which selects xhigh for Qwen 3.8 Flash Next and high for other recognized
+families. `extraction_reasoning_effort` defaults to `none`, so initial patient
+extraction requests disable thinking for every model, including Flash Next.
+The existing repair policy can enable reasoning after repeated validation
+failures. Explicit values override these defaults; setting extraction to `auto`
+opts into the model profile, including xhigh for Flash Next.
 
 After querying `/models`, Stage 2 selects a checked-in publisher sampling profile
 for the resolved backing model, including served aliases where the endpoint
