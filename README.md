@@ -24,8 +24,8 @@ sudo apt-get update
 sudo apt-get install -y git curl ffmpeg
 nvidia-smi
 
-git clone https://github.com/kenlkehl/causal-dragonnet-text.git
-cd causal-dragonnet-text
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
 
 # Install uv if it is not already on PATH.
 if ! command -v uv >/dev/null 2>&1; then
