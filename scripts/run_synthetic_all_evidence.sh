@@ -63,6 +63,7 @@ stage2_request_timeout="${STAGE2_REQUEST_TIMEOUT:-}"
 stage2_request_attempt_timeout="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-}"
 stage2_model="${STAGE2_MODEL:-}"
 stage2_extraction_model="${STAGE2_EXTRACTION_MODEL:-}"
+stage2_extraction_endpoints="${STAGE2_EXTRACTION_ENDPOINTS:-}"
 stage2_extraction_workers="${STAGE2_EXTRACTION_WORKERS:-}"
 stage2_max_tokens="${STAGE2_MAX_TOKENS:-}"
 stage2_extraction_max_tokens="${STAGE2_EXTRACTION_MAX_TOKENS:-}"
@@ -139,10 +140,14 @@ if (( stage2_managed_orchestrator )); then
 else
     stage2_endpoint="${STAGE2_ENDPOINT-http://127.0.0.1:8010/v1}"
 fi
-if (( stage2_managed_extractor )); then
+if (( stage2_managed_extractor )) || [[ -n "${stage2_extraction_endpoints}" ]]; then
     stage2_extraction_endpoint="${STAGE2_EXTRACTION_ENDPOINT:-}"
 else
     stage2_extraction_endpoint="${STAGE2_EXTRACTION_ENDPOINT-http://127.0.0.1:8020/v1}"
+fi
+if [[ -n "${stage2_extraction_endpoints}" ]] && { (( stage2_managed_extractor )) || [[ -n "${stage2_extraction_endpoint}" ]]; }; then
+    echo "Set STAGE2_EXTRACTION_ENDPOINTS independently of STAGE2_EXTRACTION_ENDPOINT and managed extraction vLLM settings." >&2
+    exit 1
 fi
 if (( stage2_managed_orchestrator )) && [[ -n "${stage2_endpoint}" ]]; then
     echo "Set either STAGE2_ENDPOINT or managed orchestrator vLLM settings, not both." >&2
@@ -180,8 +185,8 @@ if (( stage2_managed_extractor && ! stage2_enabled )); then
     echo "Managed extraction vLLM also requires an external or managed orchestrator." >&2
     exit 1
 fi
-if (( stage2_enabled && ! stage2_managed_extractor )) && [[ -z "${stage2_extraction_endpoint}" ]]; then
-    echo "STAGE2_EXTRACTION_ENDPOINT or managed extraction vLLM settings are required whenever Stage 2 is enabled." >&2
+if (( stage2_enabled && ! stage2_managed_extractor )) && [[ -z "${stage2_extraction_endpoint}" && -z "${stage2_extraction_endpoints}" ]]; then
+    echo "STAGE2_EXTRACTION_ENDPOINT, STAGE2_EXTRACTION_ENDPOINTS, or managed extraction vLLM settings are required whenever Stage 2 is enabled." >&2
     exit 1
 fi
 if [[ "${disable_htr}" == "1" ]]; then
@@ -323,6 +328,14 @@ if (( stage2_managed_extractor )); then
         stage2_policy_args+=(
             --set "stage2.extraction_llm.vllm.extra_args=${stage2_extraction_vllm_extra_args_json}"
         )
+    fi
+elif [[ -n "${stage2_extraction_endpoints}" ]]; then
+    stage2_policy_args+=(--stage2-extraction-endpoints "${stage2_extraction_endpoints}")
+    if [[ -n "${stage2_extraction_workers}" ]]; then
+        stage2_policy_args+=(--stage2-extraction-workers "${stage2_extraction_workers}")
+    fi
+    if [[ -n "${stage2_extraction_model}" ]]; then
+        stage2_policy_args+=(--stage2-extraction-model "${stage2_extraction_model}")
     fi
 elif [[ -n "${stage2_extraction_endpoint}" ]]; then
     stage2_policy_args+=(
@@ -487,6 +500,8 @@ if (( stage2_managed_extractor )); then
     if (( stage2_managed_orchestrator )); then
         stage2_description+="; models alternate across the GPU union with adaptive configured-split fallback"
     fi
+elif [[ -n "${stage2_extraction_endpoints}" && "${stage2_enabled}" == "1" ]]; then
+    stage2_description+="; load-aware external extractor pool (${stage2_extraction_workers:-sum of per-server caps} concurrent requests)"
 elif [[ -n "${stage2_extraction_endpoint}" && "${stage2_enabled}" == "1" ]]; then
     stage2_description+="; extractor ${stage2_extraction_endpoint} (${stage2_extraction_workers:-${resolved_stage2_workers}} concurrent requests)"
 fi

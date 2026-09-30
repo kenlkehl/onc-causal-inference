@@ -157,3 +157,107 @@ def test_second_bad_field_can_be_excluded_from_reduced_batch(tmp_path, monkeypat
     assert frame.loc[0, "measurement_1"] == 4
     summary = json.loads((tmp_path / "failure_summary.json").read_text())
     assert len(summary["feature_failure_patterns"]) == 2
+
+
+@pytest.mark.parametrize("invalid_value", ["scalar", "category"])
+@pytest.mark.parametrize("metadata", ["missing", "container", "incomplete"])
+def test_serial_invalid_value_and_metadata_recover_prior_state(
+    tmp_path, invalid_value, metadata,
+):
+    features = definitions()[:2]
+    first, second = [feature["name"] for feature in features]
+    prior_values = {first: 11, second: 12}
+    if invalid_value == "category":
+        features[0].update(value_type="categorical", categories_or_unit=["A", "B"])
+        prior_values[first] = "A"
+    prior_state = {first: "Earlier supported value.", second: "Earlier measurement."}
+    prior = {"rows": [{"row_id": 42, "values": prior_values,
+                       "carry_forward_state": prior_state}]}
+    calls = []
+
+    def completion(messages, config):
+        # Missing serial metadata must get ordinary response repairs before
+        # value repair/category mapping can use a partial response.
+        assert config.runtime_request_kind == "extraction"
+        calls.append(messages)
+        row = {"row_id": 42, "values": {
+            first: [99] if invalid_value == "scalar" else "Undeclared",
+            second: 25,
+        }}
+        if metadata == "container":
+            row["carry_forward_state"] = []
+        elif metadata == "incomplete":
+            row["carry_forward_state"] = {second: "New measurement."}
+        return json.dumps({"rows": [row]})
+
+    result = analysis._request_validated_extraction(
+        messages=[{"role": "user", "content": "Update measurements from this chunk."}],
+        row_ids=[42], definitions=features,
+        request_json=request_with(completion, repairs=1),
+        ontology_audit_path=tmp_path / "category_ontology_repair.json",
+        messages_for_definitions=lambda _: [], prior_response=prior,
+        validate_response=lambda value, *, definitions: analysis._validate_serial_extraction(
+            value, row_id=42, definitions=definitions),
+    )
+    assert len(calls) == 2
+    assert result == prior
+    failure = json.loads((tmp_path / "extraction_failure.json").read_text())
+    assert "carry_forward_state" in failure["validation_error"]
+    assert not (tmp_path / "invalid_feature_value_repair.json").exists()
+    assert not (tmp_path / "pending_category_ontology.json").exists()
+
+
+def test_serial_value_recovery_retains_valid_new_values_and_normalized_metadata(tmp_path):
+    features = definitions()[:2]
+    first, second = [feature["name"] for feature in features]
+    response = {"rows": [{"row_id": 42, "values": {first: [99], second: 25},
+                          "carry_forward_state": {first: None, second: 25}}]}
+    result = analysis._request_validated_extraction(
+        messages=[{"role": "user", "content": "Update measurements from this chunk."}],
+        row_ids=[42], definitions=features,
+        request_json=request_with(lambda *_: json.dumps(response), repairs=1),
+        ontology_audit_path=tmp_path / "category_ontology_repair.json",
+        messages_for_definitions=lambda _: [],
+        validate_response=lambda value, *, definitions: analysis._validate_serial_extraction(
+            value, row_id=42, definitions=definitions),
+    )
+    assert result["rows"][0]["values"] == {first: None, second: 25}
+    assert result["rows"][0]["carry_forward_state"] == {first: None, second: "25"}
+    assert (tmp_path / "invalid_feature_value_repair.json").exists()
+
+
+def test_legacy_pending_category_without_serial_metadata_reextracts(tmp_path):
+    features = definitions()[:2]
+    features[0].update(value_type="categorical", categories_or_unit=["A", "B"])
+    first, second = [feature["name"] for feature in features]
+    pending = tmp_path / "pending_category_ontology.json"
+    pending.write_text(json.dumps({
+        "schema_version": analysis.PENDING_CATEGORY_ONTOLOGY_SCHEMA_VERSION,
+        "input_fingerprint": analysis._value_fingerprint({
+            "row_ids": [42], "definitions": analysis._prompt_feature_definitions(features),
+        }),
+        "issues": [{"row_id": 42, "feature_name": first,
+                    "prior_extracted_value": "Undeclared", "allowed_categories": ["A", "B"],
+                    "definition": features[0]}],
+        "response": {"rows": [{"row_id": 42, "values": {first: "Undeclared", second: 25}}]},
+    }))
+    calls = []
+    fresh = {"rows": [{"row_id": 42, "values": {first: "A", second: 25},
+                       "carry_forward_state": {first: "Documented A.", second: "New measurement."}}]}
+
+    def completion(_messages, config):
+        assert config.runtime_request_kind == "extraction"
+        calls.append(config.runtime_request_kind)
+        return json.dumps(fresh)
+
+    result = analysis._request_validated_extraction(
+        messages=[{"role": "user", "content": "Update measurements from this chunk."}],
+        row_ids=[42], definitions=features, request_json=request_with(completion),
+        ontology_audit_path=tmp_path / "category_ontology_repair.json",
+        messages_for_definitions=lambda _: [],
+        validate_response=lambda value, *, definitions: analysis._validate_serial_extraction(
+            value, row_id=42, definitions=definitions),
+    )
+    assert calls == ["extraction"]
+    assert result == fresh
+    assert not pending.exists()

@@ -136,6 +136,23 @@ def saved_fixture(tmp_path, managed=False):
     return config
 
 
+def test_saved_launcher_accepts_pool_override_without_changing_science(tmp_path):
+    config = saved_fixture(tmp_path)
+    endpoints = [{"endpoint": "http://a.test/v1", "max_concurrency": 2},
+                 {"endpoint": "http://b.test/v1", "max_concurrency": 3}]
+    args = launcher.command(config.dataset, str(config.output_dir), {
+        "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
+        "STAGE2_EXTRACTION_ENDPOINTS": json.dumps(endpoints),
+        "STAGE2_EXTRACTION_WORKERS": "5",
+    })
+    raw, directory = workflow._raw_config_from_args(workflow.build_parser().parse_args(args))
+    updated = workflow.compile_config(raw, config_dir=directory)
+    assert updated.stage2.extraction_llm.model == config.stage2.extraction_llm.model
+    assert updated.stage2.extraction_llm.workers == 5
+    assert [server.public_dict() for server in updated.stage2.extraction_llm.endpoints] == endpoints
+    assert replace(updated, stage2=config.stage2) == config
+
+
 @pytest.mark.parametrize("managed", [False, True])
 def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
     tmp_path, monkeypatch, managed

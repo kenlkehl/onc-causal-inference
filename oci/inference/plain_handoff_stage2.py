@@ -70,6 +70,7 @@ from .stage2_sampling import (
     SAMPLING_FIELDS, recommended_sampling, default_reasoning,
     is_qwen_flash_next, sampling_provenance,
 )
+from .stage2_endpoint_pool import ExtractionEndpoint, EndpointPool, endpoints_from_mapping
 from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
 from .stage2_candidate_consolidation import (
     MIXED_SCHEMA, CandidateConsolidationPolicy, CandidateEmbeddingCache,
@@ -770,6 +771,8 @@ class Stage2ExtractionLLMConfig:
     api_key: str = "EMPTY"
     workers: int = 4
     vllm: ManagedVLLMConfig | None = None
+    # External servers already started by the user. All serve the same model.
+    endpoints: tuple[ExtractionEndpoint, ...] = ()
     # Populated only while an extractor pool owned by this pipeline is alive.
     runtime_endpoints: tuple[str, ...] = ()
     # Optional continuation route for extracting cache misses with an explicitly
@@ -781,6 +784,18 @@ class Stage2ExtractionLLMConfig:
     runtime_api_key: str = "EMPTY"
 
     def validate(self, *, require_model: bool = True) -> None:
+        if self.endpoints:
+            if self.endpoint or self.vllm is not None or self.runtime_endpoints or self.runtime_endpoint:
+                raise ValueError(
+                    "configure stage2.extraction_llm.endpoints independently of endpoint, "
+                    "vllm, and runtime continuation routes"
+                )
+            for server in self.endpoints:
+                if not isinstance(server, ExtractionEndpoint):
+                    raise ValueError("stage2.extraction_llm.endpoints requires ExtractionEndpoint objects")
+                server.validate()
+            if len({server.endpoint for server in self.endpoints}) != len(self.endpoints):
+                raise ValueError("stage2.extraction_llm.endpoints contains duplicate URLs")
         if self.endpoint and self.vllm is not None and not self.runtime_endpoints:
             raise ValueError(
                 "configure either stage2.extraction_llm.endpoint or "
@@ -793,9 +808,9 @@ class Stage2ExtractionLLMConfig:
                     "stage2.extraction_llm.endpoint must be one HTTP(S) "
                     "OpenAI-compatible base URL"
                 )
-        elif self.vllm is None:
+        elif self.vllm is None and not self.endpoints:
             raise ValueError(
-                "stage2.extraction_llm requires either endpoint or vllm"
+                "stage2.extraction_llm requires endpoint, endpoints, or vllm"
             )
         if self.vllm is not None:
             self.vllm.validate()
@@ -830,7 +845,7 @@ class Stage2ExtractionLLMConfig:
             raise ValueError("stage2.extraction_llm.workers must be a positive integer")
 
     def public_dict(self) -> dict[str, Any]:
-        return {
+        values = {
             "endpoint": self.endpoint,
             "model": self.model,
             "api_key": "<redacted>",
@@ -840,6 +855,9 @@ class Stage2ExtractionLLMConfig:
             "runtime_model": self.runtime_model,
             "runtime_api_key": "<redacted>",
         }
+        if self.endpoints:
+            values["endpoints"] = [server.public_dict() for server in self.endpoints]
+        return values
 
 
 @dataclass(frozen=True)
@@ -1469,6 +1487,13 @@ def plain_stage2_config_from_mapping(
     else:
         extraction_endpoint = str(raw_extraction_llm.get("endpoint") or "").strip().rstrip("/")
         extraction_model = str(raw_extraction_llm.get("model") or "").strip()
+        extraction_workers = max(1, int(raw_extraction_llm.get(
+            "workers", min(4, max(1, default_workers)))))
+        external_endpoints = endpoints_from_mapping(
+            raw_extraction_llm.get("endpoints"), default_concurrency=extraction_workers,
+        )
+        if external_endpoints and "workers" not in raw_extraction_llm:
+            extraction_workers = sum(server.max_concurrency for server in external_endpoints)
         extraction_vllm = managed_vllm_config_from_mapping(
             raw_extraction_llm.get("vllm"),
             model=extraction_model,
@@ -1480,9 +1505,9 @@ def plain_stage2_config_from_mapping(
                 "configure either stage2.extraction_llm.endpoint or "
                 "stage2.extraction_llm.vllm, not both"
             )
-        if not extraction_endpoint and extraction_vllm is None:
+        if not extraction_endpoint and not external_endpoints and extraction_vllm is None:
             raise ValueError(
-                "stage2.extraction_llm requires either endpoint or vllm"
+                "stage2.extraction_llm requires endpoint, endpoints, or vllm"
             )
         if extraction_vllm is not None and not extraction_model:
             raise ValueError(
@@ -1496,16 +1521,9 @@ def plain_stage2_config_from_mapping(
                 or os.environ.get("OCI_STAGE2_EXTRACTION_API_KEY")
                 or "EMPTY"
             ),
-            workers=max(
-                1,
-                int(
-                    raw_extraction_llm.get(
-                        "workers",
-                        min(4, max(1, default_workers)),
-                    )
-                ),
-            ),
+            workers=extraction_workers,
             vllm=extraction_vllm,
+            endpoints=external_endpoints,
             runtime_endpoint=str(
                 raw_extraction_llm.get("runtime_endpoint") or ""
             ).strip().rstrip("/"),
@@ -1789,7 +1807,7 @@ def _resolve_extraction_llm_model(
         )
     transport_config = replace(
         config,
-        endpoint=extraction.endpoint,
+        endpoint=extraction.endpoints[0].endpoint if extraction.endpoints else extraction.endpoint,
         model="",
         api_key=extraction.api_key,
         workers=extraction.workers,
@@ -1801,7 +1819,7 @@ def _resolve_extraction_llm_model(
     LOGGER.info(
         "auto-discovered Stage 2 extraction model=%s from %s/models",
         resolved.model,
-        extraction.endpoint,
+        transport_config.endpoint,
     )
     return replace(config, extraction_llm=replace(extraction, model=resolved.model))
 
@@ -3052,6 +3070,37 @@ class _RoundRobinOpenAICompletion:
         return _openai_completion(messages, replace(config, endpoint=endpoint))
 
 
+class _LoadAwareOpenAICompletion:
+    """Route HTTP attempts to an available equivalent external extractor."""
+
+    def __init__(self, endpoints: Sequence[ExtractionEndpoint], *, api_key: str) -> None:
+        self.pool = EndpointPool(endpoints, api_key=api_key)
+
+    def __call__(self, messages: Sequence[Mapping[str, str]], config: PlainHandoffStage2Config) -> str:
+        try:
+            index = self.pool.reserve(deadline=config.runtime_request_deadline)
+        except TimeoutError as error:
+            raise Stage2RequestExhaustedError(str(error)) from error
+        server = self.pool.server(index)
+        started = time.monotonic()
+        succeeded, transport_failed = False, False
+        try:
+            request_audit.update(endpoint=server.endpoint)
+            request_audit.event("endpoint_selected", **self.pool.snapshot()[index])
+            response = _openai_completion(messages, replace(config, endpoint=server.endpoint))
+            succeeded = True
+            return response
+        except Exception as error:
+            transport_failed = _is_retryable_transport_error(error)
+            if transport_failed:
+                request_audit.event("endpoint_transport_failed", endpoint=server.endpoint,
+                                    error_type=type(error).__name__)
+            raise
+        finally:
+            self.pool.release(index, duration_seconds=time.monotonic()-started,
+                              succeeded=succeeded, transport_failed=transport_failed)
+
+
 class _ConcurrencyLimitedCompletion:
     """Apply one global request ceiling across nested Stage 2 executors."""
 
@@ -3114,7 +3163,7 @@ class _InterruptibleCompletion:
         self.switch_event = switch_event
         self.uses_default_transport = isinstance(
             completion,
-            _RoundRobinOpenAICompletion,
+            (_RoundRobinOpenAICompletion, _LoadAwareOpenAICompletion),
         )
 
     def __call__(
@@ -3132,7 +3181,7 @@ def _uses_default_openai_transport(
 ) -> bool:
     return bool(
         completion is None
-        or isinstance(completion, _RoundRobinOpenAICompletion)
+        or isinstance(completion, (_RoundRobinOpenAICompletion, _LoadAwareOpenAICompletion))
         or (
             isinstance(completion, _InterruptibleCompletion)
             and completion.uses_default_transport
@@ -6705,7 +6754,8 @@ class PlainHandoffStage2:
             extraction_endpoints = (
                 (str(extraction.runtime_endpoint).rstrip("/"),)
                 if continuation_route
-                else extraction.runtime_endpoints or (extraction.endpoint,)
+                else tuple(server.endpoint for server in extraction.endpoints)
+                or extraction.runtime_endpoints or (extraction.endpoint,)
             )
             request_model = (
                 str(extraction.runtime_model).strip()
@@ -6763,10 +6813,16 @@ class PlainHandoffStage2:
                 runtime_sampling_model=str(live_extraction_identity.get("sampling_model") or ""),
             )
             if routed_extraction is None:
-                routed_extraction = _RoundRobinOpenAICompletion(extraction_endpoints)
+                routed_extraction = (
+                    _LoadAwareOpenAICompletion(extraction.endpoints, api_key=request_api_key)
+                    if extraction.endpoints
+                    else _RoundRobinOpenAICompletion(extraction_endpoints)
+                )
             self.extraction_completion = _ConcurrencyLimitedCompletion(
                 routed_extraction,
-                max_concurrency=extraction.workers,
+                max_concurrency=(min(extraction.workers, sum(server.max_concurrency
+                                                             for server in extraction.endpoints))
+                                 if extraction.endpoints else extraction.workers),
             )
             if extraction_tokenizer is not None:
                 self.extraction_tokenizer = extraction_tokenizer
@@ -9131,6 +9187,7 @@ __all__ = [
     "PlainHandoffStage2",
     "PlainHandoffStage2Config",
     "ManagedVLLMConfig",
+    "ExtractionEndpoint",
     "Stage2ExtractionLLMConfig",
     "Stage2ExplicitFeature",
     "packetize_handoff",

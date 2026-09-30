@@ -2971,12 +2971,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--stage2-api-key", help="endpoint key; defaults to OCI_STAGE2_API_KEY")
-    parser.add_argument(
+    extraction_routes = parser.add_mutually_exclusive_group()
+    extraction_routes.add_argument(
         "--stage2-extraction-endpoint",
         help=(
             "OpenAI-compatible endpoint for the small extraction model; may equal "
             "the primary endpoint"
         ),
+    )
+    extraction_routes.add_argument(
+        "--stage2-extraction-endpoints",
+        type=json.loads,
+        help="JSON array of prestarted extraction servers, each with endpoint and max_concurrency",
     )
     parser.add_argument(
         "--stage2-extraction-model",
@@ -3283,6 +3289,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
             stage2[key] = value
     extraction_overrides = {
         "endpoint": args.stage2_extraction_endpoint,
+        "endpoints": args.stage2_extraction_endpoints,
         "model": args.stage2_extraction_model,
         "api_key": args.stage2_extraction_api_key,
         "workers": args.stage2_extraction_workers,
@@ -3296,6 +3303,12 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
             extraction_llm = extraction_value
         else:
             raise ValueError("stage2.extraction_llm must be a configuration object")
+        # An explicit external route replaces the other external route inherited
+        # from a saved config. Managed vLLM settings still require explicit removal.
+        if args.stage2_extraction_endpoints is not None:
+            extraction_llm.pop("endpoint", None)
+        elif args.stage2_extraction_endpoint is not None:
+            extraction_llm.pop("endpoints", None)
         for key, value in extraction_overrides.items():
             if value is not None:
                 extraction_llm[key] = value

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,10 @@ import pytest
     {"STAGE2_WORKERS": "8", "STAGE2_EXTRACTION_WORKERS": "12",
      "STAGE2_REQUEST_TIMEOUT": "3600",
      "STAGE2_REQUEST_ATTEMPT_TIMEOUT": "1200"},
+    {"STAGE2_EXTRACTION_ENDPOINTS": json.dumps([
+        {"endpoint": "http://a.test/v1", "max_concurrency": 64},
+        {"endpoint": "http://b.test/v1", "max_concurrency": 32},
+    ]), "STAGE2_EXTRACTION_WORKERS": "96"},
 ])
 def test_example_wrappers_run_both_stages_by_default(tmp_path: Path, runtime_overrides):
     repo_root = Path(__file__).resolve().parents[1]
@@ -57,7 +62,12 @@ fi
 
         invocations = invocation_log.read_text(encoding="utf-8").splitlines()
         workflow = invocations[-1]
-        if runtime_overrides:
+        if "STAGE2_EXTRACTION_ENDPOINTS" in runtime_overrides:
+            assert "--stage2-extraction-endpoints" in workflow
+            assert "--stage2-extraction-workers 96" in workflow
+            assert "--stage2-extraction-endpoint " not in workflow
+            assert "load-aware external extractor pool" in completed.stdout
+        elif runtime_overrides:
             assert "--stage2-workers 8" in invocations[-2]
             assert "--stage2-extraction-workers 12" in workflow
             assert "stage2.request_attempt_timeout=1200" in workflow
@@ -69,10 +79,11 @@ fi
             assert "stage2.request_timeout=6000" in workflow
         assert "research_all_evidence_workflow" in workflow
         assert "--stage2-endpoint http://127.0.0.1:8010/v1" in workflow
-        assert "--stage2-extraction-endpoint http://127.0.0.1:8020/v1" in workflow
+        if "STAGE2_EXTRACTION_ENDPOINTS" not in runtime_overrides:
+            assert "--stage2-extraction-endpoint http://127.0.0.1:8020/v1" in workflow
+            assert "extractor http://127.0.0.1:8020/v1" in completed.stdout
         assert "--stage1-only" not in workflow
         assert "Stage 2:        http://127.0.0.1:8010/v1" in completed.stdout
-        assert "extractor http://127.0.0.1:8020/v1" in completed.stdout
 
 
 def test_completed_handoff_uses_stage2_only_without_gpu_probe(tmp_path: Path):

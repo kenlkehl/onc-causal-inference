@@ -1370,6 +1370,14 @@ def _request_validated_extraction(
                 ]
                 if not pending_issues:
                     raise ValueError("pending category ontology checkpoint has no issues")
+                if validate_response is not None:
+                    # A legacy pending value/category error may have been raised
+                    # before serial metadata was checked. Re-extract incompatible
+                    # responses instead of crashing after note-free mapping.
+                    try:
+                        validate_candidate(pending["response"])
+                    except (_ExtractionCategoryError, _ExtractionValueError):
+                        pass
                 raise _ExtractionCategoryError(
                     issues=pending_issues,
                     response=pending["response"],
@@ -2066,13 +2074,14 @@ def _validate_serial_extraction(
             "carry_forward_state": _named_extraction_values(value["decision_notes"], definitions)}]}
 
 
-    validated = _validate_extraction(
-        value,
-        row_ids=[row_id],
-        definitions=definitions,
-    )
     feature_names = [str(definition["name"]) for definition in definitions]
-    row = validated["rows"][0]
+    value = _normalize_single_patient_wrapper(
+        value, row_ids=[row_id], feature_names=feature_names,
+    )
+    rows = value.get("rows")
+    if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
+        raise ValueError("serial extraction response requires one patient row")
+    row = rows[0]
     raw_state = row.get("carry_forward_state")
     if not isinstance(raw_state, Mapping):
         raise ValueError("serial extraction row requires a carry_forward_state object")
@@ -2106,8 +2115,14 @@ def _validate_serial_extraction(
                 f"{MAX_SERIAL_FEATURE_STATE_CHARS} characters", feature_names=[name],
             )
         state[name] = rendered or None
-    row["carry_forward_state"] = state
-    return validated
+    # Value/category errors retain a partial response for downstream recovery.
+    # Check metadata first so every such response is safe to carry to the next
+    # chunk, including after nulling or mapping an invalid scientific value.
+    return _validate_extraction(
+        {**value, "rows": [{**row, "carry_forward_state": state}]},
+        row_ids=[row_id],
+        definitions=definitions,
+    )
 
 
 class _PageObservationValidationError(ValueError):

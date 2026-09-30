@@ -1,5 +1,90 @@
 # Oncology Causal Inference (OCI)
 
+## Quickstart: eight H100s with managed Gemma 4 servers
+
+On a **Linux VM with 8 × NVIDIA H100 GPUs (80 GB each)**, run the bundled
+one-confounder/one-effect-modifier NSCLC example end to end with
+[`run_one_conf_one_mod_h100x8.sh`](run_one_conf_one_mod_h100x8.sh). It manages its
+own local vLLM servers and uses these Red Hat AI **FP8-dynamic** checkpoints:
+
+| Stage 2 role | Model |
+| --- | --- |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 31B IT](https://huggingface.co/RedHatAI/gemma-4-31B-it-FP8-dynamic) |
+| Patient-level extraction | [Gemma 4 26B A4B IT](https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic) |
+
+Start from a GPU VM image with a working NVIDIA driver compatible with the
+locked PyTorch/vLLM CUDA build. The current lockfile includes CUDA 13.0; use an
+R580 or newer NVIDIA driver for this native installation. `nvidia-smi` should
+show all eight H100s; `uv` installs Python packages, while the VM image supplies
+the GPU driver and system
+libraries. On Ubuntu/Debian, install the basic tools and FFmpeg if needed:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl ffmpeg
+nvidia-smi
+
+git clone https://github.com/kenlkehl/causal-dragonnet-text.git
+cd causal-dragonnet-text
+
+# Install uv if it is not already on PATH.
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# uv supplies Python 3.12 if needed and installs the locked vLLM extra.
+uv sync --frozen --python 3.12 --extra local-llm
+
+# Confirm that this environment sees eight H100s before starting the run.
+.venv/bin/python - <<'PY'
+import torch
+names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+assert len(names) == 8 and all("H100" in name for name in names), names
+print(names)
+PY
+
+./run_one_conf_one_mod_h100x8.sh
+```
+
+Allow disk space for the Python/CUDA environment, both LLM checkpoints, the
+Stage 1 embedding model, and run artifacts. Models download into the Hugging
+Face cache on first use; set `HF_HOME` to a persistent volume before launching
+if desired. If a required model asks for authentication, complete its Hugging
+Face access requirements and run `.venv/bin/hf auth login` first. See the
+[uv installer](https://docs.astral.sh/uv/getting-started/installation/) and
+[vLLM GPU installation guide](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)
+for environment details.
+
+The launcher selects eight visible GPUs and retains the original wrapper's
+scientific preset (`llm_roles`). Stage 1 finishes before Stage 2 starts its LLM
+servers. Stage 2 initially alternates models across all eight GPUs, using one
+single-GPU replica per GPU. If rapid model switching triggers the concurrent
+fallback, interpretation uses GPUs 0–3 and extraction uses GPUs 4–7, with four
+replicas per role. Both roles allow 32 concurrent requests, a 128,000-token
+server window, and 90% GPU-memory utilization. OCI handles server readiness and
+shutdown on completion or interruption. Keep local HTTP ports 8010–8017 and
+8110–8117 available; no separately launched inference servers are needed.
+
+Results default to
+`artifacts/research_all_evidence/one_conf_one_mod_nsclc_h100x8_full/`, including
+`progress.json`, `logs/workflow.log`, and `stage2/vllm_servers/`. To choose a
+persistent output location, pass it as the sole argument and repeat the same
+command to resume compatible checkpoints:
+
+```bash
+./run_one_conf_one_mod_h100x8.sh /persistent/results/one_conf_one_mod_h100x8
+```
+
+The launcher synchronizes `--extra local-llm` on ordinary launches. Set
+`OCI_PYTHON="$PWD/.venv/bin/python"` to reuse the installed environment without
+syncing. Model, worker, and `STAGE2_VLLM_*`/`STAGE2_EXTRACTION_VLLM_*` settings are
+overridable through the environment; keep GPU layouts consistent if changing
+them. Explicit saved Stage 2 launches (`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) inherit
+their saved model and server settings. See the managed-pool documentation below
+for GPU mapping, switching, logs, and cleanup, and the next quickstart for the
+multi-model scientific workflow.
+
 OCI is a research codebase for finding clinically meaningful pretreatment
 characteristics in longitudinal notes and using them in fold-honest causal
 analyses of treatment effects and treatment-effect heterogeneity. Its primary
@@ -804,6 +889,68 @@ endpoint advertises multiple IDs. Dataset-backed Stage 2 also requires
 `stage2.extraction_llm`. Its endpoint may differ from the primary endpoint or
 may be the same multi-model endpoint. Its `model` is resolved by the same
 one-model rule when omitted.
+
+### Extraction across servers you start yourself
+
+Set `stage2.extraction_llm.endpoints` to distribute extraction across existing
+OpenAI-compatible servers. Each server has its own concurrency cap:
+
+```json
+{
+  "stage2": {
+    "extraction_llm": {
+      "model": "RedHatAI/Gemma-4-26B-A4B-IT-FP8-Dynamic",
+      "workers": 128,
+      "endpoints": [
+        {"endpoint": "http://camus:8002/v1", "max_concurrency": 64},
+        {"endpoint": "http://server-b:8002/v1", "max_concurrency": 64}
+      ]
+    }
+  }
+}
+```
+
+Replace `server-b` with your second server. Supply this extraction block inside
+your run config; omit the extractor's singular `endpoint` and managed `vllm`
+settings. All pool members must serve the same model: Stage 2 verifies each
+server's advertised model identity before extraction. Model autodiscovery works
+when the first server advertises exactly one model. The pool shares the
+extractor's configured API key and model-specific sampling policy.
+
+`workers` caps concurrent logical extraction requests across the entire pool;
+`max_concurrency` caps active requests sent to that server. The effective total
+ceiling is the smaller of `workers` and the sum of server caps. When `workers`
+is omitted, it defaults to that sum. The limits include repair and retry calls.
+
+The scheduler favors available servers with fewer requests relative to their
+capacity and shorter recent response times. When vLLM exposes `/metrics`, it
+also considers other workloads' running/waiting requests and increases the
+load score above 80% KV-cache usage. Metrics refresh asynchronously at most
+every five seconds per server, with a two-second fetch timeout; observations
+expire after fifteen seconds. Missing metrics fall back to local request counts
+and response times. These signals change routing within your caps rather than
+automatically changing the caps.
+
+Retryable server failures temporarily divert traffic to other pool members.
+Cooldown grows from two to thirty seconds with repeated failures, followed by
+one recovery probe. Existing request deadlines and retry budgets still apply.
+The request audit records endpoint selection and observed load. Changing URLs
+or concurrency caps preserves compatible extraction checkpoints.
+
+You can also replace a saved single-server route through the CLI:
+
+```bash
+python -m oci.inference.research_all_evidence_workflow \
+  --config /path/to/run_config.json --stage2-only \
+  --stage2-extraction-endpoints '[{"endpoint":"http://camus:8002/v1","max_concurrency":64},{"endpoint":"http://server-b:8002/v1","max_concurrency":64}]' \
+  --stage2-extraction-workers 128
+```
+
+The synthetic cohort wrappers accept the same JSON array through
+`STAGE2_EXTRACTION_ENDPOINTS`, plus `STAGE2_EXTRACTION_WORKERS` for the global
+ceiling. An explicit singular endpoint and an endpoint list are mutually
+exclusive. A running process keeps its existing server configuration until
+restarted with the new config.
 
 ### Pipeline-managed vLLM server pools
 

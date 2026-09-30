@@ -35,6 +35,7 @@ def command(dataset: Path, output: str, env: dict[str, str]) -> list[str]:
         "STAGE2_ENDPOINT": "--stage2-endpoint",
         "STAGE2_MODEL": "--stage2-model",
         "STAGE2_EXTRACTION_ENDPOINT": "--stage2-extraction-endpoint",
+        "STAGE2_EXTRACTION_ENDPOINTS": "--stage2-extraction-endpoints",
         "STAGE2_EXTRACTION_MODEL": "--stage2-extraction-model",
         "STAGE2_EXTRACTION_WORKERS": "--stage2-extraction-workers",
     }

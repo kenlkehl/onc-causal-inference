@@ -7,6 +7,7 @@ import signal
 import threading
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1052,10 +1053,20 @@ def test_rapid_managed_switch_falls_back_to_concurrent_configured_pools(
     # The extraction-to-interpretation interval is long enough to preserve
     # all-GPU alternation. The next transition is rapid and selects the split.
     monotonic_values = iter((100.0, 200.0, 230.0))
+    original_mark_switch = stage2_workflow._ManagedStage2SwitchTracker.mark_switch
+
+    def timed_mark_switch(tracker):
+        # Request admission also reads the clock. Limit the scripted values to
+        # model-switch observations so those independent reads cannot exhaust it.
+        with monkeypatch.context() as switch_clock:
+            switch_clock.setattr(stage2_workflow, "time", SimpleNamespace(
+                monotonic=lambda: next(monotonic_values)))
+            return original_mark_switch(tracker)
+
     monkeypatch.setattr(
-        stage2_workflow.time,
-        "monotonic",
-        lambda: next(monotonic_values),
+        stage2_workflow._ManagedStage2SwitchTracker,
+        "mark_switch",
+        timed_mark_switch,
     )
     monkeypatch.setattr(
         stage2_workflow,
