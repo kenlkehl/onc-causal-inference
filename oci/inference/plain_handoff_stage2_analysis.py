@@ -3542,6 +3542,22 @@ def extract_rows(
     extraction_request_identity = dict(request_identity or {})
     if note_search.enabled:
         extraction_request_identity["measurement_method"] = measurement_method
+
+    def note_search_fallback(row, selected, directory):
+        serial = _serial_extraction_required(row=row, definitions=selected, tokenizer=tokenizer,
+            chunk_size_tokens=int(chunk_size_tokens), max_prompt_chars=int(max_prompt_chars),
+            input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens))
+        if serial:
+            return _serial_extract_feature_batch(parent_dir=directory, row=row, definitions=selected,
+                request_json=guarded_request_json, request_identity=extraction_request_identity,
+                tokenizer=tokenizer, chunk_size_tokens=int(chunk_size_tokens),
+                context_window_tokens=int(context_window_tokens), max_output_tokens=int(max_output_tokens),
+                context_margin_tokens=int(context_margin_tokens), max_prompt_chars=int(max_prompt_chars))
+        return _request_validated_extraction(
+            messages=_extraction_prompt(definitions=selected, rows=[row]), row_ids=[int(row["row_id"])],
+            definitions=selected, request_json=guarded_request_json,
+            ontology_audit_path=directory / "category_ontology_repair.json",
+            messages_for_definitions=lambda subset: _extraction_prompt(definitions=subset, rows=[row]))
     feature_names = [str(feature["name"]) for feature in definitions]
     definition_batches = _partition_feature_definitions(
         definitions,
@@ -3778,6 +3794,8 @@ def extract_rows(
                         row=row, definitions=batch_definitions, parent_dir=feature_dir,
                         request_json=guarded_request_json, request_identity=extraction_request_identity,
                         config=note_search, max_prompt_chars=int(max_prompt_chars), tokenizer=tokenizer,
+                        plan_directory=output_dir / "note_search_plans",
+                        fallback_extract=lambda selected, directory: note_search_fallback(row, selected, directory),
                         input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
                     )
                 elif use_serial:
@@ -4096,6 +4114,8 @@ def extract_rows(
                     row=batch[0], definitions=definitions, parent_dir=batch_dir,
                     request_json=guarded_request_json, request_identity=extraction_request_identity,
                     config=note_search, max_prompt_chars=int(max_prompt_chars), tokenizer=tokenizer,
+                    plan_directory=output_dir / "note_search_plans",
+                    fallback_extract=lambda selected, directory: note_search_fallback(batch[0], selected, directory),
                     input_token_budget=int(context_window_tokens) - int(max_output_tokens) - int(context_margin_tokens),
                 )
             elif use_serial:

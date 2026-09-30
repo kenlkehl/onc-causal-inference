@@ -1039,9 +1039,16 @@ values still undergo validation.
 
 An optional `stage2.extraction_note_search.enabled: true` path uses a persistent,
 isolated Python REPL to search the patient's full record and extract each feature
-batch from selected excerpts. It reuses the MatchMiner-AI note-search worker,
-keeps OCI's endpoint, sampling, concurrency, and field-repair handling, and
-checkpoints completed search cells. Mode-based variables retain full-record
+batch from selected excerpts. OCI includes its own worker and requires no
+MatchMiner package or checkout. It keeps the endpoint, sampling, concurrency,
+and field-repair handling, and
+checkpoints completed search cells. Excerpts include original character ranges
+from the first search. Per-variable follow-up searches revisit missing values,
+unseen mentions, and conflicts, with two focused passes and a bounded full-record
+fallback by default. A missing value with zero search matches gets one additional
+search using alternative wording before remaining missing. This adds no date
+parsing or chronology inference.
+Mode-based variables retain full-record
 occurrence extraction. The standard full-record path remains the default.
 Search can miss evidence, and a speed or accuracy advantage has not been
 established. See [note-search extraction](docs/stage2_note_search.md) for setup,

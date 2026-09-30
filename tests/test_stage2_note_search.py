@@ -1,7 +1,6 @@
 """Exercise measurement recovery and isolation boundaries, without a live LLM."""
 from dataclasses import replace
 import json
-import os
 
 import pandas as pd
 import pytest
@@ -56,7 +55,7 @@ def arguments(tmp_path, request, **kwargs):
         dataset=pd.DataFrame({"text": ["UNREAD PREFIX " * 1000 + "ECOG 2. Age 67."]}),
         row_ids=[0], text_column="text", definitions=FEATURES,
         output_dir=tmp_path, request_json=request, workers=1, max_prompt_chars=100_000,
-        note_search=search.NoteSearchConfig(enabled=True), deferred_retry_passes=0, **kwargs,
+        note_search=search.NoteSearchConfig(enabled=True, max_review_passes=0), deferred_retry_passes=0, **kwargs,
     )
 
 
@@ -76,6 +75,7 @@ def test_batch_retrieval_values_provenance_resume_and_patient_isolation(tmp_path
         if "Search cells remaining: 3" in text:
             assert "ECOG 2. Age 67." not in text and "ECOG 3. Age 58." not in text
             return validate(python_action())
+        assert "[Document segment 1; original characters 14000:" in text
         values = {"ecog": 2, "age": 67} if "ECOG 2." in text else {"ecog": 3, "age": 58}
         return validate({"action": "final", "values": values})
 
@@ -201,7 +201,8 @@ def test_config_roundtrip_routes_search_to_training_refinement_and_heldout(fake_
     assert analysis._configured_serial_extraction(cfg)["note_search"] == cfg.extraction_note_search
     assert "extraction_note_search" in analysis.frozen_preselection_review_policy(cfg)
     assert "note_search" not in analysis._configured_serial_extraction(replace(cfg, extraction_note_search=search.NoteSearchConfig()))
-    for value in [{"enabled": "yes"}, {"max_cells": 0}, {"worker_memory_mb": 10}, {"typo": 1}]:
+    for value in [{"enabled": "yes"}, {"retry_zero_match_missing": "yes"}, {"max_cells": 0}, {"max_scan_patterns": 0},
+                  {"max_scan_patterns": True}, {"worker_memory_mb": 10}, {"typo": 1}]:
         with pytest.raises(ValueError):
             search.config_from_mapping(value)
 
@@ -226,7 +227,7 @@ def test_feature_slices_and_heldout_path_use_the_selected_method(tmp_path, fake_
         return validate({"action": "final", "values": {name: 2 if name == "ecog" else 67}})
 
     cfg = workflow.PlainHandoffStage2Config(endpoint="http://unused.test/v1", model="test",
-        extraction_note_search=search.NoteSearchConfig(enabled=True))
+        extraction_note_search=search.NoteSearchConfig(enabled=True, max_review_passes=0))
     frame = analysis._extract_outer_heldout_measurements(
         dataset=pd.DataFrame({"text": ["ECOG 2. Age 67."]}), heldout_ids=[0], text_column="text",
         measurement_definitions=FEATURES, output_dir=tmp_path, request_json=request, workers=1,
@@ -249,11 +250,8 @@ def test_answer_before_any_successful_search_is_not_scientific_missingness(tmp_p
     assert not (tmp_path / "extracted.csv").exists()
 
 
-def test_real_optional_worker_search_state_and_isolation():
-    source = os.environ.get("OCI_TEST_NOTE_SEARCH_CHECKOUT")
-    if not source:
-        pytest.skip("Set OCI_TEST_NOTE_SEARCH_CHECKOUT to exercise the external isolated worker")
-    config = search.NoteSearchConfig(enabled=True, source_checkout=source, cell_timeout_seconds=1)
+def test_builtin_worker_search_state_and_isolation():
+    config = search.NoteSearchConfig(enabled=True, cell_timeout_seconds=1)
     search.preflight(config)
     worker_class, identity = search.load_backend(config)
     assert len(identity["worker_sha256"]) == 64
@@ -266,3 +264,23 @@ def test_real_optional_worker_search_state_and_isolation():
         assert worker.execute("import socket; socket.socket()")["error"] is not None
         with pytest.raises(RuntimeError, match="wall-time"):
             worker.execute("while True: pass")
+
+
+def test_real_worker_accepts_128_patterns_and_preserves_runtime_limits():
+    config = search.NoteSearchConfig(enabled=True, max_code_chars=100)
+    worker_class, identity = search.load_backend(config)
+    assert identity["implementation"] == "oci_builtin"
+    assert search.policy_identity(config) != search.policy_identity(replace(config, max_scan_patterns=12))
+    history = " ".join(f"F{i:03d}" for i in range(128))
+    with worker_class(history, config) as worker:
+        raw = worker.execute("result = scan([r'\\bF%03d\\b' % i for i in range(128)], context=0); print(json.dumps(result))")
+        assert raw["error"] is None and raw["source_spans"]
+        result = json.loads(raw["output"])
+        assert result["match_count"] == 128 and len(result["hits"]) == 12
+        assert result["hits"][0]["quote"] == "F000" and result["hits"][-1]["quote"] == "F127"
+        assert not raw["sources_truncated"]
+        assert len(raw["output"]) <= config.max_output_chars
+        rejected = worker.execute("scan(['F000'] * 129)")
+        assert rejected["error"] == "ValueError" and "1-128" in rejected["error_detail"]
+        with pytest.raises(RuntimeError, match="code limit"):
+            worker.execute(" " * 101)

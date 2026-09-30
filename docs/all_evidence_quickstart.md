@@ -121,8 +121,8 @@ extraction `auto` opts into Flash Next's xhigh profile.
 See [sampling profiles](stage2_sampling.md).
 
 For the optional Python REPL extraction path, set
-`stage2.extraction_note_search.enabled` to `true` and configure its MatchMiner-AI
-worker dependency. Start with fresh measurement outputs; existing full-record
+`stage2.extraction_note_search.enabled` to `true`. OCI includes the worker;
+Linux and `libseccomp.so.2` are required for isolation. Start with fresh measurement outputs; existing full-record
 measurements cannot be mixed into the comparison. See
 [note-search extraction](stage2_note_search.md). This option keeps mode-based
 variables on full-record extraction and does not change the default workflow.
