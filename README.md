@@ -87,8 +87,91 @@ syncing. Model, worker, and `STAGE2_VLLM_*`/`STAGE2_EXTRACTION_VLLM_*` settings 
 overridable through the environment; keep GPU layouts consistent if changing
 them. Explicit saved Stage 2 launches (`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) inherit
 their saved model and server settings. See the managed-pool documentation below
-for GPU mapping, switching, logs, and cleanup, and the next quickstart for the
-multi-model scientific workflow.
+for GPU mapping, switching, logs, and cleanup, and the multi-model quickstart
+below for the full scientific workflow.
+
+## Quickstart: eight RTX PRO 6000 Blackwell GPUs with NVIDIA NVFP4 Gemma 4
+
+On a **Linux machine with 8 × NVIDIA RTX PRO 6000 Blackwell GPUs (96 GB each)**,
+use the root-level launchers below. Both manage their own local vLLM servers
+and use NVIDIA's **NVFP4** Gemma 4 checkpoints:
+
+| Stage 2 role | Model |
+| --- | --- |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 31B IT NVFP4](https://huggingface.co/nvidia/Gemma-4-31B-IT-NVFP4) |
+| Patient-level extraction | [Gemma 4 26B A4B IT NVFP4](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4) |
+
+NVIDIA's extraction repository name omits `IT`, but its model card identifies
+the instruction-tuned checkpoint. Use **RTX PRO 6000 Blackwell** hardware for
+this preset, with the CUDA 13.0-compatible R580 or newer driver and Linux system
+libraries described above. From a fresh Ubuntu/Debian machine:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl ffmpeg
+nvidia-smi
+
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
+
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+uv sync --frozen --python 3.12 --extra local-llm
+
+# Verify all eight visible GPUs are RTX PRO 6000 Blackwell devices.
+.venv/bin/python - <<'PY'
+import torch
+names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+assert len(names) == 8 and all(
+    "RTX PRO 6000" in name and "Blackwell" in name for name in names
+), names
+print(names)
+PY
+
+./run_one_conf_one_mod_rtxpro6000x8.sh
+```
+
+If you already followed the H100 environment setup in this checkout, use the
+RTX launcher after verifying the RTX GPUs. To run the larger bundled cohort,
+use [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh)
+instead. Each launcher retains its cohort wrapper's scientific settings
+(`llm_roles`) and has a separate default output directory:
+
+| Launcher | Default output under `artifacts/research_all_evidence/` |
+| --- | --- |
+| [`run_one_conf_one_mod_rtxpro6000x8.sh`](run_one_conf_one_mod_rtxpro6000x8.sh) | `one_conf_one_mod_nsclc_rtxpro6000x8_full/` |
+| [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh) | `five_conf_five_mod_nsclc_rtxpro6000x8_full/` |
+
+Stage 1 completes before the managed vLLM servers start. Stage 2 initially
+alternates models across all eight GPUs, with one single-GPU replica per GPU.
+Rapid switching can trigger the same four/four concurrent split as the H100
+preset: interpretation on logical GPUs 0–3 and extraction on 4–7. Tensor
+parallelism defaults to **1** for both models, matching NVIDIA's documented
+extraction layout. Both roles allow 32 concurrent requests, a 128,000-token
+server window, and 90% GPU-memory utilization. vLLM reads the ModelOpt/NVFP4
+metadata from the checkpoints; OCI supplies text-only serving, the Gemma 4
+reasoning parser, readiness checks, and shutdown. Keep local HTTP ports
+8010–8017 and 8110–8117 available. See
+[vLLM's ModelOpt support](https://docs.vllm.ai/en/v0.26.0/features/quantization/modelopt/)
+for checkpoint loading details.
+
+Choose a persistent output location by passing one argument. Repeat the same
+command to resume compatible checkpoints; run these examples separately:
+
+```bash
+./run_one_conf_one_mod_rtxpro6000x8.sh /persistent/results/one_conf_one_mod_rtxpro6000x8
+./run_five_conf_five_mod_rtxpro6000x8.sh /persistent/results/five_conf_five_mod_rtxpro6000x8
+```
+
+The H100 quickstart's cache, authentication, progress, and log instructions also
+apply here. Ordinary launches sync the `local-llm` extra; set
+`OCI_PYTHON="$PWD/.venv/bin/python"` to skip synchronization. Model, worker, and
+managed-pool settings remain overridable through the environment. If changing
+the server context window, also adjust
+`STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`. Explicit saved Stage 2 launches
+(`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) retain their saved models and serving settings.
 
 OCI is a research codebase for finding clinically meaningful pretreatment
 characteristics in longitudinal notes and using them in fold-honest causal
