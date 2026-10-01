@@ -1,5 +1,10 @@
 # Oncology Causal Inference (OCI)
 
+## Overview
+OCI is a pipeline for causal inference for individual treatment effect estimation (ITE estimation), also known as conditional average treatment effect estimation (CATE), using unstructured electronic health records text, focusing on oncology.
+
+In other words: If an oncologist is in clinic with a patient and choosing which of two treatments to recommend, OCI is a tool for building a model to predict which treatment might yield the better outcome for that specific, individual patient.
+
 ## Quickstart: eight H100s with managed Gemma 4 servers
 
 On a **Linux VM with 8 × NVIDIA H100 GPUs (80 GB each)**, run the bundled
