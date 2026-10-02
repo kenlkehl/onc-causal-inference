@@ -40,6 +40,7 @@ fi
 
 # uv supplies Python 3.12 if needed and installs the locked vLLM extra.
 uv sync --frozen --python 3.12 --extra local-llm
+.venv/bin/python scripts/configure_local_cuda.py
 
 # Confirm that this environment sees eight H100s before starting the run.
 .venv/bin/python - <<'PY'
@@ -119,6 +120,7 @@ if ! command -v uv >/dev/null 2>&1; then
   export PATH="$HOME/.local/bin:$PATH"
 fi
 uv sync --frozen --python 3.12 --extra local-llm
+.venv/bin/python scripts/configure_local_cuda.py
 
 # Verify all eight visible GPUs are RTX PRO 6000 Blackwell devices.
 .venv/bin/python - <<'PY'
@@ -143,6 +145,26 @@ instead. Each launcher retains its cohort wrapper's scientific settings
 | --- | --- |
 | [`run_one_conf_one_mod_rtxpro6000x8.sh`](run_one_conf_one_mod_rtxpro6000x8.sh) | `one_conf_one_mod_nsclc_rtxpro6000x8_full/` |
 | [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh) | `five_conf_five_mod_nsclc_rtxpro6000x8_full/` |
+
+For manual serving, activate the configured environment and use the exact
+checkpoint name (including `NVFP4`):
+
+```bash
+source .venv/bin/activate
+vllm serve nvidia/Gemma-4-26B-A4B-NVFP4
+```
+
+FlashInfer builds Blackwell kernels at startup and needs CUDA 12.9 or newer.
+An older `nvcc` on the system PATH can cause `SM 12.x requires CUDA >= 12.9`
+followed by `No supported CUDA architectures found for major versions [12]`,
+even when PyTorch and the driver support the GPU. The `local-llm` extra installs
+the CUDA 13.0 compiler matching the locked runtime; `configure_local_cuda.py`
+exposes its compiler, headers, and runtime library in the venv. Run that setup
+step again after recreating the venv. On glibc 2.42+ (including Ubuntu 26.04),
+it also corrects CUDA 13.0's `rsqrt` exception declarations in the venv headers
+to match glibc. `nvcc --version` inside the activated
+environment should report 13.0. Explicit `CUDA_HOME` or `CUDA_PATH` settings
+take precedence; unset them to use the configured venv toolkit.
 
 Stage 1 completes before the managed vLLM servers start. Stage 2 initially
 alternates models across all eight GPUs, with one single-GPU replica per GPU.

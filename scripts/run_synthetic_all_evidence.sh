@@ -244,6 +244,7 @@ if [[ -z "${python_bin}" ]]; then
     echo "Synchronizing ${repo_root}/.venv from the lockfile..."
     if (( stage2_managed_any )); then
         uv sync --frozen --extra local-llm
+        "${repo_root}/.venv/bin/python" "${repo_root}/scripts/configure_local_cuda.py"
     else
         uv sync --frozen
     fi
