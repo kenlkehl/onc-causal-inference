@@ -3,9 +3,83 @@ from __future__ import annotations
 import os
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
+
+
+@pytest.mark.parametrize("launcher", [
+    "run_one_conf_one_mod_rtxpro6000x8.sh",
+    "run_five_conf_five_mod_rtxpro6000x8.sh",
+])
+@pytest.mark.parametrize("saved,overrides", [
+    (False, {}),
+    (False, {
+        "STAGE2_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","196608"]',
+        "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","131072"]',
+        "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS": "131072",
+    }),
+    (True, {}),
+])
+def test_rtx_wrappers_pass_context_budgets_and_preserve_saved_settings(
+    tmp_path: Path, launcher, saved, overrides,
+):
+    repo_root = Path(__file__).resolve().parents[1]
+    invocation_log = tmp_path / "invocations.jsonl"
+    fake_python = tmp_path / "python"
+    fake_python.write_text(
+        f"#!{sys.executable}\n"
+        "import json, os, sys\n"
+        "with open(os.environ['FAKE_PYTHON_INVOCATION_LOG'], 'a') as log:\n"
+        "    log.write(json.dumps({'args': sys.argv[1:], 'env': "
+        "{k: v for k, v in os.environ.items() if k.startswith('STAGE2_')}}) + '\\n')\n"
+        "if sys.argv[1].endswith('detect_all_evidence_hardware.py'):\n"
+        "    print('8\\tcuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7"
+        "\\t12\\t32\\t12\\teight eligible GPUs')\n",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    environment = {
+        k: v for k, v in os.environ.items()
+        if not k.startswith(("STAGE2_", "OCI_"))
+        and k not in {"GPU_COUNT", "PHYSICAL_GPUS", "DISABLE_HTR", "STAGE1_ARCHITECTURES"}
+    }
+    environment.update(
+        OCI_PYTHON=str(fake_python),
+        FAKE_PYTHON_INVOCATION_LOG=str(invocation_log),
+        **overrides,
+    )
+    if saved:
+        environment.update(STAGE2_ONLY="1", OCI_RUN_CONFIG=str(tmp_path / "saved.json"))
+    subprocess.run(
+        ["bash", str(repo_root / launcher), str(tmp_path / "output")],
+        cwd=repo_root, env=environment, check=True, capture_output=True, text=True,
+    )
+    invocations = [json.loads(line) for line in invocation_log.read_text().splitlines()]
+    args = invocations[-1]["args"]
+    if saved:
+        assert len(invocations) == 1
+        assert args[0].endswith("launch_saved_stage2.py")
+        assert invocations[0]["env"] == {"STAGE2_ONLY": "1"}
+        return
+
+    assert "oci.inference.research_all_evidence_workflow" in args
+    settings = dict(args[i + 1].split("=", 1) for i, arg in enumerate(args) if arg == "--set")
+    for variable, setting in (
+        ("STAGE2_VLLM_EXTRA_ARGS_JSON", "stage2.vllm.extra_args"),
+        ("STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON", "stage2.extraction_llm.vllm.extra_args"),
+    ):
+        extra_args = json.loads(settings[setting])
+        expected = json.loads(overrides[variable]) if overrides else [
+            "--gpu-memory-utilization", "0.90", "--max-model-len", "262144",
+            "--max-num-seqs", "32",
+        ]
+        assert extra_args == expected
+    context_flag = args.index("--stage2-extraction-context-window-tokens")
+    assert args[context_flag + 1] == overrides.get(
+        "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS", "262144",
+    )
 
 
 @pytest.mark.parametrize("runtime_overrides", [

@@ -171,7 +171,7 @@ alternates models across all eight GPUs, with one single-GPU replica per GPU.
 Rapid switching can trigger the same four/four concurrent split as the H100
 preset: interpretation on logical GPUs 0–3 and extraction on 4–7. Tensor
 parallelism defaults to **1** for both models, matching NVIDIA's documented
-extraction layout. Both roles allow 32 concurrent requests, a 128,000-token
+extraction layout. Both roles allow 32 concurrent requests, a 262,144-token
 server window, and 90% GPU-memory utilization. vLLM reads the ModelOpt/NVFP4
 metadata from the checkpoints; OCI supplies text-only serving, the Gemma 4
 reasoning parser, readiness checks, and shutdown. Keep local HTTP ports
@@ -194,6 +194,12 @@ managed-pool settings remain overridable through the environment. If changing
 the server context window, also adjust
 `STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`. Explicit saved Stage 2 launches
 (`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) retain their saved models and serving settings.
+For a run saved with the earlier 128,000-token RTX preset, update
+`stage2.vllm.extra_args` and `stage2.extraction_llm.vllm.extra_args` in its
+`run_config.json` to use `--max-model-len 262144`, and set
+`stage2.extraction_context_window_tokens` to `262144` before resuming.
+The context window includes both input and allowed output: the primary role's
+100,000-token output allowance left only 28,000 input tokens under the old cap.
 
 OCI is a research codebase for finding clinically meaningful pretreatment
 characteristics in longitudinal notes and using them in fold-honest causal

@@ -30,7 +30,7 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
     export STAGE2_EXTRACTION_WORKERS="${STAGE2_EXTRACTION_WORKERS:-32}"
     export STAGE2_REQUEST_ATTEMPT_TIMEOUT="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-1800}"
     export STAGE2_REQUEST_TIMEOUT="${STAGE2_REQUEST_TIMEOUT:-6000}"
-    export STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS="${STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS:-128000}"
+    export STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS="${STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS:-262144}"
     export STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS="${STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS:-4096}"
 
     # Alternate eight single-GPU replicas, with a four/four concurrent fallback.
@@ -47,7 +47,9 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
 
     # vLLM reads ModelOpt/NVFP4 quantization from each checkpoint's metadata.
     # Managed Gemma servers supply --language-model-only and the gemma4 parser.
-    vllm_extra_args='["--gpu-memory-utilization","0.90","--max-model-len","128000","--max-num-seqs","32"]'
+    # Use the checkpoints' native 256K window: prompt and output share this
+    # budget, including the primary role's 100,000-token output allowance.
+    vllm_extra_args='["--gpu-memory-utilization","0.90","--max-model-len","262144","--max-num-seqs","32"]'
     export STAGE2_VLLM_EXTRA_ARGS_JSON="${STAGE2_VLLM_EXTRA_ARGS_JSON:-${vllm_extra_args}}"
     export STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON="${STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON:-${vllm_extra_args}}"
 fi
