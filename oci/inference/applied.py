@@ -9,6 +9,8 @@ auditable dispatch branch.
 from __future__ import annotations
 
 import logging
+import hashlib
+import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -67,6 +69,13 @@ def _run_explicit_feature_extraction(
         "extraction_max_tokens": feature_config.extraction_max_tokens,
         "extraction_max_text_length": feature_config.extraction_max_text_length,
     }
+    cache_config["patient_text_hash"] = hashlib.sha256(json.dumps(
+        dataset[config.text_column].fillna("").astype(str).tolist(),
+        ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    cache_config["extraction_context_strategy"] = feature_config.extraction_context_strategy
+    if feature_config.extraction_context_strategy == "colbert":
+        from ..extraction.colbert import retrieval_identity
+        cache_config["colbert"] = retrieval_identity(feature_config.colbert)
     cached = None
     if feature_config.cache_enabled:
         cached = cache.load_if_valid(
@@ -90,6 +99,8 @@ def _run_explicit_feature_extraction(
             temperature=feature_config.extraction_temperature,
             max_tokens=feature_config.extraction_max_tokens,
             max_text_length=feature_config.extraction_max_text_length,
+            context_strategy=feature_config.extraction_context_strategy,
+            colbert=feature_config.colbert,
         )
         try:
             cached = extractor.extract_to_dataframe(

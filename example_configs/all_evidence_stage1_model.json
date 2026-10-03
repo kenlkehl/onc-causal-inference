@@ -1263,13 +1263,9 @@
       "codex_cli_model_name": "gpt-5.4-mini",
       "codex_cli_parallelism": 4,
       "codex_cli_reasoning_effort": "medium",
-      "complete_page_context_chars": 256,
-      "complete_page_core_chars": 13488,
-      "complete_page_max_chars": 14000,
-      "complete_reconciliation_fan_in": 16,
       "enabled": true,
       "extraction_batch_size": 100,
-      "extraction_context_strategy": "complete_paged_v1",
+      "extraction_context_strategy": "colbert",
       "extraction_max_retries": 3,
       "extraction_max_text_length": 14000,
       "extraction_max_tokens": 25000,
@@ -1291,7 +1287,16 @@
       "vllm_model_name": "unused-stage1-model",
       "vllm_reasoning_parser": "auto",
       "vllm_server_url": "http://unused.invalid/v1",
-      "vllm_tensor_parallel_size": 1
+      "vllm_tensor_parallel_size": 1,
+      "colbert": {
+        "devices": [
+          "auto"
+        ],
+        "cache_dir": ".oci_cache/colbert",
+        "chunk_size": 64,
+        "chunk_overlap": 0,
+        "top_k": 20
+      }
     },
     "outcome_column": "outcome_indicator",
     "outcome_type": "binary",

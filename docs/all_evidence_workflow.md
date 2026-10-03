@@ -703,6 +703,7 @@ operational controls include `request_timeout` (14400 seconds by default),
 `consolidation_batch_size`, `consolidation_alphabetical_rounds`,
 `consolidation_max_rounds`, `consolidation_policy`,
 `extraction_max_prompt_chars`, `extraction_feature_batch_size`, `extraction_note_search`,
+`extraction_context_strategy`, `colbert`,
 `extraction_chunk_size_tokens`, `extraction_context_window_tokens`,
 `extraction_context_margin_tokens`,
 `vllm_rapid_switch_seconds`,
@@ -743,7 +744,13 @@ reservation and may require re-extraction if that reservation changes; the norma
 fingerprint check remains enforced. The chunk planner reserves the larger of the
 two configured extraction ceilings so a reasoning repair has sufficient room.
 Extraction always isolates one patient and never sends more than the configured
-feature batch. By default, long records are read in ordered, lossless contiguous chunks of
+feature batch. The default `extraction_context_strategy: "colbert"` embeds complete
+prepared patient records into reusable disk-cached token vectors and retrieves
+question-specific excerpts for each measurement. Retrieval workers run across
+configured GPUs independently of the LLM server pool. See [ColBERT extraction](colbert_extraction.md)
+for configuration, provenance, cache reuse, and launcher controls.
+With `extraction_context_strategy: "full_record"`, long records are read in ordered,
+lossless contiguous chunks of
 at most `extraction_chunk_size_tokens` (50,000 by default), preferring nearby
 note, paragraph, line, sentence, or word boundaries. Each chunk receives the
 validated cumulative scalar extraction from all earlier chunks and returns the
@@ -752,7 +759,8 @@ tokenizer and reduces the source chunk when definitions or prior state need
 more of the 131,072-token context. Per-chunk inputs, results, and completion
 markers are checkpointed, and fingerprints include the prior state, so restarts
 continue at the first unfinished compatible chunk without dropping source text.
-The exact extraction tokenizer must be present locally under the configured
+The same lossless planner handles retrieved context that exceeds an LLM request
+budget. The exact extraction tokenizer must be present locally under the configured
 model ID, either in the managed vLLM download directory or Hugging Face cache.
 
 Extraction separates variables whose conflict strategy is `mode` (most frequent
@@ -775,8 +783,9 @@ Training, ontology-refinement re-extraction, estimand alternatives, and held-out
 extraction receive the same selected method. Method/limit/backend changes require
 fresh measurement outputs, while discovery and variable definitions remain
 independent of the extraction choice. See [the configuration and checkpoint
-guide](stage2_note_search.md). Full-record reading remains the default, and the
-search path has not yet been benchmarked for clinical recall or throughput.
+guide](stage2_note_search.md). Explicitly enabling note search overrides the
+ColBERT default. Retrieval and note search have not yet been benchmarked here
+for clinical recall or throughput.
 
 Mode extraction plans one patient inside each worker, so requests can start before
 page planning finishes for the cohort. The planner prepares fixed prompt prefixes

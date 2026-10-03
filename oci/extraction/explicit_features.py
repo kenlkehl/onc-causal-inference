@@ -55,6 +55,7 @@ import pandas as pd
 from tqdm import tqdm
 
 from ..config import ExplicitFeatureSpec
+from ..colbert_config import ColBERTConfig, colbert_config_from_mapping
 from .contract_lexical_context import (
     CONTRACT_LEXICAL_CONTEXT_VERSION,
     compact_contract_lexical_context,
@@ -195,6 +196,7 @@ def build_extraction_prompt(
     max_text_length: Optional[int] = None,
     context_strategy: str = "tail",
     source_text_temporally_valid_by_design: bool = False,
+    colbert: ColBERTConfig | None = None,
 ) -> str:
     """Build prompt for feature extraction.
 
@@ -255,7 +257,13 @@ def build_extraction_prompt(
 
     text = str(clinical_text)
     strategy = str(context_strategy).strip().lower().replace("-", "_")
-    if strategy == "tail":
+    if strategy == "colbert":
+        from .colbert import get_retriever
+        retrieval_config = colbert or ColBERTConfig()
+        text = get_retriever(retrieval_config).retrieve(text, specs, top_k=retrieval_config.top_k)["context"]
+        if max_text_length is not None and len(text) > int(max_text_length):
+            raise ValueError("ColBERT retrieved context exceeds extraction_max_text_length; increase the budget or reduce top_k")
+    elif strategy == "tail":
         # Preserve the historical behavior exactly for backward compatibility.
         if max_text_length is not None and len(text) > int(max_text_length):
             text = text[-int(max_text_length) :]
@@ -274,11 +282,18 @@ def build_extraction_prompt(
             raise ValueError("complete_paged_v1 received an oversized unpaged input")
     else:
         raise ValueError(
-            "context_strategy must be 'tail', 'contract_lexical_rag', or "
+            "context_strategy must be 'colbert', 'tail', 'contract_lexical_rag', or "
             "'complete_paged_v1'"
         )
 
-    if strategy == "contract_lexical_rag":
+    if strategy == "colbert" or text.startswith("[oci_colbert_v1]"):
+        document_instruction = (
+            "Read the retrieved excerpts and extract the declared characteristics. "
+            "These excerpts are a subset of the patient's record; missing values do not "
+            "establish absence from the complete record. Follow temporal and aggregation rules."
+        )
+        document_label = "ColBERT-retrieved excerpts"
+    elif strategy == "contract_lexical_rag":
         document_instruction = (
             "Read every contract-guided verbatim excerpt below and extract the "
             "following characteristics. Excerpts retain their original source order."
@@ -551,10 +566,11 @@ class VLLMFeatureExtractor:
         temperature: float = 0.0,
         max_tokens: int = 1024,
         max_text_length: Optional[int] = None,
-        context_strategy: str = "tail",
+        context_strategy: str = "colbert",
         source_text_temporally_valid_by_design: bool = False,
         schema_repair_attempts: Optional[int] = None,
         fail_closed: bool = False,
+        colbert: ColBERTConfig | None = None,
     ):
         """Initialize extractor.
 
@@ -579,7 +595,7 @@ class VLLMFeatureExtractor:
             temperature: LLM temperature (0 for deterministic)
             max_tokens: Maximum tokens in response
             max_text_length: Maximum clinical text characters included in prompt
-            context_strategy: ``tail`` or ``contract_lexical_rag``
+            context_strategy: ``colbert`` (default), ``tail``, or ``contract_lexical_rag``
             source_text_temporally_valid_by_design: Trust source-text timing
                 instead of imposing a treatment-time eligibility boundary
         """
@@ -626,6 +642,7 @@ class VLLMFeatureExtractor:
         self.max_tokens = max_tokens
         self.max_text_length = max_text_length
         self.context_strategy = str(context_strategy)
+        self.colbert = colbert_config_from_mapping(colbert)
         self.source_text_temporally_valid_by_design = bool(source_text_temporally_valid_by_design)
         self.schema_repair_attempts = (
             None if schema_repair_attempts is None else int(schema_repair_attempts)
@@ -747,6 +764,7 @@ class VLLMFeatureExtractor:
             self.specs,
             max_text_length=self.max_text_length,
             context_strategy=self.context_strategy,
+            colbert=self.colbert,
             source_text_temporally_valid_by_design=(self.source_text_temporally_valid_by_design),
         )
         messages = [{"role": "user", "content": prompt}]
@@ -1068,18 +1086,20 @@ class VLLMFeatureExtractor:
         """Extract features from batch using vLLM Python API."""
         from vllm import SamplingParams
 
-        # Build prompts
-        prompts = []
-        for text in texts:
-            user_content = build_extraction_prompt(
-                text,
-                self.specs,
-                max_text_length=self.max_text_length,
-                context_strategy=self.context_strategy,
-                source_text_temporally_valid_by_design=(
-                    self.source_text_temporally_valid_by_design
-                ),
+        def prepare(text):
+            return build_extraction_prompt(
+                text, self.specs, max_text_length=self.max_text_length,
+                context_strategy=self.context_strategy, colbert=self.colbert,
+                source_text_temporally_valid_by_design=self.source_text_temporally_valid_by_design,
             )
+
+        if self.context_strategy == "colbert" and len(texts) > 1:
+            with ThreadPoolExecutor(max_workers=min(32, len(texts))) as pool:
+                user_contents = list(pool.map(prepare, texts))
+        else:
+            user_contents = [prepare(text) for text in texts]
+        prompts = []
+        for user_content in user_contents:
             tokenizer = self._llm.get_tokenizer()
 
             if hasattr(tokenizer, "apply_chat_template"):
@@ -1242,8 +1262,9 @@ def extract_explicit_features(
     temperature: float = 0.0,
     max_tokens: int = 1024,
     max_text_length: Optional[int] = None,
-    context_strategy: str = "tail",
+    context_strategy: str = "colbert",
     batch_size: int = 32,
+    colbert: ColBERTConfig | None = None,
 ) -> pd.DataFrame:
     """Convenience function to extract features from texts.
 
@@ -1267,7 +1288,7 @@ def extract_explicit_features(
         temperature: LLM temperature
         max_tokens: Max response tokens
         max_text_length: Maximum clinical text characters included in prompt
-        context_strategy: ``tail`` or ``contract_lexical_rag``
+        context_strategy: ``colbert`` (default), ``tail``, or ``contract_lexical_rag``
         batch_size: Batch size for processing
 
     Returns:
@@ -1293,6 +1314,7 @@ def extract_explicit_features(
         max_tokens=max_tokens,
         max_text_length=max_text_length,
         context_strategy=context_strategy,
+        colbert=colbert,
     )
 
     try:

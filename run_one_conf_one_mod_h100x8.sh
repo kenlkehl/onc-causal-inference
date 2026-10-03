@@ -6,6 +6,8 @@
 # Re-run with the same output directory to resume compatible checkpoints.
 # Explicit saved Stage 2 launches retain their saved model and serving settings.
 
+# Extraction defaults to cached ColBERT retrieval. Configure STAGE2_COLBERT_*
+# or select STAGE2_EXTRACTION_CONTEXT_STRATEGY=full_record for fresh legacy runs.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

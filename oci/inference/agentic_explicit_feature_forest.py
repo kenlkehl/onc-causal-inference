@@ -1944,6 +1944,7 @@ def _codex_extraction_prompt(
     complete_document = (
         str(context_strategy).strip().lower().replace("-", "_") == "tail"
         and max_text_length is None
+        and not str(clinical_text).startswith("[oci_colbert_v1]")
     )
     reading_instruction = (
         "Read the whole clinical note in the extraction prompt below from beginning " "to end."
@@ -2402,7 +2403,8 @@ class VLLMExplicitFeatureExtractionProvider:
         specs: List[ExplicitFeatureSpec],
     ) -> List[List[ExplicitFeatureSpec]]:
         """Group related contracts while enforcing the hard ten-variable cap."""
-        if self.feature_config.extraction_context_strategy == COMPLETE_PAGED_VERSION:
+        if self.feature_config.extraction_context_strategy in {COMPLETE_PAGED_VERSION, "colbert"}:
+            # Retrieval selects evidence independently for each question.
             # Complete-page responses carry one closed feature contract so that
             # every page can later be reconciled without companion-variable
             # prompt effects.
@@ -2700,10 +2702,11 @@ class VLLMExplicitFeatureExtractionProvider:
             temperature=self.feature_config.extraction_temperature,
             max_tokens=self.feature_config.extraction_max_tokens,
             max_text_length=self.feature_config.extraction_max_text_length,
+            colbert=self.feature_config.colbert,
             context_strategy=getattr(
                 self.feature_config,
                 "extraction_context_strategy",
-                "tail",
+                "colbert",
             ),
             source_text_temporally_valid_by_design=bool(
                 getattr(
@@ -3049,7 +3052,7 @@ class VLLMExplicitFeatureExtractionProvider:
             "extraction_context_strategy": getattr(
                 self.feature_config,
                 "extraction_context_strategy",
-                "tail",
+                "colbert",
             ),
             "extraction_context_compactor_version": CONTRACT_LEXICAL_CONTEXT_VERSION,
             "extraction_grouping_version": EXTRACTION_GROUPING_VERSION,
@@ -3074,6 +3077,9 @@ class VLLMExplicitFeatureExtractionProvider:
             ),
             "extraction_batch_size": int(self.feature_config.extraction_batch_size),
         }
+        if self.feature_config.extraction_context_strategy == "colbert":
+            from ..extraction.colbert import retrieval_identity
+            cache_config["colbert"] = retrieval_identity(self.feature_config.colbert)
         return cache_config
 
     def _spec_fingerprint(self, spec: ExplicitFeatureSpec) -> str:
@@ -3128,7 +3134,7 @@ class CodexCLIExplicitFeatureExtractionProvider(VLLMExplicitFeatureExtractionPro
             .lower()
             .replace("-", "_")
         )
-        return {
+        identity = {
             "features": [_spec_extraction_contract_dict(spec) for spec in specs],
             "prompt_template_version": EXTRACTION_PROMPT_VERSION,
             "extraction_provider": "codex_cli",
@@ -3176,6 +3182,10 @@ class CodexCLIExplicitFeatureExtractionProvider(VLLMExplicitFeatureExtractionPro
             ),
             "extraction_batch_size": int(self.feature_config.extraction_batch_size),
         }
+        if context_strategy == "colbert":
+            from ..extraction.colbert import retrieval_identity
+            identity["colbert"] = retrieval_identity(self.feature_config.colbert)
+        return identity
 
     def _extract_spec_group(
         self,
@@ -3230,6 +3240,14 @@ class CodexCLIExplicitFeatureExtractionProvider(VLLMExplicitFeatureExtractionPro
                 False,
             )
         )
+        if context_strategy == "colbert":
+            from ..extraction.colbert import get_retriever
+            text = get_retriever(self.feature_config.colbert).retrieve(
+                text, specs, top_k=self.feature_config.colbert.top_k)["context"]
+            if (self.feature_config.extraction_max_text_length is not None
+                    and len(text) > self.feature_config.extraction_max_text_length):
+                raise ValueError("ColBERT retrieved context exceeds extraction_max_text_length")
+            context_strategy = "tail"
         base_prompt = _codex_extraction_prompt(
             text,
             specs,

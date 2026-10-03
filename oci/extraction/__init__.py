@@ -15,6 +15,8 @@ from .explicit_features import (
     strip_reasoning_trace,
     extract_explicit_features,
 )
+from ..colbert_config import ColBERTConfig
+from .colbert import ColBERTRetriever, get_retriever
 from .cache import ExtractionCache
 from .contract_lexical_context import (
     CONTRACT_LEXICAL_CONTEXT_VERSION,
@@ -75,6 +77,9 @@ VLLMConfounderExtractor = VLLMFeatureExtractor
 extract_explicit_confounders = extract_explicit_features
 
 __all__ = [
+    "ColBERTConfig",
+    "ColBERTRetriever",
+    "get_retriever",
     "ExplicitFeatureValue",
     "VLLMFeatureExtractor",
     "build_extraction_prompt",

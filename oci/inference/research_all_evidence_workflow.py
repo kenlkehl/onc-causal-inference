@@ -3013,6 +3013,16 @@ def build_parser() -> argparse.ArgumentParser:
             "at least 4096 and defaults to 75000"
         ),
     )
+    parser.add_argument("--stage2-extraction-context-strategy", choices=("colbert", "full_record"))
+    parser.add_argument("--stage2-colbert-model")
+    parser.add_argument("--stage2-colbert-revision")
+    parser.add_argument("--stage2-colbert-devices", help="auto, cpu, or comma-separated logical CUDA devices")
+    parser.add_argument("--stage2-colbert-cache-dir")
+    parser.add_argument("--stage2-colbert-chunk-size", type=int)
+    parser.add_argument("--stage2-colbert-chunk-overlap", type=int)
+    parser.add_argument("--stage2-colbert-query-length", type=int)
+    parser.add_argument("--stage2-colbert-batch-size", type=int)
+    parser.add_argument("--stage2-colbert-top-k", type=int)
     parser.add_argument(
         "--stage2-extraction-chunk-size-tokens",
         type=int,
@@ -3399,6 +3409,17 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
         for key, value in extraction_vllm_overrides.items():
             if value is not None:
                 extraction_vllm[key] = value
+    if args.stage2_extraction_context_strategy is not None:
+        stage2["extraction_context_strategy"] = args.stage2_extraction_context_strategy
+    colbert_overrides = {
+        "model_name": args.stage2_colbert_model, "revision": args.stage2_colbert_revision,
+        "devices": args.stage2_colbert_devices, "cache_dir": args.stage2_colbert_cache_dir,
+        "chunk_size": args.stage2_colbert_chunk_size, "chunk_overlap": args.stage2_colbert_chunk_overlap,
+        "query_length": args.stage2_colbert_query_length, "batch_size": args.stage2_colbert_batch_size,
+        "top_k": args.stage2_colbert_top_k,
+    }
+    if any(value is not None for value in colbert_overrides.values()):
+        stage2.setdefault("colbert", {}).update({k: v for k, v in colbert_overrides.items() if v is not None})
     stage2_numeric_overrides = {
         "max_tokens": args.stage2_max_tokens,
         "extraction_max_tokens": args.stage2_extraction_max_tokens,

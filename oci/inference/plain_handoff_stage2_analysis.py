@@ -38,6 +38,8 @@ from . import stage2_request_audit as request_audit
 from . import stage2_clinical_prompts as clinical_prompts
 from . import stage2_note_search as note_search_extraction
 from .stage2_note_search import NoteSearchConfig
+from ..colbert_config import ColBERTConfig
+from . import stage2_colbert
 
 from ..models.causal_forest_head import CausalForestHead
 from ..models.elastic_net_nuisance import (
@@ -384,6 +386,8 @@ def _configured_serial_extraction(config: Any) -> dict[str, Any]:
     search = getattr(config, "extraction_note_search", NoteSearchConfig())
     if search.enabled:
         settings["note_search"] = search
+    settings["context_strategy"] = getattr(config, "extraction_context_strategy", "full_record")
+    settings["colbert"] = getattr(config, "colbert", ColBERTConfig())
     return settings
 
 
@@ -438,6 +442,8 @@ def frozen_preselection_review_policy(config: Any) -> dict[str, Any]:
     search = getattr(config, "extraction_note_search", NoteSearchConfig())
     if search.enabled:
         policy["extraction_note_search"] = note_search_extraction.policy_identity(search)
+    if not search.enabled and getattr(config, "extraction_context_strategy", "full_record") == "colbert":
+        policy["colbert"] = stage2_colbert.policy_identity(getattr(config, "colbert", ColBERTConfig()))
     return policy
 
 
@@ -3458,10 +3464,25 @@ def extract_rows(
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
     deferred_retry_passes: int = 1,
     note_search: NoteSearchConfig | None = None,
+    context_strategy: str = "full_record",
+    colbert: ColBERTConfig | None = None,
+    _source_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> pd.DataFrame:
     """Extract patient/feature batches with full-record or optional note-search reading."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if context_strategy == "colbert" and not (note_search and note_search.enabled):
+        return stage2_colbert.extract_rows(
+            dataset=dataset, row_ids=row_ids, text_column=text_column, definitions=definitions,
+            output_dir=output_dir, request_json=request_json, workers=workers,
+            max_prompt_chars=max_prompt_chars, feature_batch_size=feature_batch_size,
+            request_identity=request_identity, tokenizer=tokenizer,
+            chunk_size_tokens=chunk_size_tokens, context_window_tokens=context_window_tokens,
+            max_output_tokens=max_output_tokens, context_margin_tokens=context_margin_tokens,
+            deferred_retry_passes=deferred_retry_passes, colbert=colbert or ColBERTConfig(),
+        )
+    if context_strategy not in {"full_record", "colbert"}:
+        raise ValueError("Stage 2 extraction context_strategy must be colbert or full_record")
     note_search = note_search or NoteSearchConfig()
     note_search.validate()
     measurement_method = note_search_extraction.claim_output_method(output_dir, note_search)
@@ -3492,6 +3513,7 @@ def extract_rows(
             return extract_rows(
                 dataset=dataset, row_ids=row_ids, text_column=text_column,
                 definitions=group, output_dir=output_dir / "by_strategy" / name,
+                _source_rows=_source_rows,
                 request_json=split_request, workers=group_workers,
                 max_prompt_chars=max_prompt_chars, feature_batch_size=feature_batch_size,
                 request_identity=request_identity, tokenizer=tokenizer,
@@ -3499,6 +3521,7 @@ def extract_rows(
                 max_output_tokens=max_output_tokens, context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
                 note_search=note_search,
+                context_strategy=context_strategy, colbert=colbert,
             )
 
         mode_workers = max(1, int(workers) // 8)
@@ -3596,7 +3619,7 @@ def extract_rows(
         )
         return frame
 
-    request_rows = [
+    request_rows = list(_source_rows) if _source_rows is not None else [
         {
             "row_id": int(row_id),
             "text": (
@@ -8170,6 +8193,8 @@ def _extract_changed_features_and_merge(
     context_margin_tokens: int,
     deferred_retry_passes: int = 1,
     note_search: NoteSearchConfig | None = None,
+    context_strategy: str = "full_record",
+    colbert: ColBERTConfig | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Extract changed features only and materialize a complete merged matrix."""
 
@@ -8203,6 +8228,7 @@ def _extract_changed_features_and_merge(
             context_margin_tokens=context_margin_tokens,
             deferred_retry_passes=deferred_retry_passes,
             note_search=note_search,
+            context_strategy=context_strategy, colbert=colbert,
         )
         summary = json.loads(
             (output_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8240,6 +8266,7 @@ def _extract_changed_features_and_merge(
         context_margin_tokens=context_margin_tokens,
         deferred_retry_passes=deferred_retry_passes,
         note_search=note_search,
+        context_strategy=context_strategy, colbert=colbert,
     )
     prior_names = [str(feature["name"]) for feature in prior_definitions]
     prior_indexed = _validated_extraction_index(
@@ -8356,6 +8383,8 @@ def _extract_training_with_ontology_feedback(
     context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS,
     deferred_retry_passes: int = 1,
     note_search: NoteSearchConfig | None = None,
+    context_strategy: str = "full_record",
+    colbert: ColBERTConfig | None = None,
     prior_extracted: pd.DataFrame | None = None,
     prior_definitions: Sequence[Mapping[str, Any]] | None = None,
     prior_failure_summary: Mapping[str, Any] | None = None,
@@ -8410,6 +8439,7 @@ def _extract_training_with_ontology_feedback(
                 context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
                 note_search=note_search,
+                context_strategy=context_strategy, colbert=colbert,
             )
             summary = json.loads(
                 (extraction_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8438,6 +8468,7 @@ def _extract_training_with_ontology_feedback(
                 context_margin_tokens=context_margin_tokens,
                 deferred_retry_passes=deferred_retry_passes,
                 note_search=note_search,
+                context_strategy=context_strategy, colbert=colbert,
             )
         repeated = _repeated_ontology_failure_patterns(
             summary,
@@ -9704,9 +9735,11 @@ def run_fold_analysis(
 ) -> dict[str, Any]:
     """Run extraction supervision, fold-local selection, and causal-forest estimation."""
 
-    note_search_extraction.claim_output_method(
-        output_dir, getattr(config, "extraction_note_search", NoteSearchConfig()), fold_root=True,
-    )
+    search = getattr(config, "extraction_note_search", NoteSearchConfig())
+    if not search.enabled and getattr(config, "extraction_context_strategy", "full_record") == "colbert":
+        stage2_colbert.claim_output_method(output_dir, getattr(config, "colbert", ColBERTConfig()), fold_root=True)
+    else:
+        note_search_extraction.claim_output_method(output_dir, search, fold_root=True)
     # Study context is supplied only to modeling reviews, never extraction supervision.
     (
         ontology_refinement_min_failure_patients,

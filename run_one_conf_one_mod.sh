@@ -18,6 +18,8 @@
 #     STAGE2_SELECTION_MODE=independent_tasks OCI_PREFLIGHT_ONLY=1 ./run_one_conf_one_mod.sh
 #   See docs/stage2_independent_tasks.md for archived-source migration and resume.
 
+# Extraction defaults to cached ColBERT retrieval. Configure STAGE2_COLBERT_*
+# or select STAGE2_EXTRACTION_CONTEXT_STRATEGY=full_record for fresh legacy runs.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

@@ -7,6 +7,7 @@ from pathlib import Path
 import json
 import hashlib
 import math
+from .colbert_config import ColBERTConfig, colbert_config_from_mapping
 
 
 def _validate_parallelism_setting(value: Any, name: str) -> None:
@@ -236,10 +237,10 @@ class ExplicitFeatureExtractionConfig:
     complete_page_context_chars: Optional[int] = None
     complete_page_max_chars: Optional[int] = None
     complete_reconciliation_fan_in: Optional[int] = None
-    # Request packing and document-context selection. Defaults preserve the
-    # historical domain grouping and note-tail prompt behavior.
+    # Request packing and retrieval from cached patient token vectors.
     extraction_grouping_strategy: str = "clinical_domain"
-    extraction_context_strategy: str = "tail"
+    extraction_context_strategy: str = "colbert"
+    colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
     extraction_provider: str = "openai"
     # Opt-in for datasets whose text has already been made temporally valid by
     # construction. The legacy default preserves treatment-time extraction
@@ -261,6 +262,7 @@ class ExplicitFeatureExtractionConfig:
     featurizer_dropout: float = 0.1
 
     def __post_init__(self):
+        self.colbert = colbert_config_from_mapping(self.colbert)
         if not isinstance(self.source_text_temporally_valid_by_design, bool):
             raise ValueError(
                 "explicit_features.source_text_temporally_valid_by_design must be boolean"
@@ -278,10 +280,10 @@ class ExplicitFeatureExtractionConfig:
             )
         self.extraction_grouping_strategy = grouping
         context = str(self.extraction_context_strategy).strip().lower().replace("-", "_")
-        if context not in {"tail", "contract_lexical_rag", "complete_paged_v1"}:
+        if context not in {"colbert", "tail", "contract_lexical_rag", "complete_paged_v1"}:
             raise ValueError(
                 "explicit_features.extraction_context_strategy must be "
-                "'tail', 'contract_lexical_rag', or 'complete_paged_v1'"
+                "'colbert', 'tail', 'contract_lexical_rag', or 'complete_paged_v1'"
             )
         self.extraction_context_strategy = context
         if self.extraction_max_text_length is not None:

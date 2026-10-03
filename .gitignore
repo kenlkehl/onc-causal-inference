@@ -17,3 +17,5 @@ synthetic_output*
 applied_experiments/
 artifacts/
 reports/
+
+.oci_cache/

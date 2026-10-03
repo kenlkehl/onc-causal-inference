@@ -1,5 +1,8 @@
 # Oncology Causal Inference (OCI)
 
+New runs default to [ColBERT feature extraction](docs/colbert_extraction.md): independently implemented patient-record retrieval, reusable disk-cached token embeddings, and parallel GPU/patient/LLM-server processing. The root all-in-one launchers inherit this default.
+
+
 ## Overview
 OCI is a pipeline for causal inference for individual treatment effect estimation (ITE estimation), also known as conditional average treatment effect estimation (CATE), using unstructured electronic health records text, focusing on oncology.
 
@@ -1300,7 +1303,11 @@ example and validation rules.
 Stage 2 extraction is permanently isolated to one patient per model prompt. It
 queries at most `stage2.extraction_feature_batch_size` definitions per prompt
 (10 by default), checkpoints each feature slice, and merges the slices before
-review. A record longer than the available prompt envelope is processed in
+review. The default `colbert` path embeds the prepared record once, caches its
+token vectors, and retrieves question-specific evidence for each feature. See
+[ColBERT extraction](docs/colbert_extraction.md) for cache, GPU, and launcher settings.
+Select `stage2.extraction_context_strategy: "full_record"` for exhaustive reading.
+In that mode, or when retrieved evidence exceeds the prompt envelope, text is processed in
 source order with lossless contiguous chunks capped by
 `stage2.extraction_chunk_size_tokens` (50,000 by default). Each validated
 structured extraction becomes the prior state for the next chunk. The planner
@@ -1329,7 +1336,8 @@ fallback by default. A missing value with zero search matches gets one additiona
 search using alternative wording before remaining missing. This adds no date
 parsing or chronology inference.
 Mode-based variables retain full-record
-occurrence extraction. The standard full-record path remains the default.
+occurrence extraction within the note-search route. ColBERT retrieval is the
+default when note search is not explicitly enabled.
 Search can miss evidence, and a speed or accuracy advantage has not been
 established. See [note-search extraction](docs/stage2_note_search.md) for setup,
 limits, and how to keep a comparison separate from existing measurements.
@@ -1348,7 +1356,7 @@ packet plan is cached and input-fingerprinted for fast, safe restarts.
 Stage 2 sends every compiled semantic evidence card to exhaustive feature
 discovery. The primary model must list every pretreatment patient-level clinical
 feature mentioned or implied by the supplied cards, and one evidence item may
-support many candidates. There is no ColBERT routing, evidence-community graph,
+support many candidates. There is no ColBERT candidate routing, evidence-community graph,
 candidate retrieval, candidate-count cap, or causal-role filter. All discovered
 candidates enter merge-only consolidation; oracle metadata never participates.
 

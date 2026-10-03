@@ -67,6 +67,7 @@ def _compute_config_hash(config: Dict[str, Any]) -> str:
             'extraction_request_group_sha256', ''
         ),
         'extraction_context_strategy': config.get('extraction_context_strategy', 'tail'),
+        'colbert': config.get('colbert'),
         'extraction_context_compactor_version': config.get(
             'extraction_context_compactor_version', ''
         ),

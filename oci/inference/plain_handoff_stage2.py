@@ -80,6 +80,7 @@ from .stage2_candidate_consolidation import (
 )
 from . import stage2_clinical_prompts as clinical_prompts
 from . import stage2_request_audit as request_audit
+from ..colbert_config import ColBERTConfig, colbert_config_from_mapping
 from .stage2_note_search import (
     NoteSearchConfig,
     config_from_mapping as note_search_config_from_mapping,
@@ -919,6 +920,8 @@ class PlainHandoffStage2Config:
     extraction_max_prompt_chars: int = DEFAULT_EXTRACTION_MAX_PROMPT_CHARS
     extraction_feature_batch_size: int = DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE
     extraction_note_search: NoteSearchConfig = field(default_factory=NoteSearchConfig)
+    extraction_context_strategy: str = "colbert"
+    colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
     # Long records are processed in ordered, lossless source chunks. This is a
     # token cap rather than a target: the planner shrinks a chunk when feature
     # definitions and carried-forward state need more of the context window.
@@ -1065,6 +1068,10 @@ class PlainHandoffStage2Config:
         if not isinstance(self.extraction_note_search, NoteSearchConfig):
             raise ValueError("stage2.extraction_note_search must be a NoteSearchConfig")
         self.extraction_note_search.validate()
+        if self.extraction_context_strategy not in {"colbert", "full_record"}:
+            raise ValueError("stage2.extraction_context_strategy must be colbert or full_record")
+        if not isinstance(self.colbert, ColBERTConfig):
+            raise ValueError("stage2.colbert must be a ColBERTConfig")
         if (isinstance(self.extraction_deferred_retry_passes, bool)
                 or not isinstance(self.extraction_deferred_retry_passes, int)
                 or self.extraction_deferred_retry_passes < 0):
@@ -1594,6 +1601,8 @@ def plain_stage2_config_from_mapping(
         extraction_stream=raw.get("extraction_stream", False),
         extraction_deferred_retry_passes=raw.get("extraction_deferred_retry_passes", 1),
         extraction_note_search=note_search_config_from_mapping(raw.get("extraction_note_search")),
+        extraction_context_strategy=raw.get("extraction_context_strategy", "colbert"),
+        colbert=colbert_config_from_mapping(raw.get("colbert")),
         interpretation_reasoning_effort=interpretation_reasoning_effort,
         extraction_reasoning_effort=extraction_reasoning_effort,
         max_prompt_chars=int(raw.get("max_prompt_chars", 100_000)),

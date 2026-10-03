@@ -3,7 +3,6 @@
   "seed": 42,
   "device": "cpu",
   "num_workers": 1,
-
   "applied_inference": {
     "dataset_path": "./dataset.parquet",
     "clinical_question": "What is the causal effect of treatment_indicator on outcome_indicator?",
@@ -12,10 +11,8 @@
     "treatment_column": "treatment_indicator",
     "outcome_type": "binary",
     "cv_folds": 5,
-
     "architecture": {
       "model_type": "agentic_explicit_feature_forest",
-
       "explicit_feature_forest": {
         "n_estimators": 200,
         "max_depth": null,
@@ -24,7 +21,6 @@
         "honest": true,
         "inference": true
       },
-
       "agentic_feature_search": {
         "outer_folds": 5,
         "inner_folds": 3,
@@ -56,25 +52,29 @@
         "stop_after_rejected_iteration": true
       }
     },
-
     "explicit_features": {
       "enabled": true,
       "features": [],
       "vllm_mode": "server",
       "vllm_server_url": "http://localhost:8000/v1",
       "vllm_model_name": "Qwen/Qwen2.5-7B-Instruct",
-      "complete_page_context_chars": 256,
-      "complete_page_core_chars": 13488,
-      "complete_page_max_chars": 14000,
-      "complete_reconciliation_fan_in": 16,
       "extraction_batch_size": 32,
       "extraction_max_retries": 3,
       "extraction_temperature": 0.0,
       "extraction_max_tokens": 1024,
-      "extraction_context_strategy": "complete_paged_v1",
+      "extraction_context_strategy": "colbert",
       "extraction_max_text_length": 14000,
       "cache_enabled": true,
-      "cache_dir": null
+      "cache_dir": null,
+      "colbert": {
+        "devices": [
+          "auto"
+        ],
+        "cache_dir": ".oci_cache/colbert",
+        "chunk_size": 64,
+        "chunk_overlap": 0,
+        "top_k": 20
+      }
     }
   }
 }

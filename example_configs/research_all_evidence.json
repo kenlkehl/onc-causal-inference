@@ -76,7 +76,7 @@
       "modifier_selection_rule": "any_inner_fold_union",
       "internal_cv_folds": 3,
       "regularization_grid_size": 16,
-      "optimization_tolerance": 1e-6,
+      "optimization_tolerance": 1e-06,
       "one_standard_error_rule": true,
       "nuisance_prediction_one_standard_error_rule": false,
       "modifier_one_standard_error_rule": false,
@@ -95,7 +95,20 @@
     },
     "estimation_trees": 200,
     "propensity_clip": 0.02,
-    "explicit_features": []
+    "explicit_features": [],
+    "extraction_context_strategy": "colbert",
+    "colbert": {
+      "model_name": "lightonai/GTE-ModernColBERT-v1",
+      "devices": [
+        "auto"
+      ],
+      "cache_dir": ".oci_cache/colbert",
+      "chunk_size": 64,
+      "chunk_overlap": 0,
+      "query_length": 512,
+      "batch_size": 32,
+      "top_k": 20
+    }
   },
   "run": {
     "devices": [

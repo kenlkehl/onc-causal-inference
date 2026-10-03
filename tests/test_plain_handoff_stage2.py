@@ -7451,6 +7451,7 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     }
     packets = [{"packet_id": "packet_1", "outer_fold": 1}]
     config = PlainHandoffStage2Config(
+        extraction_context_strategy="full_record",  # archived legacy measurements
         endpoint="http://stage2.test/v1",
         model="primary-model",
         extraction_llm=Stage2ExtractionLLMConfig(
@@ -7691,6 +7692,7 @@ def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_m
     }
     packets = [{"packet_id": "packet_1", "outer_fold": 1}]
     config = PlainHandoffStage2Config(
+        extraction_context_strategy="full_record",  # archived legacy measurements
         endpoint="http://stage2.test/v1",
         model="primary-model",
         extraction_llm=Stage2ExtractionLLMConfig(

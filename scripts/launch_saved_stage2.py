@@ -38,6 +38,9 @@ def command(dataset: Path, output: str, env: dict[str, str]) -> list[str]:
         "STAGE2_EXTRACTION_ENDPOINTS": "--stage2-extraction-endpoints",
         "STAGE2_EXTRACTION_MODEL": "--stage2-extraction-model",
         "STAGE2_EXTRACTION_WORKERS": "--stage2-extraction-workers",
+        "STAGE2_COLBERT_DEVICES": "--stage2-colbert-devices",
+        "STAGE2_COLBERT_CACHE_DIR": "--stage2-colbert-cache-dir",
+        "STAGE2_COLBERT_BATCH_SIZE": "--stage2-colbert-batch-size",
     }
     for prefix, flag in (
         ("STAGE2_VLLM_", "--stage2-vllm-"),

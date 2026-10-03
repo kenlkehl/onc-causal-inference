@@ -2,7 +2,10 @@
 
 Run these commands from the repository root after `uv sync --frozen`.
 The complete Stage 1 workflow needs CUDA GPUs. Stage 2 can use external
-OpenAI-compatible servers or pipeline-managed vLLM.
+OpenAI-compatible servers or pipeline-managed vLLM. Patient feature extraction
+defaults to [cached ColBERT retrieval](colbert_extraction.md), using all visible
+GPUs for retrieval or CPU when none are available. Configure `stage2.colbert.devices`
+to choose dedicated retrieval devices; LLM server concurrency remains independent.
 
 ## Start the multi-model workflow
 

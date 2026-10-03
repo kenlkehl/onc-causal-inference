@@ -361,6 +361,17 @@ if [[ -n "${stage2_extraction_max_tokens}" ]]; then
         --stage2-extraction-max-tokens "${stage2_extraction_max_tokens}"
     )
 fi
+# All root quickstarts delegate here. Retrieval indexes are shared across runs,
+# outer folds, ontology revisions, and answering endpoints for this cohort.
+stage2_policy_args+=(--stage2-extraction-context-strategy "${STAGE2_EXTRACTION_CONTEXT_STRATEGY:-colbert}")
+stage2_policy_args+=(--stage2-colbert-cache-dir "${STAGE2_COLBERT_CACHE_DIR:-${repo_root}/.oci_cache/colbert}")
+for colbert_setting in MODEL REVISION DEVICES CHUNK_SIZE CHUNK_OVERLAP QUERY_LENGTH BATCH_SIZE TOP_K; do
+    variable="STAGE2_COLBERT_${colbert_setting}"
+    if [[ -n "${!variable:-}" ]]; then
+        option="${colbert_setting,,}"
+        stage2_policy_args+=("--stage2-colbert-${option//_/-}" "${!variable}")
+    fi
+done
 if [[ -n "${stage2_extraction_chunk_size_tokens}" ]]; then
     stage2_policy_args+=(
         --stage2-extraction-chunk-size-tokens "${stage2_extraction_chunk_size_tokens}"
