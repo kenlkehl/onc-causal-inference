@@ -962,7 +962,9 @@ class EmbeddingContrastDiscoveryConfig:
     ] = None
     external_corpus_cache_dirs: List[str] = field(default_factory=list)
     external_top_k_chunks_per_tail: int = 12
-    retrieval_tfidf_enabled: bool = True
+    # Optional lexical summaries of embedding contrasts. Contextual embedding
+    # witnesses remain enabled when this additional evidence lane is disabled.
+    retrieval_tfidf_enabled: bool = False
     retrieval_tfidf_ngram_range_min: int = 1
     retrieval_tfidf_ngram_range_max: int = 3
     retrieval_tfidf_max_features: int = 20_000
@@ -1960,10 +1962,10 @@ class TfidfTopicDiscoveryConfig:
     score_test_min_topics_per_bank: int = 5
     score_test_max_topics_per_bank: int = 20
     score_test_full_topic_min_inner_folds: int = 1
-    # Sparse skip connection around NMF. Candidate groups are built only from
+    # Opt-in sparse skip connection around NMF. Candidate groups are built only from
     # stable fit-side effect n-grams that are absent from every fitted topic's
     # configured term summary, then tested once on the exact inner-held-out rows.
-    orphan_ngram_enabled: bool = True
+    orphan_ngram_enabled: bool = False
     orphan_ngram_min_abs_fit_score: float = 2.0
     orphan_ngram_cluster_similarity_threshold: float = 0.25
     orphan_ngram_cluster_max_terms: int = 15

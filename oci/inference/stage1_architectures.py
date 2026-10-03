@@ -148,6 +148,11 @@ STAGE1_ARCHITECTURE_SPECS = (
 )
 
 STAGE1_ARCHITECTURES = tuple(spec.name for spec in STAGE1_ARCHITECTURE_SPECS)
+DEFAULT_STAGE1_ARCHITECTURES = tuple(
+    name
+    for name in STAGE1_ARCHITECTURES
+    if name not in {TFIDF_SEMANTIC_RETRIEVAL, TFIDF_ORPHAN_NGRAMS}
+)
 STAGE1_ARCHITECTURE_REGISTRY: Mapping[str, Stage1ArchitectureSpec] = {
     spec.name: spec for spec in STAGE1_ARCHITECTURE_SPECS
 }
@@ -188,7 +193,7 @@ def legacy_enabled_stage1_architectures(
     *,
     outcome_type: str,
 ) -> tuple[str, ...]:
-    """Mirror the pre-registry enable-flag behavior exactly."""
+    """Resolve enabled lanes from their implementation settings."""
 
     mm_config = applied_config.architecture.multi_model_forest
     enabled: set[str] = set()
@@ -217,11 +222,11 @@ def legacy_enabled_stage1_architectures(
         enabled.add(EMBEDDING_WHOLE_COHORT)
         if bool(getattr(embedding, "include_cluster_contrast_vectors", True)):
             enabled.add(EMBEDDING_CLUSTERED)
-        if bool(getattr(embedding, "retrieval_tfidf_enabled", True)):
+        if bool(getattr(embedding, "retrieval_tfidf_enabled", False)):
             enabled.add(TFIDF_SEMANTIC_RETRIEVAL)
 
     enabled.add(TFIDF_TOPICS)
-    if bool(getattr(mm_config.tfidf_topic, "orphan_ngram_enabled", True)):
+    if bool(getattr(mm_config.tfidf_topic, "orphan_ngram_enabled", False)):
         enabled.add(TFIDF_ORPHAN_NGRAMS)
     enabled.add(NEURAL_QUERY_MOMENTS)
     return tuple(name for name in STAGE1_ARCHITECTURES if name in enabled)
@@ -233,7 +238,12 @@ def unavailable_explicit_architectures(
     *,
     outcome_type: str,
 ) -> tuple[str, ...]:
-    """Return selected lanes disabled by their own implementation switches."""
+    """Return selected lanes unavailable under their prerequisite settings.
+
+    Naming either optional lexical lane explicitly opts into it. Its false
+    default does not veto the selector that enables it in the applied mapping;
+    embedding availability and orphan score-test prerequisites still apply.
+    """
 
     available = set(
         legacy_enabled_stage1_architectures(
@@ -241,6 +251,11 @@ def unavailable_explicit_architectures(
             outcome_type=outcome_type,
         )
     )
+    mm_config = applied_config.architecture.multi_model_forest
+    if bool(getattr(mm_config.embedding_contrast, "enabled", False)):
+        available.add(TFIDF_SEMANTIC_RETRIEVAL)
+    if bool(getattr(mm_config.tfidf_topic, "score_test_enabled", True)):
+        available.add(TFIDF_ORPHAN_NGRAMS)
     return tuple(name for name in STAGE1_ARCHITECTURES if name in set(selected) - available)
 
 
@@ -275,6 +290,7 @@ def selected_components(selected: Iterable[str]) -> tuple[str, ...]:
 __all__ = [
     "BOW_NUISANCE",
     "BOW_R_LOSS",
+    "DEFAULT_STAGE1_ARCHITECTURES",
     "EMBEDDING_CLUSTERED",
     "EMBEDDING_WHOLE_COHORT",
     "HTR_NEURAL",

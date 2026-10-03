@@ -49,12 +49,12 @@ from .stage2_sequential_consolidation import (
 from .stage1_architectures import (
     BOW_NUISANCE,
     BOW_R_LOSS,
+    DEFAULT_STAGE1_ARCHITECTURES,
     EMBEDDING_CLUSTERED,
     EMBEDDING_WHOLE_COHORT,
     HTR_NEURAL,
     MATCHED_PAIR_UPLIFT,
     NEURAL_QUERY_MOMENTS,
-    STAGE1_ARCHITECTURES,
     TFIDF_ORPHAN_NGRAMS,
     TFIDF_SEMANTIC_RETRIEVAL,
     TFIDF_TOPICS,
@@ -655,7 +655,7 @@ class Stage1RunContext:
     dataset: pd.DataFrame
     applied_config: Any
     neural_query_config: Any
-    selected_architectures: tuple[str, ...] = STAGE1_ARCHITECTURES
+    selected_architectures: tuple[str, ...] = DEFAULT_STAGE1_ARCHITECTURES
     support_services: tuple[str, ...] = ()
 
     @property

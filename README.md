@@ -408,7 +408,7 @@ training fold. If held-out outcomes influence which variable is named or how it
 is defined, ordinary cross-validation no longer measures the adaptive procedure.
 
 The default five outer folds and five inner folds produce one full outer-training
-context and five inner-training contexts per outer fold. All ten architectures
+context and five inner-training contexts per outer fold. All enabled architectures
 use the same row definitions. The outer contexts support held-out evaluation;
 the inner contexts measure whether a proposed feature is stable under changes in
 the discovery sample.
@@ -466,7 +466,9 @@ causal identification.
 ## The ten Stage 1 evidence architectures
 
 The word “architecture” refers here to a distinct way of generating scientific
-evidence from text. The ten architectures are stored in three computational
+evidence from text. Eight architectures are enabled by default. TF-IDF semantic
+retrieval contrasts and orphan n-grams remain available as opt-in lanes.
+The ten supported architectures are stored in three computational
 components: `text_models`, `tfidf`, and `neural_queries`. The shared embedding
 cache is infrastructure, and `handoff` is an aggregation step; neither is an
 eleventh model.
@@ -601,6 +603,9 @@ cluster membership itself as a clinical label.
 
 ### 7. TF-IDF vocabulary from semantic retrieval (`tfidf_semantic_retrieval_contrasts`)
 
+This optional architecture is disabled by default
+(`embedding_contrast.retrieval_tfidf_enabled=false`).
+
 Both whole-cohort and cluster-local embedding contrasts return records or chunks
 from opposing sides of a semantic direction. This architecture fits lexical
 summaries to those contrasts and reports the terms that distinguish their sides.
@@ -629,6 +634,9 @@ coherent severity construct, or it may combine several measurements that should
 remain separate. Stage 2 reviews every topic member before naming a feature.
 
 ### 9. Residual or orphan TF-IDF n-grams (`tfidf_orphan_ngrams`)
+
+This optional architecture is disabled by default
+(`tfidf_topic.orphan_ngram_enabled=false`). Consensus TF-IDF topics remain enabled.
 
 This architecture is also independent of the embedding branch. It begins with
 the effect-associated n-grams produced by the same fold-local TF-IDF screening
@@ -750,8 +758,9 @@ under `science.stage1` or `science.neural_queries`. The resolved settings used b
 the run are written beside the results.
 
 `science.stage1_architectures` is an optional list of architecture names. When
-it is omitted, the workflow preserves the existing enable-flag behavior and
-runs every architecture enabled by the Stage 1 model configuration. An explicit
+it is omitted, the workflow runs every architecture enabled by the Stage 1 model
+configuration: eight lanes in the bundled defaults, with TF-IDF retrieval
+contrasts and orphan n-grams disabled. An explicit
 selection runs only the required producer components and private prerequisites,
 and exposes only the selected architecture lanes to Stage 2. For example:
 
@@ -763,7 +772,15 @@ uv run python scripts/run_all_evidence.py \
 
 Architecture selection is part of the scientific run definition. Resume with
 the same selection; use a fresh output directory to change it. `--architectures
-all` explicitly selects all ten lanes.
+all` explicitly selects all ten lanes, including the two optional lanes.
+Naming either optional lane in an explicit selection opts into it; its private
+prerequisites must still be available. To add a lane to the default mix without
+listing every architecture, set
+`science.stage1.architecture.multi_model_forest.embedding_contrast.retrieval_tfidf_enabled=true`
+or `science.stage1.architecture.multi_model_forest.tfidf_topic.orphan_ngram_enabled=true`.
+Stage 2 uses the resolved Stage 1 selection and does not require disabled lanes.
+Standalone Stage 2 configuration requires the eight default lanes; all ten
+remain supported for explicit selections and saved handoffs.
 
 Chunk-based models fail rather than silently discard the end of an unusually
 long record. If a capacity error reports that a record requires more embedding

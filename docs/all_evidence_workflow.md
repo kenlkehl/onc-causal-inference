@@ -92,15 +92,17 @@ environment.
 
 ### Architecture selection
 
-By default, Stage 1 retains the historical behavior: it runs every architecture
-enabled by the resolved model configuration. To make an architecture subset a
+By default, Stage 1 runs eight architectures. TF-IDF semantic retrieval contrasts
+(`embedding_contrast.retrieval_tfidf_enabled=false`) and orphan n-grams
+(`tfidf_topic.orphan_ngram_enabled=false`) are opt-in. The workflow resolves the
+enabled lanes from the model configuration. To make an architecture subset a
 first-class scientific choice, set `science.stage1_architectures` to a JSON list
 or pass a comma-separated CLI value:
 
 ```bash
 uv run python scripts/run_all_evidence.py \
   --config my_run.json \
-  --architectures embedding_whole_cohort,tfidf_semantic_retrieval_contrasts
+  --architectures embedding_whole_cohort,embedding_clustered
 ```
 
 The registry resolves private prerequisites such as the embedding cache and
@@ -108,6 +110,14 @@ whole-cohort contrast computation, but only selected architecture envelopes are
 written to a targeted handoff and admitted to Stage 2. A saved explicit
 selection cannot be changed while resuming. Omit the setting to resume an older
 run unchanged, or choose a fresh output directory for a different subset.
+
+`--architectures all` explicitly enables all ten supported lanes. Naming either
+optional lane in an explicit selection enables that lane when its prerequisites
+are available. To add them to the default mix through model overrides, set
+`science.stage1.architecture.multi_model_forest.embedding_contrast.retrieval_tfidf_enabled=true`
+and/or `science.stage1.architecture.multi_model_forest.tfidf_topic.orphan_ngram_enabled=true`.
+Consensus TF-IDF topics and the contextual embedding witnesses remain enabled
+when these optional lexical lanes are disabled.
 
 ## Full, Stage-1-only, and Stage-2-only runs
 
@@ -171,6 +181,12 @@ with a readable Stage 1 rerun instruction. This is an in-process set comparison,
 not an artifact-authentication, byte-attestation, or deployment-gate system.
 The former `raw_packets_v1` compatibility option is intentionally unsupported
 because it combined scientifically distinct architectures.
+
+Standalone Stage 2 defaults require only the eight default architectures. The
+workflow passes its resolved Stage 1 selection to both
+`stage2.required_architectures` and `stage2.included_architectures`; it never
+requires a disabled lane. Explicit ten-lane configurations and old ten-lane
+handoffs are still supported.
 
 Neural-query evidence uses `ranked_query_chunks_v1`: patients are ranked by
 their maximum chunk cosine, and `science.neural_queries.evidence_retrieval_top_k`

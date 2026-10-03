@@ -43,6 +43,7 @@ from .plain_handoff_stage2_evidence import (
     compile_stage2_handoff_evidence,
     stage1_embedding_cache_dependency_identity,
 )
+from .stage1_architectures import DEFAULT_STAGE1_ARCHITECTURES
 from .plain_handoff_stage2_analysis import (
     EXTRACTION_FIELD_REPAIR_LIMIT,
     _ExtractionFieldError,
@@ -925,7 +926,9 @@ class PlainHandoffStage2Config:
     extraction_context_window_tokens: int = DEFAULT_EXTRACTION_CONTEXT_WINDOW_TOKENS
     extraction_context_margin_tokens: int = DEFAULT_EXTRACTION_CONTEXT_MARGIN_TOKENS
     evidence_compiler: str = EVIDENCE_COMPILER_VERSION
-    required_architectures: tuple[str, ...] = SUPPORTED_STAGE2_ARCHITECTURES
+    # Require the default lanes while retaining support for explicit selections
+    # and saved handoffs containing either optional lexical architecture.
+    required_architectures: tuple[str, ...] = DEFAULT_STAGE1_ARCHITECTURES
     included_architectures: tuple[str, ...] | None = None
     evidence_max_cards_per_fold: int = 400
     evidence_max_exemplars_per_card: int = 4
@@ -1651,7 +1654,7 @@ def plain_stage2_config_from_mapping(
         ),
         evidence_compiler=str(raw.get("evidence_compiler", EVIDENCE_COMPILER_VERSION)).strip(),
         required_architectures=architecture_names(
-            raw.get("required_architectures", SUPPORTED_STAGE2_ARCHITECTURES)
+            raw.get("required_architectures", DEFAULT_STAGE1_ARCHITECTURES)
         ),
         included_architectures=(
             architecture_names(raw["included_architectures"])

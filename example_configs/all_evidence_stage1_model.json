@@ -953,6 +953,7 @@
           "pseudo_target_quantile": 0.2,
           "pseudo_target_weighted": true,
           "residualize_columns": [],
+          "retrieval_tfidf_enabled": false,
           "top_k_chunks_per_tail": 12
         },
         "extracted_feature_review_auc_margin": 0.02,
@@ -1116,7 +1117,7 @@
           "orphan_ngram_cluster_max_terms": 15,
           "orphan_ngram_cluster_neighbors": 20,
           "orphan_ngram_cluster_similarity_threshold": 0.25,
-          "orphan_ngram_enabled": true,
+          "orphan_ngram_enabled": false,
           "orphan_ngram_fdr_level": 0.2,
           "orphan_ngram_full_min_inner_folds": 1,
           "orphan_ngram_max_selected_clusters": 10,

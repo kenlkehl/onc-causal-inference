@@ -17,6 +17,7 @@ from oci.inference.embedding_contrast_discovery import (
 )
 from oci.inference.all_evidence_fusion import HTR_NEURAL, MATCHED_PAIR_UPLIFT
 from oci.inference.plain_handoff_stage2_evidence import SUPPORTED_STAGE2_ARCHITECTURES
+from oci.inference.stage1_architectures import DEFAULT_STAGE1_ARCHITECTURES
 from oci.inference.research_all_evidence_workflow import (
     COMPONENT_ORDER,
     ResearchAllEvidenceWorkflow,
@@ -762,11 +763,50 @@ def test_handoff_context_uses_stage1_runner_and_exact_heldout_rows(tmp_path, mon
     assert rows[0]["importance"]["matched_pair_uplift"] == {"views": []}
 
 
-def test_default_research_config_requires_all_ten_stage2_architectures(tmp_path):
-    _raw, config = _inputs(tmp_path, components=())
+@pytest.mark.parametrize("enable_optional", [False, True])
+def test_research_config_requires_only_its_enabled_stage2_architectures(
+    tmp_path, enable_optional,
+):
+    raw, config = _inputs(tmp_path, components=())
+    if enable_optional:
+        raw["science"]["stage1"]["architecture"] = {
+            "multi_model_forest": {
+                "embedding_contrast": {"retrieval_tfidf_enabled": True},
+                "tfidf_topic": {"orphan_ngram_enabled": True},
+            }
+        }
+        config = compile_config(raw, config_dir=tmp_path)
     context = ResearchAllEvidenceWorkflow(config)._resolved_context()
+    model = context.applied_config.architecture.multi_model_forest
 
-    assert _required_stage2_architectures(context) == SUPPORTED_STAGE2_ARCHITECTURES
+    assert model.embedding_contrast.retrieval_tfidf_enabled is enable_optional
+    assert model.tfidf_topic.orphan_ngram_enabled is enable_optional
+    expected = (
+        SUPPORTED_STAGE2_ARCHITECTURES if enable_optional else DEFAULT_STAGE1_ARCHITECTURES
+    )
+    assert _required_stage2_architectures(context) == expected
+
+
+@pytest.mark.parametrize(
+    "selection",
+    ["tfidf_semantic_retrieval_contrasts", "tfidf_orphan_ngrams", "all"],
+)
+def test_explicit_architecture_selector_adds_optional_lanes_to_default_mix(tmp_path, selection):
+    raw, _config = _inputs(tmp_path)
+    raw["science"]["stage1_architectures"] = (
+        "all" if selection == "all" else [*DEFAULT_STAGE1_ARCHITECTURES, selection]
+    )
+    config = compile_config(raw, config_dir=tmp_path)
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
+    model = context.applied_config.architecture.multi_model_forest
+
+    assert model.embedding_contrast.retrieval_tfidf_enabled is (
+        "tfidf_semantic_retrieval_contrasts" in context.selected_architectures
+    )
+    assert model.tfidf_topic.orphan_ngram_enabled is (
+        "tfidf_orphan_ngrams" in context.selected_architectures
+    )
+    assert _required_stage2_architectures(context) == config.stage1_architectures
 
 
 def test_handoff_context_receives_its_full_lane_cpu_budget(tmp_path, monkeypatch):

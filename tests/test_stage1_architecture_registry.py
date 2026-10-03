@@ -13,13 +13,17 @@ from oci.inference.plain_handoff_stage2_evidence import (
     SUPPORTED_STAGE2_ARCHITECTURES,
     compile_stage2_handoff_evidence,
 )
-from oci.inference.plain_handoff_stage2 import plain_stage2_config_from_mapping
+from oci.inference.plain_handoff_stage2 import (
+    PlainHandoffStage2Config,
+    plain_stage2_config_from_mapping,
+)
 from oci.inference.stage1_architecture_artifacts import (
     _score_artifacts,
     iter_stage1_architecture_evidence,
     materialize_stage1_architecture_artifacts,
 )
 from oci.inference.stage1_architectures import (
+    DEFAULT_STAGE1_ARCHITECTURES,
     STAGE1_ARCHITECTURES,
     canonicalize_stage1_architectures,
     resolve_support_services,
@@ -79,6 +83,23 @@ def test_stage2_mapping_accepts_comma_separated_architecture_names():
     assert config is not None
     assert config.required_architectures == ("bow_nuisance", "tfidf_topics")
     assert config.included_architectures == ("bow_nuisance", "tfidf_topics")
+
+
+def test_stage2_defaults_require_eight_architectures_and_still_accept_all_ten():
+    config = plain_stage2_config_from_mapping(
+        {"endpoint": "http://stage2.test/v1"},
+        default_workers=1,
+    )
+    assert config.required_architectures == DEFAULT_STAGE1_ARCHITECTURES
+    assert config.included_architectures is None
+    assert PlainHandoffStage2Config(endpoint="http://stage2.test/v1").required_architectures == (
+        DEFAULT_STAGE1_ARCHITECTURES
+    )
+    all_architectures = plain_stage2_config_from_mapping(
+        {"endpoint": "http://stage2.test/v1", "required_architectures": "all"},
+        default_workers=1,
+    )
+    assert all_architectures.required_architectures == STAGE1_ARCHITECTURES
 
 
 def test_targeted_artifacts_expose_only_the_selected_architecture(tmp_path: Path):

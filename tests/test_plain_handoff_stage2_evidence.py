@@ -25,6 +25,7 @@ from oci.inference.plain_handoff_stage2_evidence import (
     SUPPORTED_STAGE2_ARCHITECTURES,
     compile_stage2_handoff_evidence,
 )
+from oci.inference.stage1_architectures import DEFAULT_STAGE1_ARCHITECTURES
 
 
 def _htr_row(*, outer_fold: int, inner_fold: int, row_id: int) -> dict:
@@ -226,8 +227,9 @@ def test_compiler_reuses_fusion_tfidf_allowlist_and_drops_large_score_arrays(
     assert compiled.packets[0]["content"]["source_families"] == ["tfidf_topics"]
 
 
-def test_compiler_preserves_all_ten_architectures_as_independent_interpretation_lanes(
-    tmp_path: Path,
+@pytest.mark.parametrize("include_optional", [False, True], ids=["default_eight", "explicit_ten"])
+def test_compiler_preserves_enabled_architectures_as_independent_interpretation_lanes(
+    tmp_path: Path, include_optional: bool,
 ):
     rows = [
         {
@@ -388,12 +390,24 @@ def test_compiler_preserves_all_ten_architectures_as_independent_interpretation_
         },
     ]
 
+    required = SUPPORTED_STAGE2_ARCHITECTURES if include_optional else DEFAULT_STAGE1_ARCHITECTURES
+    if not include_optional:
+        # Mirror disabled producers: no retrieval terms, and only a disabled
+        # orphan diagnostic. The compiler sees the actual raw handoff, without
+        # an included-architecture filter hiding missing lanes.
+        for contrast in rows[0]["evidence"]["embedding_contrast_evidence"]["contrasts"]:
+            contrast.pop("tfidf_retrieval_terms")
+        rows[1]["evidence"]["discovery"]["topic_score_tests"]["effect_orphan_ngram_branch"] = {
+            "status": "disabled", "clusters": [], "selected_clusters": [],
+            "selected_cluster_ids": [], "selection_count": 0,
+        }
+
     compiled = compile_stage2_handoff_evidence(
         rows,
         handoff_path=tmp_path / "handoff" / "evidence.jsonl",
         max_cards_per_outer_fold=64,
         max_packet_chars=4_000,
-        required_architectures=SUPPORTED_STAGE2_ARCHITECTURES,
+        required_architectures=required,
     )
 
     expected = {
@@ -408,6 +422,8 @@ def test_compiler_preserves_all_ten_architectures_as_independent_interpretation_
         TFIDF_ORPHAN_NGRAMS,
         NEURAL_QUERY_MOMENTS,
     }
+    if not include_optional:
+        expected -= {TFIDF_SEMANTIC_RETRIEVAL, TFIDF_ORPHAN_NGRAMS}
     assert {packet["architecture"] for packet in compiled.packets} == expected
     assert set(compiled.summary["outer_folds"]["1"]["architecture_packets"]) == expected
     assert set(compiled.summary["required_architectures"]) == expected
@@ -442,7 +458,7 @@ def test_compiler_preserves_all_ten_architectures_as_independent_interpretation_
             if packet["architecture"] == TFIDF_ORPHAN_NGRAMS
         ]
     )
-    assert "orphan residual wording" in orphan_rendered
+    assert ("orphan residual wording" in orphan_rendered) is include_optional
 
 
 def test_compiler_rejects_a_missing_enabled_architecture_before_interpretation(
