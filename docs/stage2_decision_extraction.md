@@ -1,0 +1,313 @@
+# Stage 2 decision extraction with Plumb
+
+Stage 2 can measure features with `crh225/plumb-4b` instead of generating JSON
+with the extraction LLM. Enable `stage2.decision_extraction.enabled`. The
+`extraction_llm` configuration still names the extraction model, server, and
+concurrency; the primary LLM continues to define/review ontologies and perform
+the existing scientific reviews. The default backend for existing configurations
+is unchanged.
+
+## Root single-run launchers
+
+Fresh runs through `run_one_conf_one_mod.sh`, `run_five_conf_five_mod.sh`, and
+their H100/RTX PRO 6000 variants **default to Plumb decision extraction**.
+They use ColBERT excerpts, one feature per prompt, the 3000-token cap, three
+numeric narrowing passes, and independent ±5% verification described below.
+The primary model still defines and reviews ontologies. To select the original
+generative extractor and its model preset:
+
+```bash
+STAGE2_DECISION_EXTRACTION=0 ./run_five_conf_five_mod.sh /path/to/legacy-run
+```
+
+The base one/five scripts expect an external primary server on port 8010 and
+a Plumb classification server on port 8020 by default. Configure
+`STAGE2_EXTRACTION_ENDPOINT` and `STAGE2_EXTRACTION_MODEL` to match an existing
+classifier, or use the managed extraction `STAGE2_EXTRACTION_VLLM_*` settings.
+The external-server example below uses port 8134 and served name `plumb-4b`:
+
+```bash
+STAGE2_EXTRACTION_ENDPOINT=http://127.0.0.1:8134/v1 \
+STAGE2_EXTRACTION_MODEL=plumb-4b \
+./run_five_conf_five_mod.sh /path/to/plumb-run
+```
+
+The eight-GPU presets manage one Gemma 4 26B primary server on GPU 0 and seven
+Plumb replicas on GPUs 1–7, all with tensor parallelism of one. H100 uses the
+Red Hat AI FP8-dynamic Gemma checkpoint; RTX PRO 6000 uses NVIDIA's NVFP4
+checkpoint. Extraction allows 128 concurrent requests across the seven replicas;
+each Plumb scheduler allows up to eight sequences within its token budget.
+Plumb uses a 3072-token server window, bf16, eager mode,
+and 28% GPU-memory allocation per replica; the primary model retains its
+existing long-context preset. Override `STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON`
+to change Plumb's serving resources. The backend supplies the readout conversion
+arguments automatically. Managed decision launches sync both the `local-llm`
+and `decision-extraction` extras unless `OCI_PYTHON` is supplied.
+Model, GPU allocation, and worker environment overrides remain available.
+
+Explicit saved-run launches (`OCI_RUN_CONFIG` with `STAGE2_ONLY=1`, including
+preflight and reselection) preserve the saved backend and model configuration.
+The new defaults apply to fresh configuration construction; choose a fresh
+output directory when switching an existing run to Plumb. Other JSON-based
+entry points keep decision extraction opt-in.
+
+## Run configuration
+
+[`research_all_evidence_plumb.json`](../example_configs/research_all_evidence_plumb.json)
+is a full workflow example. Set its dataset, output directory, and primary LLM
+endpoint for your study. It starts a separate managed Plumb server on GPU 1,
+uses CPU ColBERT retrieval, and leaves the primary endpoint externally managed.
+The example's 0.28 GPU-memory allocation was tested alongside the existing worker
+on this machine's A6000. GPU numbers follow `CUDA_VISIBLE_DEVICES`.
+
+```bash
+python scripts/run_all_evidence.py --config example_configs/research_all_evidence_plumb.json
+```
+
+Use a **fresh output directory** when switching extraction backends, retrieval
+settings, or decision policy. Existing generative-extraction measurements are
+not interchangeable with decision measurements. To use an existing classifier,
+replace `extraction_llm.vllm` with an `endpoint` such as
+`http://127.0.0.1:8134/v1`, and set `model` to that server's advertised model ID.
+Multiple equivalent endpoints retain the existing load/capacity router.
+
+The tested runtime is vLLM **0.30.0**; no upgrade to the machine's active workers
+was necessary. The optional dependency extra `.[decision-extraction]` declares
+that minimum. Install into a dedicated serving environment if needed. Plumb's
+pinned revision is `24f7bf77e7ee258a2d158c61ea2dce2b60321010`. Local weights from
+the feasibility work are at `artifacts/plumb_feasibility/model`; the safetensors
+file there links to the Hugging Face cache. Set `decision_extraction.tokenizer_name`
+to that directory and `tokenizer_revision` to `""` to use its local tokenizer.
+
+## Why vLLM classification works here
+
+Plumb has a causal language-model output head, not a separately trained classifier.
+vLLM's conversion copies the output-weight rows for tokens A through P into a
+16-output readout, applies it to the **last prompt position**, and returns raw
+logits. For this checkpoint, the output weights are tied to the input embeddings.
+No token is generated. The client takes only the logits for the offered options
+and computes `softmax(logits / 2.07)`, matching the original Plumb/JevK5 readout.
+
+Managed servers automatically receive the following conversion arguments. An
+external server must be launched with the same readout:
+
+```bash
+CUDA_VISIBLE_DEVICES=1 python -m vllm.entrypoints.openai.api_server \
+  --model artifacts/plumb_feasibility/model --served-model-name plumb-4b \
+  --host 127.0.0.1 --port 8134 \
+  --runner pooling --convert classify \
+  --hf-overrides '{"classifier_from_token":["A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P"],"method":"no_post_processing","num_labels":16}' \
+  --pooler-config '{"pooling_type":"LAST","use_activation":false}' \
+  --max-model-len 3072 --gpu-memory-utilization 0.28 --enforce-eager \
+  --dtype bfloat16 --max-num-seqs 8 --max-num-batched-tokens 4096
+```
+
+Requests go to `/classify` with pretokenized input, `use_activation=false`, and
+`add_special_tokens=false`. vLLM calls the response array `probs`, even when it
+contains raw logits. The client checks its length, finite values, model ID,
+prompt-token count, and absence of generated tokens; invalid responses or
+transport failures stop extraction rather than becoming clinical missingness.
+Transport retries are bounded. Generative repair/fallback is disabled for this
+backend. Primary and decision servers use their configured allocations; the
+generative backend's alternating all-GPU model swap does not apply.
+
+The original 24 choice, noul, and score fixtures were run through this conversion:
+all top answers agreed with JevK5, and the largest probability difference was
+0.003671. Every response reported zero completion tokens. The comparison is
+saved in `artifacts/plumb_feasibility/vllm_probe/comparison.json`.
+
+## Feature ontologies and retrieval
+
+Every prompt contains exactly one feature. Binary, categorical, and ordinal
+features use their existing `categories_or_unit` ontology, with at most 14
+declared categories plus separate **not documented** and **none of the above**
+options. Binary features require exactly two declared categories. Category order
+is preserved; numeric bins are ascending; exit options come last. These models
+are sensitive to option ordering, so the order is recorded and frozen.
+
+Continuous features need one canonical unit and an inclusive initial domain:
+
+```json
+{
+  "name": "pretreatment_weight",
+  "description": "Pretreatment body weight",
+  "value_type": "continuous",
+  "categories_or_unit": ["kg"],
+  "measurement_definition": "The most recent explicitly documented weight before treatment, converted to kg.",
+  "missing_value_rule": "Missing if unavailable or ambiguous.",
+  "decision_ontology": {"minimum": 0, "maximum": 256},
+  "roles": ["confounder"]
+}
+```
+
+If numeric bounds are absent, the primary LLM proposes and validates them from
+the feature contract **before viewing patient measurements**. Ambiguous discovered
+features are similarly converted to a closed ontology; investigator-supplied
+features must have a concrete type. Ontologies with unsupported types, excessive
+categories, missing units, or invalid bounds fail explicitly.
+
+The existing ColBERT retriever ranks chunks from that patient's record for that
+feature. Whole chunks are included in rank order and rendered in source order.
+The complete Plumb chat prompt, including its template and answer prefix, must
+fit `max_prompt_tokens` (default and maximum: 3000). Lower-ranked chunks that
+do not fit are omitted and logged; neither chunks nor prompts are silently
+truncated. If even one chunk cannot fit with the feature contract, extraction
+fails. A missing decision means unavailable in **retrieved evidence**, not proof
+that the full record lacks it. Longitudinal conflict rules are included, but
+counts and modes are limited to the retrieved observations.
+
+## Numeric narrowing and verification
+
+Defaults are six numeric bins plus two exits, for **eight choices per pass**,
+and three passes. Each pass subdivides the chosen interval. Bins are half-open,
+except for the inclusive global upper endpoint. “Outside these ranges” remains
+available after the first pass, allowing rejection of an earlier wrong branch.
+The midpoint of the final bin is the candidate estimate. Nominal interval width
+is `(maximum - minimum) / 6**3`; more passes increase nominal resolution but can
+also introduce errors.
+
+A fourth, independent prompt asks whether the actual documented value falls
+within the numeric interval equivalent to:
+
+```
+abs(candidate - documented) <= 0.05 * abs(documented)
+```
+
+For a positive candidate, that interval is `[candidate / 1.05, candidate / 0.95]`;
+negative endpoints are sorted. The client computes these bounds, so Plumb only
+has to make an interval decision. Units, time scope, and conflict rules still
+apply. The default requires a true decision with probability at least **0.8**.
+A rejected candidate becomes missing; its estimate, interval, and full decision
+history remain available. Exact zero requires an exact zero estimate under this
+relative-error definition, which finite midpoint bins can fail to produce.
+
+Relevant settings:
+
+| Setting | Default | Meaning |
+| --- | ---: | --- |
+| `numeric_bins` | 6 | Numeric intervals per pass; allowed 2–6, plus two exits |
+| `numeric_passes` | 3 | Refinement passes; allowed 1–8 |
+| `verification_relative_tolerance` | 0.05 | Relative tolerance against the documented value |
+| `verification_min_probability` | 0.8 | Minimum true probability to release an estimate |
+| `none_above_fraction` | 0.2 | Fraction of training patients required to trigger ontology review |
+| `none_above_min_patients` | 3 | Minimum distinct training patients required as well |
+| `max_prompt_tokens` | 3000 | Complete decision prompt limit |
+
+`stage2.max_ontology_refinement_rounds` bounds review/re-extraction rounds.
+The generative extractor's feature-batch size and output-token budgets do not
+control decision requests.
+
+## Ontology review and frozen held-out extraction
+
+Review triggers when both the NOTA count and fraction thresholds are reached
+for a feature. The denominator is all patients in that outer training fold.
+Ordinary missingness and failed numeric verification do not trigger expansion.
+The primary LLM receives the feature, aggregate failure counts, and at most
+three complete retrieved evidence examples from failed **training** measurements,
+bounded by its prompt limit. Row IDs, treatment/outcome columns, and held-out
+rows are not supplied. Evidence excerpts may naturally mention treatments;
+they are used only to revise measurement categories or numeric bounds.
+
+The LLM may keep the ontology, replace categorical levels, or revise numeric
+bounds. It cannot change feature identity, units, time scope, or missing/conflict
+rules through this review. Supplied explicit-feature ontologies retain the
+pipeline's existing immutability rule; unresolved NOTA is reported for manual
+review. Only changed features are re-extracted. Prepared/revised definitions
+are frozen before held-out measurement. The unrelated estimand-driven ontology
+search and runtime model-continuation override are currently incompatible with
+this backend and rejected by configuration validation.
+
+Checkpoints fingerprint the source text, feature contract (including numeric
+bounds), retrieval/model identity, and decision settings. They record full
+prompts, ordered choices, raw logits, probabilities, source offsets, omitted
+chunks, candidate intervals, and verification results. Fold failure summaries
+separate NOTA, ordinary missingness, and verification failure.
+
+## Integration evaluation, 2026-10-04
+
+`scripts/plumb_stage2_test.py` runs the actual ColBERT → vLLM path on the existing
+76-case synthetic continuous fixture, keeping gold values outside prompts.
+Use `--output` for a fresh result directory when changing settings.
+
+```bash
+HF_HUB_OFFLINE=1 artifacts/plumb_feasibility/venv/bin/python \
+  scripts/plumb_stage2_test.py \
+  --output artifacts/plumb_feasibility/stage2_decision_strict_results
+```
+
+With the final 0.8 verification threshold, the fresh run accepted **50/68 numeric
+cases**, and all 50 were within 5% of gold. Six missing/ambiguous and two
+out-of-domain cases returned missing. Across all 76 cases there were 50 accepted,
+9 NOTA, 11 verification rejections, and 6 not-documented decisions. Five rejected
+numeric candidates were actually within tolerance. Maximum prompt length was
+699 tokens; elapsed time was about 39 seconds with cached weights, CPU retrieval,
+and four request workers. These are short fixtures, not a long-record benchmark.
+
+| Conversion | Gold | Candidate | Final result |
+| --- | ---: | ---: | --- |
+| 27 mm → cm | 2.7 | 15.519 | Rejected |
+| 72,500 g → kg | 72.5 | 70.519 | Accepted, 2.73% error |
+| 180 lb → kg | 81.647 | 170.074 | Rejected |
+
+An exploratory 0.5-threshold run accepted 59 estimates, including **four outside
+5%**. The stronger threshold was chosen after inspecting those results, so the
+zero false acceptances in the final run are **not independent validation or a
+guarantee**. Verification uses the same model and can share its mistakes. Unit
+conversion, small signed values, and zero remain weak points. Concurrent bf16
+inference also produced small score differences between runs. Evaluate on
+study-specific labeled records before relying on this as a production substitute.
+
+Raw outputs and summaries are under
+`artifacts/plumb_feasibility/stage2_decision_results` (0.5) and
+`artifacts/plumb_feasibility/stage2_decision_strict_results` (0.8).
+
+## Serving concurrency probe, 2026-10-04
+
+`scripts/plumb_throughput_benchmark.py` replays saved decision prompts against
+one managed classifier, then stops that server. The probe used GPU 1 of this
+machine (an A6000 shared with its existing worker), vLLM 0.30.0, bf16 eager
+serving, and 28% GPU-memory allocation. The 44 distinct prompts came from the
+two-patient five-confounder/five-modifier evaluation and contained 2016–2457
+tokens. Each trial replayed them four times (176 requests), after warmup.
+Prefix caching was disabled to prevent replayed inputs from inflating throughput.
+
+| Server sequence limit | Token batch budget | Requests in flight | Decisions/second | Median request latency |
+| ---: | ---: | ---: | ---: | ---: |
+| 8 | 4096 | 8 | 4.70 | 1.56 s |
+| 8 | 4096 | 32 | 4.61 | 7.04 s |
+| 64 | 16384 | 8 | 4.73 | 1.68 s |
+| 64 | 16384 | 32 | 4.72 | 6.15 s |
+| 64 | 16384 | 64 | 4.71 | 13.84 s |
+| 64 | 16384 | 128 | 4.71 | 20.20 s |
+
+A repeat of concurrency 32 on the larger server preset measured 4.71 decisions/s.
+All 1232 timed requests completed successfully. Top decisions agreed with the
+original audits on 99.4–100% of requests, depending on trial; this is a numerical
+consistency check, not an accuracy evaluation. Requests in flight include queued
+requests; the sequence and token limits bound actual GPU batches.
+
+Higher concurrency was feasible, but neither a deeper queue nor the larger
+token budget improved throughput materially on this workload. These are
+**serving-only** measurements: retrieval, prompt packing/tokenization, and
+checkpoint writes were excluded. They do not establish an end-to-end optimum
+or the optimum on H100/RTX PRO 6000. The eight-GPU launchers allow 128 requests
+across seven Plumb replicas, with eight sequences and 4096 tokens per server.
+That is a global request limit, including queued work, not 128 GPU sequences
+per replica or a claim of measured throughput improvement.
+
+To repeat the larger-batch probe using local weights and the saved audits:
+
+```bash
+HF_HUB_OFFLINE=1 artifacts/plumb_feasibility/venv/bin/python \
+  scripts/plumb_throughput_benchmark.py \
+  --gpu 1 --max-num-seqs 64 --max-num-batched-tokens 16384 \
+  --concurrency 8,32,64,128,32 --repeats 4 \
+  --output artifacts/plumb_feasibility/throughput_new_run
+```
+
+The GPU index follows `CUDA_VISIBLE_DEVICES`. Choose an available GPU and port;
+the output directory must be new. Use `--audits` and `--model` to supply an
+existing extraction's decision directory and its matching local model/tokenizer.
+Raw results, server commands/logs, and prompt hashes are saved under
+`artifacts/plumb_feasibility/throughput_baseline` and
+`artifacts/plumb_feasibility/throughput_16k` for the measurements above.

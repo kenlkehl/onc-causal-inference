@@ -60,12 +60,16 @@ dev = [
 extraction = [
     "google-auth[requests]>=2.0.0",
 ]
+decision-extraction = [
+    # Verified Plumb Qwen3.5 next-token A–P readout through the pooling API.
+    "vllm>=0.30.0",
+]
 local-llm = [
     "vllm>=0.20.1",
     "openai-harmony>=0.0.8",
     # Match the locked PyTorch/vLLM CUDA 13.0 runtime. FlashInfer compiles
     # Blackwell kernels at startup, so the runtime libraries alone are not enough.
-    "cuda-toolkit[nvcc,cccl,crt,nvvm]==13.0.2; sys_platform == 'linux'",
+    "cuda-toolkit[nvcc,cccl,crt,nvvm]==13.0.3; sys_platform == 'linux'",
 ]
 gemini = [
     "google-genai>=1.0.0",

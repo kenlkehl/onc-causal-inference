@@ -18,7 +18,7 @@ requested_output_dir="${3:-}"
 cd "${repo_root}"
 
 # Validate before dependency synchronization, GPU inspection, or checkpoint writes.
-for control in STAGE2_ONLY STAGE2_RESELECT OCI_PREFLIGHT_ONLY; do
+for control in STAGE2_ONLY STAGE2_RESELECT OCI_PREFLIGHT_ONLY STAGE2_DECISION_EXTRACTION; do
     value="${!control-0}"
     if [[ "$value" != "0" && "$value" != "1" ]]; then
         echo "$control must be 0 or 1." >&2
@@ -63,6 +63,7 @@ stage2_request_timeout="${STAGE2_REQUEST_TIMEOUT:-}"
 stage2_request_attempt_timeout="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-}"
 stage2_model="${STAGE2_MODEL:-}"
 stage2_extraction_model="${STAGE2_EXTRACTION_MODEL:-}"
+stage2_decision_extraction="${STAGE2_DECISION_EXTRACTION:-0}"
 stage2_extraction_endpoints="${STAGE2_EXTRACTION_ENDPOINTS:-}"
 stage2_extraction_workers="${STAGE2_EXTRACTION_WORKERS:-}"
 stage2_max_tokens="${STAGE2_MAX_TOKENS:-}"
@@ -243,7 +244,11 @@ if [[ -z "${python_bin}" ]]; then
     fi
     echo "Synchronizing ${repo_root}/.venv from the lockfile..."
     if (( stage2_managed_any )); then
-        uv sync --frozen --extra local-llm
+        sync_args=(--frozen --extra local-llm)
+        if (( stage2_managed_extractor && stage2_decision_extraction )); then
+            sync_args+=(--extra decision-extraction)
+        fi
+        uv sync "${sync_args[@]}"
         "${repo_root}/.venv/bin/python" "${repo_root}/scripts/configure_local_cuda.py"
     else
         uv sync --frozen
@@ -291,6 +296,11 @@ if [[ -z "${gpu_count}" || -z "${devices}" || -z "${worker_count}" ]]; then
 fi
 
 stage2_policy_args=()
+if (( stage2_decision_extraction )); then
+    stage2_policy_args+=(--set stage2.decision_extraction.enabled=true)
+else
+    stage2_policy_args+=(--set stage2.decision_extraction.enabled=false)
+fi
 if [[ -n "${STAGE2_SELECTION_MODE:-}" ]]; then
     stage2_policy_args+=(--set "stage2.statistical_selection.selection_mode=${STAGE2_SELECTION_MODE}")
 fi
@@ -510,12 +520,20 @@ if (( stage2_managed_extractor )); then
     fi
     stage2_description+="; managed extractor vLLM: ${extractor_server_description} on ${stage2_extraction_vllm_gpus} (${stage2_extraction_workers:-${resolved_stage2_workers}} concurrent requests)"
     if (( stage2_managed_orchestrator )); then
-        stage2_description+="; models alternate across the GPU union with adaptive configured-split fallback"
+        if (( stage2_decision_extraction )); then
+            stage2_description+="; separate resident primary and decision pools"
+        else
+            stage2_description+="; models alternate across the GPU union with adaptive configured-split fallback"
+        fi
     fi
 elif [[ -n "${stage2_extraction_endpoints}" && "${stage2_enabled}" == "1" ]]; then
     stage2_description+="; load-aware external extractor pool (${stage2_extraction_workers:-sum of per-server caps} concurrent requests)"
 elif [[ -n "${stage2_extraction_endpoint}" && "${stage2_enabled}" == "1" ]]; then
     stage2_description+="; extractor ${stage2_extraction_endpoint} (${stage2_extraction_workers:-${resolved_stage2_workers}} concurrent requests)"
+fi
+
+if (( stage2_enabled && stage2_decision_extraction )); then
+    stage2_description+="; Plumb decisions (one feature/prompt, 3000-token cap)"
 fi
 
 if [[ -n "${stage1_architectures}" ]]; then

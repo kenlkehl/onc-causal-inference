@@ -1,6 +1,6 @@
 # Oncology Causal Inference (OCI)
 
-New runs default to [ColBERT feature extraction](docs/colbert_extraction.md): independently implemented patient-record retrieval, reusable disk-cached token embeddings, and parallel GPU/patient/LLM-server processing. The root all-in-one launchers inherit this default.
+The root `run_one_conf*` and `run_five_conf*` single-run launchers default to [Plumb decision extraction](docs/stage2_decision_extraction.md) over [cached ColBERT excerpts](docs/colbert_extraction.md): one feature per prompt, at most 3000 tokens, and progressive numeric narrowing with ±5% verification. Set `STAGE2_DECISION_EXTRACTION=0` to use the original LLM extractor. Explicit saved-run launches preserve their saved backend; JSON-based entry points keep Plumb opt-in.
 
 
 ## Overview
@@ -8,17 +8,17 @@ OCI is a pipeline for causal inference for individual treatment effect estimatio
 
 In other words: If an oncologist is in clinic with a patient and choosing which of two treatments to recommend, OCI is a tool for building a model to predict which treatment might yield the better outcome for that specific, individual patient.
 
-## Quickstart: eight H100s with managed Gemma 4 servers
+## Quickstart: eight H100s with managed Gemma 4 and Plumb servers
 
 On a **Linux VM with 8 × NVIDIA H100 GPUs (80 GB each)**, run the bundled
 one-confounder/one-effect-modifier NSCLC example end to end with
 [`run_one_conf_one_mod_h100x8.sh`](run_one_conf_one_mod_h100x8.sh). It manages its
-own local vLLM servers and uses these Red Hat AI **FP8-dynamic** checkpoints:
+own local vLLM servers and uses these checkpoints:
 
 | Stage 2 role | Model |
 | --- | --- |
-| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 31B IT](https://huggingface.co/RedHatAI/gemma-4-31B-it-FP8-dynamic) |
-| Patient-level extraction | [Gemma 4 26B A4B IT](https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic) |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 26B A4B IT](https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic) |
+| Patient-level extraction | [Plumb 4B](https://huggingface.co/crh225/plumb-4b) |
 
 Start from a GPU VM image with a working NVIDIA driver compatible with the
 locked PyTorch/vLLM CUDA build. The current lockfile includes CUDA 13.0; use an
@@ -42,7 +42,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # uv supplies Python 3.12 if needed and installs the locked vLLM extra.
-uv sync --frozen --python 3.12 --extra local-llm
+uv sync --frozen --python 3.12 --extra local-llm --extra decision-extraction
 .venv/bin/python scripts/configure_local_cuda.py
 
 # Confirm that this environment sees eight H100s before starting the run.
@@ -67,13 +67,15 @@ for environment details.
 
 The launcher selects eight visible GPUs and retains the original wrapper's
 scientific preset (`llm_roles`). Stage 1 finishes before Stage 2 starts its LLM
-servers. Stage 2 initially alternates models across all eight GPUs, using one
-single-GPU replica per GPU. If rapid model switching triggers the concurrent
-fallback, interpretation uses GPUs 0–3 and extraction uses GPUs 4–7, with four
-replicas per role. Both roles allow 32 concurrent requests, a 128,000-token
-server window, and 90% GPU-memory utilization. OCI handles server readiness and
-shutdown on completion or interruption. Keep local HTTP ports 8010–8017 and
-8110–8117 available; no separately launched inference servers are needed.
+servers. One Gemma 4 26B server handles interpretation on GPU 0; seven Plumb
+servers handle extraction on GPUs 1–7. Each server uses one GPU. The primary
+role allows 32 concurrent requests; extraction allows 128 across the seven
+replicas, whose schedulers each allow up to eight sequences within the token budget.
+Gemma uses a 128,000-token server window and 90% GPU-memory utilization. Plumb
+uses a 3072-token window, bf16 eager serving, and 28% GPU-memory utilization.
+OCI handles server readiness and shutdown on completion or interruption. Keep
+local HTTP port 8010 and ports 8110–8116 available; no separately launched
+inference servers are needed.
 
 Results default to
 `artifacts/research_all_evidence/one_conf_one_mod_nsclc_h100x8_full/`, including
@@ -85,7 +87,7 @@ command to resume compatible checkpoints:
 ./run_one_conf_one_mod_h100x8.sh /persistent/results/one_conf_one_mod_h100x8
 ```
 
-The launcher synchronizes `--extra local-llm` on ordinary launches. Set
+The launcher synchronizes `--extra local-llm --extra decision-extraction` on ordinary launches. Set
 `OCI_PYTHON="$PWD/.venv/bin/python"` to reuse the installed environment without
 syncing. Model, worker, and `STAGE2_VLLM_*`/`STAGE2_EXTRACTION_VLLM_*` settings are
 overridable through the environment; keep GPU layouts consistent if changing
@@ -94,18 +96,18 @@ their saved model and server settings. See the managed-pool documentation below
 for GPU mapping, switching, logs, and cleanup, and the multi-model quickstart
 below for the full scientific workflow.
 
-## Quickstart: eight RTX PRO 6000 Blackwell GPUs with NVIDIA NVFP4 Gemma 4
+## Quickstart: eight RTX PRO 6000 Blackwell GPUs with Gemma 4 and Plumb
 
 On a **Linux machine with 8 × NVIDIA RTX PRO 6000 Blackwell GPUs (96 GB each)**,
 use the root-level launchers below. Both manage their own local vLLM servers
-and use NVIDIA's **NVFP4** Gemma 4 checkpoints:
+and use NVIDIA's **NVFP4** Gemma 4 for interpretation and Plumb for extraction:
 
 | Stage 2 role | Model |
 | --- | --- |
-| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 31B IT NVFP4](https://huggingface.co/nvidia/Gemma-4-31B-IT-NVFP4) |
-| Patient-level extraction | [Gemma 4 26B A4B IT NVFP4](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4) |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 26B A4B NVFP4](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4) |
+| Patient-level extraction | [Plumb 4B](https://huggingface.co/crh225/plumb-4b) |
 
-NVIDIA's extraction repository name omits `IT`, but its model card identifies
+NVIDIA's Gemma repository name omits `IT`, but its model card identifies
 the instruction-tuned checkpoint. Use **RTX PRO 6000 Blackwell** hardware for
 this preset, with the CUDA 13.0-compatible R580 or newer driver and Linux system
 libraries described above. From a fresh Ubuntu/Debian machine:
@@ -122,7 +124,7 @@ if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
-uv sync --frozen --python 3.12 --extra local-llm
+uv sync --frozen --python 3.12 --extra local-llm --extra decision-extraction
 .venv/bin/python scripts/configure_local_cuda.py
 
 # Verify all eight visible GPUs are RTX PRO 6000 Blackwell devices.
@@ -149,13 +151,17 @@ instead. Each launcher retains its cohort wrapper's scientific settings
 | [`run_one_conf_one_mod_rtxpro6000x8.sh`](run_one_conf_one_mod_rtxpro6000x8.sh) | `one_conf_one_mod_nsclc_rtxpro6000x8_full/` |
 | [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh) | `five_conf_five_mod_nsclc_rtxpro6000x8_full/` |
 
-For manual serving, activate the configured environment and use the exact
-checkpoint name (including `NVFP4`):
+For manual primary-model serving, activate the configured environment and use
+the exact checkpoint name (including `NVFP4`):
 
 ```bash
 source .venv/bin/activate
 vllm serve nvidia/Gemma-4-26B-A4B-NVFP4
 ```
+
+Plumb requires a separate server with the
+[next-token readout conversion arguments](docs/stage2_decision_extraction.md#why-vllm-classification-works-here).
+The managed launchers supply those automatically.
 
 FlashInfer builds Blackwell kernels at startup and needs CUDA 12.9 or newer.
 An older `nvcc` on the system PATH can cause `SM 12.x requires CUDA >= 12.9`
@@ -169,16 +175,15 @@ to match glibc. `nvcc --version` inside the activated
 environment should report 13.0. Explicit `CUDA_HOME` or `CUDA_PATH` settings
 take precedence; unset them to use the configured venv toolkit.
 
-Stage 1 completes before the managed vLLM servers start. Stage 2 initially
-alternates models across all eight GPUs, with one single-GPU replica per GPU.
-Rapid switching can trigger the same four/four concurrent split as the H100
-preset: interpretation on logical GPUs 0–3 and extraction on 4–7. Tensor
-parallelism defaults to **1** for both models, matching NVIDIA's documented
-extraction layout. Both roles allow 32 concurrent requests, a 262,144-token
-server window, and 90% GPU-memory utilization. vLLM reads the ModelOpt/NVFP4
-metadata from the checkpoints; OCI supplies text-only serving, the Gemma 4
-reasoning parser, readiness checks, and shutdown. Keep local HTTP ports
-8010–8017 and 8110–8117 available. See
+Stage 1 completes before the managed vLLM servers start. Stage 2 keeps one
+Gemma 4 26B server on logical GPU 0 and seven Plumb servers on GPUs 1–7.
+Tensor parallelism defaults to **1** for both models. The primary role allows
+32 concurrent requests; extraction allows 128 across the seven replicas.
+Gemma uses a 262,144-token server window and 90% GPU-memory
+utilization; Plumb uses a 3072-token window and 28% GPU-memory utilization.
+vLLM reads Gemma's ModelOpt/NVFP4 metadata; OCI supplies text-only serving,
+the Gemma 4 reasoning parser, Plumb's readout conversion, readiness checks,
+and shutdown. Keep local HTTP port 8010 and ports 8110–8116 available. See
 [vLLM's ModelOpt support](https://docs.vllm.ai/en/v0.26.0/features/quantization/modelopt/)
 for checkpoint loading details.
 
@@ -191,13 +196,14 @@ command to resume compatible checkpoints; run these examples separately:
 ```
 
 The H100 quickstart's cache, authentication, progress, and log instructions also
-apply here. Ordinary launches sync the `local-llm` extra; set
+apply here. Ordinary launches sync the `local-llm` and `decision-extraction` extras; set
 `OCI_PYTHON="$PWD/.venv/bin/python"` to skip synchronization. Model, worker, and
 managed-pool settings remain overridable through the environment. If changing
-the server context window, also adjust
-`STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`. Explicit saved Stage 2 launches
+the legacy LLM extractor's server window, also adjust
+`STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`; this setting does not control Plumb
+prompts. Explicit saved Stage 2 launches
 (`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) retain their saved models and serving settings.
-For a run saved with the earlier 128,000-token RTX preset, update
+For a generative-extraction run saved with the earlier 128,000-token RTX preset, update
 `stage2.vllm.extra_args` and `stage2.extraction_llm.vllm.extra_args` in its
 `run_config.json` to use `--max-model-len 262144`, and set
 `stage2.extraction_context_window_tokens` to `262144` before resuming.

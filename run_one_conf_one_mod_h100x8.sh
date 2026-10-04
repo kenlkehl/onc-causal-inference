@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 
 # One-confounder/one-modifier workflow for an eight-H100 (80 GB each) Linux VM.
-# OCI owns both vLLM pools, including startup, readiness, switching, and cleanup.
+# OCI owns both vLLM pools, including startup, readiness, and cleanup.
 # Usage: ./run_one_conf_one_mod_h100x8.sh [OUTPUT_DIR]
 # Re-run with the same output directory to resume compatible checkpoints.
 # Explicit saved Stage 2 launches retain their saved model and serving settings.
 
-# Extraction defaults to cached ColBERT retrieval. Configure STAGE2_COLBERT_*
-# or select STAGE2_EXTRACTION_CONTEXT_STRATEGY=full_record for fresh legacy runs.
+# Extraction defaults to Plumb decisions over cached ColBERT excerpts.
+# Set STAGE2_DECISION_EXTRACTION=0 for the legacy LLM extractor.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -22,16 +22,23 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
     if [[ -z "${PHYSICAL_GPUS:-}" ]]; then
         export GPU_COUNT="${GPU_COUNT:-8}"
     fi
-    export STAGE2_MODEL="${STAGE2_MODEL:-RedHatAI/gemma-4-31B-it-FP8-dynamic}"
-    export STAGE2_EXTRACTION_MODEL="${STAGE2_EXTRACTION_MODEL:-RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic}"
+    source "${repo_root}/scripts/stage2_extraction_defaults.sh" RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic
+    if [[ "$STAGE2_DECISION_EXTRACTION" == "1" ]]; then
+        # One Gemma server supports ontology work while seven Plumb replicas extract.
+        export STAGE2_MODEL="${STAGE2_MODEL:-RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic}"
+        export STAGE2_VLLM_GPUS="${STAGE2_VLLM_GPUS:-cuda:0}"
+        export STAGE2_EXTRACTION_VLLM_GPUS="${STAGE2_EXTRACTION_VLLM_GPUS:-cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7}"
+        export STAGE2_EXTRACTION_WORKERS="${STAGE2_EXTRACTION_WORKERS:-128}"
+    else
+        # Preserve the legacy LLM backend's model and alternating/split preset.
+        export STAGE2_MODEL="${STAGE2_MODEL:-RedHatAI/gemma-4-31B-it-FP8-dynamic}"
+        export STAGE2_VLLM_GPUS="${STAGE2_VLLM_GPUS:-cuda:0,cuda:1,cuda:2,cuda:3}"
+        export STAGE2_EXTRACTION_VLLM_GPUS="${STAGE2_EXTRACTION_VLLM_GPUS:-cuda:4,cuda:5,cuda:6,cuda:7}"
+        export STAGE2_EXTRACTION_WORKERS="${STAGE2_EXTRACTION_WORKERS:-32}"
+    fi
     export STAGE2_WORKERS="${STAGE2_WORKERS:-32}"
-    export STAGE2_EXTRACTION_WORKERS="${STAGE2_EXTRACTION_WORKERS:-32}"
 
-    # Each model initially runs eight single-GPU replicas across the GPU union.
-    # Rapid switching falls back to four replicas per model on disjoint GPUs.
-    export STAGE2_VLLM_GPUS="${STAGE2_VLLM_GPUS:-cuda:0,cuda:1,cuda:2,cuda:3}"
     export STAGE2_VLLM_GPUS_PER_SERVER="${STAGE2_VLLM_GPUS_PER_SERVER:-1}"
-    export STAGE2_EXTRACTION_VLLM_GPUS="${STAGE2_EXTRACTION_VLLM_GPUS:-cuda:4,cuda:5,cuda:6,cuda:7}"
     export STAGE2_EXTRACTION_VLLM_GPUS_PER_SERVER="${STAGE2_EXTRACTION_VLLM_GPUS_PER_SERVER:-1}"
     export STAGE2_VLLM_RAPID_SWITCH_SECONDS="${STAGE2_VLLM_RAPID_SWITCH_SECONDS:-900}"
     export STAGE2_VLLM_BASE_PORT="${STAGE2_VLLM_BASE_PORT:-8010}"
@@ -39,9 +46,9 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
     export STAGE2_VLLM_INTERNAL_PORT_BASE="${STAGE2_VLLM_INTERNAL_PORT_BASE:-20000}"
     export STAGE2_EXTRACTION_VLLM_INTERNAL_PORT_BASE="${STAGE2_EXTRACTION_VLLM_INTERNAL_PORT_BASE:-30000}"
 
-    # FP8 is read from each checkpoint's quantization config. Managed Gemma
+    # FP8 is read from the Gemma checkpoint's quantization config. Managed Gemma
     # servers automatically use --language-model-only and the gemma4 parser.
-    # Match the inherited extraction context budget to the served model window.
+    # Plumb already has a separate short-window serving preset above.
     vllm_extra_args='["--gpu-memory-utilization","0.90","--max-model-len","128000","--max-num-seqs","32"]'
     export STAGE2_VLLM_EXTRA_ARGS_JSON="${STAGE2_VLLM_EXTRA_ARGS_JSON:-${vllm_extra_args}}"
     export STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON="${STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON:-${vllm_extra_args}}"

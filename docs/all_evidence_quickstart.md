@@ -7,6 +7,12 @@ defaults to [cached ColBERT retrieval](colbert_extraction.md), using all visible
 GPUs for retrieval or CPU when none are available. Configure `stage2.colbert.devices`
 to choose dedicated retrieval devices; LLM server concurrency remains independent.
 
+The root `run_one_conf*` and `run_five_conf*` single-run launchers now default
+to [Plumb decision extraction](stage2_decision_extraction.md), with one feature
+per prompt and at most 3000 tokens. Set `STAGE2_DECISION_EXTRACTION=0` for their
+original LLM extractor. Explicit saved-run launches preserve their saved
+backend. The JSON workflow examples below retain their configured backend.
+
 ## Start the multi-model workflow
 
 Copy the multi-model example **inside `example_configs/`**. Relative dataset and

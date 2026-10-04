@@ -18,8 +18,8 @@
 #     STAGE2_SELECTION_MODE=independent_tasks OCI_PREFLIGHT_ONLY=1 ./run_one_conf_one_mod.sh
 #   See docs/stage2_independent_tasks.md for archived-source migration and resume.
 
-# Extraction defaults to cached ColBERT retrieval. Configure STAGE2_COLBERT_*
-# or select STAGE2_EXTRACTION_CONTEXT_STRATEGY=full_record for fresh legacy runs.
+# Extraction defaults to Plumb decisions over cached ColBERT excerpts.
+# Set STAGE2_DECISION_EXTRACTION=0 for the legacy LLM extractor.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,9 +34,9 @@ export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 # Saved-run launches inherit science and model settings from the preserved config.
 if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELECT:-0}" != "1" && "${OCI_PREFLIGHT_ONLY:-0}" != "1" ]]; then
     export STAGE2_MODEL="${STAGE2_MODEL:-RedHatAI/Gemma-4-31B-IT-FP8-Dynamic}"
-    export STAGE2_EXTRACTION_MODEL="${STAGE2_EXTRACTION_MODEL:-google/gemma-4-e4b-it}"
+    source "${repo_root}/scripts/stage2_extraction_defaults.sh" google/gemma-4-e4b-it
     # Match the extraction server window and reserve room for token-count differences.
-    # The extractor pages long records and caps repair output within this budget.
+    # These budgets apply only to the legacy LLM extractor.
     export STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS="${STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS:-128000}"
     export STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS="${STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS:-4096}"
     # Bound load on a single reasoning server and allow slow generations to finish.

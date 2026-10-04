@@ -12,7 +12,7 @@
 #     STAGE2_EXTRACTION_ENDPOINT=http://127.0.0.1:8020/v1 ./run_five_conf_five_mod.sh
 #   PHYSICAL_GPUS=0,1,2,3 STAGE2_MODEL=Qwen/Qwen3.8-27B \
 #     STAGE2_VLLM_GPUS=0,1 STAGE2_VLLM_GPUS_PER_SERVER=2 \
-#     STAGE2_EXTRACTION_MODEL=LiquidAI/LFM2.5-2.6B \
+#     STAGE2_DECISION_EXTRACTION=0 STAGE2_EXTRACTION_MODEL=LiquidAI/LFM2.5-2.6B \
 #     STAGE2_EXTRACTION_VLLM_GPUS=2,3 STAGE2_EXTRACTION_VLLM_GPUS_PER_SERVER=1 \
 #     ./run_five_conf_five_mod.sh
 #   STAGE1_ARCHITECTURES=bow_nuisance,tfidf_topics ./run_five_conf_five_mod.sh
@@ -23,8 +23,8 @@
 #     STAGE2_SELECTION_MODE=independent_tasks OCI_PREFLIGHT_ONLY=1 ./run_five_conf_five_mod.sh
 #   See docs/stage2_independent_tasks.md for archived-source migration and resume.
 
-# Extraction defaults to cached ColBERT retrieval. Configure STAGE2_COLBERT_*
-# or select STAGE2_EXTRACTION_CONTEXT_STRATEGY=full_record for fresh legacy runs.
+# Extraction defaults to Plumb decisions over cached ColBERT excerpts.
+# Set STAGE2_DECISION_EXTRACTION=0 for the legacy LLM extractor.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +39,7 @@ export NUMEXPR_NUM_THREADS="${NUMEXPR_NUM_THREADS:-1}"
 # Saved-run launches inherit science and model settings from the preserved config.
 if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELECT:-0}" != "1" && "${OCI_PREFLIGHT_ONLY:-0}" != "1" ]]; then
     export STAGE2_MODEL="${STAGE2_MODEL:-RedHatAI/Gemma-4-31B-IT-FP8-Dynamic}"
-    export STAGE2_EXTRACTION_MODEL="${STAGE2_EXTRACTION_MODEL:-google/gemma-4-e4b-it}"
+    source "${repo_root}/scripts/stage2_extraction_defaults.sh" google/gemma-4-e4b-it
 
     # Stage 2 ontology preset for this example. Callers may override any setting
     # through the corresponding environment variable.

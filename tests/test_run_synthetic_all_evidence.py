@@ -10,19 +10,32 @@ import pytest
 
 
 @pytest.mark.parametrize("launcher", [
+    "run_one_conf_one_mod.sh",
+    "run_five_conf_five_mod.sh",
+    "run_one_conf_one_mod_h100x8.sh",
     "run_one_conf_one_mod_rtxpro6000x8.sh",
     "run_five_conf_five_mod_rtxpro6000x8.sh",
 ])
 @pytest.mark.parametrize("saved,overrides", [
     (False, {}),
+    (False, {"STAGE2_DECISION_EXTRACTION": "0"}),
     (False, {
+        "STAGE2_DECISION_EXTRACTION": "0",
         "STAGE2_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","196608"]',
         "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","131072"]',
         "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS": "131072",
     }),
+    (False, {
+        "STAGE2_MODEL": "custom-gemma",
+        "STAGE2_EXTRACTION_MODEL": "custom-plumb",
+        "STAGE2_VLLM_GPUS": "cuda:0,cuda:1",
+        "STAGE2_EXTRACTION_VLLM_GPUS": "cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7",
+        "STAGE2_EXTRACTION_WORKERS": "24",
+        "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","3072","--gpu-memory-utilization","0.35"]',
+    }),
     (True, {}),
 ])
-def test_rtx_wrappers_pass_context_budgets_and_preserve_saved_settings(
+def test_wrappers_select_backend_and_preserve_saved_settings(
     tmp_path: Path, launcher, saved, overrides,
 ):
     repo_root = Path(__file__).resolve().parents[1]
@@ -52,7 +65,7 @@ def test_rtx_wrappers_pass_context_budgets_and_preserve_saved_settings(
     )
     if saved:
         environment.update(STAGE2_ONLY="1", OCI_RUN_CONFIG=str(tmp_path / "saved.json"))
-    subprocess.run(
+    completed = subprocess.run(
         ["bash", str(repo_root / launcher), str(tmp_path / "output")],
         cwd=repo_root, env=environment, check=True, capture_output=True, text=True,
     )
@@ -65,25 +78,94 @@ def test_rtx_wrappers_pass_context_budgets_and_preserve_saved_settings(
         return
 
     assert "oci.inference.research_all_evidence_workflow" in args
-    assert args[args.index("--stage2-model") + 1] == args[args.index("--stage2-extraction-model") + 1]
-    assert args[args.index("--stage2-model") + 1] == "nvidia/Gemma-4-26B-A4B-NVFP4"
+    decision = overrides.get("STAGE2_DECISION_EXTRACTION", "1") == "1"
+    rtx = "rtxpro6000" in launcher
+    h100 = "h100" in launcher
+    managed = rtx or h100
+    primary = (
+        "nvidia/Gemma-4-26B-A4B-NVFP4" if rtx else
+        "RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic" if h100 and decision else
+        "RedHatAI/gemma-4-31B-it-FP8-dynamic" if h100 else
+        "RedHatAI/Gemma-4-31B-IT-FP8-Dynamic"
+    )
+    legacy = (
+        "nvidia/Gemma-4-26B-A4B-NVFP4" if rtx else
+        "RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic" if h100 else
+        "google/gemma-4-e4b-it"
+    )
+    assert args[args.index("--stage2-model") + 1] == overrides.get("STAGE2_MODEL", primary)
+    assert args[args.index("--stage2-extraction-model") + 1] == overrides.get(
+        "STAGE2_EXTRACTION_MODEL", "crh225/plumb-4b" if decision else legacy,
+    )
     assert args[args.index("--stage2-extraction-context-strategy") + 1] == "colbert"
     assert args[args.index("--stage2-colbert-cache-dir") + 1] == str(repo_root / ".oci_cache/colbert")
     settings = dict(args[i + 1].split("=", 1) for i, arg in enumerate(args) if arg == "--set")
+    assert json.loads(settings["stage2.decision_extraction.enabled"]) is decision
+    # Compile the actual shell-emitted CLI, catching invalid combinations of
+    # backend, retrieval, primary model, and extraction server settings.
+    from oci.inference.research_all_evidence_workflow import (
+        _raw_config_from_args, build_parser, compile_config,
+    )
+    raw, config_dir = _raw_config_from_args(build_parser().parse_args(args[2:]))
+    config = compile_config(raw, config_dir=config_dir)
+    assert config.stage2.decision_extraction.enabled is decision
+    assert config.stage2.decision_extraction.max_prompt_tokens == 3000
+    assert config.stage2.extraction_context_strategy == "colbert"
+    if not managed:
+        assert config.stage2.extraction_llm.vllm is None
+        return
+
+    assert ("separate resident primary and decision pools" in completed.stdout) is decision
+    primary_gpus = overrides.get(
+        "STAGE2_VLLM_GPUS", "cuda:0" if decision else "cuda:0,cuda:1,cuda:2,cuda:3",
+    ).split(",")
+    extraction_gpus = overrides.get(
+        "STAGE2_EXTRACTION_VLLM_GPUS",
+        "cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7" if decision else "cuda:4,cuda:5,cuda:6,cuda:7",
+    ).split(",")
+    for pool, gpus in ((config.stage2.vllm, primary_gpus), (config.stage2.extraction_llm.vllm, extraction_gpus)):
+        assert pool.server_count == len(gpus)
+        assert pool.gpu_groups() == tuple((gpu,) for gpu in gpus)
+    assert not set(primary_gpus) & set(extraction_gpus)
+    assert set(primary_gpus + extraction_gpus) == {f"cuda:{i}" for i in range(8)}
+    assert config.stage2.extraction_llm.workers == int(overrides.get(
+        "STAGE2_EXTRACTION_WORKERS", "128" if decision else "32",
+    ))
     for variable, setting in (
         ("STAGE2_VLLM_EXTRA_ARGS_JSON", "stage2.vllm.extra_args"),
         ("STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON", "stage2.extraction_llm.vllm.extra_args"),
     ):
         extra_args = json.loads(settings[setting])
-        expected = json.loads(overrides[variable]) if overrides else [
-            "--gpu-memory-utilization", "0.90", "--max-model-len", "262144",
+        expected = json.loads(overrides[variable]) if variable in overrides else [
+            "--gpu-memory-utilization", "0.90", "--max-model-len", "262144" if rtx else "128000",
             "--max-num-seqs", "32",
         ]
+        if decision and variable == "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON" and variable not in overrides:
+            assert extra_args[extra_args.index("--max-model-len") + 1] == "3072"
+            assert extra_args[extra_args.index("--gpu-memory-utilization") + 1] == "0.28"
+            assert extra_args[extra_args.index("--revision") + 1] == config.stage2.decision_extraction.tokenizer_revision
+            assert "--enforce-eager" in extra_args
+            assert "--convert" not in extra_args  # Added by the backend, once.
+            continue
         assert extra_args == expected
     context_flag = args.index("--stage2-extraction-context-window-tokens")
     assert args[context_flag + 1] == overrides.get(
-        "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS", "262144",
+        "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS", "262144" if rtx else "128000",
     )
+
+
+@pytest.mark.parametrize("value", ["true", "2", "invalid"])
+def test_invalid_decision_backend_flag_fails_before_setup(tmp_path, value):
+    repo_root = Path(__file__).resolve().parents[1]
+    environment = {k: v for k, v in os.environ.items() if not k.startswith(("STAGE2_", "OCI_"))}
+    environment.update(STAGE2_DECISION_EXTRACTION=value, OCI_PYTHON="/does/not/exist")
+    completed = subprocess.run(
+        ["bash", str(repo_root / "run_one_conf_one_mod.sh"), str(tmp_path / "output")],
+        env=environment, capture_output=True, text=True,
+    )
+    assert completed.returncode == 2
+    assert "STAGE2_DECISION_EXTRACTION must be 0 or 1" in completed.stderr
+    assert "Synchronizing" not in completed.stdout
 
 
 @pytest.mark.parametrize("runtime_overrides", [

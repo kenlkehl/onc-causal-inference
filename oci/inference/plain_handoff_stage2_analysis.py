@@ -343,6 +343,8 @@ def _ontology_refinement_limits(config: Any) -> tuple[int, int]:
 def _configured_extraction_feature_batch_size(config: Any) -> int:
     """Read the feature prompt cap from current or pre-batching configs."""
 
+    if getattr(getattr(config, "decision_extraction", None), "enabled", False):
+        return 1
     if not hasattr(config, "extraction_feature_batch_size"):
         LOGGER.warning(
             "Stage 2 received a pre-feature-batching config; using the default "
@@ -389,6 +391,9 @@ def _configured_serial_extraction(config: Any) -> dict[str, Any]:
         settings["note_search"] = search
     settings["context_strategy"] = getattr(config, "extraction_context_strategy", "full_record")
     settings["colbert"] = getattr(config, "colbert", ColBERTConfig())
+    decision = getattr(config, "decision_extraction", None)
+    if decision is not None and decision.enabled:
+        settings["decision_extraction"] = decision
     return settings
 
 
@@ -445,6 +450,11 @@ def frozen_preselection_review_policy(config: Any) -> dict[str, Any]:
         policy["extraction_note_search"] = note_search_extraction.policy_identity(search)
     if not search.enabled and getattr(config, "extraction_context_strategy", "full_record") == "colbert":
         policy["colbert"] = stage2_colbert.policy_identity(getattr(config, "colbert", ColBERTConfig()))
+    decision = getattr(config, "decision_extraction", None)
+    if decision is not None and decision.enabled:
+        from .stage2_decision import SCHEMA
+
+        policy["decision_extraction"] = {"schema": SCHEMA, **decision.public_dict()}
     return policy
 
 
@@ -833,6 +843,8 @@ def _prompt_feature_definitions(
         row["conflict_resolution"] = _resolved_conflict_resolution(definition)
         if definition.get("clinical_label"):
             row["clinical_label"] = definition["clinical_label"]
+        if definition.get("decision_ontology") is not None:
+            row["decision_ontology"] = copy.deepcopy(definition["decision_ontology"])
         output.append(row)
     return output
 
@@ -3479,11 +3491,23 @@ def extract_rows(
     note_search: NoteSearchConfig | None = None,
     context_strategy: str = "full_record",
     colbert: ColBERTConfig | None = None,
+    decision_extraction: Any | None = None,
+    decision_client: Any | None = None,
     _source_rows: Sequence[Mapping[str, Any]] | None = None,
 ) -> pd.DataFrame:
     """Extract patient/feature batches with full-record or optional note-search reading."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if decision_extraction is not None and decision_extraction.enabled:
+        from . import stage2_decision
+
+        if context_strategy != "colbert" or (note_search and note_search.enabled):
+            raise ValueError("decision extraction requires ColBERT")
+        return stage2_decision.extract_rows(
+            dataset=dataset, row_ids=row_ids, text_column=text_column, definitions=definitions,
+            output_dir=output_dir, workers=workers, request_identity=request_identity,
+            policy=decision_extraction, client=decision_client, colbert=colbert or ColBERTConfig(),
+        )
     if context_strategy == "colbert" and not (note_search and note_search.enabled):
         return stage2_colbert.extract_rows(
             dataset=dataset, row_ids=row_ids, text_column=text_column, definitions=definitions,
@@ -8159,6 +8183,12 @@ def _merge_incremental_failure_summaries(
         "issue_files": int(prior_summary.get("issue_files") or 0)
         + int(delta_summary.get("issue_files") or 0),
         "feature_failure_patterns": patterns,
+        **({"decision_feature_summary": {
+            name: copy.deepcopy(
+                (delta_summary if name in changed else prior_summary)
+                .get("decision_feature_summary", {}).get(name, {})
+            ) for name in sorted(current)
+        }} if "decision_feature_summary" in prior_summary or "decision_feature_summary" in delta_summary else {}),
         "structural_failure_patient_count": len(structural_rows),
         "structural_failure_patient_row_ids": sorted(structural_rows),
         "incremental_refinement": {
@@ -8211,9 +8241,15 @@ def _extract_changed_features_and_merge(
     note_search: NoteSearchConfig | None = None,
     context_strategy: str = "full_record",
     colbert: ColBERTConfig | None = None,
+    decision_extraction: Any | None = None,
+    decision_client: Any | None = None,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     """Extract changed features only and materialize a complete merged matrix."""
 
+    decision_settings = (
+        {"decision_extraction": decision_extraction, "decision_client": decision_client}
+        if decision_extraction is not None and decision_extraction.enabled else {}
+    )
     current = [dict(feature) for feature in definitions]
     current_names = [str(feature["name"]) for feature in current]
 
@@ -8245,6 +8281,7 @@ def _extract_changed_features_and_merge(
             deferred_retry_passes=deferred_retry_passes,
             note_search=note_search,
             context_strategy=context_strategy, colbert=colbert,
+            **decision_settings,
         )
         summary = json.loads(
             (output_dir / "failure_summary.json").read_text(encoding="utf-8")
@@ -8283,6 +8320,7 @@ def _extract_changed_features_and_merge(
         deferred_retry_passes=deferred_retry_passes,
         note_search=note_search,
         context_strategy=context_strategy, colbert=colbert,
+        **decision_settings,
     )
     prior_names = [str(feature["name"]) for feature in prior_definitions]
     prior_indexed = _validated_extraction_index(
@@ -8401,11 +8439,30 @@ def _extract_training_with_ontology_feedback(
     note_search: NoteSearchConfig | None = None,
     context_strategy: str = "full_record",
     colbert: ColBERTConfig | None = None,
+    decision_extraction: Any | None = None,
+    decision_client: Any | None = None,
     prior_extracted: pd.DataFrame | None = None,
     prior_definitions: Sequence[Mapping[str, Any]] | None = None,
     prior_failure_summary: Mapping[str, Any] | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], int]:
     """Extract training rows and incrementally repair changed feature ontologies."""
+
+    if decision_extraction is not None and decision_extraction.enabled:
+        from .stage2_decision_ontology import extract_training
+
+        return extract_training(
+            dataset=dataset, row_ids=row_ids, text_column=text_column, definitions=definitions,
+            output_dir=output_dir, feedback_dir=feedback_dir, request_json=request_json,
+            workers=workers, max_prompt_chars=max_prompt_chars, feature_batch_size=1,
+            max_refinement_rounds=max_refinement_rounds, request_identity=request_identity,
+            tokenizer=tokenizer, chunk_size_tokens=chunk_size_tokens,
+            context_window_tokens=context_window_tokens, max_output_tokens=max_output_tokens,
+            context_margin_tokens=context_margin_tokens, deferred_retry_passes=deferred_retry_passes,
+            note_search=note_search, context_strategy=context_strategy, colbert=colbert,
+            decision_extraction=decision_extraction, decision_client=decision_client,
+            prior_extracted=prior_extracted, prior_definitions=prior_definitions,
+            prior_failure_summary=prior_failure_summary,
+        )
 
     supplied_prior = (
         prior_extracted is not None,
@@ -9747,12 +9804,19 @@ def run_fold_analysis(
     selection_consolidation_request_json: RequestJSON | None = None,
     config: Any,
     extraction_tokenizer: Any | None = None,
+    decision_client: Any | None = None,
     stage1_packets: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Run extraction supervision, fold-local selection, and causal-forest estimation."""
 
     search = getattr(config, "extraction_note_search", NoteSearchConfig())
-    if not search.enabled and getattr(config, "extraction_context_strategy", "full_record") == "colbert":
+    decision = getattr(config, "decision_extraction", None)
+    decision_enabled = decision is not None and decision.enabled
+    if decision_enabled:
+        from .stage2_decision import claim_output_method
+
+        claim_output_method(output_dir, decision, config.colbert, fold_root=True)
+    elif not search.enabled and getattr(config, "extraction_context_strategy", "full_record") == "colbert":
         stage2_colbert.claim_output_method(output_dir, getattr(config, "colbert", ColBERTConfig()), fold_root=True)
     else:
         note_search_extraction.claim_output_method(output_dir, search, fold_root=True)
@@ -9763,6 +9827,8 @@ def run_fold_analysis(
     ) = _ontology_refinement_limits(config)
     extraction_feature_batch_size = _configured_extraction_feature_batch_size(config)
     serial_extraction = _configured_serial_extraction(config)
+    if decision_enabled:
+        serial_extraction["decision_client"] = decision_client
     fit_ids = [int(value) for value in split["fit_row_ids"]]
     heldout_ids = [int(value) for value in split["heldout_row_ids"]]
     inner_splits = list(split.get("inner_splits") or []) or _fallback_inner_splits(
@@ -9912,15 +9978,23 @@ def run_fold_analysis(
         )
         summaries = feature_summaries(extracted, extracted_definitions)
         _write_json(round_dir / "aggregate_extraction_summary.json", summaries)
-        reviewed, changed, review_report = _request_aggregate_ontology_supervisor(
-            definitions=extracted_definitions,
-            summaries=summaries,
-            failure_summary=failure_summary,
-            output_dir=round_dir / "supervisor",
-            request_json=request_json,
-            workers=int(getattr(config, "workers", 1)),
-            request_identity=primary_identity,
-        )
+        if decision_enabled:
+            # Decision ontology review has already run, conditional on the NOTA
+            # rate. Do not invoke the unconditional generative-extractor review.
+            reviewed, changed = extracted_definitions, False
+            review_report = {"changed_feature_ids": [], "policy": "decision_none_above_threshold"}
+            _write_json(round_dir / "supervisor" / "result.json", review_report)
+            _write_json(round_dir / "supervisor" / "complete.json", {"status": "complete", **review_report})
+        else:
+            reviewed, changed, review_report = _request_aggregate_ontology_supervisor(
+                definitions=extracted_definitions,
+                summaries=summaries,
+                failure_summary=failure_summary,
+                output_dir=round_dir / "supervisor",
+                request_json=request_json,
+                workers=int(getattr(config, "workers", 1)),
+                request_identity=primary_identity,
+            )
         final_fit_all = extracted
         final_fit_raw = raw_extracted
         final_fit_definitions = extracted_definitions
@@ -9950,6 +10024,11 @@ def run_fold_analysis(
         )
         if not changed:
             review_converged = True
+            if decision_enabled:
+                feedback_report = json.loads(
+                    (round_dir / "failure_ontology_refinement" / "result.json").read_text()
+                )
+                review_converged = feedback_report["stopped_reason"] != "maximum_refinement_rounds_reached"
             break
 
     if (

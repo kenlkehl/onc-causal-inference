@@ -749,6 +749,10 @@ prepared patient records into reusable disk-cached token vectors and retrieves
 question-specific excerpts for each measurement. Retrieval workers run across
 configured GPUs independently of the LLM server pool. See [ColBERT extraction](colbert_extraction.md)
 for configuration, provenance, cache reuse, and launcher controls.
+An optional [Plumb decision extraction backend](stage2_decision_extraction.md)
+replaces JSON generation with vLLM next-token decision scores. It uses one
+feature per ColBERT prompt (at most 3,000 tokens), closed ontologies with
+training-only NOTA review, and iterative numeric bins followed by verification.
 With `extraction_context_strategy: "full_record"`, long records are read in ordered,
 lossless contiguous chunks of
 at most `extraction_chunk_size_tokens` (50,000 by default), preferring nearby

@@ -74,6 +74,7 @@ from .stage2_sampling import (
     is_qwen_flash_next, sampling_provenance,
 )
 from .stage2_endpoint_pool import ExtractionEndpoint, EndpointPool, endpoints_from_mapping
+from .stage2_decision_config import DecisionExtractionConfig, decision_config_from_mapping
 from .stage2_discovery_prompt import DISCOVERY_PROMPT_VERSION, DISCOVERY_SYSTEM_PROMPT
 from .stage2_candidate_consolidation import (
     MIXED_SCHEMA, CandidateConsolidationPolicy, CandidateEmbeddingCache,
@@ -564,6 +565,7 @@ class Stage2ExplicitFeature:
     stability_summary: str = ""
     caveats: str = ""
     conflict_resolution: Mapping[str, Any] | str | None = None
+    decision_ontology: Mapping[str, float] | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str):
@@ -662,6 +664,10 @@ class Stage2ExplicitFeature:
         )
         object.__setattr__(self, "stability_summary", str(self.stability_summary or "").strip())
         object.__setattr__(self, "caveats", str(self.caveats or "").strip())
+        if self.decision_ontology is not None:
+            from .stage2_decision import validate_ontology
+
+            validate_ontology(self.as_definition())
 
     def as_definition(self) -> dict[str, Any]:
         return {
@@ -675,6 +681,7 @@ class Stage2ExplicitFeature:
             "roles": list(self.roles),
             "stability_summary": self.stability_summary,
             "caveats": self.caveats,
+            **({"decision_ontology": dict(self.decision_ontology)} if self.decision_ontology is not None else {}),
         }
 
 
@@ -724,6 +731,7 @@ def _stage2_explicit_feature_from_mapping(
         missing_value_rule=required_value("missing_value_rule"),
         roles=tuple(role for role in raw_roles if role is not None),
         conflict_resolution=combined.get("conflict_resolution"),
+        decision_ontology=combined.get("decision_ontology"),
         stability_summary=str(combined.get("stability_summary") or ""),
         caveats=str(combined.get("caveats") or ""),
     )
@@ -928,6 +936,7 @@ class PlainHandoffStage2Config:
     extraction_note_search: NoteSearchConfig = field(default_factory=NoteSearchConfig)
     extraction_context_strategy: str = "colbert"
     colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
+    decision_extraction: DecisionExtractionConfig = field(default_factory=DecisionExtractionConfig)
     # Long records are processed in ordered, lossless source chunks. This is a
     # token cap rather than a target: the planner shrinks a chunk when feature
     # definitions and carried-forward state need more of the context window.
@@ -1085,6 +1094,18 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.extraction_context_strategy must be colbert or full_record")
         if not isinstance(self.colbert, ColBERTConfig):
             raise ValueError("stage2.colbert must be a ColBERTConfig")
+        if not isinstance(self.decision_extraction, DecisionExtractionConfig):
+            raise ValueError("stage2.decision_extraction must be a DecisionExtractionConfig")
+        self.decision_extraction.validate()
+        if self.decision_extraction.enabled:
+            if self.extraction_context_strategy != "colbert" or self.extraction_note_search.enabled:
+                raise ValueError("decision extraction requires ColBERT retrieval without note_search")
+            if self.runtime_disable_extraction:
+                raise ValueError("decision extraction cannot use runtime_disable_extraction")
+            if self.extraction_llm is not None and self.extraction_llm.runtime_endpoint:
+                raise ValueError("decision extraction cannot use a runtime_endpoint continuation")
+            if self.estimand_ontology.enabled:
+                raise ValueError("decision extraction currently requires estimand_ontology.enabled=false")
         if (isinstance(self.extraction_deferred_retry_passes, bool)
                 or not isinstance(self.extraction_deferred_retry_passes, int)
                 or self.extraction_deferred_retry_passes < 0):
@@ -1624,6 +1645,7 @@ def plain_stage2_config_from_mapping(
         extraction_note_search=note_search_config_from_mapping(raw.get("extraction_note_search")),
         extraction_context_strategy=raw.get("extraction_context_strategy", "colbert"),
         colbert=colbert_config_from_mapping(raw.get("colbert")),
+        decision_extraction=decision_config_from_mapping(raw.get("decision_extraction")),
         interpretation_reasoning_effort=interpretation_reasoning_effort,
         extraction_reasoning_effort=extraction_reasoning_effort,
         max_prompt_chars=int(raw.get("max_prompt_chars", 100_000)),
@@ -6996,6 +7018,11 @@ class PlainHandoffStage2:
         else:
             extraction_identity = None
             extraction_runtime_identity = None
+        self.decision_client = None
+        if config.decision_extraction.enabled:
+            from .stage2_decision_client import VLLMDecisionClient
+
+            self.decision_client = VLLMDecisionClient.from_config(config)
         self.model_identity = {
             "schema_version": MODEL_IDENTITY_SCHEMA_VERSION,
             "feature_definition_model": config.frozen_feature_definition_model or config.model,
@@ -7006,7 +7033,14 @@ class PlainHandoffStage2:
             "endpoint_urls_are_transport_only": True,
             "effective_request_policies": {
                 "interpretation": _stage2_request_policy(self.config, "interpretation"),
-                "extraction": _stage2_request_policy(self.extraction_request_config or self.config, "extraction"),
+                "extraction": (
+                    {"mode": "next_token_decision", "readout": "LAST/raw_A_to_P_logits",
+                     "temperature": config.decision_extraction.temperature,
+                     "max_prompt_tokens": config.decision_extraction.max_prompt_tokens,
+                     "generated_tokens": 0}
+                    if config.decision_extraction.enabled else
+                    _stage2_request_policy(self.extraction_request_config or self.config, "extraction")
+                ),
             },
         }
 
@@ -8343,6 +8377,8 @@ class PlainHandoffStage2:
             fallback_after_same_error: int = 3,
         ) -> dict[str, Any]:
             if request_kind == "extraction":
+                if self.config.decision_extraction.enabled:
+                    raise RuntimeError("Decision extraction must use the classifier client, not JSON generation")
                 if (
                     extraction_analysis_request_config is None
                     or self.extraction_completion is None
@@ -8452,6 +8488,7 @@ class PlainHandoffStage2:
             ),
             config=self.config,
             extraction_tokenizer=self.extraction_tokenizer,
+            decision_client=self.decision_client,
             stage1_packets=discovery_packets,
         )
         completed = {
@@ -8896,6 +8933,10 @@ def run_plain_handoff_stage2(
 
     extraction = config.extraction_llm
     extraction_vllm = extraction.vllm if extraction is not None else None
+    if config.decision_extraction.enabled and extraction_vllm is not None:
+        from .stage2_decision_config import classifier_vllm_config
+
+        extraction_vllm = classifier_vllm_config(extraction_vllm)
     if extraction is not None and str(extraction.runtime_endpoint).strip():
         # An explicit continuation route replaces only the live transport. The
         # configured pool remains in the persisted checkpoint identity and must
@@ -8971,6 +9012,12 @@ def run_plain_handoff_stage2(
                 runtime_primary_completion=completion,
                 runtime_extraction_completion=extraction_completion,
             )
+
+    # A pooling classifier cannot share a generative server or participate in
+    # the completion-triggered all-GPU model swapping protocol. Keep exactly
+    # the user's configured allocations, with separate resident endpoints.
+    if config.decision_extraction.enabled:
+        return run_configured_managed_pools()
 
     primary_vllm = config.vllm
     if (

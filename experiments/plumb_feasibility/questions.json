@@ -1,0 +1,170 @@
+[
+  {
+    "id": "choice_delivery",
+    "domain": "general",
+    "state": "The delivery photo shows apartment 14. The shipping address says apartment 41.",
+    "question": {"type": "choice", "instructions": "Where was the parcel delivered?", "criteria": ["correct_address", "wrong_address", "unknown"]},
+    "expected": "wrong_address"
+  },
+  {
+    "id": "choice_routing",
+    "domain": "general",
+    "state": "My password works, but I was charged twice for the same order. Please reverse the duplicate charge.",
+    "question": {"type": "choice", "instructions": "Which team should handle the customer's request?", "criteria": {"technical": "Login or software problems", "billing": "Charges and refunds", "shipping": "Delivery problems", "unknown": "No clear request"}},
+    "expected": "billing"
+  },
+  {
+    "id": "choice_smoking_former",
+    "domain": "synthetic_clinical",
+    "state": "She smoked one pack daily for 12 years and quit six years ago. She has not smoked since.",
+    "question": {"type": "choice", "instructions": "Extract the patient's current smoking status.", "criteria": ["never", "former", "current", "not_documented"]},
+    "expected": "former"
+  },
+  {
+    "id": "choice_smoking_missing",
+    "domain": "synthetic_clinical",
+    "state": "The patient walks daily and drinks tea. Tobacco use was not discussed.",
+    "question": {"type": "choice", "instructions": "Extract the patient's smoking status. Use not_documented if the note does not establish it.", "criteria": ["never", "former", "current", "not_documented"]},
+    "expected": "not_documented"
+  },
+  {
+    "id": "choice_explicit_absence",
+    "domain": "synthetic_clinical",
+    "state": "Pretreatment brain MRI: no intracranial metastases identified.",
+    "question": {"type": "choice", "instructions": "Extract pretreatment brain metastasis status from this note.", "criteria": {"present": "Brain metastases documented", "absent": "Brain metastases explicitly absent", "unknown": "Status not established"}},
+    "expected": "absent"
+  },
+  {
+    "id": "choice_family_history",
+    "domain": "synthetic_clinical",
+    "state": "Her father had diabetes. The patient's own diabetes history is not recorded.",
+    "question": {"type": "choice", "instructions": "Extract whether the patient has diabetes. Family history does not establish the patient's status.", "criteria": ["present", "absent", "not_documented"]},
+    "expected": "not_documented"
+  },
+  {
+    "id": "choice_temporal_scope",
+    "domain": "synthetic_clinical",
+    "state": "Before treatment: ECOG 1. At the visit three months after treatment began: ECOG 3.",
+    "question": {"type": "choice", "instructions": "What ECOG value was documented before treatment?", "criteria": ["0", "1", "2", "3", "4", "not_documented"]},
+    "expected": "1"
+  },
+  {
+    "id": "choice_unit_conversion",
+    "domain": "general",
+    "state": "The parcel weighs 1.5 kilograms. Light: under 1000 grams. Medium: 1000 through 2000 grams. Heavy: over 2000 grams.",
+    "question": {"type": "choice", "instructions": "Which weight category applies?", "criteria": ["light", "medium", "heavy"]},
+    "expected": "medium"
+  },
+  {
+    "id": "noul_conjunction_true",
+    "domain": "general",
+    "state": "Entry requires a ticket and age at least 18. Morgan has a ticket and is 18 years old.",
+    "question": {"type": "noul", "instructions": "Is Morgan eligible to enter under the stated rule?"},
+    "expected": true
+  },
+  {
+    "id": "noul_conjunction_false",
+    "domain": "general",
+    "state": "Entry requires a ticket and age at least 18. Morgan has a ticket and is 17 years old.",
+    "question": {"type": "noul", "instructions": "Is Morgan eligible to enter under the stated rule?"},
+    "expected": false
+  },
+  {
+    "id": "noul_negation",
+    "domain": "general",
+    "state": "The train has not been cancelled. It will depart 20 minutes late.",
+    "question": {"type": "noul", "instructions": "Has the train been cancelled?"},
+    "expected": false
+  },
+  {
+    "id": "noul_exception",
+    "domain": "general",
+    "state": "The library closes on Sundays except on festival weekend. Today is Sunday during festival weekend, and the library is open.",
+    "question": {"type": "noul", "instructions": "Is the library open today?"},
+    "expected": true
+  },
+  {
+    "id": "noul_clinical_positive",
+    "domain": "synthetic_clinical",
+    "state": "Pretreatment biopsy confirmed metastatic carcinoma in the liver.",
+    "question": {"type": "noul", "instructions": "Does the note document liver metastasis before treatment?"},
+    "expected": true
+  },
+  {
+    "id": "noul_clinical_negative",
+    "domain": "synthetic_clinical",
+    "state": "Pretreatment imaging explicitly shows no liver metastases.",
+    "question": {"type": "noul", "instructions": "Does the note document liver metastasis before treatment?"},
+    "expected": false
+  },
+  {
+    "id": "noul_missingness_gate",
+    "domain": "synthetic_clinical",
+    "state": "The note documents weight and appetite. Performance status was not assessed.",
+    "question": {"type": "noul", "instructions": "Is a performance status value documented in this note?"},
+    "expected": false
+  },
+  {
+    "id": "noul_explicit_measurement",
+    "domain": "synthetic_clinical",
+    "state": "Pretreatment assessment: ECOG performance status 2.",
+    "question": {"type": "noul", "instructions": "Is a performance status value documented in this note?"},
+    "expected": true
+  },
+  {
+    "id": "score_severity_none",
+    "domain": "general",
+    "state": "The service is operating normally. No users are affected.",
+    "question": {"type": "score", "instructions": "Assign incident severity using the supplied levels.", "criteria": ["No incident: normal service", "Minor: cosmetic defect with service working", "Major: some users cannot use the service", "Critical: complete outage for all users"]},
+    "expected": 0
+  },
+  {
+    "id": "score_severity_minor",
+    "domain": "general",
+    "state": "A heading has the wrong color. All service functions work normally.",
+    "question": {"type": "score", "instructions": "Assign incident severity using the supplied levels.", "criteria": ["No incident: normal service", "Minor: cosmetic defect with service working", "Major: some users cannot use the service", "Critical: complete outage for all users"]},
+    "expected": 1
+  },
+  {
+    "id": "score_severity_major",
+    "domain": "general",
+    "state": "Customers in one region cannot sign in. Customers in all other regions can use the service normally.",
+    "question": {"type": "score", "instructions": "Assign incident severity using the supplied levels.", "criteria": ["No incident: normal service", "Minor: cosmetic defect with service working", "Major: some users cannot use the service", "Critical: complete outage for all users"]},
+    "expected": 2
+  },
+  {
+    "id": "score_severity_critical",
+    "domain": "general",
+    "state": "The entire service is offline. No customer can access any feature.",
+    "question": {"type": "score", "instructions": "Assign incident severity using the supplied levels.", "criteria": ["No incident: normal service", "Minor: cosmetic defect with service working", "Major: some users cannot use the service", "Critical: complete outage for all users"]},
+    "expected": 3
+  },
+  {
+    "id": "score_rubric_count",
+    "domain": "general",
+    "state": "A submission must include a title, a date, and a signature. This submission includes a title and signature but no date.",
+    "question": {"type": "score", "instructions": "Score the number of required elements included, with one point per included element.", "criteria": ["Zero required elements included", "One required element included", "Two required elements included", "All three required elements included"]},
+    "expected": 2
+  },
+  {
+    "id": "score_pain_absent",
+    "domain": "synthetic_clinical",
+    "state": "The patient explicitly reports no pain today.",
+    "question": {"type": "score", "instructions": "Extract the documented pain severity on these ordered levels.", "criteria": ["No pain", "Mild pain", "Moderate pain", "Severe pain"]},
+    "expected": 0
+  },
+  {
+    "id": "score_pain_moderate",
+    "domain": "synthetic_clinical",
+    "state": "The patient describes the current pain as moderate, neither mild nor severe.",
+    "question": {"type": "score", "instructions": "Extract the documented pain severity on these ordered levels.", "criteria": ["No pain", "Mild pain", "Moderate pain", "Severe pain"]},
+    "expected": 2
+  },
+  {
+    "id": "score_ecog_temporal",
+    "domain": "synthetic_clinical",
+    "state": "Pretreatment visit: ECOG performance status 1. Follow-up after treatment: ECOG performance status 3.",
+    "question": {"type": "score", "instructions": "Extract the explicitly documented pretreatment ECOG performance status.", "criteria": ["ECOG 0", "ECOG 1", "ECOG 2", "ECOG 3", "ECOG 4"]},
+    "expected": 1
+  }
+]
