@@ -126,6 +126,7 @@ class RequestJSON(Protocol):
         validate: Callable[[Mapping[str, Any]], dict[str, Any]],
         *,
         request_kind: str = "interpretation",
+        initial_reasoning_effort: str | None = None,
     ) -> dict[str, Any]: ...
 
 
@@ -1230,13 +1231,16 @@ def _category_ontology_plan(
     return items, targets
 
 
-def _category_ontology_prompt(items: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+def _category_ontology_prompt(
+    items: Sequence[Mapping[str, Any]], *, validation_error: str | None = None,
+) -> list[dict[str, str]]:
     if len(items) != 1:
         raise ValueError("category interpretation requires one phrase per call")
     item = items[0]
     feature = {**item, "name": item["feature_name"], "categories_or_unit": item["allowed_categories"]}
     return clinical_prompts.messages("08_map_categories", clinical_prompts.feature_text(feature)
-        + "\n\nPhrase to interpret\n" + clinical_prompts.scalar(item["prior_extracted_value"]))
+        + "\n\nPhrase to interpret\n" + clinical_prompts.scalar(item["prior_extracted_value"])
+        + ("\n\nValidation error\n" + validation_error if validation_error else ""))
 
 
 def _validate_category_ontology(
@@ -1625,9 +1629,16 @@ def _request_validated_extraction(
         corrections = {"corrections": []}
         for item in items:
             mapped = request_json(
-                _category_ontology_prompt([item]),
+                _category_ontology_prompt(
+                    [item], validation_error=(
+                        f"_ExtractionCategoryError: feature {item['feature_name']!r} "
+                        f"value {item['prior_extracted_value']!r} is invalid; allowed values "
+                        f"are {item['allowed_categories']!r} or null"
+                    ),
+                ),
                 lambda value, item=item: _validate_category_ontology(value, items=[item]),
                 request_kind="interpretation",
+                initial_reasoning_effort="none",
             )
             corrections["corrections"].extend(mapped["corrections"])
         resolution = "llm_category_ontology"
@@ -3569,6 +3580,7 @@ def extract_rows(
         validate: Callable[[Mapping[str, Any]], dict[str, Any]],
         *,
         request_kind: str = "interpretation",
+        initial_reasoning_effort: str | None = None,
     ) -> dict[str, Any]:
         if cancellation.is_set():
             raise _ExtractionCancelledError(
@@ -3578,6 +3590,8 @@ def extract_rows(
             messages,
             validate,
             request_kind=request_kind,
+            **({"initial_reasoning_effort": initial_reasoning_effort}
+               if initial_reasoning_effort is not None else {}),
         )
     extraction_request_identity = dict(request_identity or {})
     if note_search.enabled:

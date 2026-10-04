@@ -65,6 +65,8 @@ def test_rtx_wrappers_pass_context_budgets_and_preserve_saved_settings(
         return
 
     assert "oci.inference.research_all_evidence_workflow" in args
+    assert args[args.index("--stage2-model") + 1] == args[args.index("--stage2-extraction-model") + 1]
+    assert args[args.index("--stage2-model") + 1] == "nvidia/Gemma-4-26B-A4B-NVFP4"
     assert args[args.index("--stage2-extraction-context-strategy") + 1] == "colbert"
     assert args[args.index("--stage2-colbert-cache-dir") + 1] == str(repo_root / ".oci_cache/colbert")
     settings = dict(args[i + 1].split("=", 1) for i, arg in enumerate(args) if arg == "--set")

@@ -24,6 +24,7 @@ from collections import Counter, defaultdict
 from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Sequence
 from urllib.parse import urlparse
@@ -50,6 +51,7 @@ from .plain_handoff_stage2_analysis import (
     Stage2RequestExhaustedError,
     Stage2ResponseValidationError,
     infrastructure_failure_audit_paths,
+    _token_id_count,
     prompt_token_count,
     run_fold_analysis,
 )
@@ -117,7 +119,7 @@ ALLOWED_EVIDENCE_AXES = {
 }
 ALLOWED_ROLES = {"confounder", "effect_modifier"}
 DEFAULT_MAX_RESPONSE_REPAIRS = 15
-DEFAULT_THINKING_AFTER_RESPONSE_REPAIRS = 5
+DEFAULT_THINKING_AFTER_RESPONSE_REPAIRS = 1
 DEFAULT_REQUEST_TIMEOUT = 240 * 60.0
 DEFAULT_REQUEST_ATTEMPT_TIMEOUT = 60 * 60.0
 DEFAULT_TRANSPORT_MAX_ATTEMPTS = 6
@@ -866,6 +868,10 @@ class Stage2ExtractionLLMConfig:
 class PlainHandoffStage2Config:
     endpoint: str
     model: str = ""
+    # Reuse completed definitions produced by this model while subsequent
+    # extraction/interpretation uses model. Missing definitions must not be
+    # regenerated under a different model and attributed to this provenance.
+    frozen_feature_definition_model: str = ""
     api_key: str = "EMPTY"
     # Total wall-clock budget for one logical JSON request, including transport
     # retries and validator-guided repair turns.
@@ -1009,6 +1015,8 @@ class PlainHandoffStage2Config:
     # root when available) so served aliases still receive the right controls.
     runtime_model_family: str = ""
     runtime_sampling_model: str = ""
+    # Live server context limits are transport state, not checkpoint identity.
+    runtime_context_window_tokens: int | None = None
     # Operational guard for post-extraction reselection. Preserve the configured
     # extractor identity in checkpoints, but neither launch nor call it. Any
     # unexpected extraction request fails closed instead of occupying a GPU.
@@ -1028,6 +1036,11 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.endpoint must be one HTTP(S) OpenAI-compatible base URL")
         if require_model and not self.model.strip():
             raise ValueError("stage2.model must be nonempty")
+        if not isinstance(self.frozen_feature_definition_model, str) or (
+            self.frozen_feature_definition_model
+            and not self.frozen_feature_definition_model.strip()
+        ):
+            raise ValueError("stage2.frozen_feature_definition_model must be a model ID or empty string")
         if self.vllm is not None:
             self.vllm.validate()
         if (
@@ -1155,6 +1168,12 @@ class PlainHandoffStage2Config:
             )
         if self.runtime_model_family not in {"", "qwen3", "gemma4", "lfm2.5", "other"}:
             raise ValueError("stage2.runtime_model_family is not recognized")
+        if self.runtime_context_window_tokens is not None and (
+            isinstance(self.runtime_context_window_tokens, bool)
+            or not isinstance(self.runtime_context_window_tokens, int)
+            or self.runtime_context_window_tokens < 1
+        ):
+            raise ValueError("stage2.runtime_context_window_tokens must be a positive integer or None")
         if not isinstance(self.runtime_disable_extraction, bool):
             raise ValueError("stage2.runtime_disable_extraction must be true or false")
         if self.max_prompt_chars < 4_000:
@@ -1374,6 +1393,7 @@ class PlainHandoffStage2Config:
         values.pop("runtime_transport_attempt_budget", None)
         values.pop("runtime_model_family", None)
         values.pop("runtime_sampling_model", None)
+        values.pop("runtime_context_window_tokens", None)
         values.pop("runtime_disable_extraction", None)
         values["explicit_features"] = [
             feature.as_definition() for feature in self.explicit_features
@@ -1577,6 +1597,7 @@ def plain_stage2_config_from_mapping(
     config = PlainHandoffStage2Config(
         endpoint=endpoint.rstrip("/"),
         model=model,
+        frozen_feature_definition_model=raw.get("frozen_feature_definition_model", ""),
         api_key=api_key,
         request_timeout=float(raw.get("request_timeout", DEFAULT_REQUEST_TIMEOUT)),
         request_attempt_timeout=float(
@@ -2495,7 +2516,7 @@ class _ManagedStage2SwitchTracker:
 
 
 class _LazyStage2ExtractionTokenizer:
-    """Load the exact extraction-model tokenizer only when patient work begins."""
+    """Load an exact model tokenizer only when token-bounded work begins."""
 
     def __init__(
         self,
@@ -2530,9 +2551,9 @@ class _LazyStage2ExtractionTokenizer:
                     )
                 except Exception as exc:
                     raise RuntimeError(
-                        "Stage 2 cannot enforce serial extraction token limits because "
-                        f"the extraction tokenizer {self.model!r} could not be loaded. "
-                        "Make the tokenizer available in the extraction vLLM download "
+                        "Stage 2 cannot enforce prompt token limits because "
+                        f"the tokenizer {self.model!r} could not be loaded. "
+                        "Make the tokenizer available in the vLLM download "
                         "directory or the Hugging Face cache."
                     ) from exc
         return self._tokenizer
@@ -2543,6 +2564,81 @@ class _LazyStage2ExtractionTokenizer:
     def apply_chat_template(self, *args: Any, **kwargs: Any) -> Any:
         template_kwargs = {**self.chat_template_kwargs, **kwargs}
         return self._load().apply_chat_template(*args, **template_kwargs)
+
+
+def _primary_context_window_tokens(
+    config: PlainHandoffStage2Config,
+    identity: Mapping[str, Any] | None = None,
+) -> int | None:
+    limits: list[int] = []
+    if config.runtime_context_window_tokens is not None:
+        limits.append(int(config.runtime_context_window_tokens))
+    for observation in (identity or {}).get("endpoint_observations", []):
+        record = observation.get("selected_model_record") or {}
+        value = record.get("max_model_len")
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            limits.append(value)
+    args = list(config.vllm.extra_args) if config.vllm is not None else []
+    for index, arg in enumerate(args):
+        if arg == "--max-model-len" and index + 1 < len(args):
+            value = args[index + 1]
+        elif arg.startswith("--max-model-len="):
+            value = arg.split("=", 1)[1]
+        else:
+            continue
+        # vLLM also accepts "auto"; in that case use its advertised limit.
+        try:
+            limit = int(value)
+        except (TypeError, ValueError):
+            continue
+        if limit > 0:
+            limits.append(limit)
+    return min(limits) if limits else None
+
+
+@lru_cache(maxsize=8)
+def _primary_prompt_tokenizer(
+    model: str, cache_dir: str, template_kwargs_json: str,
+) -> _LazyStage2ExtractionTokenizer:
+    return _LazyStage2ExtractionTokenizer(
+        model=model, cache_dir=cache_dir,
+        chat_template_kwargs=json.loads(template_kwargs_json),
+    )
+
+
+def _primary_prompt_token_counter(
+    config: PlainHandoffStage2Config,
+) -> Callable[[Sequence[Mapping[str, str]]], int]:
+    template_kwargs = dict(config.vllm.default_chat_template_kwargs or {}) if config.vllm else {}
+    tokenizer = _primary_prompt_tokenizer(
+        config.runtime_sampling_model or config.model,
+        str(config.vllm.download_dir) if config.vllm else "",
+        json.dumps(template_kwargs, sort_keys=True),
+    )
+    policy = _stage2_request_policy(config, "interpretation")
+    family = config.runtime_model_family or _stage2_model_family(config.model)
+
+    def count(messages: Sequence[Mapping[str, str]]) -> int:
+        # Repairs can enable thinking. Reserve the larger framing in either
+        # mode, including the same prompt controls used by the transport.
+        counts = []
+        for thinking in (False, True):
+            controlled = (
+                list(messages) if policy.get("preserve_thinking") else
+                _reasoning_controlled_messages(
+                    messages, model_family=family, enable_thinking=thinking,
+                    max_prompt_chars=int(config.max_prompt_chars),
+                )
+            )
+            encoded = tokenizer.apply_chat_template(
+                controlled, tokenize=True, add_generation_prompt=True,
+                enable_thinking=thinking,
+                **({"preserve_thinking": True} if policy.get("preserve_thinking") else {}),
+            )
+            counts.append(_token_id_count(encoded))
+        return max(counts)
+
+    return count
 
 
 def _stage2_request_policy(
@@ -2599,6 +2695,14 @@ def _feature_definition_input_value(
 ) -> dict[str, Any]:
     """Fingerprint only inputs that can affect discovery and operationalization."""
 
+    if config.frozen_feature_definition_model:
+        config = replace(
+            config,
+            model=config.frozen_feature_definition_model,
+            runtime_sampling_model=config.frozen_feature_definition_model,
+            runtime_model_family=_stage2_model_family(config.frozen_feature_definition_model),
+            runtime_reasoning_effort=None,
+        )
     return {
         "feature_definition_input_schema": FEATURE_DEFINITION_INPUT_SCHEMA_VERSION,
         "prompt_catalog_version": clinical_prompts.PROMPT_VERSION,
@@ -3456,7 +3560,8 @@ def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None 
         )
     else:
         content = (
-            "Your preceding answer needs this correction: " + str(exc) + "\n"
+            "Your preceding answer needs this correction: "
+            + type(exc).__name__ + ": " + str(exc) + "\n"
             "Use the task and information above to return the complete corrected JSON object. "
             "Preserve supported values and use null when the definition requires it."
         )
@@ -3496,6 +3601,7 @@ def _request_json(
     completion: CompletionFunction,
     validate: Callable[[Mapping[str, Any]], dict[str, Any]],
     request_kind: str = "interpretation",
+    initial_reasoning_effort: str | None = None,
     prompt_token_counter: Callable[[Sequence[Mapping[str, str]]], int] | None = None,
     context_window_tokens: int | None = None,
     context_margin_tokens: int = 0,
@@ -3515,6 +3621,7 @@ def _request_json(
                 completion=admitted_completion,
                 validate=validate,
                 request_kind=request_kind,
+                initial_reasoning_effort=initial_reasoning_effort,
                 prompt_token_counter=prompt_token_counter,
                 context_window_tokens=context_window_tokens,
                 context_margin_tokens=context_margin_tokens,
@@ -3523,11 +3630,30 @@ def _request_json(
                 conservative_validation_fallback=conservative_validation_fallback,
                 fallback_after_same_error=fallback_after_same_error,
             )
-    request_policy = _stage2_request_policy(config, request_kind)
+    if (
+        request_kind == "interpretation"
+        and prompt_token_counter is None
+        and _uses_default_openai_transport(completion)
+    ):
+        primary_window = _primary_context_window_tokens(config)
+        if primary_window is not None:
+            prompt_token_counter = _primary_prompt_token_counter(config)
+            context_window_tokens = primary_window
+            context_margin_tokens = max(context_margin_tokens, 4096)
+    if initial_reasoning_effort is not None and (
+        not isinstance(initial_reasoning_effort, str)
+        or initial_reasoning_effort not in SUPPORTED_REASONING_EFFORTS
+    ):
+        raise ValueError("unsupported initial_reasoning_effort")
+    request_policy = _stage2_request_policy(
+        replace(config, runtime_reasoning_effort=initial_reasoning_effort)
+        if initial_reasoning_effort is not None else config,
+        request_kind,
+    )
     request_config = replace(
         config,
         runtime_request_kind=str(request_policy["request_kind"]),
-        runtime_reasoning_effort=None,
+        runtime_reasoning_effort=initial_reasoning_effort,
     )
     base_conversation = [dict(message) for message in messages]
     conversation = [dict(message) for message in base_conversation]
@@ -3590,7 +3716,7 @@ def _request_json(
                 )
                 if available_output_tokens < 1:
                     raise ValueError(
-                        "Stage 2 extraction repair prompt leaves no model output context: "
+                        "Stage 2 repair prompt leaves no model output context: "
                         f"prompt_tokens={prompt_tokens}, "
                         f"context_window_tokens={context_window_tokens}, "
                         f"context_margin_tokens={context_margin_tokens}"
@@ -3599,6 +3725,19 @@ def _request_json(
                     int(_stage2_request_policy(attempt_config)["max_tokens"]),
                     available_output_tokens,
                 )
+                request_audit.event(
+                    "context_budget", prompt_tokens=prompt_tokens,
+                    context_window_tokens=context_window_tokens,
+                    context_margin_tokens=context_margin_tokens,
+                    max_tokens=dynamic_output_ceiling,
+                )
+                if dynamic_output_ceiling < int(_stage2_request_policy(attempt_config)["max_tokens"]):
+                    LOGGER.info(
+                        "Stage 2 context budget kind=%s prompt_tokens=%s max_tokens=%s "
+                        "context_window_tokens=%s margin_tokens=%s",
+                        request_kind, prompt_tokens, dynamic_output_ceiling,
+                        context_window_tokens, context_margin_tokens,
+                    )
                 if request_policy["request_kind"] == "extraction":
                     reasoning_ceiling = (
                         _reasoning_enabled(_stage2_request_policy(attempt_config)["reasoning_effort"])
@@ -3609,7 +3748,7 @@ def _request_json(
                         **{("extraction_reasoning_max_tokens" if reasoning_ceiling else
                             "extraction_max_tokens"): dynamic_output_ceiling},
                     )
-                else:  # pragma: no cover - token counting is extraction-only today
+                else:
                     attempt_config = replace(
                         attempt_config,
                         max_tokens=dynamic_output_ceiling,
@@ -6712,6 +6851,7 @@ class PlainHandoffStage2:
             config,
             runtime_model_family=str(primary_identity["model_family"]),
             runtime_sampling_model=str(primary_identity.get("sampling_model") or ""),
+            runtime_context_window_tokens=_primary_context_window_tokens(config, primary_identity),
         )
         config.validate()
         self.config = config
@@ -6739,6 +6879,7 @@ class PlainHandoffStage2:
                 runtime_endpoints=(),
                 runtime_model_family="",
                 runtime_sampling_model="",
+                runtime_context_window_tokens=None,
             )
             consolidation_identity = _endpoint_model_identity(
                 consolidation_request_config,
@@ -6750,6 +6891,9 @@ class PlainHandoffStage2:
                 consolidation_request_config,
                 runtime_model_family=str(consolidation_identity["model_family"]),
                 runtime_sampling_model=str(consolidation_identity.get("sampling_model") or ""),
+                runtime_context_window_tokens=_primary_context_window_tokens(
+                    consolidation_request_config, consolidation_identity,
+                ),
             )
             self.selection_consolidation_completion = _ConcurrencyLimitedCompletion(
                 _RoundRobinOpenAICompletion((consolidation_request_config.endpoint,)),
@@ -6854,6 +6998,7 @@ class PlainHandoffStage2:
             extraction_runtime_identity = None
         self.model_identity = {
             "schema_version": MODEL_IDENTITY_SCHEMA_VERSION,
+            "feature_definition_model": config.frozen_feature_definition_model or config.model,
             "primary": primary_identity,
             "extraction": extraction_identity,
             "extraction_runtime_continuation": extraction_runtime_identity,
@@ -7928,6 +8073,13 @@ class PlainHandoffStage2:
         complete_path = output_dir / "complete.json"
         features_path = output_dir / "feature_definitions.json"
         definitions_complete_path = output_dir / "definitions_complete.json"
+        if self.config.frozen_feature_definition_model and not (
+            features_path.is_file() and definitions_complete_path.is_file()
+        ):
+            raise RuntimeError(
+                "frozen_feature_definition_model requires completed feature definitions "
+                f"for outer fold {outer_fold}; refusing to regenerate them with another model"
+            )
         interpreted_candidates_path = output_dir / "interpreted_candidates.json"
         definition_inputs = _feature_definition_input_value(
             config=self.config,
@@ -8182,6 +8334,7 @@ class PlainHandoffStage2:
             validate: Callable[[Mapping[str, Any]], dict[str, Any]],
             *,
             request_kind: str = "interpretation",
+            initial_reasoning_effort: str | None = None,
             repair_context: Mapping[str, Any] | None = None,
             validation_event_observer: (
                 Callable[[Mapping[str, Any]], None] | None
@@ -8208,6 +8361,7 @@ class PlainHandoffStage2:
                 completion=completion,
                 validate=validate,
                 request_kind=request_kind,
+                initial_reasoning_effort=initial_reasoning_effort,
                 prompt_token_counter=(
                     (
                         lambda candidate: prompt_token_count(
@@ -8357,7 +8511,7 @@ class PlainHandoffStage2:
         ):
             raise ValueError(
                 "dataset-backed Stage 2 requires stage2.extraction_llm so patient "
-                "value extraction is isolated from the primary review model"
+                "value extraction has its own request policy"
             )
         output_dir.mkdir(parents=True, exist_ok=True)
         self._check_and_record_model_identity(output_dir)
@@ -8819,6 +8973,58 @@ def run_plain_handoff_stage2(
             )
 
     primary_vllm = config.vllm
+    if (
+        primary_vllm is not None
+        and extraction_vllm is not None
+        and config.model.strip() == extraction.model.strip()
+    ):
+        # A single model can handle both roles through per-request thinking
+        # controls. Launch one pool over the GPU union, share its router, and
+        # never enter the alternating-model/configured-split state machine.
+        shared_vllm = _all_gpu_extraction_vllm_config(primary_vllm, extraction_vllm)
+        phase_path = managed_root / "model_phase.json"
+
+        def record_shared_phase(status: str) -> None:
+            _write_json(phase_path, {
+                "schema_version": MANAGED_MODEL_PHASE_SCHEMA_VERSION,
+                "status": status,
+                "active_role": "shared",
+                "allocation_mode": "shared_model",
+                "model": extraction.model,
+                "roles": sorted(STAGE2_REQUEST_KINDS),
+                "gpus": list(shared_vllm.gpus),
+                "transition": 0,
+                "recorded_at": _now(),
+            })
+
+        record_shared_phase("starting")
+        LOGGER.info("start shared managed Stage 2 model=%s gpus=%s replicas=%s",
+                    extraction.model, list(shared_vllm.gpus), shared_vllm.server_count)
+        with launch_managed_vllm_servers(
+            config=shared_vllm, model=extraction.model, api_key=extraction.api_key,
+            output_dir=managed_root / "shared",
+        ) as endpoints:
+            shared_completion = _RoundRobinOpenAICompletion(tuple(endpoints))
+            runtime_config = replace(
+                config,
+                endpoint=endpoints[0],
+                api_key=extraction.api_key,
+                vllm=shared_vllm,
+                runtime_endpoints=tuple(endpoints),
+                extraction_llm=replace(
+                    extraction, endpoint=endpoints[0], vllm=shared_vllm,
+                    runtime_endpoints=tuple(endpoints),
+                ),
+            )
+            record_shared_phase("running")
+            result = run_with_config(
+                runtime_config,
+                runtime_dataset=dataset,
+                runtime_primary_completion=completion or shared_completion,
+                runtime_extraction_completion=extraction_completion or completion or shared_completion,
+            )
+            record_shared_phase("complete")
+            return result
     if primary_vllm is not None and extraction_vllm is not None:
         all_gpu_interpretation = _all_gpu_interpretation_vllm_config(
             primary_vllm,

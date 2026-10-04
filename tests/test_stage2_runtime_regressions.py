@@ -649,10 +649,84 @@ def test_leaf_checkpoint_survives_endpoint_and_runtime_budget_changes(tmp_path):
     moved = replace(
         config, endpoint="http://new-server.test/v1", workers=4,
         request_timeout=6000.0, request_attempt_timeout=1800.0,
+        runtime_context_window_tokens=262144,
     )
+    assert "runtime_context_window_tokens" not in moved.public_dict()
     assert stage2_workflow._checkpointed_request_json(
         **kwargs, config=moved, completion=should_not_call,
     ) == result
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_primary_requests_automatically_budget_context_across_repairs_and_retries(
+    tmp_path, monkeypatch, wrapped,
+):
+    calls = []
+    original = [{"role": "user", "content": "evidence " * 19000}]
+    tokenizer = SimpleNamespace(apply_chat_template=lambda rows, **kwargs: {
+        "input_ids": range(sum(len(row["content"]) for row in rows) + 20
+                           + (5 if kwargs["enable_thinking"] else 0))
+    })
+    monkeypatch.setattr(stage2_workflow, "_primary_prompt_tokenizer", lambda *_: tokenizer)
+    config = PlainHandoffStage2Config(
+        endpoint="http://stage2.test/v1", model="test-model",
+        max_prompt_chars=640000, runtime_context_window_tokens=262144,
+        transport_retry_backoff=0,
+    )
+    counter = stage2_workflow._primary_prompt_token_counter(config)
+
+    def completion(messages, attempt_config):
+        calls.append([dict(row) for row in messages])
+        assert messages[0] == original[0]
+        assert attempt_config.max_tokens == 262144 - counter(messages) - 4096
+        assert attempt_config.max_tokens < 100000
+        if len(calls) == 1:
+            return "{}"
+        if len(calls) == 2:
+            raise stage2_workflow._RetryableStage2ResponseError("empty response")
+        assert "missing required field" in messages[-2]["content"]
+        assert "empty response" in messages[-1]["content"]
+        return '{"required": true}'
+
+    def validate(value):
+        if "required" not in value:
+            raise ValueError("missing required field")
+        return dict(value)
+
+    monkeypatch.setattr(stage2_workflow, "_openai_completion", completion)
+    routed = stage2_workflow._RoundRobinOpenAICompletion((config.endpoint,))
+    if wrapped:
+        import threading
+        routed = stage2_workflow._ConcurrencyLimitedCompletion(
+            stage2_workflow._InterruptibleCompletion(
+                routed, required_role="primary", switch_event=threading.Event(),
+            ), 1,
+        )
+    kwargs = dict(
+        output_dir=tmp_path, input_value={"phase": "group_operationalization"},
+        messages=original, config=config, completion=routed, validate=validate,
+    )
+    assert stage2_workflow._checkpointed_request_json(**kwargs) == {"required": True}
+    assert len(calls) == 3
+    assert stage2_workflow._checkpointed_request_json(**kwargs) == {"required": True}
+    assert len(calls) == 3
+    assert json.loads((tmp_path / "input.json").read_text())["request_policy"]["max_tokens"] == 100000
+
+
+@pytest.mark.parametrize("args", [
+    ("--max-model-len", "262144"), ("--max-model-len=262144",),
+])
+def test_primary_context_uses_smallest_live_or_managed_limit(args):
+    config = PlainHandoffStage2Config(
+        endpoint="http://stage2.test/v1", model="test-model",
+        vllm=ManagedVLLMConfig(server_count=1, gpus=("cuda:0",), extra_args=args),
+    )
+    assert stage2_workflow._primary_context_window_tokens(config) == 262144
+    identity = {"endpoint_observations": [
+        {"selected_model_record": {"max_model_len": 200000}},
+        {"selected_model_record": {"max_model_len": 210000}},
+    ]}
+    assert stage2_workflow._primary_context_window_tokens(config, identity) == 200000
 
 
 def test_transport_feedback_preserves_semantic_error_and_original_input():

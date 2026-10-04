@@ -67,6 +67,27 @@ assign disjoint device lists to avoid loading duplicate replicas on a GPU.
 
 ## All-in-one launchers
 
+The RTX PRO 6000 x8 preset uses Gemma 4 26B-A4B for both Stage 2 roles.
+When the primary and extraction model IDs match and both pools are managed,
+the launcher starts one shared pool over the union of their configured GPUs.
+Extraction and interpretation share the same request router; no model reload
+or four/four fallback occurs. Different explicitly configured model IDs retain
+the existing alternating-model workflow.
+
+Extraction starts with `enable_thinking=false`. The first validation repair
+includes the previous response and the concrete error, with thinking still off.
+If that repair fails, later repairs enable thinking. The default
+`thinking_after_response_repairs` is 1. Category-mapping repairs also begin
+without thinking; ordinary aggregate interpretation keeps its separate policy.
+
+To resume extraction with a new interpretation model while reusing completed
+definitions, set `frozen_feature_definition_model` to the original definition
+model ID. This preserves their original input fingerprints and records their
+provenance separately from the current serving model. Every outer fold must
+already have matching completed definitions; missing or incompatible upstream
+checkpoints fail rather than regenerate under the old model ID. Remove existing
+extraction-and-later artifacts before changing a saved run's serving identity.
+
 Every `run_*.sh` in the repository root delegates to the shared launcher and
 defaults to ColBERT. For example:
 

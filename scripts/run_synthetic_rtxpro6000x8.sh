@@ -23,9 +23,9 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
     if [[ -z "${PHYSICAL_GPUS:-}" ]]; then
         export GPU_COUNT="${GPU_COUNT:-8}"
     fi
-    export STAGE2_MODEL="${STAGE2_MODEL:-nvidia/Gemma-4-31B-IT-NVFP4}"
     # NVIDIA omits IT from this repository name; the checkpoint is instruction tuned.
     export STAGE2_EXTRACTION_MODEL="${STAGE2_EXTRACTION_MODEL:-nvidia/Gemma-4-26B-A4B-NVFP4}"
+    export STAGE2_MODEL="${STAGE2_MODEL:-${STAGE2_EXTRACTION_MODEL}}"
     export STAGE2_WORKERS="${STAGE2_WORKERS:-32}"
     export STAGE2_EXTRACTION_WORKERS="${STAGE2_EXTRACTION_WORKERS:-32}"
     export STAGE2_REQUEST_ATTEMPT_TIMEOUT="${STAGE2_REQUEST_ATTEMPT_TIMEOUT:-1800}"
@@ -33,7 +33,8 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
     export STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS="${STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS:-262144}"
     export STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS="${STAGE2_EXTRACTION_CONTEXT_MARGIN_TOKENS:-4096}"
 
-    # Alternate eight single-GPU replicas, with a four/four concurrent fallback.
+    # Matching model IDs share one pool over the union of these allocations.
+    # Explicitly selecting different models retains the alternating/split mode.
     # Keep TP=1 for the NVIDIA 26B A4B checkpoint's supported vLLM layout.
     export STAGE2_VLLM_GPUS="${STAGE2_VLLM_GPUS:-cuda:0,cuda:1,cuda:2,cuda:3}"
     export STAGE2_VLLM_GPUS_PER_SERVER="${STAGE2_VLLM_GPUS_PER_SERVER:-1}"

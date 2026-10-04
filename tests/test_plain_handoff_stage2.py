@@ -128,7 +128,7 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config.outer_fold_recovery_attempts == 2
     assert config.outer_fold_recovery_backoff == 60.0
     assert config.max_response_repairs == 15
-    assert config.thinking_after_response_repairs == 5
+    assert config.thinking_after_response_repairs == 1
     assert config.max_tokens == 100_000
     assert config.extraction_max_tokens == 75_000
     assert config.repetition_penalty is None
@@ -1900,7 +1900,7 @@ def test_serial_ontology_repair_normalizes_numeric_carry_forward_state(
     observed_prior_states = []
     extraction_calls = 0
 
-    def request_json(messages, validate, *, request_kind="interpretation"):
+    def request_json(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         nonlocal extraction_calls
         body = prompt_inputs(messages)
         if request_kind == "interpretation":
@@ -2437,13 +2437,14 @@ def test_extraction_uses_note_free_category_ontology_after_fifteen_failed_repair
         text_column="clinical_text",
         definitions=[definition],
         output_dir=tmp_path / "extraction",
-        request_json=lambda messages, validate, *, request_kind="interpretation": (
+        request_json=lambda messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None: (
             stage2_workflow._request_json(
                 messages=messages,
                 config=config,
                 completion=completion,
                 validate=validate,
                 request_kind=request_kind,
+                initial_reasoning_effort=initial_reasoning_effort,
             )
         ),
         workers=1,
@@ -2485,7 +2486,7 @@ def test_pending_category_ontology_resumes_without_repeating_extraction(
     output = tmp_path / "extraction"
     first_calls = []
 
-    def extraction_then_switch(messages, validate, *, request_kind="interpretation"):
+    def extraction_then_switch(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         first_calls.append(request_kind)
         if request_kind == "extraction":
             return validate(
@@ -2518,7 +2519,7 @@ def test_pending_category_ontology_resumes_without_repeating_extraction(
     assert pending_path.is_file()
     resumed_calls = []
 
-    def resume_interpretation(messages, validate, *, request_kind="interpretation"):
+    def resume_interpretation(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         resumed_calls.append(request_kind)
         assert request_kind == "interpretation"
         item = prompt_inputs(messages)["items"][0]
@@ -2604,7 +2605,7 @@ def test_extraction_defaults_unmappable_category_to_null_instead_of_crashing(
         "categories_or_unit": ["not documented", "documented"],
     }
 
-    def request_json(messages, validate, *, request_kind="interpretation"):
+    def request_json(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         body = prompt_inputs(messages)
         if body["job"] == "extract_stage2_patient_variables":
             return validate(
@@ -8016,7 +8017,7 @@ def test_repeated_training_extraction_failures_refine_ontology_and_reextract(
     }
     jobs = []
 
-    def request_json(messages, validate, *, request_kind="interpretation"):
+    def request_json(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         body = prompt_inputs(messages)
         if body.get("task") in {
             "analyze_cluster",
@@ -8181,7 +8182,7 @@ def test_failure_refinement_reextracts_only_changed_features_and_resumes(
     ]
     extraction_feature_sets = []
 
-    def request_json(messages, validate, *, request_kind="interpretation"):
+    def request_json(messages, validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         body = prompt_inputs(messages)
         if body.get("task") in {
             "analyze_cluster",
@@ -8284,7 +8285,7 @@ def test_failure_refinement_reextracts_only_changed_features_and_resumes(
     )
     assert final_summary["feature_failure_patterns"] == []
 
-    def unexpected_request(_messages, _validate, *, request_kind="interpretation"):
+    def unexpected_request(_messages, _validate, *, request_kind="interpretation", initial_reasoning_effort=None):
         raise AssertionError(f"completed delta checkpoint should resume ({request_kind})")
 
     resumed, resumed_definitions, resumed_rounds = (

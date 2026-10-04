@@ -299,10 +299,12 @@ def extract_feature_batch(*, row, definitions, parent_dir, request_json, request
                 memory = saved["action"]["memory"]
                 observe(raw)
 
-            def agent_request(messages, validate, *, request_kind="extraction"):
+            def agent_request(messages, validate, *, request_kind="extraction", initial_reasoning_effort=None):
                 nonlocal cells, memory, logical_requests, review_flags
                 if request_kind != "extraction":
-                    return request_json(messages, validate, request_kind=request_kind)
+                    return request_json(messages, validate, request_kind=request_kind,
+                        **({"initial_reasoning_effort": initial_reasoning_effort}
+                           if initial_reasoning_effort is not None else {}))
 
                 def validate_action(value):
                     if not isinstance(value, Mapping):
