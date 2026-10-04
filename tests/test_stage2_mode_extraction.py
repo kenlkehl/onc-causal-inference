@@ -91,6 +91,29 @@ def test_relaxed_evidence_matching_preserves_structural_value_checks(change):
             definitions=[definition()])
 
 
+@pytest.mark.parametrize("date_quote", [2024, 2024.0, True, [], {}])
+def test_nonstring_date_quote_retains_valid_observations_for_repair(date_quote):
+    observations = [
+        {"feature": "state 0", "value": "red", "quote": "State red",
+         "governing_date_quote": "2024"},
+        {"feature": "state 0", "value": "blue", "quote": "State blue",
+         "governing_date_quote": date_quote},
+    ]
+    with pytest.raises(analysis._PageObservationValidationError) as caught:
+        analysis._validate_page_observations(
+            {"observations": observations},
+            page={"row_id": 0, "text": "2024 State red. State blue.",
+                  "page": {"page_index": 1, "char_start": 0}},
+            definitions=[definition()],
+        )
+    issue, = caught.value.issues
+    assert issue["observation_index"] == 2 and issue["feature_name"] == "state_0"
+    assert issue["raw_observation"]["governing_date_quote"] == date_quote
+    assert "quote string" in issue["reason"]
+    retained, = caught.value.response["rows"][0]["observations"]
+    assert retained["value"] == "red" and retained["recorded_at"] == "2024"
+
+
 def test_changed_mode_contract_rejects_old_completion_checkpoint(tmp_path, monkeypatch):
     install(monkeypatch)
     calls = []

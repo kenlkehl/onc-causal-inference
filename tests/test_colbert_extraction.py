@@ -261,6 +261,58 @@ def test_stage2_retrieval_checkpoint_reuse_and_patient_request_parallelism(
         analysis.extract_rows(**{**kwargs, "colbert": replace(settings(tmp_path), top_k=1)})
 
 
+@pytest.mark.parametrize("context_strategy", ["full_record", "colbert"])
+def test_numeric_date_quote_repairs_and_extraction_resumes(
+    tmp_path, backend, monkeypatch, context_strategy
+):
+    from oci.inference import plain_handoff_stage2 as stage2
+    from oci.inference import plain_handoff_stage2_analysis as analysis
+    from tests.stage2_prompt_spy import install
+
+    install(monkeypatch)
+    definition = {
+        "name": "state", "description": "red state",
+        "value_type": "categorical", "categories_or_unit": ["red", "blue"],
+        "measurement_definition": "Use modal state",
+        "missing_value_rule": "Return null",
+        "conflict_resolution": {"strategy": "mode"},
+    }
+    config = stage2.PlainHandoffStage2Config(
+        endpoint="http://unused/v1", model="test", max_response_repairs=1
+    )
+    calls = []
+
+    def completion(messages, cfg):
+        calls.append(messages)
+        return json.dumps({"observations": [
+            {"feature": "state", "value": "red", "quote": "red state",
+             "governing_date_quote": 2024 if len(calls) == 1 else "2024"},
+            {"feature": "state", "value": "blue", "quote": "blue state",
+             "governing_date_quote": "2023"},
+        ]})
+
+    def request(messages, validate, *, request_kind):
+        return stage2._request_json(
+            messages=messages, config=config, completion=completion,
+            validate=validate, request_kind=request_kind,
+        )
+
+    kwargs = dict(
+        dataset=pd.DataFrame({"text": ["2024 red state. 2023 blue state."]}),
+        row_ids=[0], text_column="text", definitions=[definition],
+        output_dir=tmp_path / "output", request_json=request, workers=1,
+        max_prompt_chars=100_000, context_strategy=context_strategy,
+        colbert=settings(tmp_path),
+    )
+    frame = analysis.extract_rows(**kwargs)
+    assert frame["state"].tolist() == ["red"]
+    assert len(calls) == 2 and "quote string" in calls[1][-1]["content"]
+    pd.testing.assert_frame_equal(analysis.extract_rows(**kwargs), frame)
+    assert len(calls) == 2
+    issues = list((tmp_path / "output").rglob("invalid_page_observation_repair.json"))
+    assert issues == []
+
+
 def test_standalone_prompt_retrieval_and_overflow_fail_closed(tmp_path, backend):
     from oci.config import ExplicitFeatureSpec, ExplicitFeatureExtractionConfig
     from oci.extraction.explicit_features import build_extraction_prompt, VLLMFeatureExtractor

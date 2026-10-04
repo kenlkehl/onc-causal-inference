@@ -2244,9 +2244,11 @@ def _canonical_observation_time(value: Any) -> str | None:
     return parsed.isoformat().replace("+00:00", "Z")
 
 
-def _canonical_time_evidence(value: str) -> str:
+def _canonical_time_evidence(value: Any) -> str:
     """Normalize the model-supplied date text locally."""
 
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("recorded_at_evidence must be a nonempty date or datetime quote string")
     text = value.strip()
     if re.fullmatch(r"\d{4}", text):
         return text
