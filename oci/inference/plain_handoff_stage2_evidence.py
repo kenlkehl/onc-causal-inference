@@ -7,11 +7,13 @@ and full/inner training contexts.  This module turns that handoff into compact,
 auditable evidence cards before the first Stage 2 model request.
 
 The compiler reuses the allowlisted scientific adapters from
-``all_evidence_fusion``.  It then performs three deterministic reductions:
+``all_evidence_fusion``.  It then performs deterministic reductions:
 
 * exact text/content deduplication within (never across) outer folds;
 * provenance and stability aggregation across full/inner training contexts;
-* conservative, stratified semantic clustering with an oversampled card cap.
+* conservative, stratified semantic clustering with an oversampled card cap;
+* source-relative strength ranking and overlap control within each card;
+* supporting sentence lookup in the supplied fold-local clinical evidence.
 
 Full raw evidence remains in the Stage 1 handoff.  Separate member and lineage
 manifests retain the path from every prompt card back to its raw occurrences.
@@ -51,8 +53,14 @@ from .stage1_architectures import (
     TFIDF_SEMANTIC_RETRIEVAL,
 )
 from .neural_query_evidence_contract import validate_query_retrieval_policy
+from .stage2_evidence_selection import (
+    SELECTION_POLICY,
+    SupportingSentenceIndex,
+    annotate_strength,
+    select_exemplars as _select_exemplars,
+)
 
-EVIDENCE_COMPILER_VERSION = "semantic_cluster_cards_v3"
+EVIDENCE_COMPILER_VERSION = "semantic_cluster_cards_v5"
 SUPPORTED_STAGE2_ARCHITECTURES = STAGE1_ARCHITECTURES
 ALLOWED_AXES = {
     "treatment",
@@ -96,6 +104,13 @@ _NUMERIC_SCORE_KEYS = {
     "similarity",
     "standardized_score",
     "tau_hat_r_stage",
+    "tfidf_contrast",
+    "rank",
+    "fit_rank",
+    "fit_signed_score",
+    "abs_pseudo_target_score",
+    "pseudo_target_score",
+    "confounder_overlap_score",
 }
 
 
@@ -460,7 +475,7 @@ def _occurrence_reference_summaries(
         reference = dict(occurrence.get("reference") or {})
         details = occurrence.get("details")
         if isinstance(details, Mapping):
-            for key in ("query_id", "bank"):
+            for key in ("query_id", "bank", "term_normalization"):
                 value = details.get(key)
                 if value not in (None, ""):
                     reference[key] = value
@@ -1107,8 +1122,16 @@ def _extract_neural_query_occurrences(
                 details={
                     "term": compact.get("term"), "query_id": query_id, "bank": bank,
                     "retrieval_policy": dict(retrieval_policy),
+                    **({"term_normalization": dict(query["term_normalization"])}
+                       if isinstance(query.get("term_normalization"), Mapping) else {}),
                 },
-                scores={**_finite_scores(compact), **_finite_scores(query)},
+                scores={
+                    # Preserve native term strength and list rank. A query's
+                    # fit statistic stays available for audit only.
+                    **_finite_scores({"fit_standardized_score": query.get("fit_standardized_score")}),
+                    **_finite_scores(compact),
+                    "rank": float(compact.get("rank") or term_index + 1),
+                },
             )
             if occurrence is not None:
                 ngram_compactor.add(occurrence)
@@ -1402,58 +1425,6 @@ def _cluster_members(
     return output
 
 
-def _member_support(member: Mapping[str, Any]) -> tuple[int, int, int, str]:
-    references = list(member["raw_references"])
-    contexts = {(reference.get("scope"), reference.get("inner_fold")) for reference in references}
-    return (
-        len(contexts),
-        len(member["source_families"]),
-        int(member["raw_occurrence_count"]),
-        str(member["member_id"]),
-    )
-
-
-def _select_exemplars(
-    members: Sequence[Mapping[str, Any]],
-    matrix: np.ndarray | None,
-    center: np.ndarray | None,
-    *,
-    limit: int,
-) -> list[Mapping[str, Any]]:
-    if len(members) <= limit:
-        return sorted(members, key=_member_support, reverse=True)
-    selected: list[int] = []
-    if matrix is not None and center is not None:
-        distances = np.linalg.norm(matrix - center.reshape(1, -1), axis=1)
-        selected.append(int(np.argmin(distances)))
-    else:
-        selected.append(max(range(len(members)), key=lambda index: _member_support(members[index])))
-    while len(selected) < limit:
-        best_index = None
-        best_key: tuple[float, int, int, int, str] | None = None
-        selected_families = {
-            family for index in selected for family in members[index]["source_families"]
-        }
-        for index, member in enumerate(members):
-            if index in selected:
-                continue
-            diversity = 0.0
-            if matrix is not None:
-                diversity = min(
-                    float(np.linalg.norm(matrix[index] - matrix[chosen])) for chosen in selected
-                )
-            novelty = len(set(member["source_families"]) - selected_families)
-            support = _member_support(member)
-            key = (diversity, novelty, support[0], support[2], support[3])
-            if best_key is None or key > best_key:
-                best_key = key
-                best_index = index
-        if best_index is None:
-            break
-        selected.append(best_index)
-    return [members[index] for index in selected]
-
-
 def _score_summary(members: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     values: dict[str, dict[float, int]] = defaultdict(lambda: defaultdict(int))
     for member in members:
@@ -1511,6 +1482,7 @@ def _build_card(
     semantic_mode: str,
     max_exemplars: int,
     max_exemplar_chars: int,
+    sentence_index: SupportingSentenceIndex | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     member_ids = sorted(str(member["member_id"]) for member in members)
     digest = _sha256_text(_canonical_json(member_ids))[:20]
@@ -1540,9 +1512,19 @@ def _build_card(
     )
     polarities = sorted({polarity for member in members for polarity in member["polarities"]})
     representative_evidence = []
+    selected_audit = []
+    shown_sentences: set[str] = set()
     for member in exemplars:
+        supporting_sentences = sentence_index.find(member) if sentence_index is not None else []
+        sentences = [sentence for sentence in supporting_sentences if sentence["text"] not in shown_sentences]
+        shown_sentences.update(str(sentence["text"]) for sentence in sentences)
+        text = str(member["text"])
+        if sentences:
+            text += "\nExamples from clinical records:\n" + "\n\n".join(
+                str(sentence["text"]) for sentence in sentences
+            )
         rendered = _truncate_exemplar(
-            str(member["text"]),
+            text,
             max_chars=max(256, int(max_exemplar_chars)),
         )
         occurrence = max(
@@ -1565,6 +1547,12 @@ def _build_card(
                 "details": dict(occurrence.get("details") or {}),
             }
         )
+        selected_audit.append({
+            "member_id": member["member_id"],
+            "selection_strength": dict(member.get("selection_strength") or {}),
+            "supporting_sentences": supporting_sentences,
+            "displayed_supporting_sentence_count": len(sentences),
+        })
     card = {
         "schema_version": EVIDENCE_COMPILER_VERSION,
         "card_id": card_id,
@@ -1590,6 +1578,8 @@ def _build_card(
         "card_id": card_id,
         "member_ids": member_ids,
         "raw_occurrence_count": raw_occurrence_count,
+        "selection_policy": SELECTION_POLICY,
+        "selected_exemplars": selected_audit,
     }
     return card, lineage
 
@@ -1731,6 +1721,8 @@ def compile_stage2_handoff_evidence(
             occurrences,
             embedding_cache=embedding_cache,
         )
+        annotate_strength(members)
+        sentence_index = SupportingSentenceIndex(members)
         grouped: dict[
             tuple[str, tuple[str, ...], tuple[str, ...], tuple[str, ...], str],
             list[dict[str, Any]],
@@ -1783,6 +1775,7 @@ def compile_stage2_handoff_evidence(
                         semantic_mode=mode,
                         max_exemplars=max_exemplars_per_card,
                         max_exemplar_chars=max_exemplar_chars,
+                        sentence_index=sentence_index,
                     )
                 )
             group_audit.append(
@@ -1803,7 +1796,7 @@ def compile_stage2_handoff_evidence(
         lineage = [lineage for _card, lineage in compiled]
         fitted_cards: list[dict[str, Any]] = []
         fold_packets: list[dict[str, Any]] = []
-        for card in cards:
+        for card, card_lineage in zip(cards, lineage):
             packet = _fit_packet_to_budget(
                 {
                     "packet_id": str(card["card_id"]),
@@ -1819,6 +1812,10 @@ def compile_stage2_handoff_evidence(
                 max_packet_chars=int(max_packet_chars),
             )
             fitted_cards.append(dict(packet["content"]))
+            card_lineage["prompt_exemplar_text_sha256"] = [
+                _sha256_text(str(item["text"]))
+                for item in packet["content"]["representative_evidence"]
+            ]
             fold_packets.append(packet)
             packets.append(packet)
         public_members = tuple(
@@ -1832,6 +1829,7 @@ def compile_stage2_handoff_evidence(
                 "source_architectures": list(member["source_architectures"]),
                 "raw_references": list(member["raw_references"]),
                 "raw_occurrence_count": int(member["raw_occurrence_count"]),
+                "selection_strength": dict(member["selection_strength"]),
             }
             for member in members
         )
@@ -1883,6 +1881,7 @@ def compile_stage2_handoff_evidence(
         }
     summary = {
         "schema_version": EVIDENCE_COMPILER_VERSION,
+        "selection_policy": SELECTION_POLICY,
         "required_architectures": list(required),
         "included_architectures": None if included is None else list(included),
         "embedding_cache": str(embedding_cache.directory) if embedding_cache else None,

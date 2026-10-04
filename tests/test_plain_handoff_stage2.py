@@ -153,7 +153,7 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config.vllm_rapid_switch_seconds == 900.0
     assert config.ontology_refinement_min_failure_patients == 3
     assert config.max_ontology_refinement_rounds == 2
-    assert config.evidence_compiler == "semantic_cluster_cards_v3"
+    assert config.evidence_compiler == "semantic_cluster_cards_v5"
     assert config.evidence_max_cards_per_fold == 400
     assert config.extraction_llm is None
     assert config.input_temporal_scope == "pre_index_treatment"

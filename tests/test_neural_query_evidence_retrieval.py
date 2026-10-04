@@ -10,7 +10,7 @@ from oci.inference.neural_query_agentic_forest import (
     NeuralQueryEvidenceCapacityOverflowError,
     build_query_evidence,
 )
-from oci.inference.neural_query_evidence_contract import query_retrieval_policy
+from oci.inference.neural_query_evidence_contract import query_retrieval_policy, query_term_normalization
 from oci.inference.plain_handoff_stage2_evidence import (
     compile_stage2_handoff_evidence,
     extract_stage1_architecture_occurrences,
@@ -52,6 +52,9 @@ def test_selects_matching_chunks_and_recomputes_terms_from_both_selected_arms():
     for excluded in ["secondrank_signal", "unrelated_history", "HELDOUT_SENTINEL"]:
         assert excluded not in serialized
     assert evidence["retrieval_policy"] == query_retrieval_policy(1)
+    assert evidence["term_normalization"] == query_term_normalization(config)
+    assert evidence["term_normalization"]["stop_words"] is None
+    assert query_term_normalization() == query_term_normalization(NeuralQueryAgenticForestConfig())
 
 
 def test_explicit_top_k_retains_second_match_without_importing_entire_history():
@@ -108,6 +111,9 @@ def test_canonical_handoff_preserves_policy_and_cannot_bypass_legacy_rejection(t
     config, kwargs = fixture()
     evidence = build_query_evidence(config=config, **kwargs)[0]
     occurrences = extract_stage1_architecture_occurrences([raw_row(evidence)])[1]
+    for occurrence in occurrences:
+        if occurrence["evidence_kind"] == "lexical_term":
+            assert occurrence["details"]["term_normalization"] == evidence["term_normalization"]
     canonical = [
         {"source": "stage1_architecture", "outer_fold": 1,
          "evidence": {"architecture": "neural_query_moments", "occurrence": occurrence}}

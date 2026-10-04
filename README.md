@@ -429,6 +429,9 @@ For each outer fold, the full multi-model path performs the following sequence:
 1. **Compile and discover.** Stage 2 compiles raw Stage 1 output into semantic
    evidence cards, preserving exact members and source lineage. The default
    budget is 400 cards per outer fold; this limits cards, not candidate variables.
+   Python chooses strong, nonredundant representatives within each card and adds
+   matching sentences from saved training evidence where available. Source
+   scores and overlap decisions remain in the audit files, outside LLM prompts.
    Discovery reads every card and names atomic clinical measurements supported by
    the text. Python tracks identifiers and source references.
 2. **Consolidate and define.** Mixed semantic and alphabetical neighborhoods
@@ -949,7 +952,7 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
     "repetition_penalty": null,
     "interpretation_reasoning_effort": "auto",
     "extraction_reasoning_effort": "none",
-    "evidence_compiler": "semantic_cluster_cards_v3",
+    "evidence_compiler": "semantic_cluster_cards_v5",
     "evidence_max_cards_per_fold": 400,
     "evidence_max_exemplars_per_card": 4,
     "evidence_max_exemplar_chars": 2400,
@@ -1353,6 +1356,47 @@ does not load another embedding model beside the serving process. The raw Stage
 reduction audit are written under `stage2/evidence_compilation/`. The compiled
 packet plan is cached and input-fingerprinted for fast, safe restarts.
 
+Within each semantic card, Python ranks evidence using its native item score
+(for example, absolute coefficient, attention, or TF-IDF contrast). Scores are
+converted to percentiles within the originating query/model-view list, then
+averaged across the training contexts where the item appeared, taking only the
+best percentile per context. Repeated queries cannot inflate recurrence. Item
+rank is a fallback when a native score is unavailable; query-level fit scores
+and patient-level losses are not item importance. Recurrence and proximity to
+the cluster center break ties. Unscored items use those tie-breakers directly.
+
+Representatives are selected in that order, skipping overlapping text within
+the card. Overlap checks preserve differing numbers, negations, and distinct
+clinical measures such as creatinine versus creatinine clearance. They do not
+merge clinical concepts or fill unused slots with duplicates. Existing
+architecture/axis/polarity strata and the card allocation remain in place.
+
+For selected phrases and topic terms, up to two matching clinical sentences are
+attached from the supplied evidence in the same outer fold and training
+context. Neural-query phrases use their own queries' chunks; embedding terms
+use their own contrasts' chunks. Other terms can use the supplied clinical
+chunks from that training context. If no match exists, the original phrase is
+retained. Long fragments are clipped around the match, with source offsets and
+references in the lineage file. No patient files are searched during this step.
+Neural word n-grams also match using their Stage 1 tokenization and stop-word
+rules, so `brain metastases remained` can locate “brain metastases have
+remained.” The returned sentences preserve the original wording, including
+negation. New neural-query evidence records these normalization settings;
+older evidence uses the historical English-stop-word defaults, explicitly
+marked in the match audit. Shared sentences are displayed once per card, while
+each selected phrase retains its matching sentences in the audit.
+The discovery model receives readable excerpts only; numeric ranking and
+redundancy metadata stay in member/lineage audits. All original members remain
+in lineage, including those not chosen for display. This is a selection policy,
+not a claim that source strength identifies a causal variable.
+
+Version 5 invalidates earlier compiled-card caches, including version 4 cards
+that missed sentences containing removed stop words. Configurations explicitly
+pinning `semantic_cluster_cards_v3` or `semantic_cluster_cards_v4` must be updated to
+`semantic_cluster_cards_v5`; omitting the compiler setting uses the current
+version. Previously lossy canonical handoffs cannot recover discarded source
+scores; rebuild them from raw Stage 1 evidence to benefit from contrast ranking.
+
 Stage 2 sends every compiled semantic evidence card to exhaustive feature
 discovery. The primary model must list every pretreatment patient-level clinical
 feature mentioned or implied by the supplied cards, and one evidence item may
@@ -1360,7 +1404,7 @@ support many candidates. There is no ColBERT candidate routing, evidence-communi
 candidate retrieval, candidate-count cap, or causal-role filter. All discovered
 candidates enter merge-only consolidation; oracle metadata never participates.
 
-`semantic_cluster_cards_v3` is the only supported Stage 2 evidence compiler.
+`semantic_cluster_cards_v5` is the only supported Stage 2 evidence compiler.
 Before any interpretation request, it compares the architectures present in
 each outer fold with the run's frozen Stage 1 selection: either the explicit
 selector or, for legacy runs, the resolved enable flags. A missing selected

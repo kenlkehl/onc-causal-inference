@@ -23,7 +23,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 
 from ..config import ExplicitFeatureSpec
 from .neural_cohort_witness import pad_chunk_embeddings
-from .neural_query_evidence_contract import query_retrieval_policy
+from .neural_query_evidence_contract import query_retrieval_policy, query_term_normalization
 
 
 QUERY_FEATURE_PROMPT_VERSION = "neural_query_feature_v1"
@@ -801,6 +801,7 @@ def build_query_evidence(
                 "member_subfolds": list(record.get("member_subfolds") or []),
                 "fit_standardized_score": record.get("fit_standardized_score"),
                 "top_chunks": foreground_items,
+                "term_normalization": query_term_normalization(config),
                 "top_contrastive_ngrams": _contrastive_ngrams(
                     [item["text"] for item in foreground_items],
                     [item["text"] for item in background_items],
