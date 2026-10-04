@@ -128,7 +128,7 @@ def test_stage2_config_allows_endpoint_without_model():
     assert config.outer_fold_recovery_attempts == 2
     assert config.outer_fold_recovery_backoff == 60.0
     assert config.max_response_repairs == 15
-    assert config.thinking_after_response_repairs == 1
+    assert config.thinking_after_response_repairs == 5
     assert config.max_tokens == 100_000
     assert config.extraction_max_tokens == 75_000
     assert config.repetition_penalty is None

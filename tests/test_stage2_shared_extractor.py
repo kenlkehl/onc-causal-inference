@@ -69,8 +69,16 @@ def test_shared_model_launches_once_and_routes_both_roles_across_gpu_union(tmp_p
 
 
 @pytest.mark.parametrize("kind", ["extraction", "interpretation"])
-@pytest.mark.parametrize("failed_responses", [1, 2])
-def test_wire_repairs_stay_off_once_then_enable_thinking_only_if_needed(monkeypatch, kind, failed_responses):
+@pytest.mark.parametrize("off_repairs,failed_responses,expected_thinking", [
+    (1, 1, [False, False]),
+    (1, 2, [False, False, True]),
+    (5, 1, [False, False]),
+    (5, 5, [False, False, False, False, False, False]),
+    (5, 6, [False, False, False, False, False, False, True]),
+])
+def test_wire_repairs_enable_thinking_after_configured_off_repairs(
+    monkeypatch, kind, off_repairs, failed_responses, expected_thinking,
+):
     import openai
     requests = []
 
@@ -94,16 +102,17 @@ def test_wire_repairs_stay_off_once_then_enable_thinking_only_if_needed(monkeypa
         return value
 
     monkeypatch.setattr(openai, "OpenAI", Client)
-    cfg = workflow.PlainHandoffStage2Config(endpoint="http://test/v1", model=MODEL)
+    cfg = workflow.PlainHandoffStage2Config(
+        endpoint="http://test/v1", model=MODEL,
+        thinking_after_response_repairs=off_repairs,
+    )
     assert workflow._request_json(
         messages=[{"role": "user", "content": "ECOG 1"}], config=cfg,
         completion=workflow._openai_completion, validate=validate, request_kind=kind,
         initial_reasoning_effort="none" if kind == "interpretation" else None,
         prompt_token_counter=lambda messages: 100, context_window_tokens=262144,
     ) == {"ecog": 1}
-    assert [r["extra_body"]["chat_template_kwargs"]["enable_thinking"] for r in requests] == (
-        [False, False] if failed_responses == 1 else [False, False, True]
-    )
+    assert [r["extra_body"]["chat_template_kwargs"]["enable_thinking"] for r in requests] == expected_thinking
     for request in requests[1:]:
         assert request["messages"][-2]["role"] == "assistant"
         assert "ValueError: ecog requires one scalar value; received list" in request["messages"][-1]["content"]

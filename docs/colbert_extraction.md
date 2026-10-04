@@ -74,10 +74,10 @@ Extraction and interpretation share the same request router; no model reload
 or four/four fallback occurs. Different explicitly configured model IDs retain
 the existing alternating-model workflow.
 
-Extraction starts with `enable_thinking=false`. The first validation repair
-includes the previous response and the concrete error, with thinking still off.
-If that repair fails, later repairs enable thinking. The default
-`thinking_after_response_repairs` is 1. Category-mapping repairs also begin
+Extraction starts with `enable_thinking=false`. The first five validation repairs
+include the previous response and the concrete error, with thinking still off.
+If those repairs fail, the sixth repair and later repairs enable thinking. The
+default `thinking_after_response_repairs` is 5. Category-mapping repairs also begin
 without thinking; ordinary aggregate interpretation keeps its separate policy.
 
 To resume extraction with a new interpretation model while reusing completed

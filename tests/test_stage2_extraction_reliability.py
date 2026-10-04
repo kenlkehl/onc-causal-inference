@@ -93,9 +93,9 @@ def test_all_extraction_repairs_enable_thinking_with_larger_budget_after_thresho
             messages=[{"role": "user", "content": "PRIVATE NOTE"}],
             config=config(extraction_max_tokens=4096, extraction_reasoning_max_tokens=32768),
             completion=completion, validate=validate, request_kind="extraction")
-    # Initial response and the first error-guided repair leave thinking off.
-    assert [p["reasoning_effort"] for p in policies] == ["none"] * 2 + ["high"] * 14
-    assert [p["max_tokens"] for p in policies] == [4096] * 2 + [32768] * 14
+    # Initial response and the first five error-guided repairs leave thinking off.
+    assert [p["reasoning_effort"] for p in policies] == ["none"] * 6 + ["high"] * 10
+    assert [p["max_tokens"] for p in policies] == [4096] * 6 + [32768] * 10
     for prompt in prompts[1:]:
         assert prompt[0]["content"] == "PRIVATE NOTE"
         assert prompt[-2] == {"role": "assistant", "content": "{}"}
