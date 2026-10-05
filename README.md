@@ -1,214 +1,10 @@
 # Oncology Causal Inference (OCI)
 
-The root `run_one_conf*` and `run_five_conf*` single-run launchers default to [Plumb decision extraction](docs/stage2_decision_extraction.md) over [cached ColBERT excerpts](docs/colbert_extraction.md): one feature per prompt, at most 3000 tokens, and progressive numeric narrowing with ±5% verification. Set `STAGE2_DECISION_EXTRACTION=0` to use the original LLM extractor. Explicit saved-run launches preserve their saved backend; JSON-based entry points keep Plumb opt-in.
-
-
 ## Overview
+
 OCI is a pipeline for causal inference for individual treatment effect estimation (ITE estimation), also known as conditional average treatment effect estimation (CATE), using unstructured electronic health records text, focusing on oncology.
 
 In other words: If an oncologist is in clinic with a patient and choosing which of two treatments to recommend, OCI is a tool for building a model to predict which treatment might yield the better outcome for that specific, individual patient.
-
-## Quickstart: eight H100s with managed Gemma 4 and Plumb servers
-
-On a **Linux VM with 8 × NVIDIA H100 GPUs (80 GB each)**, run the bundled
-one-confounder/one-effect-modifier NSCLC example end to end with
-[`run_one_conf_one_mod_h100x8.sh`](run_one_conf_one_mod_h100x8.sh). It manages its
-own local vLLM servers and uses these checkpoints:
-
-| Stage 2 role | Model |
-| --- | --- |
-| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 26B A4B IT](https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic) |
-| Patient-level extraction | [Plumb 4B](https://huggingface.co/crh225/plumb-4b) |
-
-Start from a GPU VM image with a working NVIDIA driver compatible with the
-locked PyTorch/vLLM CUDA build. The current lockfile includes CUDA 13.0; use an
-R580 or newer NVIDIA driver for this native installation. `nvidia-smi` should
-show all eight H100s; `uv` installs Python packages, while the VM image supplies
-the GPU driver and system
-libraries. On Ubuntu/Debian, install the basic tools and FFmpeg if needed:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y git curl ffmpeg
-nvidia-smi
-
-git clone https://github.com/kenlkehl/onc-causal-inference.git
-cd onc-causal-inference
-
-# Install uv if it is not already on PATH.
-if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-fi
-
-# uv supplies Python 3.12 if needed and installs the locked vLLM extra.
-uv sync --frozen --python 3.12 --extra local-llm --extra decision-extraction
-.venv/bin/python scripts/configure_local_cuda.py
-
-# Confirm that this environment sees eight H100s before starting the run.
-.venv/bin/python - <<'PY'
-import torch
-names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
-assert len(names) == 8 and all("H100" in name for name in names), names
-print(names)
-PY
-
-./run_one_conf_one_mod_h100x8.sh
-```
-
-Allow disk space for the Python/CUDA environment, both LLM checkpoints, the
-Stage 1 embedding model, and run artifacts. Models download into the Hugging
-Face cache on first use; set `HF_HOME` to a persistent volume before launching
-if desired. If a required model asks for authentication, complete its Hugging
-Face access requirements and run `.venv/bin/hf auth login` first. See the
-[uv installer](https://docs.astral.sh/uv/getting-started/installation/) and
-[vLLM GPU installation guide](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)
-for environment details.
-
-The launcher selects eight visible GPUs and retains the original wrapper's
-scientific preset (`llm_roles`). Stage 1 finishes before Stage 2 starts its LLM
-servers. One Gemma 4 26B server handles interpretation on GPU 0; seven Plumb
-servers handle extraction on GPUs 1–7. Each server uses one GPU. The primary
-role allows 32 concurrent requests; extraction allows 128 across the seven
-replicas, whose schedulers each allow up to eight sequences within the token budget.
-Gemma uses a 128,000-token server window and 90% GPU-memory utilization. Plumb
-uses a 3072-token window, bf16 eager serving, and 28% GPU-memory utilization.
-OCI handles server readiness and shutdown on completion or interruption. Keep
-local HTTP port 8010 and ports 8110–8116 available; no separately launched
-inference servers are needed.
-
-Results default to
-`artifacts/research_all_evidence/one_conf_one_mod_nsclc_h100x8_full/`, including
-`progress.json`, `logs/workflow.log`, and `stage2/vllm_servers/`. To choose a
-persistent output location, pass it as the sole argument and repeat the same
-command to resume compatible checkpoints:
-
-```bash
-./run_one_conf_one_mod_h100x8.sh /persistent/results/one_conf_one_mod_h100x8
-```
-
-The launcher synchronizes `--extra local-llm --extra decision-extraction` on ordinary launches. Set
-`OCI_PYTHON="$PWD/.venv/bin/python"` to reuse the installed environment without
-syncing. Model, worker, and `STAGE2_VLLM_*`/`STAGE2_EXTRACTION_VLLM_*` settings are
-overridable through the environment; keep GPU layouts consistent if changing
-them. Explicit saved Stage 2 launches (`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) inherit
-their saved model and server settings. See the managed-pool documentation below
-for GPU mapping, switching, logs, and cleanup, and the multi-model quickstart
-below for the full scientific workflow.
-
-## Quickstart: eight RTX PRO 6000 Blackwell GPUs with Gemma 4 and Plumb
-
-On a **Linux machine with 8 × NVIDIA RTX PRO 6000 Blackwell GPUs (96 GB each)**,
-use the root-level launchers below. Both manage their own local vLLM servers
-and use NVIDIA's **NVFP4** Gemma 4 for interpretation and Plumb for extraction:
-
-| Stage 2 role | Model |
-| --- | --- |
-| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 26B A4B NVFP4](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4) |
-| Patient-level extraction | [Plumb 4B](https://huggingface.co/crh225/plumb-4b) |
-
-NVIDIA's Gemma repository name omits `IT`, but its model card identifies
-the instruction-tuned checkpoint. Use **RTX PRO 6000 Blackwell** hardware for
-this preset, with the CUDA 13.0-compatible R580 or newer driver and Linux system
-libraries described above. From a fresh Ubuntu/Debian machine:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y git curl ffmpeg
-nvidia-smi
-
-git clone https://github.com/kenlkehl/onc-causal-inference.git
-cd onc-causal-inference
-
-if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
-fi
-uv sync --frozen --python 3.12 --extra local-llm --extra decision-extraction
-.venv/bin/python scripts/configure_local_cuda.py
-
-# Verify all eight visible GPUs are RTX PRO 6000 Blackwell devices.
-.venv/bin/python - <<'PY'
-import torch
-names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
-assert len(names) == 8 and all(
-    "RTX PRO 6000" in name and "Blackwell" in name for name in names
-), names
-print(names)
-PY
-
-./run_one_conf_one_mod_rtxpro6000x8.sh
-```
-
-If you already followed the H100 environment setup in this checkout, use the
-RTX launcher after verifying the RTX GPUs. To run the larger bundled cohort,
-use [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh)
-instead. Each launcher retains its cohort wrapper's scientific settings
-(`llm_roles`) and has a separate default output directory:
-
-| Launcher | Default output under `artifacts/research_all_evidence/` |
-| --- | --- |
-| [`run_one_conf_one_mod_rtxpro6000x8.sh`](run_one_conf_one_mod_rtxpro6000x8.sh) | `one_conf_one_mod_nsclc_rtxpro6000x8_full/` |
-| [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh) | `five_conf_five_mod_nsclc_rtxpro6000x8_full/` |
-
-For manual primary-model serving, activate the configured environment and use
-the exact checkpoint name (including `NVFP4`):
-
-```bash
-source .venv/bin/activate
-vllm serve nvidia/Gemma-4-26B-A4B-NVFP4
-```
-
-Plumb requires a separate server with the
-[next-token readout conversion arguments](docs/stage2_decision_extraction.md#why-vllm-classification-works-here).
-The managed launchers supply those automatically.
-
-FlashInfer builds Blackwell kernels at startup and needs CUDA 12.9 or newer.
-An older `nvcc` on the system PATH can cause `SM 12.x requires CUDA >= 12.9`
-followed by `No supported CUDA architectures found for major versions [12]`,
-even when PyTorch and the driver support the GPU. The `local-llm` extra installs
-the CUDA 13.0 compiler matching the locked runtime; `configure_local_cuda.py`
-exposes its compiler, headers, and runtime library in the venv. Run that setup
-step again after recreating the venv. On glibc 2.42+ (including Ubuntu 26.04),
-it also corrects CUDA 13.0's `rsqrt` exception declarations in the venv headers
-to match glibc. `nvcc --version` inside the activated
-environment should report 13.0. Explicit `CUDA_HOME` or `CUDA_PATH` settings
-take precedence; unset them to use the configured venv toolkit.
-
-Stage 1 completes before the managed vLLM servers start. Stage 2 keeps one
-Gemma 4 26B server on logical GPU 0 and seven Plumb servers on GPUs 1–7.
-Tensor parallelism defaults to **1** for both models. The primary role allows
-32 concurrent requests; extraction allows 128 across the seven replicas.
-Gemma uses a 262,144-token server window and 90% GPU-memory
-utilization; Plumb uses a 3072-token window and 28% GPU-memory utilization.
-vLLM reads Gemma's ModelOpt/NVFP4 metadata; OCI supplies text-only serving,
-the Gemma 4 reasoning parser, Plumb's readout conversion, readiness checks,
-and shutdown. Keep local HTTP port 8010 and ports 8110–8116 available. See
-[vLLM's ModelOpt support](https://docs.vllm.ai/en/v0.26.0/features/quantization/modelopt/)
-for checkpoint loading details.
-
-Choose a persistent output location by passing one argument. Repeat the same
-command to resume compatible checkpoints; run these examples separately:
-
-```bash
-./run_one_conf_one_mod_rtxpro6000x8.sh /persistent/results/one_conf_one_mod_rtxpro6000x8
-./run_five_conf_five_mod_rtxpro6000x8.sh /persistent/results/five_conf_five_mod_rtxpro6000x8
-```
-
-The H100 quickstart's cache, authentication, progress, and log instructions also
-apply here. Ordinary launches sync the `local-llm` and `decision-extraction` extras; set
-`OCI_PYTHON="$PWD/.venv/bin/python"` to skip synchronization. Model, worker, and
-managed-pool settings remain overridable through the environment. If changing
-the legacy LLM extractor's server window, also adjust
-`STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`; this setting does not control Plumb
-prompts. Explicit saved Stage 2 launches
-(`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) retain their saved models and serving settings.
-For a generative-extraction run saved with the earlier 128,000-token RTX preset, update
-`stage2.vllm.extra_args` and `stage2.extraction_llm.vllm.extra_args` in its
-`run_config.json` to use `--max-model-len 262144`, and set
-`stage2.extraction_context_window_tokens` to `262144` before resuming.
-The context window includes both input and allowed output: the primary role's
-100,000-token output allowance left only 28,000 input tokens under the old cap.
 
 OCI is a research codebase for finding clinically meaningful pretreatment
 characteristics in longitudinal notes and using them in fold-honest causal
@@ -1098,6 +894,213 @@ exclusive. A running process keeps its existing server configuration until
 restarted with the new config.
 
 ### Pipeline-managed vLLM server pools
+
+The root `run_one_conf*` and `run_five_conf*` single-run launchers default to [Plumb decision extraction](docs/stage2_decision_extraction.md) over [cached ColBERT excerpts](docs/colbert_extraction.md): one feature per prompt, at most 3000 tokens, and progressive numeric narrowing with ±5% verification. Set `STAGE2_DECISION_EXTRACTION=0` to use the original LLM extractor. Explicit saved-run launches preserve their saved backend; JSON-based entry points keep Plumb opt-in.
+
+#### Quickstart: eight H100s with managed Gemma 4 and Plumb servers
+
+On a **Linux VM with 8 × NVIDIA H100 GPUs (80 GB each)**, run the bundled
+one-confounder/one-effect-modifier NSCLC example end to end with
+[`run_one_conf_one_mod_h100x8.sh`](run_one_conf_one_mod_h100x8.sh). It manages its
+own local vLLM servers and uses these checkpoints:
+
+| Stage 2 role | Model |
+| --- | --- |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 26B A4B IT](https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic) |
+| Patient-level extraction | [Plumb 4B](https://huggingface.co/crh225/plumb-4b) |
+
+Start from a GPU VM image with a working NVIDIA driver compatible with the
+locked PyTorch/vLLM CUDA build. The current lockfile includes CUDA 13.0; use an
+R580 or newer NVIDIA driver for this native installation. `nvidia-smi` should
+show all eight H100s; `uv` installs Python packages, while the VM image supplies
+the GPU driver and system
+libraries. On Ubuntu/Debian, install the basic tools and FFmpeg if needed:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl ffmpeg
+nvidia-smi
+
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
+
+# Install uv if it is not already on PATH.
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# uv supplies Python 3.12 if needed and installs the locked vLLM extra.
+uv sync --frozen --python 3.12 --extra local-llm --extra decision-extraction
+.venv/bin/python scripts/configure_local_cuda.py
+
+# Confirm that this environment sees eight H100s before starting the run.
+.venv/bin/python - <<'PY'
+import torch
+names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+assert len(names) == 8 and all("H100" in name for name in names), names
+print(names)
+PY
+
+./run_one_conf_one_mod_h100x8.sh
+```
+
+Allow disk space for the Python/CUDA environment, both LLM checkpoints, the
+Stage 1 embedding model, and run artifacts. Models download into the Hugging
+Face cache on first use; set `HF_HOME` to a persistent volume before launching
+if desired. If a required model asks for authentication, complete its Hugging
+Face access requirements and run `.venv/bin/hf auth login` first. See the
+[uv installer](https://docs.astral.sh/uv/getting-started/installation/) and
+[vLLM GPU installation guide](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)
+for environment details.
+
+The launcher selects eight visible GPUs and retains the original wrapper's
+scientific preset (`llm_roles`). Stage 1 finishes before Stage 2 starts its LLM
+servers. One Gemma 4 26B server handles interpretation on GPU 0; seven Plumb
+servers handle extraction on GPUs 1–7. Each server uses one GPU. The primary
+role allows 32 concurrent requests; extraction allows 128 across the seven
+replicas, whose schedulers each allow up to eight sequences within the token budget.
+Gemma uses a 128,000-token server window and 90% GPU-memory utilization. Plumb
+uses a 3072-token window, bf16 eager serving, and 28% GPU-memory utilization.
+OCI handles server readiness and shutdown on completion or interruption. Keep
+local HTTP port 8010 and ports 8110–8116 available; no separately launched
+inference servers are needed.
+
+Results default to
+`artifacts/research_all_evidence/one_conf_one_mod_nsclc_h100x8_full/`, including
+`progress.json`, `logs/workflow.log`, and `stage2/vllm_servers/`. To choose a
+persistent output location, pass it as the sole argument and repeat the same
+command to resume compatible checkpoints:
+
+```bash
+./run_one_conf_one_mod_h100x8.sh /persistent/results/one_conf_one_mod_h100x8
+```
+
+The launcher synchronizes `--extra local-llm --extra decision-extraction` on ordinary launches. Set
+`OCI_PYTHON="$PWD/.venv/bin/python"` to reuse the installed environment without
+syncing. Model, worker, and `STAGE2_VLLM_*`/`STAGE2_EXTRACTION_VLLM_*` settings are
+overridable through the environment; keep GPU layouts consistent if changing
+them. Explicit saved Stage 2 launches (`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) inherit
+their saved model and server settings. See the managed-pool documentation below
+for GPU mapping, switching, logs, and cleanup, and the multi-model quickstart
+above for the full scientific workflow.
+
+#### Quickstart: eight RTX PRO 6000 Blackwell GPUs with Gemma 4 and Plumb
+
+On a **Linux machine with 8 × NVIDIA RTX PRO 6000 Blackwell GPUs (96 GB each)**,
+use the root-level launchers below. Both manage their own local vLLM servers
+and use NVIDIA's **NVFP4** Gemma 4 for interpretation and Plumb for extraction:
+
+| Stage 2 role | Model |
+| --- | --- |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 26B A4B NVFP4](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4) |
+| Patient-level extraction | [Plumb 4B](https://huggingface.co/crh225/plumb-4b) |
+
+NVIDIA's Gemma repository name omits `IT`, but its model card identifies
+the instruction-tuned checkpoint. Use **RTX PRO 6000 Blackwell** hardware for
+this preset, with the CUDA 13.0-compatible R580 or newer driver and Linux system
+libraries described above. From a fresh Ubuntu/Debian machine:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl ffmpeg
+nvidia-smi
+
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
+
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+uv sync --frozen --python 3.12 --extra local-llm --extra decision-extraction
+.venv/bin/python scripts/configure_local_cuda.py
+
+# Verify all eight visible GPUs are RTX PRO 6000 Blackwell devices.
+.venv/bin/python - <<'PY'
+import torch
+names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+assert len(names) == 8 and all(
+    "RTX PRO 6000" in name and "Blackwell" in name for name in names
+), names
+print(names)
+PY
+
+./run_one_conf_one_mod_rtxpro6000x8.sh
+```
+
+If you already followed the H100 environment setup in this checkout, use the
+RTX launcher after verifying the RTX GPUs. To run the larger bundled cohort,
+use [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh)
+instead. Each launcher retains its cohort wrapper's scientific settings
+(`llm_roles`) and has a separate default output directory:
+
+| Launcher | Default output under `artifacts/research_all_evidence/` |
+| --- | --- |
+| [`run_one_conf_one_mod_rtxpro6000x8.sh`](run_one_conf_one_mod_rtxpro6000x8.sh) | `one_conf_one_mod_nsclc_rtxpro6000x8_full/` |
+| [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh) | `five_conf_five_mod_nsclc_rtxpro6000x8_full/` |
+
+For manual primary-model serving, activate the configured environment and use
+the exact checkpoint name (including `NVFP4`):
+
+```bash
+source .venv/bin/activate
+vllm serve nvidia/Gemma-4-26B-A4B-NVFP4
+```
+
+Plumb requires a separate server with the
+[next-token readout conversion arguments](docs/stage2_decision_extraction.md#why-vllm-classification-works-here).
+The managed launchers supply those automatically.
+
+FlashInfer builds Blackwell kernels at startup and needs CUDA 12.9 or newer.
+An older `nvcc` on the system PATH can cause `SM 12.x requires CUDA >= 12.9`
+followed by `No supported CUDA architectures found for major versions [12]`,
+even when PyTorch and the driver support the GPU. The `local-llm` extra installs
+the CUDA 13.0 compiler matching the locked runtime; `configure_local_cuda.py`
+exposes its compiler, headers, and runtime library in the venv. Run that setup
+step again after recreating the venv. On glibc 2.42+ (including Ubuntu 26.04),
+it also corrects CUDA 13.0's `rsqrt` exception declarations in the venv headers
+to match glibc. `nvcc --version` inside the activated
+environment should report 13.0. Explicit `CUDA_HOME` or `CUDA_PATH` settings
+take precedence; unset them to use the configured venv toolkit.
+
+Stage 1 completes before the managed vLLM servers start. Stage 2 keeps one
+Gemma 4 26B server on logical GPU 0 and eight Plumb servers on GPUs 0–7.
+GPU 0 hosts both models. Tensor parallelism defaults to **1** for both models.
+The primary role allows 32 concurrent requests; extraction allows 128 across
+the eight Plumb replicas. Gemma uses a 262,144-token server window and 50%
+GPU-memory utilization; Plumb uses a 3072-token window and 28% GPU-memory
+utilization.
+vLLM reads Gemma's ModelOpt/NVFP4 metadata; OCI supplies text-only serving,
+the Gemma 4 reasoning parser, Plumb's readout conversion, readiness checks,
+and shutdown. Keep local HTTP port 8010 and ports 8110–8117 available. See
+[vLLM's ModelOpt support](https://docs.vllm.ai/en/v0.26.0/features/quantization/modelopt/)
+for checkpoint loading details.
+
+Choose a persistent output location by passing one argument. Repeat the same
+command to resume compatible checkpoints; run these examples separately:
+
+```bash
+./run_one_conf_one_mod_rtxpro6000x8.sh /persistent/results/one_conf_one_mod_rtxpro6000x8
+./run_five_conf_five_mod_rtxpro6000x8.sh /persistent/results/five_conf_five_mod_rtxpro6000x8
+```
+
+The H100 quickstart's cache, authentication, progress, and log instructions also
+apply here. Ordinary launches sync the `local-llm` and `decision-extraction` extras; set
+`OCI_PYTHON="$PWD/.venv/bin/python"` to skip synchronization. Model, worker, and
+managed-pool settings remain overridable through the environment. If changing
+the legacy LLM extractor's server window, also adjust
+`STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`; this setting does not control Plumb
+prompts. Explicit saved Stage 2 launches
+(`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) retain their saved models and serving settings.
+For a generative-extraction run saved with the earlier 128,000-token RTX preset, update
+`stage2.vllm.extra_args` and `stage2.extraction_llm.vllm.extra_args` in its
+`run_config.json` to use `--max-model-len 262144`, and set
+`stage2.extraction_context_window_tokens` to `262144` before resuming.
+The context window includes both input and allowed output: the primary role's
+100,000-token output allowance left only 28,000 input tokens under the old cap.
+
+#### Managed-pool configuration and lifecycle
 
 The pipeline can independently own the orchestrator and extractor vLLM
 lifecycles. For the orchestrator, omit `stage2.endpoint`, provide
