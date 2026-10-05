@@ -19,6 +19,8 @@ class ColBERTConfig:
     batch_size: int = 32
     score_batch_size: int = 32
     top_k: int = 20
+    # Runtime concurrency; excluded from encoding and measurement identities.
+    workers_per_device: int = 1
 
     def __post_init__(self):
         for name in ("model_name", "cache_dir"):
@@ -43,7 +45,10 @@ class ColBERTConfig:
             or ("auto" in self.devices and len(self.devices) != 1)
         ):
             raise ValueError("colbert.devices must be auto, cpu, or unique logical CUDA devices")
-        for name in ("chunk_size", "query_length", "batch_size", "score_batch_size", "top_k"):
+        for name in (
+            "workers_per_device", "chunk_size", "query_length", "batch_size",
+            "score_batch_size", "top_k",
+        ):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"colbert.{name} must be a positive integer")
         if self.query_length < 8:

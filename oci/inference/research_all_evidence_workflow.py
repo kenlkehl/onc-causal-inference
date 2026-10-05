@@ -3017,6 +3017,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stage2-colbert-model")
     parser.add_argument("--stage2-colbert-revision")
     parser.add_argument("--stage2-colbert-devices", help="auto, cpu, or comma-separated logical CUDA devices")
+    parser.add_argument(
+        "--stage2-colbert-workers-per-device", type=int,
+        help="independent retrieval encoder workers per device (default: 1)",
+    )
     parser.add_argument("--stage2-colbert-cache-dir")
     parser.add_argument("--stage2-colbert-chunk-size", type=int)
     parser.add_argument("--stage2-colbert-chunk-overlap", type=int)
@@ -3414,6 +3418,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     colbert_overrides = {
         "model_name": args.stage2_colbert_model, "revision": args.stage2_colbert_revision,
         "devices": args.stage2_colbert_devices, "cache_dir": args.stage2_colbert_cache_dir,
+        "workers_per_device": args.stage2_colbert_workers_per_device,
         "chunk_size": args.stage2_colbert_chunk_size, "chunk_overlap": args.stage2_colbert_chunk_overlap,
         "query_length": args.stage2_colbert_query_length, "batch_size": args.stage2_colbert_batch_size,
         "top_k": args.stage2_colbert_top_k,

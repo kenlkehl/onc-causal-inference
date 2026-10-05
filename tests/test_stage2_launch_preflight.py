@@ -242,6 +242,22 @@ def test_saved_command_rejects_cohort_and_output_mismatch(tmp_path):
         launcher.command(config.dataset, "", {**env, "STAGE2_CONSOLIDATION_MAX_ROUNDS": "1"})
 
 
+def test_saved_retrieval_worker_override_preserves_science_and_checkpoints(tmp_path):
+    config = saved_fixture(tmp_path)
+    before = tree(tmp_path)
+    args = launcher.command(config.dataset, str(config.output_dir), {
+        "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
+        "STAGE2_COLBERT_WORKERS_PER_DEVICE": "4",
+    })
+    raw, directory = workflow._raw_config_from_args(workflow.build_parser().parse_args(args))
+    expanded = workflow.compile_config(raw, config_dir=directory)
+    assert expanded.stage2.colbert.workers_per_device == 4
+    assert expanded.stage2.colbert.measurement_identity() == config.stage2.colbert.measurement_identity()
+    assert expanded.stage2.colbert.encoding_identity() == config.stage2.colbert.encoding_identity()
+    preflight.preflight_stage2(expanded)
+    assert tree(tmp_path) == before
+
+
 @pytest.mark.parametrize("wrapper", ["run_one_conf_one_mod.sh", "run_five_conf_five_mod.sh"])
 def test_wrappers_delegate_saved_config_without_injecting_defaults(tmp_path, wrapper):
     fake = tmp_path / "python"

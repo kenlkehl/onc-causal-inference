@@ -35,6 +35,7 @@ For the production workflow, put these fields in `stage2`:
     "model_name": "lightonai/GTE-ModernColBERT-v1",
     "revision": null,
     "devices": ["auto"],
+    "workers_per_device": 1,
     "cache_dir": ".oci_cache/colbert",
     "chunk_size": 64,
     "chunk_overlap": 0,
@@ -58,12 +59,43 @@ checkpoint's position capacity.
 
 `auto` uses all visible CUDA devices, or CPU when CUDA is unavailable. Explicit
 devices, such as `["cuda:0", "cuda:1"]`, use logical indices after
-`CUDA_VISIBLE_DEVICES`. A shared pool keeps one encoder worker per device for a
-retriever configuration across concurrent folds and patient tasks. Embedding
-batches and MaxSim scoring execute on those workers independently of the LLM
-servers. Reserve sufficient GPU memory for the encoder alongside managed vLLM
-servers, select dedicated GPUs, or set `["cpu"]`. In separate OCI processes,
+`CUDA_VISIBLE_DEVICES`. A shared pool keeps `workers_per_device` encoder workers
+per device (default 1) for a retriever configuration across concurrent folds and
+patient tasks. Each worker has its own encoder, serial task queue, and CUDA stream,
+so multiple workers on a GPU can overlap work. Embedding batches and MaxSim scoring
+execute on those workers independently of the LLM servers. Each worker also has
+its own query cache and a patient-vector cache bounded to 16 patients and 128 MiB
+of combined host/GPU data. The content-addressed disk cache is shared; concurrent
+workers still encode a new patient index only once. Increasing the worker count
+reuses existing indexes and extraction checkpoints. CPU devices support the same
+worker-count setting, without CUDA streams.
+
+Additional workers use more model/workspace memory and compete with the answering
+model for GPU compute. Benchmark throughput when increasing the count; extra
+workers do not guarantee a proportional speedup. Reserve sufficient GPU memory
+for the encoders alongside managed vLLM servers, select dedicated GPUs, or set
+`["cpu"]`. In separate OCI processes,
 assign disjoint device lists to avoid loading duplicate replicas on a GPU.
+
+On this RTX PRO 6000 run, a 2026-10-05 probe replayed 40 saved patient/feature
+retrievals on GPU 7 while the pipeline continued. Scores, rankings, and rendered
+excerpts matched the saved audits exactly with 1, 2, 4, and 8 workers. The first
+worker's process footprint includes CUDA/library overhead shared by subsequent
+workers; each additional warmed worker added about 668 MiB (0.65 GiB).
+
+| Workers on one GPU | Total probe VRAM (GiB) | Retrievals/s with uncached queries |
+| --- | ---: | ---: |
+| 1 | 1.92 | 94 |
+| 2 | 2.58 | 126 |
+| 4 | 3.88 | 108 |
+| 8 | 6.49 | 92 |
+
+These are retrieval-only measurements with warm patient indexes, three timed
+repeats of 160 requests, and the existing pipeline sharing that GPU. Eight
+workers fit comfortably, but two were fastest when queries needed encoding.
+With query vectors also cached, one worker was fastest (about 1,032 retrievals/s).
+Whole-pipeline speed must be measured separately; this probe does not establish
+an end-to-end speedup.
 
 ## All-in-one launchers
 
@@ -93,19 +125,20 @@ defaults to ColBERT. For example:
 
 ```bash
 STAGE2_COLBERT_DEVICES=cuda:0,cuda:1 \
+STAGE2_COLBERT_WORKERS_PER_DEVICE=4 \
 STAGE2_COLBERT_CACHE_DIR=/persistent/oci-colbert-cache \
 STAGE2_COLBERT_TOP_K=20 ./run_one_conf_one_mod.sh
 ```
 
 Supported overrides are `STAGE2_EXTRACTION_CONTEXT_STRATEGY` and
-`STAGE2_COLBERT_MODEL`, `REVISION`, `DEVICES`, `CACHE_DIR`, `CHUNK_SIZE`,
-`CHUNK_OVERLAP`, `QUERY_LENGTH`, `BATCH_SIZE`, and `TOP_K` (each with the
+`STAGE2_COLBERT_MODEL`, `REVISION`, `DEVICES`, `WORKERS_PER_DEVICE`, `CACHE_DIR`,
+`CHUNK_SIZE`, `CHUNK_OVERLAP`, `QUERY_LENGTH`, `BATCH_SIZE`, and `TOP_K` (each with the
 `STAGE2_COLBERT_` prefix). The Python CLI exposes matching
 `--stage2-colbert-*` options and `--stage2-extraction-context-strategy`.
 Advanced settings can also be supplied with `--set stage2.colbert.KEY=VALUE`.
 
-Explicit saved-run launches preserve their saved settings. Device, batch-size,
-and cache-location overrides are permitted on resume. Switching retrieval
+Explicit saved-run launches preserve their saved settings. Device, worker-count,
+batch-size, and cache-location overrides are permitted on resume. Switching retrieval
 models, top K, geometry, or measurement methods requires fresh measurement
 outputs; checkpoints refuse to mix incompatible results. For an older full-record
 run whose saved config omits the selector, explicitly add

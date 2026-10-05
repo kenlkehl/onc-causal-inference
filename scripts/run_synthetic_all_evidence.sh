@@ -375,7 +375,7 @@ fi
 # outer folds, ontology revisions, and answering endpoints for this cohort.
 stage2_policy_args+=(--stage2-extraction-context-strategy "${STAGE2_EXTRACTION_CONTEXT_STRATEGY:-colbert}")
 stage2_policy_args+=(--stage2-colbert-cache-dir "${STAGE2_COLBERT_CACHE_DIR:-${repo_root}/.oci_cache/colbert}")
-for colbert_setting in MODEL REVISION DEVICES CHUNK_SIZE CHUNK_OVERLAP QUERY_LENGTH BATCH_SIZE TOP_K; do
+for colbert_setting in MODEL REVISION DEVICES WORKERS_PER_DEVICE CHUNK_SIZE CHUNK_OVERLAP QUERY_LENGTH BATCH_SIZE TOP_K; do
     variable="STAGE2_COLBERT_${colbert_setting}"
     if [[ -n "${!variable:-}" ]]; then
         option="${colbert_setting,,}"

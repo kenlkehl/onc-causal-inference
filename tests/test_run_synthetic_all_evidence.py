@@ -19,6 +19,7 @@ import pytest
 @pytest.mark.parametrize("saved,overrides", [
     (False, {}),
     (False, {"STAGE2_DECISION_EXTRACTION": "0"}),
+    (False, {"STAGE2_COLBERT_WORKERS_PER_DEVICE": "4"}),
     (False, {
         "STAGE2_DECISION_EXTRACTION": "0",
         "STAGE2_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","196608"]',
@@ -111,6 +112,7 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     assert config.stage2.decision_extraction.enabled is decision
     assert config.stage2.decision_extraction.max_prompt_tokens == 3000
     assert config.stage2.extraction_context_strategy == "colbert"
+    assert config.stage2.colbert.workers_per_device == int(overrides.get("STAGE2_COLBERT_WORKERS_PER_DEVICE", "1"))
     if not managed:
         assert config.stage2.extraction_llm.vllm is None
         return

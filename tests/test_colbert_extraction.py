@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
 import re
@@ -24,15 +25,38 @@ class Tokenizer:
 def backend(monkeypatch, tmp_path):
     from oci.extraction import colbert_encoder
 
-    state = {"documents": 0, "queries": 0, "devices": set(), "active": 0, "peak": 0}
+    state = {"documents": 0, "queries": 0, "devices": set(), "active": 0, "peak": 0,
+             "streams": [], "encoder_streams": []}
     lock = threading.Lock()
+    current = threading.local()
+
+    class Stream:
+        def __init__(self, *, device):
+            self.device = device
+            with lock:
+                state["streams"].append(self)
+
+    @contextmanager
+    def stream_context(stream):
+        previous = getattr(current, "stream", None)
+        current.stream = stream
+        try:
+            yield
+        finally:
+            current.stream = previous
 
     class Encoder:
         def __init__(self, config, device, folder):
             self.tokenizer = Tokenizer()
             self.device = device
+            self.stream = getattr(current, "stream", None)
+            if device != "cpu":
+                assert self.stream is not None and self.stream.device == device
+            with lock:
+                state["encoder_streams"].append(self.stream)
 
         def encode(self, texts, *, query=False):
+            assert getattr(current, "stream", None) is self.stream
             with lock:
                 state["queries" if query else "documents"] += len(texts)
                 state["devices"].add(self.device)
@@ -69,9 +93,14 @@ def backend(monkeypatch, tmp_path):
                 sys.modules,
                 "torch",
                 SimpleNamespace(
-                    Tensor=type("Tensor", (), {}), cuda=SimpleNamespace(device_count=lambda: 0)
+                    Tensor=type("Tensor", (), {}), cuda=SimpleNamespace(device_count=lambda: 0),
+                    inference_mode=nullcontext,
                 ),
             )
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "Stream", Stream, raising=False)
+    monkeypatch.setattr(torch.cuda, "stream", stream_context, raising=False)
     yield state
     with colbert._retrievers_lock:
         for retriever in colbert._retrievers.values():
@@ -238,6 +267,59 @@ def test_parallel_gpu_workers_and_atomic_shared_patient_cache(tmp_path, backend)
     assert backend["documents"] == 10  # five unique three-word documents, two chunks each
 
 
+@pytest.mark.parametrize("count", [1, 2, 4])
+def test_workers_per_gpu_use_independent_streams_and_share_indexes(tmp_path, backend, monkeypatch, count):
+    from oci.extraction import colbert_encoder
+
+    config = replace(settings(tmp_path), devices=("cuda:0",), workers_per_device=count)
+    retriever = colbert.get_retriever(config)
+    barrier = threading.Barrier(count)
+    original_encode = colbert_encoder.ColBERTEncoder.encode
+
+    def encode(self, texts, *, query=False):
+        if query:
+            barrier.wait(timeout=10)
+        return original_encode(self, texts, query=query)
+
+    monkeypatch.setattr(colbert_encoder.ColBERTEncoder, "encode", encode)
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        results = list(pool.map(
+            lambda _: retriever.retrieve("red same patient", [{"name": "red"}]), range(count)
+        ))
+    assert len(retriever.workers) == count
+    assert len({worker.stream for worker in retriever.workers}) == count
+    assert set(backend["encoder_streams"]) == {worker.stream for worker in retriever.workers}
+    assert backend["documents"] == 2
+    assert sum(not result["cache_hit"] for result in results) == 1
+    assert all(result["hits"] == results[0]["hits"] for result in results)
+    assert all(result["context"] == results[0]["context"] for result in results)
+
+
+def test_worker_count_changes_pool_but_preserves_measurement_identity(tmp_path, backend):
+    from dataclasses import asdict
+
+    config = settings(tmp_path)
+    expanded = replace(config, workers_per_device=4)
+    assert config.workers_per_device == 1
+    assert colbert_config_from_mapping(asdict(expanded)) == expanded
+    assert expanded.encoding_identity() == config.encoding_identity()
+    assert expanded.measurement_identity() == config.measurement_identity()
+    original = colbert.get_retriever(config)
+    replacement = colbert.get_retriever(expanded)
+    assert replacement is colbert.get_retriever(expanded) and replacement is not original
+    assert len(replacement.workers) == 4
+    first = original.retrieve("red same patient", [{"name": "red"}])
+    second = replacement.retrieve("red same patient", [{"name": "red"}])
+    assert second["cache_hit"] and second["hits"] == first["hits"]
+    assert second["index_key"] == first["index_key"]
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "2", None])
+def test_workers_per_device_requires_positive_integer(value):
+    with pytest.raises(ValueError, match="workers_per_device must be a positive integer"):
+        colbert_config_from_mapping({"workers_per_device": value})
+
+
 def test_config_and_feature_query_exclude_roles_and_outcomes(tmp_path):
     assert colbert_config_from_mapping({"devices": "cuda:0,cuda:1"}).devices == ("cuda:0", "cuda:1")
     for options in (
@@ -307,6 +389,9 @@ def test_stage2_retrieval_checkpoint_reuse_and_patient_request_parallelism(
     frame = analysis.extract_rows(**kwargs)
     assert frame["_oci_row_id"].tolist() == [1, 0] and frame["state"].tolist() == ["blue", "red"]
     pd.testing.assert_frame_equal(analysis.extract_rows(**kwargs), frame)
+    pd.testing.assert_frame_equal(analysis.extract_rows(
+        **{**kwargs, "colbert": replace(settings(tmp_path), workers_per_device=4)}
+    ), frame)
     assert len(calls) == 2
     assert len(list((tmp_path / "output").rglob("retrieval.json"))) == 2
     with pytest.raises(ValueError, match="differ from saved"):

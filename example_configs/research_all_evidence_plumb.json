@@ -123,6 +123,7 @@
         "cpu"
       ],
       "cache_dir": ".oci_cache/colbert",
+      "workers_per_device": 1,
       "chunk_size": 64,
       "chunk_overlap": 0,
       "query_length": 512,

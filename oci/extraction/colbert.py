@@ -1,4 +1,4 @@
-"""Disk-backed, patient-isolated ColBERT retrieval with one worker per device.
+"""Disk-backed, patient-isolated ColBERT retrieval with configurable device workers.
 
 The shared worker pool bounds GPU replicas across concurrent folds and patient
 threads. Each worker batches token encoding and MaxSim scoring. Patient indexes
@@ -246,10 +246,25 @@ class _DeviceWorker:
     def __init__(self, config, device, folder, signature):
         self.config, self.device, self.folder, self.signature = config, device, folder, signature
         self.encoder = None
+        self.stream = None
         self.queries = OrderedDict()
         self.patients = OrderedDict()
         self.patient_cache_bytes = 0
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"colbert-{device}")
+
+    @contextmanager
+    def _execution_context(self):
+        # Create and use the stream on this worker's executor thread. Its model
+        # and cached tensors stay on the same stream for their entire lifetime.
+        if self.device == "cpu":
+            yield
+        else:
+            import torch
+
+            if self.stream is None:
+                self.stream = torch.cuda.Stream(device=self.device)
+            with torch.cuda.stream(self.stream):
+                yield
 
     @staticmethod
     def _index_version(path):
@@ -308,6 +323,10 @@ class _DeviceWorker:
         return chunks, vectors, batches, cache_hit
 
     def retrieve(self, text, queries, top_k):
+        with self._execution_context():
+            return self._retrieve(text, queries, top_k)
+
+    def _retrieve(self, text, queries, top_k):
         if self.encoder is None:
             from .colbert_encoder import ColBERTEncoder
 
@@ -372,9 +391,16 @@ class ColBERTRetriever:
         devices = config.devices
         if devices == ("auto",):
             devices = tuple(f"cuda:{i}" for i in range(torch.cuda.device_count())) or ("cpu",)
-        self.workers = [_DeviceWorker(config, d, folder, self.signature) for d in devices]
+        self.workers = [
+            _DeviceWorker(config, device, folder, self.signature)
+            for _ in range(config.workers_per_device)
+            for device in devices
+        ]
         self.lock, self.next_worker = threading.Lock(), 0
-        LOGGER.info("ColBERT retrieval devices=%s cache=%s", devices, config.cache_dir)
+        LOGGER.info(
+            "ColBERT retrieval devices=%s workers_per_device=%s total_workers=%s cache=%s",
+            devices, config.workers_per_device, len(self.workers), config.cache_dir,
+        )
 
     def retrieve(self, text, features, *, top_k=None):
         top_k = self.config.top_k if top_k is None else top_k
@@ -420,6 +446,7 @@ def get_retriever(config=None):
         local_state,
         digest(config.encoding_identity()),
         config.devices,
+        config.workers_per_device,
         str(Path(config.cache_dir).expanduser().resolve()),
         config.batch_size,
         config.score_batch_size,
