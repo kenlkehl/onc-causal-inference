@@ -14,6 +14,23 @@ matched-patient models in Stage 1, then uses Stage 2 to interpret that evidence,
 define measurable patient variables, extract them without crossing patient or
 fold boundaries, and estimate causal effects with diagnostics.
 
+On the `gao-hestie-dina` branch, binary-outcome effect discovery and selection
+use the Gao–Hastie Bernoulli **DINA** objective in the former R-learner paths.
+This includes sparse text and HTR effect fits, TF-IDF and neural-query effect
+scores, whole-cohort embedding effect contrasts, Stage 2 candidate and joint
+modifier selection, and optional estimand-informed ontology effect probes.
+Continuous outcomes retain their existing objectives. Categorical variables are
+selected as whole groups, including their encoded levels and missingness columns.
+
+Stage 2 multi-model selection retains causal-forest evidence and adds a separate
+DINA evidence family. Its default final CATE search compares `causal_forest`,
+`linear_interactions` (an S-learner), and `dina`. DINA learns a conditional **log
+odds ratio**, then converts its fitted counterfactual probabilities to a **risk
+difference** for CATE output and common held-out R-loss comparison. A constant
+log odds ratio can imply varying risk differences, so the methods can support
+different modifiers. See [the DINA integration and interpretation guide](docs/gao_hastie_dina.md)
+for the equations, component mapping, validation, and inference limitations.
+
 ## Installation
 
 OCI supports Python 3.12 and 3.13. From a fresh checkout:
@@ -48,7 +65,7 @@ Set each role's worker count for the server capacity available to this run.
 
 The example already enables multi-model selection, matched-batch contrast
 evidence, post-extraction alias consolidation, propensity bounds of 0.1–0.9,
-and causal-forest/linear-interaction architecture search. **Estimand-informed
+and causal-forest/linear-interaction/DINA architecture search. **Estimand-informed
 ontology refinement and modifier-concept review are opt-in**; this command
 enables both:
 
@@ -88,9 +105,15 @@ does not change a saved run's scientific settings.
 They run the bundled cohorts, select visible GPUs, and default to external
 endpoints at `http://127.0.0.1:8010/v1` and `http://127.0.0.1:8020/v1`.
 Fresh wrapper runs preset Gemma model IDs; override **both** model IDs when
-using different servers. The wrappers' scientific defaults use `llm_roles`
-and omit estimand refinement, concept review, and post-extraction consolidation.
-Use the configured Python entry point above for the full multi-model path.
+using different servers. Fresh wrapper runs default to `multi_model`, including
+DINA alongside causal-forest evidence and the three-way final CATE search above.
+The H100 and RTX PRO 6000 wrappers inherit the same scientific preset through
+`scripts/run_synthetic_all_evidence.sh`. All five root launchers declare binary
+outcomes, so the Stage 1 and Stage 2 DINA paths activate automatically; no DINA
+flag is required. Estimand refinement, concept review, matched-batch contrasts,
+and post-extraction consolidation remain opt-in for these wrappers. Set
+`STAGE2_SELECTION_MODE=llm_roles` or `independent_tasks` to use those selectors;
+they use DINA modifier screens but retain the forest as the final CATE estimator.
 
 ```bash
 # Replace both served IDs and endpoint URLs for your deployment.
@@ -122,9 +145,15 @@ those runtime budgets.
 For the wrappers' explicit saved-run adapter, use
 `OCI_RUN_CONFIG=/path/to/output/run_config.json STAGE2_ONLY=1` and an installed
 `OCI_PYTHON` (or the repository `.venv/bin/python`). This path never synchronizes
-dependencies. Its `STAGE2_SELECTION_MODE` shortcut accepts only `llm_roles` and
-`independent_tasks`; use the Python CLI/configuration for `multi_model` rather
-than supplying that value through the shell shortcut. Managed-vLLM GPU layouts
+dependencies and preserves the saved selection mode and explicit estimator list.
+`STAGE2_SELECTION_MODE` accepts `llm_roles`, `independent_tasks`, or `multi_model`
+as an explicit override. For an older saved config, enable `multi_model` and add
+`"dina"` to `stage2.statistical_selection.multi_model.modifier_count.estimators`
+if that list explicitly contains only the earlier two estimators. Keep
+`modifier_count.enabled=true` to run the final architecture search. For completed
+Stage 2 runs, use `STAGE2_RESELECT=1` to recompute selection and estimation from
+the preserved upstream artifacts. This does not regenerate old Stage 1 evidence;
+use a new full run to apply DINA throughout both stages. Managed-vLLM GPU layouts
 and their adaptive model switching are described below.
 
 ## Scientific setting
@@ -248,7 +277,8 @@ For each outer fold, the full multi-model path performs the following sequence:
    roles and investigator-specified features, with per-feature audit records.
 5. **Refine definitions when enabled.** Estimand-informed ontology search compares
    added measurement alternatives using inner-validation nuisance losses and
-   R-loss. It considers both confounder and modifier uses and preserves the
+   DINA likelihood loss for binary modifiers (R-loss for continuous outcomes).
+   It considers both confounder and modifier uses and preserves the
    original qualifying measurements. Added measurements must also pass coverage.
 6. **Consolidate measured aliases when enabled.** Semantic similarity and observed
    agreement support coalescing equivalent measurements, while retaining the
@@ -260,8 +290,9 @@ For each outer fold, the full multi-model path performs the following sequence:
    bounds restrict modifier evidence; confounder screens retain the broader cohort.
 8. **Choose modifiers and estimator.** Optional concept review groups leading
    candidates into clinical concepts and nominates existing measurements. Nested
-   held-out R-loss compares modifier budgets and causal forests versus penalized
-   outcome models with treatment interactions, while retaining confounder roles.
+   held-out risk-difference R-loss compares modifier budgets and causal forests,
+   penalized outcome models with treatment interactions, and binary DINA, while
+   retaining confounder roles.
 9. **Freeze and evaluate.** Extract only the required held-out measurements,
    apply frozen transformations, and generate held-out CATE predictions and
    nuisance predictions. Combine held-out AIPW scores for the reported ATE.
@@ -343,8 +374,12 @@ Stage 2 must determine whether the phrase supports a measurable patient variable
 
 The sparse residual-effect architecture searches for words and phrases related
 to variation in treatment response after treatment and outcome nuisance
-predictions have been accounted for. In R-learner notation, it studies the
-residual relationship
+predictions have been accounted for. For binary outcomes it fits DINA using
+cross-fitted propensity and treatment-arm outcome probabilities. The sparse
+ridge coefficients describe variation in log odds ratios; exported effect
+predictions are risk differences. The architecture ID `bow_r_loss` is retained
+for compatibility. For continuous outcomes, it studies the R-learner residual
+relationship
 
 ```text
 Y - m(X) approximately equals tau(X) times [T - e(X)],
@@ -374,8 +409,10 @@ treatment effect or its direction.
 
 The hierarchical transformer divides a long record into overlapping clinical
 chunks, encodes each chunk, and uses a document-level transformer to combine
-them. Separate nuisance and residual-effect heads learn from the ordered chunk
-representations. Attention and span summaries translate influential parts of the
+them. Separate nuisance and effect heads learn from the ordered chunk
+representations. Binary staged and joint effect heads optimize DINA with frozen,
+nested text nuisance fits and convert log odds ratios to risk differences.
+Attention and span summaries translate influential parts of the
 record back into readable phrases.
 
 This model is useful when meaning depends on context or on evidence distributed
@@ -388,7 +425,9 @@ weights should be read as model-use diagnostics, not as causal explanations.
 The embedding architecture encodes record chunks with a frozen sentence model
 and averages them into patient-level semantic representations. Within each
 training context, it constructs directions associated with treatment, outcome,
-joint treatment-outcome structure, and residual-effect scores. It then retrieves
+joint treatment-outcome structure, and residual-effect scores. Binary
+whole-cohort effect directions use DINA scores; native treatment/outcome cell
+and cluster contrasts retain their definitions. It then retrieves
 actual text chunks aligned with the positive and negative ends of those
 directions.
 
@@ -435,6 +474,9 @@ representation is screened separately for treatment, outcome, and
 residual-effect signal. Non-negative matrix factorization is then fit across
 configured random seeds to identify groups of terms that recur together.
 Consensus across fits reduces dependence on a single topic decomposition.
+For binary outcomes, the effect screen uses DINA scores around a training-fitted
+constant log odds ratio and Fisher-information weights, with cross-fitted
+propensity and arm-specific outcome probabilities.
 
 A topic is a co-occurrence pattern, not necessarily one variable. A topic that
 contains terms for frailty, oxygen use, and hospitalization may represent a
@@ -465,6 +507,8 @@ for recurring semantic patterns. Separate banks are optimized for treatment,
 outcome, and residual-effect objectives, with constraints that encourage useful
 activation and diversity among queries. The saved evidence includes query
 activations, aggregate moments, and readable high-activation witnesses.
+For binary outcomes, the effect bank uses the same DINA score and Fisher weights
+as the TF-IDF effect screens, in both nested discovery and final refitting.
 
 This approach is more flexible than a fixed mean-difference contrast because it
 can learn several distinct semantic detectors for the same objective. Its
@@ -792,7 +836,7 @@ supplied through `OCI_STAGE2_API_KEY`. For example:
           "enabled": true,
           "concept_review": true,
           "concept_top_n_per_fold": 100,
-          "estimators": ["causal_forest", "linear_interactions"]
+          "estimators": ["causal_forest", "linear_interactions", "dina"]
         }
       },
       "l1_ratio": 0.8,
@@ -954,9 +998,9 @@ Face access requirements and run `.venv/bin/hf auth login` first. See the
 [vLLM GPU installation guide](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)
 for environment details.
 
-The launcher selects eight visible GPUs and retains the original wrapper's
-scientific preset (`llm_roles`). Stage 1 finishes before Stage 2 starts its LLM
-servers. One Gemma 4 26B server handles interpretation on GPU 0; seven Plumb
+The launcher selects eight visible GPUs and inherits the shared wrapper's
+scientific preset (`multi_model`, including binary DINA). Stage 1 finishes before
+Stage 2 starts its LLM servers. One Gemma 4 26B server handles interpretation on GPU 0; seven Plumb
 servers handle extraction on GPUs 1–7. Each server uses one GPU. The primary
 role allows 32 concurrent requests; extraction allows 128 across the seven
 replicas, whose schedulers each allow up to eight sequences within the token budget.
@@ -1032,8 +1076,8 @@ PY
 If you already followed the H100 environment setup in this checkout, use the
 RTX launcher after verifying the RTX GPUs. To run the larger bundled cohort,
 use [`run_five_conf_five_mod_rtxpro6000x8.sh`](run_five_conf_five_mod_rtxpro6000x8.sh)
-instead. Each launcher retains its cohort wrapper's scientific settings
-(`llm_roles`) and has a separate default output directory:
+instead. Each launcher inherits its cohort wrapper's scientific settings
+(`multi_model`, including binary DINA) and has a separate default output directory:
 
 | Launcher | Default output under `artifacts/research_all_evidence/` |
 | --- | --- |
@@ -1534,7 +1578,8 @@ priorities nominate up to eight original variables per role by default. An LLM
 proposes up to two measurement alternatives per variable from its definition and
 aggregate values. New alternatives are extracted on training patients and tested
 inside inner folds: nuisance outcome loss with propensity/overlap safeguards for
-confounder uses, and held-out R-loss for modifier uses. Stable improvements are
+confounder uses, and held-out DINA likelihood loss for binary modifier uses
+(R-loss for continuous outcomes). Stable improvements are
 added alongside the original measurements. New alternatives also pass the 95%
 missingness filter. This is separate from outcome-blind extraction repair and
 aggregate review; see [estimand refinement](docs/stage2_estimand_ontology.md).
@@ -1570,7 +1615,7 @@ available for audit and held-out reconstruction. Configured explicit features
 are protected from replacement.
 
 Stage 2 then builds statistical evidence within the outer-training partition.
-The following two paragraphs describe `llm_roles` and `independent_tasks`;
+The following paragraphs describe `llm_roles` and `independent_tasks`;
 `multi_model` builds the broader evidence collection described afterward.
 In every inner fold, a logistic group elastic net predicts treatment
 and a separate group elastic net predicts the marginal outcome. Continuous and
@@ -1582,25 +1627,32 @@ treatment, outcome, and treatment-adjusted outcome associations, retaining raw
 p-values, within-fold Benjamini-Hochberg q-values, and fold support. The
 `univariable_confounder_p_value_threshold` and
 `univariable_confounder_q_value_threshold` settings create evidence flags;
-they are not hard inclusion gates. In `llm_roles`, both nuisance models used to
-build modifier evidence use the provisional union. In `independent_tasks`,
-those nuisance fits instead independently regularize over all candidates
-within each inner fold. Reports include
+they are not hard inclusion gates. For continuous-outcome modifier evidence,
+`llm_roles` fits nuisances on the provisional union, while `independent_tasks`
+independently regularizes over all candidates within each inner fold. Binary
+DINA nuisances use the full candidate catalog in both modes. Reports include
 inner-heldout and pooled out-of-fold AUROC as well as log loss for binary tasks.
 
-Inner-fold grouped elastic nets produce cross-fitted propensity and marginal-
-outcome predictions. For every candidate, candidate-specific grouped elastic-
-net calibration layers augment both nuisances using only inner-fold training
-data. A ridge-stabilized R-learner compares a constant-effect model with a model
-that jointly adds all estimable candidate interaction contrasts, and scores the
-gain on untouched inner-heldout rows. The ten largest held-out R-loss gains enter
-each inner fold's evidence set by default, without a sign or p-value gate. A
-second R-loss model places all candidate interaction groups in one joint grouped
-elastic net and records coefficient support plus held-out whole-model gain. The
-nuisance screens continue to use the one-standard-error rule, while nuisance
-prediction defaults to the minimum-CV-loss elastic net.
+For binary outcomes, inner-fold grouped models provide cross-fitted propensity
+and treatment-arm outcome probabilities for DINA. A ridge-stabilized candidate
+fit compares a constant log odds ratio with one that varies over all estimable
+contrasts of that candidate, using the same frozen nuisance offset. The ten
+largest held-out Bernoulli likelihood gains enter each inner fold's evidence set
+by default, without a sign or p-value gate. A joint group elastic-net DINA fit
+records coefficient support and held-out whole-model gain. All categorical
+levels and missingness columns of a feature share one selection group.
 
-In the default `stage2.statistical_selection.selection_mode: "llm_roles"`,
+Continuous outcomes retain the candidate-wise and joint R-loss models, with
+cross-fitted propensity and marginal-outcome predictions and candidate-specific
+nuisance calibration. The nuisance screens continue to use the
+one-standard-error rule, while nuisance prediction defaults to the
+minimum-CV-loss elastic net. Binary selection reports retain legacy `r_loss`
+compatibility keys, accompanied by `dina_loss` aliases and objective/scale
+metadata; those screening keys represent likelihood loss. Final architecture
+search and probability-scale diagnostics still use actual squared R-loss.
+
+In `stage2.statistical_selection.selection_mode: "llm_roles"` (the core config
+default; the synthetic wrappers explicitly select `multi_model`),
 final primary-model adjudication receives only allowlisted definitions and these
 aggregate statistics. Large candidate sets are sliced into bounded requests of
 `stage2.role_adjudication.max_candidates_per_request` candidates (20 by
@@ -1615,25 +1667,28 @@ modifier union supply the final roles.
 
 In `selection_mode: "independent_tasks"`, treatment, outcome, and effect
 supports are selected separately by nonzero groups in any inner fold. Effect
-support comes from the joint R-loss model; it does not require a nuisance vote
+support comes from the joint grouped DINA model for binary outcomes or the joint
+R-loss model for continuous outcomes; it does not require a nuisance vote
 or candidate-wise top-N rank. P/q values and candidate-wise rankings remain
 diagnostics. LLM annotations, when enabled, cannot change inclusion or routing,
 and annotation failures do not veto estimation. See
 [independent task selection](docs/stage2_independent_tasks.md) for the full
 procedure and artifact fields.
 
-In `selection_mode: "multi_model"`, seven standard evidence families inform LLM
-clinical-theme reviews; optional matched-batch contrasts add an eighth:
+In `selection_mode: "multi_model"`, eight standard evidence families inform LLM
+clinical-theme reviews for binary outcomes (seven for continuous outcomes);
+optional matched-batch contrasts add one more:
 
 | Evidence family | Main contribution |
 | --- | --- |
 | Univariable models | Treatment/outcome associations and treatment-by-candidate interaction tests |
 | Penalized main effects | Group elastic-net treatment and marginal-outcome support |
 | Penalized outcome interactions | Candidate main effects and joint treatment interactions |
-| Orthogonal linear models | Grouped treatment-residual interactions |
-| Candidate R-learners | Held-out R-loss gain from one candidate at a time |
+| Orthogonal linear models | Joint grouped DINA selection for binary outcomes; grouped treatment-residual interactions for continuous outcomes |
+| Candidate effect learners (`univariable_rlearner`) | Held-out candidate-group DINA likelihood gain for binary outcomes; R-loss gain for continuous outcomes |
 | Predictive forests | Held-out group-permutation importance for treatment and outcome |
 | Causal forests | Residual-effect prediction, group permutations, and split importance |
+| DINA (`dina`, binary only) | Additional held-out likelihood evidence from jointly permuting every encoded column of a clinical feature |
 | Matched-batch contrasts, when enabled | Candidate prediction of within-bin observed treatment-contrast deviations |
 
 Each inner fold uses one full training sample and, by default, two
@@ -1669,13 +1724,19 @@ recurrence counts, and ordering.
 Joint modifier-count and final-estimator search is enabled by default in
 `multi_model`. Inside each count-validation training partition, the pipeline
 rebuilds numerical evidence and LLM rankings, including concept review when
-enabled. It compares ranked modifier prefixes and causal-forest versus penalized
-interaction outcome models on held-out R-loss. The default budgets are
+enabled. It compares ranked modifier prefixes across causal forests, penalized
+interaction outcome models, and DINA for binary outcomes. All architectures are
+scored on held-out squared R-loss on the same eligible patients; DINA's fitted
+log odds ratios are first converted to risk differences. The default budgets are
 0, 4, 8, 12, 16, 24, and 32 modifiers, plus the complete ranked shortlist capped
 at 64 unlocked candidates. Locked modifiers are additional to those budgets;
 the actual representatives can be fewer than the budget. Minimum mean R-loss selects the
-count and estimator; a paired one-standard-error rule is optional. Confounders
-and retained investigator-locked roles are preserved.
+count and estimator; a paired one-standard-error rule is optional. Ties favor
+fewer modifiers, then `linear_interactions`, `dina`, and `causal_forest` in that
+order. Confounders and retained investigator-locked roles are preserved.
+DINA is omitted for continuous outcomes. An unsupported DINA evidence cell is
+marked not estimable; each architecture/count combination must be estimable on
+every scoring fold to compete.
 
 The outer-training catalog, extraction definitions, coverage filter, and upstream
 ontology/consolidation remain fixed during this nested search. Its inner scores
@@ -1727,12 +1788,15 @@ available to later supervision.
 
 Only after selection and model search finish are frozen retained definitions and
 measurement dependencies applied to outer-held-out records. The selected model
-may be an honest `CausalForestDML` or a penalized outcome model with the treatment
-main effect and treatment-by-modifier interactions. For binary outcomes, the
-latter uses logistic regression and reports the difference between predicted
-outcome probabilities under treatment and control. For continuous outcomes it
-uses a linear model. The interaction estimator supplies CATE point estimates;
-forest-style individual-effect intervals are unavailable for that architecture.
+may be an honest `CausalForestDML`, a penalized outcome model with the treatment
+main effect and treatment-by-modifier interactions, or binary DINA. The
+interaction model uses logistic regression for binary outcomes and a linear
+model for continuous outcomes. Binary DINA exports its native
+`dina_log_odds_ratio` and fitted counterfactual probabilities `dina_mu0` and
+`dina_mu1`, with `estimated_cate = dina_mu1 - dina_mu0`. Both binary parametric
+architectures therefore report CATE as a probability difference. CATE confidence
+intervals are unavailable for the interaction and DINA estimators; DINA interval
+columns remain missing.
 
 For the forest, modifiers form `X` and pure confounders form `W`; dual-role
 variables appear in `X` once. A constant effect design is used when no modifiers
@@ -1747,6 +1811,8 @@ its confidence interval. CATE predictions come from each fold's frozen chosen
 model, and the selected architecture may differ across folds. Diagnostics include
 nuisance fit quality, overlap, regularization, and optimization status. Oracle
 comparisons are a separate posthoc audit and never guide selection.
+The AIPW nuisance probabilities are independent of DINA's fitted counterfactual
+columns; the AIPW ATE interval remains available when DINA supplies the CATE.
 
 ```mermaid
 flowchart LR
@@ -2091,6 +2157,9 @@ following documents provide additional detail:
   provides a short command reference.
 - [`docs/stage2_multi_model.md`](docs/stage2_multi_model.md)
   explains repeated model evidence, matched batches, concepts, and architecture search.
+- [`docs/gao_hastie_dina.md`](docs/gao_hastie_dina.md)
+  maps the binary DINA objectives across both stages and explains effect scales,
+  whole-variable group selection, and estimation limitations.
 - [`docs/stage2_estimand_ontology.md`](docs/stage2_estimand_ontology.md)
   describes training-only comparisons of measurement definitions.
 - [`docs/stage2_sampling.md`](docs/stage2_sampling.md)

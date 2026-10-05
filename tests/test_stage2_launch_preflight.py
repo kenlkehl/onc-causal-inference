@@ -154,8 +154,9 @@ def test_saved_launcher_accepts_pool_override_without_changing_science(tmp_path)
 
 
 @pytest.mark.parametrize("managed", [False, True])
+@pytest.mark.parametrize("mode", ["independent_tasks", "multi_model"])
 def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
-    tmp_path, monkeypatch, managed
+    tmp_path, monkeypatch, managed, mode
 ):
     config = saved_fixture(tmp_path, managed)
     before = tree(tmp_path)
@@ -164,7 +165,7 @@ def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
         str(config.output_dir),
         {
             "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
-            "STAGE2_SELECTION_MODE": "independent_tasks",
+            "STAGE2_SELECTION_MODE": mode,
             "STAGE2_ONLY": "1",
         },
     )
@@ -173,7 +174,7 @@ def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
     resolved = workflow.compile_config(raw, config_dir=directory)
     assert resolved.seed == 7 and resolved.outer_folds == 2 and resolved.inner_folds == 2
     assert resolved.stage2.model == "preserved-primary"
-    assert resolved.stage2.statistical_selection.selection_mode == "independent_tasks"
+    assert resolved.stage2.statistical_selection.selection_mode == mode
     assert resolved.components == ("stage2",)
     result = preflight.preflight_stage2(resolved)
     assert result["primary_serving"] == ("managed" if managed else "external")
@@ -192,6 +193,29 @@ def test_preflight_and_saved_command_preserve_science_and_do_not_run_stage1(
     monkeypatch.setitem(workflow.DEFAULT_COMPONENT_RUNNERS, "stage2", lambda *a: {"phase": "test"})
     workflow.ResearchAllEvidenceWorkflow(resolved).run()
     assert not (config.output_dir / "resolved_neural_query_config.json").exists()
+
+
+@pytest.mark.parametrize("mode", [None, "multi_model"])
+def test_saved_launcher_preserves_explicit_pre_dina_estimator_list(tmp_path, mode):
+    config = saved_fixture(tmp_path)
+    source = config.output_dir / "run_config.json"
+    raw = json.loads(source.read_text())
+    estimators = ["causal_forest", "linear_interactions"]
+    count = raw["stage2"]["statistical_selection"]["multi_model"]["modifier_count"]
+    count["estimators"] = estimators
+    write(source, raw)
+    env = {"OCI_RUN_CONFIG": str(source)}
+    if mode:
+        env["STAGE2_SELECTION_MODE"] = mode
+    args = launcher.command(config.dataset, str(config.output_dir), env)
+    updated_raw, directory = workflow._raw_config_from_args(
+        workflow.build_parser().parse_args(args)
+    )
+    updated = workflow.compile_config(updated_raw, config_dir=directory)
+    selection = updated.stage2.statistical_selection
+    assert selection.selection_mode == (mode or config.stage2.statistical_selection.selection_mode)
+    assert selection.multi_model.modifier_count.estimators == tuple(estimators)
+    assert json.loads(source.read_text()) == raw
 
 
 @pytest.mark.parametrize(

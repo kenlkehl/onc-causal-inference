@@ -26,8 +26,8 @@ for control in STAGE2_ONLY STAGE2_RESELECT OCI_PREFLIGHT_ONLY STAGE2_DECISION_EX
     fi
 done
 case "${STAGE2_SELECTION_MODE:-}" in
-    ""|llm_roles|independent_tasks) ;;
-    *) echo "STAGE2_SELECTION_MODE must be llm_roles or independent_tasks." >&2; exit 2 ;;
+    ""|llm_roles|independent_tasks|multi_model) ;;
+    *) echo "STAGE2_SELECTION_MODE must be llm_roles, independent_tasks, or multi_model." >&2; exit 2 ;;
 esac
 if [[ "${STAGE2_RESELECT:-0}" == "1" && "${STAGE2_ONLY:-0}" != "1" ]]; then
     echo "STAGE2_RESELECT=1 requires STAGE2_ONLY=1." >&2
@@ -302,9 +302,11 @@ if (( stage2_decision_extraction )); then
 else
     stage2_policy_args+=(--set stage2.decision_extraction.enabled=false)
 fi
-if [[ -n "${STAGE2_SELECTION_MODE:-}" ]]; then
-    stage2_policy_args+=(--set "stage2.statistical_selection.selection_mode=${STAGE2_SELECTION_MODE}")
-fi
+# Fresh binary runs use all evidence families, including DINA alongside the
+# causal forest, and the default forest/linear-interactions/DINA final search.
+# Explicit saved-run launches return above and retain their recorded policy.
+stage2_selection_mode="${STAGE2_SELECTION_MODE:-multi_model}"
+stage2_policy_args+=(--set "stage2.statistical_selection.selection_mode=${stage2_selection_mode}")
 if (( stage2_managed_extractor )); then
     stage2_policy_args+=(
         --stage2-extraction-model "${stage2_extraction_model}"
@@ -564,6 +566,9 @@ else
 fi
 echo "CPU budget:     ${worker_count} workers (${cpu_count} available)"
 echo "Stage 2:        ${stage2_description}"
+if (( stage2_enabled )); then
+    echo "Selection:      ${stage2_selection_mode} (binary DINA modifier screens enabled)"
+fi
 echo "Architectures:  ${architecture_description}"
 if (( stage2_only )); then
     echo "HTR modeling:   not run during Stage 2-only resume"

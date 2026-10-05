@@ -4,6 +4,12 @@ Implemented September 21, 2026; overlap-restricted modifier screening and joint
 modifier-count/estimator selection updated September 22, 2026. Enable with
 `stage2.statistical_selection.selection_mode: "multi_model"`.
 
+The `gao-hestie-dina` branch uses Bernoulli DINA for binary orthogonal/candidate
+effect fits, adds DINA evidence alongside the forest, and adds DINA to the final
+architecture search. All five root synthetic shell launchers enable this mode
+for fresh runs. See [DINA integration](gao_hastie_dina.md) for the equations and
+the corresponding Stage 1 changes.
+
 ## 1. Purpose and scope
 
 1. Build a reproducible confounder/modifier list from complementary empirical
@@ -33,10 +39,11 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
 | Univariable models | Candidate association with treatment; outcome association adjusted for treatment | `Y ~ T + Z + T:Z`; logistic for binary outcomes, linear otherwise |
 | Penalized main effects | Separate grouped elastic nets for treatment and marginal outcome | None; predictive support alone is not a modifier label |
 | Penalized outcome interactions | Main-effect support in the joint outcome model | Grouped elastic net for `Y ~ T + all Z + all T:Z` |
-| Orthogonal linear model | Elastic-net nuisances supply residuals | Grouped elastic net for `Y_res ~ T_res * (constant + Z)` without an additional intercept |
-| Candidate R-learners | Same cross-fitted nuisances | One candidate at a time, ridge-stabilized contrasts, held-out R-loss gain over a constant effect |
+| Orthogonal linear model | Cross-fitted grouped nuisances | Joint group elastic-net DINA for binary outcomes; grouped `Y_res ~ T_res * (constant + Z)` for continuous outcomes |
+| Candidate effect learners (`univariable_rlearner`) | Same cross-fitted nuisances | One candidate group at a time; held-out DINA likelihood gain over a constant log odds ratio for binary outcomes, R-loss gain for continuous outcomes |
 | Predictive forests | Held-out group-permutation importance for treatment and outcome | None; these are evidence models, not causal-forest nuisances |
 | Causal forests | All-candidate elastic-net nuisance adjustment | Honest forests on residuals; held-out R-loss permutation importance and grouped split importance |
+| DINA (binary only) | Cross-fitted propensity and arm-specific outcome probabilities | Additional held-out Bernoulli likelihood group-permutation evidence |
 | Matched-batch contrasts (optional) | Shared cross-fitted treatment/outcome predictions define matching bins | Candidate-wise ridge on batch-average measurements; held-out deviation prediction gain over bin intercepts |
 
 1. Categorical columns remain one candidate group. Interaction tests are omnibus;
@@ -45,9 +52,10 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
 2. Univariable modifier models include the candidate main effect and are
    unadjusted for other covariates. Their confounding sensitivity is explicit to
    the LLM; orthogonal models provide separate adjusted evidence.
-3. Logistic interactions concern log odds. Orthogonal models and causal forests
-   concern outcome/probability differences. These are complementary views, not
-   interchangeable coefficient tests.
+3. Logistic interactions and binary DINA fits concern log odds ratios. Causal
+   forests concern outcome/probability differences. A constant log odds ratio
+   may imply varying risk differences, so the methods can support different
+   modifiers. Final DINA CATEs are converted to probability differences.
 4. Nominal p < 0.05 and BH q < 0.10 create separate support flags within each
    resample and endpoint. Neither is an inclusion gate. These q-values do not
    correct upstream adaptive discovery.
@@ -67,7 +75,8 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
 2. Fit all-candidate treatment and marginal-outcome elastic nets. Cross-fit them
    again inside inner training to obtain training residuals; separate models
    trained on that population predict validation residuals. Encoder and penalty
-   fitting are confined to training.
+   fitting are confined to training. Binary DINA also uses separately
+   cross-fitted treatment-arm outcome probabilities from these training rows.
 3. Keep nuisances fixed across that fold's perturbations. This assesses evidence
    stability conditional on one honest nuisance construction, not a bootstrap of
    the entire discovery process.
@@ -87,7 +96,7 @@ modifier-count/estimator selection updated September 22, 2026. Enable with
    correlated alternatives can dilute or redistribute their scores.
 8. **Every modifier screen uses the same configured overlap restriction**:
    univariable `T:candidate` tests, penalized outcome interactions, orthogonal
-   linear models, candidate R-learners, causal forests, and matched batches. Set
+   linear models, candidate effect learners, causal forests, DINA, and matched batches. Set
    `stage2.min_propensity: 0.1` and `stage2.max_propensity: 0.9`, as in the example,
    to retain estimated propensities **including** the endpoints. The previously
    unrestricted univariable and penalized interaction screens now honor these
@@ -190,11 +199,12 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
 ## 5. Joint modifier-count and final-estimator selection
 
 1. Enabled by default **within `multi_model` mode**, through `modifier_count`.
-   The `estimators` list defaults to `["causal_forest", "linear_interactions"]`.
-   Each architecture is evaluated at every modifier budget; the budget is not
-   chosen using only a forest before considering the linear alternative.
+   The `estimators` list defaults to
+   `["causal_forest", "linear_interactions", "dina"]`; DINA is omitted for
+   continuous outcomes. Each architecture is evaluated at every modifier budget.
 2. `minimum_r_loss` chooses the architecture/count pair with the smallest mean
-   validation R-loss. Exact ties prefer fewer modifiers, then the linear model.
+   validation R-loss. Exact ties prefer fewer modifiers, then
+   `linear_interactions`, `dina`, and `causal_forest` in that order.
    Optional `one_standard_error` chooses the simplest pair, in that same order,
    whose paired excess loss over the best is within one paired standard error
    across folds. This is a simplification heuristic, not a significance test.
@@ -207,7 +217,9 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
    when fewer candidates exist. With no locked modifiers, zero is a constant
    residual-effect forest; the interaction model retains treatment and covariate
    main effects but has no explicit interactions. A logistic model can still
-   produce varying probability differences because baseline risk varies.
+   produce varying probability differences because baseline risk varies. DINA
+   fits a constant log odds ratio at zero modifiers and can likewise produce
+   varying probability differences through its nuisance offset.
 5. Preserve the original inner folds. **Inside each fold's training portion**,
    create subfolds with `internal_cv_folds`, rerun every enabled evidence family,
    and obtain a fresh LLM modifier ranking. Every other patient's label is masked
@@ -223,7 +235,7 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
    only on that fold's training patients. Scoring residuals and overlap-eligible
    validation patients are identical for every count and architecture. Broad
    scoring nuisances do not depend on the full-training selected confounder set.
-8. Fit two architecture families on eligible training patients:
+8. Fit the configured architecture families on eligible training patients:
    - **Causal forest:** production feature encoding, configured `estimation_trees`,
      minimum leaf size 10, square-root feature sampling, 45% subsampling, honesty
      and inference enabled. It fits the fixed residuals. Average three forest
@@ -236,11 +248,17 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
      refitting the encoder in every penalty-CV partition. One deterministic fit
      per fold/count predicts both treatment states; CATE is `mu1 - mu0` on the
      outcome/probability scale. No validation labels enter penalty fitting.
-9. Score both families with
+   - **Binary DINA:** fit a conditional log odds ratio over the selected modifier
+     groups with a cross-fitted offset and treatment centering. Tune group
+     elastic-net penalties inside training, retaining/dropping categorical
+     levels and missingness together. Predict both treatment states through
+     the logistic link and return their probability difference as CATE.
+9. Score every family with
    `mean(((Y - m_hat) - (T - e_hat) * tau_hat)**2)` on the same validation rows.
    Average forest seeds within folds, then average fold losses equally. Require
-   at least two common usable folds and finite scores for every option; failures
-   are visible rather than silently comparing different populations. Seeds are
+   at least two scoring folds; a combination is eligible only if its scores are
+   finite on every scoring fold. Unsupported combinations are marked not
+   estimable while supported architectures continue. Seeds are
    not independent patient replications. Even when all features are locked,
    architectures are compared on the fixed locked modifier set.
 10. Choose the pair, form a final ranking from all outer-training evidence, and
@@ -248,7 +266,8 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
     surface, fold rankings, row IDs, predictions, model audits, seeds, locks,
     role decisions, and source/input fingerprints. Final refitting uses retained
     confounders/modifiers: the DML forest refits nuisances; the interaction outcome
-    model retunes its penalty with retained main effects and selected interactions.
+    model retunes its penalty with retained main effects and selected interactions;
+    DINA refits nuisances and the grouped log-odds effect model.
 11. Validation therefore uses broader adjustment than the final retained-role
     refit. It is an architecture/count comparison conditional on that adjustment
     and the **frozen upstream catalog, extractions, ontology, and consolidation**,
@@ -262,14 +281,18 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
    models use retained covariate main effects, a treatment main effect, and
    treatment interactions with selected modifiers. No extraction definition is
    changed. AIPW ATE estimation/calibration continues using separate nuisance
-   models for either architecture. Penalized interaction models currently emit
+   models for all architectures. DINA and penalized interaction models emit
    CATE point estimates only; individual-effect intervals remain missing, while
    the existing AIPW ATE interval remains available. `mu0`/`mu1` in the common
    predictions file are the AIPW nuisance predictions, not interaction-model
-   counterfactual predictions.
-2. This is opt-in. Omitted selectors preserve `llm_roles`; `independent_tasks`
+   counterfactual predictions. DINA separately exports `dina_log_odds_ratio`,
+   `dina_mu0`, and `dina_mu1`.
+2. Omitted selectors in the core configuration preserve `llm_roles`; fresh root
+   synthetic launchers explicitly select `multi_model`. `independent_tasks`
    keeps binding joint-model selection and advisory LLM annotations. New defaults
    are omitted from both legacy policy fingerprints.
+   Explicit saved-run launches preserve the saved selector and estimator list;
+   add `"dina"` to an older explicit list to include it in final-model search.
 3. `role_adjudication.enabled` must be true. Disabled/incomplete LLM review cannot
    silently fall back to a numerical union.
 4. Each nuisance fit and family/repetition/subset has an atomic, integrity-checked
@@ -325,7 +348,7 @@ Configuration block:
           "max_ranked_modifiers": 64,
           "selection_rule": "minimum_r_loss",
           "forest_seeds": 3,
-          "estimators": ["causal_forest", "linear_interactions"]
+          "estimators": ["causal_forest", "linear_interactions", "dina"]
         }
       }
     },

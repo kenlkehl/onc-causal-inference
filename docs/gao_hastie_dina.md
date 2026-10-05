@@ -38,6 +38,8 @@ DINA augments forest evidence; it does not replace the forest or the predictive 
 
 The default architecture list and `example_configs/research_all_evidence_multi_model.json` include DINA. An existing configuration that explicitly lists only the earlier two architectures continues to use that explicit list; add `"dina"` to `stage2.statistical_selection.multi_model.modifier_count.estimators` to enable it there.
 
+Fresh runs through all five root `run_one_conf_one_mod*` / `run_five_conf_five_mod*` shell launchers use the shared binary `multi_model` preset, including the DINA evidence family and final architecture search. `STAGE2_SELECTION_MODE` can explicitly select `multi_model`, `llm_roles`, or `independent_tasks`. Explicit saved-run launches (`STAGE2_ONLY=1`, optionally with `OCI_RUN_CONFIG`) preserve the saved selection mode and estimator list unless overridden. Stage 2 reselection reuses earlier Stage 1 evidence; start a new full run to apply DINA throughout both stages.
+
 ## Boundaries and interpretation
 
 Nuisance models require both treatment arms. TF-IDF stacks now supply cross-fitted arm outcome probabilities alongside the existing propensity and marginal outcome predictions. The sparse-text and HTR adapters use nested text nuisance fits; the HTR auxiliary nuisance view is TF-IDF with unigrams through trigrams and ridge logistic regression, independent of the neural effect head. Stage 2 arm nuisances use the existing grouped modeling infrastructure. Outer evaluation labels never enter the final fit APIs.

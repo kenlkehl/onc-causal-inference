@@ -18,6 +18,9 @@ import pytest
 ])
 @pytest.mark.parametrize("saved,overrides", [
     (False, {}),
+    (False, {"STAGE2_SELECTION_MODE": "multi_model"}),
+    (False, {"STAGE2_SELECTION_MODE": "llm_roles"}),
+    (False, {"STAGE2_SELECTION_MODE": "independent_tasks"}),
     (False, {"STAGE2_DECISION_EXTRACTION": "0"}),
     (False, {"STAGE2_COLBERT_WORKERS_PER_DEVICE": "4"}),
     (False, {"STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES": "1048576"}),
@@ -38,6 +41,7 @@ import pytest
         "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","3072","--gpu-memory-utilization","0.35"]',
     }),
     (True, {}),
+    (True, {"STAGE2_SELECTION_MODE": "multi_model"}),
 ])
 def test_wrappers_select_backend_and_preserve_saved_settings(
     tmp_path: Path, launcher, saved, overrides,
@@ -78,7 +82,7 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     if saved:
         assert len(invocations) == 1
         assert args[0].endswith("launch_saved_stage2.py")
-        assert invocations[0]["env"] == {"STAGE2_ONLY": "1"}
+        assert invocations[0]["env"] == {"STAGE2_ONLY": "1", **overrides}
         return
 
     assert "oci.inference.research_all_evidence_workflow" in args
@@ -112,6 +116,19 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     )
     raw, config_dir = _raw_config_from_args(build_parser().parse_args(args[2:]))
     config = compile_config(raw, config_dir=config_dir)
+    # Validate the actual launcher -> CLI -> scientific-policy path, not just
+    # dataclass defaults: the ensemble mode is needed to activate both the
+    # additional DINA evidence family and the final architecture/count search.
+    assert config.outcome_type == "binary"
+    selection = config.stage2.statistical_selection
+    assert selection.selection_mode == overrides.get("STAGE2_SELECTION_MODE", "multi_model")
+    assert {"causal_forest", "dina"} <= set(
+        selection.multi_model.active_families(config.outcome_type)
+    )
+    assert selection.multi_model.modifier_count.enabled
+    assert selection.multi_model.modifier_count.estimators == (
+        "causal_forest", "linear_interactions", "dina",
+    )
     assert config.stage2.decision_extraction.enabled is decision
     assert config.stage2.decision_extraction.max_prompt_tokens == 3000
     assert config.stage2.extraction_context_strategy == "colbert"

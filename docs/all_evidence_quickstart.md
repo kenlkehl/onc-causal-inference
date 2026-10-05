@@ -33,7 +33,7 @@ The multi-model example sets `run.mode: "full"` and enables:
 - Repeated model evidence, including matched-batch contrast evidence.
 - Post-extraction consolidation of equivalent measurements.
 - Modifier screening at estimated propensities from 0.1 through 0.9.
-- Joint modifier-count and causal-forest/penalized-interaction model search.
+- Joint modifier-count and causal-forest/penalized-interaction/DINA model search.
 
 Estimand-informed ontology refinement and modifier-concept review are optional.
 Enable both with:
@@ -87,25 +87,27 @@ For each outer fold, Stage 2:
    Exactly 95% missing is retained. The filter applies to investigator-specified
    variables too; raw measurements and exclusion audits are preserved.
 5. When enabled, tests alternative definitions for both confounder and modifier
-   uses with inner-validation nuisance losses and R-loss. Supported alternatives
+   uses with inner-validation nuisance losses and binary DINA likelihood loss
+   (R-loss for continuous outcomes). Supported alternatives
    augment the original measurements and must pass the coverage filter.
 6. When enabled, consolidates extracted aliases using semantic similarity,
    observed association, and an outcome-blind LLM equivalence review.
 7. Builds numerical selection evidence using the configured mode.
    `multi_model` combines univariable screens, penalized main-effect and
-   interaction models, orthogonal linear models, candidate R-learners,
-   predictive forests, causal forests, and optional matched-batch contrasts.
+   interaction models, orthogonal linear models, candidate effect learners,
+   predictive forests, causal forests, binary DINA, and optional matched-batch contrasts.
    Repeated patient samples and forest feature subsets support stability review.
 8. In `multi_model`, the LLM reviews themes and provisional roles. Optional
    concept review examines the top candidates from each inner fold and selects
    existing representative measurements. Nested R-loss validation then chooses
    a modifier budget and final estimator.
 9. Freezes selection, extracts held-out measurement dependencies, and predicts
-   CATEs with the selected forest or penalized interaction model. Separate
+   CATEs with the selected forest, penalized interaction model, or binary DINA. Separate
    elastic-net nuisances supply cross-fitted AIPW scores for the reported ATE.
 
-The older `llm_roles` mode combines grouped elastic-net and candidate-wise R-loss
-evidence with LLM role adjudication. `independent_tasks` selects treatment,
+The older `llm_roles` mode combines grouped elastic-net and candidate-wise effect
+evidence with LLM role adjudication. Binary modifier screens use DINA likelihood
+loss; continuous screens retain R-loss. `independent_tasks` selects treatment,
 outcome, and effect supports numerically, with optional advisory LLM annotations.
 Those paths retain the forest final estimator. P/q thresholds describe evidence;
 they are not hard candidate inclusion gates.
@@ -228,11 +230,16 @@ Preflight checks inputs and model services without starting LLM inference.
 
 ## Other launch options and outputs
 
-The bundled `run_one_conf_one_mod.sh` and `run_five_conf_five_mod.sh` wrappers
-retain their older scientific defaults. They preset Gemma IDs and external
-endpoints on ports 8010 and 8020; override both served IDs when changing models.
-Use the Python/configuration path above for `multi_model`; the wrappers'
-`STAGE2_SELECTION_MODE` shortcut accepts only `llm_roles` and `independent_tasks`.
+Fresh runs through the bundled `run_one_conf_one_mod.sh` and
+`run_five_conf_five_mod.sh` wrappers default to `multi_model`, with binary DINA
+alongside forest evidence and all three final CATE architectures. Their H100 and
+RTX PRO 6000 variants inherit this scientific preset. The two generic wrappers
+preset Gemma IDs and external endpoints on ports 8010 and 8020; override both
+served IDs when changing models. `STAGE2_SELECTION_MODE` accepts `multi_model`,
+`llm_roles`, or `independent_tasks`. Explicit saved-run launches retain their
+saved mode and estimator list. Add `"dina"` to an older explicit estimator list
+to include it in the final search. See [DINA integration](gao_hastie_dina.md)
+for the binary objectives, effect scales, and group selection.
 
 Managed vLLM needs the `local-llm` extra, model IDs, and per-role `vllm`
 configurations in place of external endpoints. When both roles are managed,
