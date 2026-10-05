@@ -122,6 +122,79 @@ def test_budget_keeps_whole_ranked_chunks_and_accounts_for_chat_template():
                                  options=[("yes", "yes"), ("no", "no")])
 
 
+@pytest.mark.parametrize("budget", [50, 300, 800, 2000])
+def test_batched_packing_preserves_first_failure_even_when_later_prefix_shrinks(budget):
+    text = "é漢 " * 400
+    hits = [[{"start": left, "end": right, "chunk_index": i}
+             for i, (left, right) in enumerate([(0, 400), (800, 1200), (400, 800)])]]
+
+    class PrefixClient(FakeClient):
+        def encode(self, messages):
+            context = json.loads(messages[1]["content"])["evidence"]
+            # The third chunk bridges two source spans, removing their headers.
+            count = 1000 if context.count("[Source characters") == 2 else 500 if context else 100
+            return list(range(count))
+
+    class BatchClient(PrefixClient):
+        def encode_batch(self, conversations):
+            return [self.encode(messages) for messages in conversations]
+
+        def decide(self, evidence, criterion, options, *, prompt_token_ids):
+            result = super().decide(evidence, criterion, options)
+            assert len(prompt_token_ids) == result["prompt_tokens"]
+            return result
+
+    kwargs = dict(source=text, evidence={"hits": hits}, criterion="criterion", options=[("yes", "yes"), ("no", "no")])
+    policy = replace(DecisionExtractionConfig(), max_prompt_tokens=budget)
+    if budget in (50, 300):
+        for client in (PrefixClient(["yes"], policy=policy), BatchClient(["yes"], policy=policy)):
+            with pytest.raises(ValueError, match="ontology alone" if budget == 50 else "No complete"):
+                decision.packed_decision(client, **kwargs)
+    else:
+        expected = decision.packed_decision(PrefixClient(["yes"], policy=policy), **kwargs)
+        actual = decision.packed_decision(BatchClient(["yes"], policy=policy), **kwargs)
+        assert actual == expected
+        if budget == 800:
+            assert actual["retrieval_budget"]["selected_chunk_indices"] == [0]
+
+
+def test_batched_packing_sends_identical_token_ids_without_final_retokenization():
+    class Tokenizer:
+        def __init__(self):
+            self.batch_calls = self.single_calls = 0
+
+        def apply_chat_template(self, messages, **kwargs):
+            assert kwargs == {"tokenize": False, "add_generation_prompt": True, "enable_thinking": False}
+            return json.dumps(messages, ensure_ascii=False) + "ASSISTANT"
+
+        def encode(self, text, **kwargs):
+            self.single_calls += 1
+            return list(text.encode())
+
+        def __call__(self, texts, **kwargs):
+            assert kwargs == {"add_special_tokens": False}
+            self.batch_calls += 1
+            return {"input_ids": [list(text.encode()) for text in texts]}
+
+    tokenizer = Tokenizer()
+    sent = []
+
+    def transport(endpoint, payload, timeout):
+        sent.append(payload["input"])
+        return {"model": "plumb", "data": [{"num_classes": 16, "probs": [8, 0] + [-1]*14}],
+                "usage": {"prompt_tokens": len(payload["input"]), "completion_tokens": 0}}
+
+    client = VLLMDecisionClient(policy=DecisionExtractionConfig(enabled=True), model="plumb",
+        endpoints=(ExtractionEndpoint("http://localhost:8134/v1", 1),), tokenizer=tokenizer, transport=transport)
+    client.pool._metrics_reader = None
+    result = decision.packed_decision(client, source="red patient", evidence=evidence("red patient"),
+        criterion="Documented color", options=[("red", "Red"), ("blue", "Blue")])
+    expected = list(tokenizer.apply_chat_template(result["messages"], tokenize=False,
+        add_generation_prompt=True, enable_thinking=False).encode())
+    assert sent == [expected] and result["selected"] == "red"
+    assert tokenizer.batch_calls == 1 and tokenizer.single_calls == 0
+
+
 def test_classifier_uses_only_offered_logits_and_checks_protocol():
     response = {"data": [{"num_classes": 16, "probs": [2.07, 0] + [1000]*14}],
                 "usage": {"prompt_tokens": 123, "completion_tokens": 0}}

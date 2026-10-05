@@ -97,6 +97,12 @@ class VLLMDecisionClient:
             add_generation_prompt=True, enable_thinking=False)
         return self.tokenizer.encode(text, add_special_tokens=False)
 
+    def encode_batch(self, conversations):
+        tokenizer = self.tokenizer
+        texts = [tokenizer.apply_chat_template(messages, tokenize=False,
+            add_generation_prompt=True, enable_thinking=False) for messages in conversations]
+        return tokenizer(texts, add_special_tokens=False)["input_ids"]
+
     def _http(self, endpoint, payload, timeout):
         url = endpoint.rstrip("/").removesuffix("/v1") + "/classify"
         request = Request(url, data=json.dumps(payload, allow_nan=False).encode(),
@@ -104,9 +110,9 @@ class VLLMDecisionClient:
         with urlopen(request, timeout=timeout) as response:
             return json.load(response)
 
-    def decide(self, evidence, criterion, options):
+    def decide(self, evidence, criterion, options, *, prompt_token_ids=None):
         messages = decision_messages(evidence, criterion, options)
-        ids = self.encode(messages)
+        ids = self.encode(messages) if prompt_token_ids is None else prompt_token_ids
         if len(ids) > self.policy.max_prompt_tokens:
             raise ValueError(f"decision prompt has {len(ids)} tokens; limit {self.policy.max_prompt_tokens}")
         payload = {"model": self.model, "input": ids, "use_activation": False,

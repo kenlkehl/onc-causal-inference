@@ -55,6 +55,7 @@ def backend(monkeypatch, tmp_path):
     )
     actual_score = colbert.maxsim_scores
     monkeypatch.setattr(colbert, "maxsim_scores", lambda q, d, **kwargs: actual_score(q, d))
+    monkeypatch.setattr(colbert, "_maxsim_batches", lambda *a, **kw: iter(()))
     # Avoid requiring an installed torch just to test worker scheduling.
     import sys
 
@@ -166,6 +167,57 @@ def test_corrupt_cache_rebuilt_and_no_patient_cross_retrieval(tmp_path, backend)
     other = retriever.retrieve("blue other", [{"name": "red"}])
     assert "red patient" not in other["context"]
     assert other["hits"][0][0]["text"] == "blue other"
+
+
+def test_patient_memory_cache_avoids_reloading_and_detects_disk_replacement(tmp_path, backend, monkeypatch):
+    loads = []
+    original_load = colbert.load_index
+
+    def load(path, *args):
+        loads.append(path)
+        return original_load(path, *args)
+
+    monkeypatch.setattr(colbert, "load_index", load)
+    retriever = colbert.get_retriever(settings(tmp_path))
+    first = retriever.retrieve("red first blue last", [{"name": "red"}])
+    second = retriever.retrieve("red first blue last", [{"name": "blue"}])
+    assert len(loads) == 1 and second["cache_hit"]
+    assert second["hits"][0][0]["text"] == "blue last"
+    Path(first["index_path"]).write_bytes(b"corrupt")
+    repaired = retriever.retrieve("red first blue last", [{"name": "red"}])
+    assert len(loads) == 2 and not repaired["cache_hit"]
+    assert repaired["hits"] == first["hits"]
+
+
+@pytest.mark.parametrize("byte_limit,entry_limit", [(16, 100), (1024, 2), (7, 100)])
+def test_patient_cache_bounds_and_eviction_keep_disk_vectors_reusable(tmp_path, backend, monkeypatch, byte_limit, entry_limit):
+    monkeypatch.setattr(colbert, "_PATIENT_CACHE_BYTES", byte_limit)
+    monkeypatch.setattr(colbert, "_PATIENT_CACHE_ENTRIES", entry_limit)
+    retriever = colbert.get_retriever(settings(tmp_path))
+    for text in ("red first", "blue second", "red first", "red third"):
+        retriever.retrieve(text, [{"name": "red"}])
+    worker = retriever.workers[0]
+    assert worker.patient_cache_bytes <= byte_limit and len(worker.patients) <= entry_limit
+    assert len(worker.patients) == (0 if byte_limit == 7 else 2)
+    before = backend["documents"]
+    reused = retriever.retrieve("blue second", [{"name": "red"}])
+    assert reused["cache_hit"] and backend["documents"] == before
+    assert reused["hits"][0][0]["text"] == "blue second"
+
+
+def test_prepared_maxsim_batches_preserve_scores_and_padding(monkeypatch):
+    import torch
+
+    rng = np.random.default_rng(10)
+    query = rng.normal(size=(7, 8)).astype(np.float32)
+    documents = [rng.normal(size=(i + 1, 8)).astype(np.float32) for i in range(13)]
+    device = torch.device("cpu")
+    reference = colbert.maxsim_scores(query, documents, device=device, batch_size=4)
+    prepared = list(colbert._maxsim_batches(documents, device=device, batch_size=4))
+    monkeypatch.setattr(colbert, "_maxsim_batches", lambda *a, **kw: pytest.fail("prepared vectors were copied again"))
+    for _ in range(3):
+        actual = colbert.maxsim_scores(query, documents, device=device, batch_size=4, prepared_batches=prepared)
+        np.testing.assert_array_equal(actual, reference)
 
 
 def test_parallel_gpu_workers_and_atomic_shared_patient_cache(tmp_path, backend):

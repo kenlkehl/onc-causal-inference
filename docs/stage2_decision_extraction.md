@@ -52,6 +52,15 @@ arguments automatically. Managed decision launches sync both the `local-llm`
 and `decision-extraction` extras unless `OCI_PYTHON` is supplied.
 Model, GPU allocation, and worker environment overrides remain available.
 
+Each retrieval worker reuses validated patient indexes and their padded MaxSim
+document batches in a bounded memory cache: at most 16 patients and 128 MiB of
+combined host vectors and GPU buffers per worker. A changed or replaced index
+file invalidates its memory entry and goes through the existing checksum and
+source-span validation. The scoring operations, padding masks, and ranking order
+remain the same. Prompt packing tokenizes candidate prefixes in one batch, keeps
+the original first-over-budget stopping rule, and sends the chosen token IDs
+directly to Plumb without tokenizing the final prompt again.
+
 Explicit saved-run launches (`OCI_RUN_CONFIG` with `STAGE2_ONLY=1`, including
 preflight and reselection) preserve the saved backend and model configuration.
 The new defaults apply to fresh configuration construction; choose a fresh
@@ -311,7 +320,8 @@ token budget improved throughput materially on this workload. These are
 **serving-only** measurements: retrieval, prompt packing/tokenization, and
 checkpoint writes were excluded. They do not establish an end-to-end optimum
 or the optimum on H100/RTX PRO 6000. The eight-GPU launchers allow 128 requests
-across seven Plumb replicas, with eight sequences and 4096 tokens per server.
+across seven Plumb replicas on H100 or eight on RTX PRO 6000, with eight sequences
+and a default 4096-token batch per server.
 That is a global request limit, including queued work, not 128 GPU sequences
 per replica or a claim of measured throughput improvement.
 
@@ -331,3 +341,23 @@ existing extraction's decision directory and its matching local model/tokenizer.
 Raw results, server commands/logs, and prompt hashes are saved under
 `artifacts/plumb_feasibility/throughput_baseline` and
 `artifacts/plumb_feasibility/throughput_16k` for the measurements above.
+
+## Preparation optimization check, 2026-10-05
+
+A paired check used 30 saved decision audits from the five outer folds on the
+RTX PRO 6000 run. Cached document scoring returned identical retrieval results,
+and batched prompt packing sent identical token IDs, including the original
+first-over-budget stopping behavior. With warm query vectors and patient indexes,
+median retrieval time fell from 14.4 ms to 0.69 ms. Median prompt-packing time fell
+from 26.7 ms to 7.53 ms. These measurements exclude classifier serving and checkpoint
+writes. Results and prompt hashes are recorded in the run's restart metadata under
+`plumb_preparation_throughput_20261005T015228Z/preparation_benchmark.json`.
+
+The saved run resumed with an 8192-token Plumb batch, retaining eight sequences,
+the 3072-token context, 28% Plumb memory allocation, and the Gemma server on GPU 0
+at 50%. Completed extraction and upstream checkpoints were preserved.
+An initial 60-second live sample measured 59.3 classifier requests/s across the
+eight replicas, versus 37.6 requests/s in the prior sample, a 58% increase.
+All five folds were running without recoveries. This is an early end-to-end
+observation as the feature mix progresses, rather than a controlled serving-only
+comparison. The samples and summary are recorded in the same restart metadata.

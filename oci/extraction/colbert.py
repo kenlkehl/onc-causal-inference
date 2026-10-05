@@ -25,6 +25,8 @@ import numpy as np
 from ..colbert_config import colbert_config_from_mapping
 
 LOGGER = logging.getLogger(__name__)
+_PATIENT_CACHE_BYTES = 128 * 1024 * 1024
+_PATIENT_CACHE_ENTRIES = 16
 
 
 def digest(value):
@@ -183,7 +185,22 @@ def load_index(path, identity, text):
     return chunks, list(np.split(vectors, np.cumsum(lengths)[:-1])) if chunks else []
 
 
-def maxsim_scores(query, documents, *, device="cpu", batch_size=32):
+def _maxsim_batches(documents, *, device, batch_size):
+    """Prepare unchanged document batches once for repeated feature searches."""
+    import torch
+
+    for offset in range(0, len(documents), batch_size):
+        batch = documents[offset : offset + batch_size]
+        longest = max(len(v) for v in batch)
+        vectors = torch.zeros((len(batch), longest, batch[0].shape[1]), device=device)
+        mask = torch.zeros((len(batch), longest), dtype=torch.bool, device=device)
+        for i, doc in enumerate(batch):
+            vectors[i, : len(doc)] = torch.as_tensor(doc, device=device)
+            mask[i, : len(doc)] = True
+        yield vectors, mask
+
+
+def maxsim_scores(query, documents, *, device="cpu", batch_size=32, prepared_batches=None):
     """Exact sum-of-token-maxima cosine score, with bounded GPU working memory."""
     if not documents:
         return np.empty(0, dtype=np.float32)
@@ -196,14 +213,9 @@ def maxsim_scores(query, documents, *, device="cpu", batch_size=32):
     scores = []
     with torch.inference_mode():
         q = torch.as_tensor(query, device=device)
-        for offset in range(0, len(documents), batch_size):
-            batch = documents[offset : offset + batch_size]
-            longest = max(len(v) for v in batch)
-            vectors = torch.zeros((len(batch), longest, query.shape[1]), device=device)
-            mask = torch.zeros((len(batch), longest), dtype=torch.bool, device=device)
-            for i, doc in enumerate(batch):
-                vectors[i, : len(doc)] = torch.as_tensor(doc, device=device)
-                mask[i, : len(doc)] = True
+        batches = prepared_batches if prepared_batches is not None else _maxsim_batches(
+            documents, device=device, batch_size=batch_size)
+        for vectors, mask in batches:
             similarity = torch.einsum("qd,btd->bqt", q, vectors)
             similarity.masked_fill_(~mask[:, None, :], -torch.inf)
             scores.extend(similarity.max(dim=-1).values.sum(dim=-1).cpu().tolist())
@@ -235,16 +247,26 @@ class _DeviceWorker:
         self.config, self.device, self.folder, self.signature = config, device, folder, signature
         self.encoder = None
         self.queries = OrderedDict()
+        self.patients = OrderedDict()
+        self.patient_cache_bytes = 0
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"colbert-{device}")
 
-    def retrieve(self, text, queries, top_k):
-        if self.encoder is None:
-            from .colbert_encoder import ColBERTEncoder
+    @staticmethod
+    def _index_version(path):
+        try:
+            stat = path.stat()
+            return stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+        except FileNotFoundError:
+            return None
 
-            self.encoder = ColBERTEncoder(self.config, self.device, self.folder)
-        identity = {**self.signature, "source_sha256": hashlib.sha256(text.encode()).hexdigest()}
-        key = digest(identity)
-        path = Path(self.config.cache_dir).expanduser() / "patients" / key[:2] / (key + ".npz")
+    def _patient_index(self, path, identity, text):
+        cached = self.patients.pop(path, None)
+        if cached is not None:
+            self.patient_cache_bytes -= cached["bytes"]
+            if cached["version"] == self._index_version(path):
+                self.patients[path] = cached
+                self.patient_cache_bytes += cached["bytes"]
+                return cached["chunks"], cached["vectors"], cached["batches"], True
         with cache_lock(path):
             try:
                 chunks, vectors = load_index(path, identity, text)
@@ -260,6 +282,40 @@ class _DeviceWorker:
                     vectors.extend(encoded)
                 save_index(path, identity, chunks, vectors)
                 cache_hit = False
+            version = self._index_version(path)
+        # Bound both host vectors and padded GPU batches before allocating.
+        size = sum(v.nbytes for v in vectors)
+        if self.device != "cpu":
+            for offset in range(0, len(vectors), self.config.score_batch_size):
+                batch = vectors[offset:offset + self.config.score_batch_size]
+                size += len(batch) * max(len(v) for v in batch) * (batch[0].shape[1] * 4 + 1)
+        batches = None
+        if size <= _PATIENT_CACHE_BYTES:
+            while self.patients and (self.patient_cache_bytes + size > _PATIENT_CACHE_BYTES
+                                    or len(self.patients) >= _PATIENT_CACHE_ENTRIES):
+                _, removed = self.patients.popitem(last=False)
+                self.patient_cache_bytes -= removed["bytes"]
+                del removed
+            if self.device != "cpu":
+                import torch
+
+                with torch.inference_mode():
+                    batches = list(_maxsim_batches(vectors, device=self.device,
+                                                   batch_size=self.config.score_batch_size))
+            self.patients[path] = {"version": version, "chunks": chunks, "vectors": vectors,
+                                   "batches": batches, "bytes": size}
+            self.patient_cache_bytes += size
+        return chunks, vectors, batches, cache_hit
+
+    def retrieve(self, text, queries, top_k):
+        if self.encoder is None:
+            from .colbert_encoder import ColBERTEncoder
+
+            self.encoder = ColBERTEncoder(self.config, self.device, self.folder)
+        identity = {**self.signature, "source_sha256": hashlib.sha256(text.encode()).hexdigest()}
+        key = digest(identity)
+        path = Path(self.config.cache_dir).expanduser() / "patients" / key[:2] / (key + ".npz")
+        chunks, vectors, batches, cache_hit = self._patient_index(path, identity, text)
         missing = list(dict.fromkeys(q for q in queries if q not in self.queries))
         for start in range(0, len(missing), self.config.batch_size):
             batch = missing[start : start + self.config.batch_size]
@@ -274,6 +330,7 @@ class _DeviceWorker:
                 vectors,
                 device=self.device,
                 batch_size=self.config.score_batch_size,
+                prepared_batches=batches,
             )
             order = np.argsort(-scores, kind="stable")[:top_k]
             hits.append(

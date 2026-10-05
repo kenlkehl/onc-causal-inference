@@ -97,18 +97,30 @@ def packed_decision(client, *, source, evidence, criterion, options):
     ranked = [hit for group in evidence["hits"] for hit in group]
     # Retrieval is for exactly one feature. Source order is restored by render_context.
     selected = []
-    empty_tokens = len(client.encode(decision_messages("", criterion, options)))
+    encode_batch = getattr(client, "encode_batch", None)
+    encoded = None
+    if encode_batch is not None:
+        contexts = [""] + [render_context(source, ranked[:i]) for i in range(1, len(ranked) + 1)]
+        encoded = encode_batch([decision_messages(context, criterion, options) for context in contexts])
+        empty_tokens = len(encoded[0])
+    else:
+        empty_tokens = len(client.encode(decision_messages("", criterion, options)))
     if empty_tokens > client.policy.max_prompt_tokens:
         raise ValueError("Feature ontology alone exceeds the decision prompt token budget")
-    for hit in ranked:
-        candidate = render_context(source, [*selected, hit])
-        if len(client.encode(decision_messages(candidate, criterion, options))) > client.policy.max_prompt_tokens:
+    for i, hit in enumerate(ranked, 1):
+        if encoded is not None:
+            tokens = len(encoded[i])
+        else:
+            candidate = render_context(source, [*selected, hit])
+            tokens = len(client.encode(decision_messages(candidate, criterion, options)))
+        if tokens > client.policy.max_prompt_tokens:
             break
         selected.append(hit)
     if ranked and not selected:
         raise ValueError("No complete retrieved chunk fits the decision prompt; shorten the feature contract")
     context = render_context(source, selected) if selected else ""
-    result = client.decide(context, criterion, options)
+    result = client.decide(context, criterion, options,
+        **({"prompt_token_ids": encoded[len(selected)]} if encoded is not None else {}))
     result["retrieval_budget"] = {"selected_chunk_indices": [h["chunk_index"] for h in selected],
         "omitted_chunk_indices": [h["chunk_index"] for h in ranked[len(selected):]],
         "max_prompt_tokens": client.policy.max_prompt_tokens}
