@@ -30,7 +30,7 @@ import torch
 logger = logging.getLogger(__name__)
 
 STAGE1_CHECKPOINT_SCHEMA_VERSION = "stage1_context_checkpoint_v1"
-STAGE1_CHECKPOINT_IMPLEMENTATION_VERSION = 1
+STAGE1_CHECKPOINT_IMPLEMENTATION_VERSION = 2
 
 T = TypeVar("T")
 

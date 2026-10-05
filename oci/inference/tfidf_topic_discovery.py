@@ -71,7 +71,7 @@ from .tfidf_safe_artifacts import (
 logger = logging.getLogger(__name__)
 
 HANDOFF_SCHEMA_VERSION = "multi_model_forest_handoff_v2"
-DISCOVERY_SCHEMA_VERSION = "tfidf_topic_discovery_v3_safe_arrays"
+DISCOVERY_SCHEMA_VERSION = "tfidf_topic_discovery_v3_safe_arrays_dina_v1"
 TFIDF_CONTEXT_ARTIFACT_INVENTORY_SCHEMA = "tfidf_context_artifact_inventory_v1"
 TFIDF_NUISANCE_EXECUTION_ATTESTATION_SCHEMA = (
     "tfidf_joint_nuisance_fold_execution_attestation_v1"
@@ -651,6 +651,18 @@ def _fit_joint_nuisance_top_level_fold(
             bool(task.outcome_binary),
         ),
     }
+    if task.outcome_binary:
+        targets.update(
+            mu0=(np.asarray(task.outcome, float), True), mu1=(np.asarray(task.outcome, float), True)
+        )
+
+    def target_rows(target, positions):
+        return (
+            np.asarray(task.treatment)[positions] == int(target[-1])
+            if target in {"mu0", "mu1"}
+            else np.ones(len(positions), bool)
+        )
+
     split_labels = np.asarray(task.split_labels, dtype=int)
     views = list(task.views)
     grouped: Dict[Tuple[Any, ...], List[Tuple[int, BoWViewConfig]]] = {}
@@ -709,16 +721,19 @@ def _fit_joint_nuisance_top_level_fold(
                     for target_index, (target, (values, binary)) in enumerate(
                         targets.items()
                     ):
+                        mask = target_rows(target, sub_fit_pos)
+                        if not mask.any():
+                            raise ValueError("DINA nuisance subfold lacks a treatment arm")
                         if x_sub_fit is None:
                             prediction = _constant_prediction(
-                                values[sub_fit_pos],
+                                values[sub_fit_pos][mask],
                                 len(sub_hold_pos),
                             )
                         else:
                             prediction, _ = _matrix_model_prediction(
-                                x_sub_fit,
+                                x_sub_fit[mask],
                                 x_sub_hold,
-                                values[sub_fit_pos],
+                                values[sub_fit_pos][mask],
                                 view,
                                 binary=binary,
                                 seed=(
@@ -760,16 +775,19 @@ def _fit_joint_nuisance_top_level_fold(
                 for target_index, (target, (values, binary)) in enumerate(
                     targets.items()
                 ):
+                    mask = target_rows(target, fit_pos)
+                    if not mask.any():
+                        raise ValueError("DINA nuisance fold lacks a treatment arm")
                     if x_fit is None:
                         prediction = _constant_prediction(
-                            values[fit_pos],
+                            values[fit_pos][mask],
                             len(heldout_pos),
                         )
                     else:
                         prediction, _ = _matrix_model_prediction(
-                            x_fit,
+                            x_fit[mask],
                             x_heldout,
-                            values[fit_pos],
+                            values[fit_pos][mask],
                             view,
                             binary=binary,
                             seed=(
@@ -788,16 +806,12 @@ def _fit_joint_nuisance_top_level_fold(
                 raise RuntimeError(
                     f"Nested {target} nuisance meta-features are incomplete"
                 )
+            mask = target_rows(target, fit_pos)
             stack_model, stack_constant = _fit_stack(
-                meta_fit[target],
-                values[fit_pos],
+                meta_fit[target][mask],
+                values[fit_pos][mask],
                 binary=binary,
-                seed=(
-                    task.random_state
-                    + 40_000
-                    + 10 * task.fold
-                    + target_index
-                ),
+                seed=(task.random_state + 40_000 + 10 * task.fold + target_index),
                 config=task.nuisance_stack_config,
             )
             held_meta = base_predictions[target]
@@ -912,17 +926,21 @@ def _run_joint_nuisance_top_level_folds(
             raise RuntimeError(
                 "parallel TF-IDF nuisance worker substituted fold positions"
             )
+        expected_targets = (
+            {"treatment", "outcome", "mu0", "mu1"}
+            if expected.outcome_binary
+            else {"treatment", "outcome"}
+        )
         if (
-            set(result.base_predictions) != {"treatment", "outcome"}
-            or set(result.stacked_predictions) != {"treatment", "outcome"}
+            set(result.base_predictions) != expected_targets
+            or set(result.stacked_predictions) != expected_targets
             or int(result.subfold_parallelism) != 1
-            or int(result.finished_monotonic_ns)
-            <= int(result.started_monotonic_ns)
+            or int(result.finished_monotonic_ns) <= int(result.started_monotonic_ns)
         ):
             raise RuntimeError(
                 "parallel TF-IDF nuisance worker returned an invalid fold result"
             )
-        for target in ("treatment", "outcome"):
+        for target in expected_targets:
             base = np.asarray(result.base_predictions[target], dtype=float)
             stacked = np.asarray(
                 result.stacked_predictions[target],
@@ -1043,6 +1061,18 @@ def fit_joint_cross_fitted_nuisance_stacks(
         "treatment": (np.asarray(treatment, dtype=float), True),
         "outcome": (np.asarray(outcome, dtype=float), bool(outcome_binary)),
     }
+    if outcome_binary:
+        targets.update(
+            mu0=(np.asarray(outcome, float), True), mu1=(np.asarray(outcome, float), True)
+        )
+
+    def target_rows(target):
+        return (
+            np.asarray(treatment) == int(target[-1])
+            if target in {"mu0", "mu1"}
+            else np.ones(len(texts), bool)
+        )
+
     split_labels = np.asarray(strata, dtype=int)
     views = list(views)
     n_rows = len(texts)
@@ -1134,12 +1164,15 @@ def fit_joint_cross_fitted_nuisance_stacks(
             x_full = None
         for view_index, view in group_views:
             for target_index, (target, (values, binary)) in enumerate(targets.items()):
+                mask = target_rows(target)
                 model = None
-                if x_full is not None and not (binary and len(np.unique(values.astype(int))) < 2):
+                if x_full is not None and not (
+                    binary and len(np.unique(values[mask].astype(int))) < 2
+                ):
                     _, model = _matrix_model_prediction(
-                        x_full,
+                        x_full[mask],
                         x_full[:0],
-                        values,
+                        values[mask],
                         view,
                         binary=binary,
                         seed=random_state
@@ -1151,16 +1184,17 @@ def fit_joint_cross_fitted_nuisance_stacks(
                 fitted_bases[target][view_index] = (
                     vectorizer,
                     model,
-                    float(np.mean(values)),
+                    float(np.mean(values[mask])),
                 )
 
     output: Dict[str, Dict[str, Any]] = {}
     for target_index, (target, (values, binary)) in enumerate(targets.items()):
         if not np.isfinite(base_oof[target]).all() or not np.isfinite(stack_oof[target]).all():
             raise RuntimeError(f"Cross-fitted {target} nuisance predictions are incomplete")
+        mask = target_rows(target)
         complete_stack, complete_constant = _fit_stack(
-            base_oof[target],
-            values,
+            base_oof[target][mask],
+            values[mask],
             binary=binary,
             seed=random_state + 60_000 + target_index,
             config=nuisance_stack_config,
@@ -1191,15 +1225,15 @@ def fit_joint_cross_fitted_nuisance_stacks(
             "fit_positions_by_row": [list(values) for values in fit_positions_by_row],
             "fitted": fitted,
             "metrics": nuisance_metrics(
-                values,
-                stack_oof[target],
+                values[mask],
+                stack_oof[target][mask],
                 binary=binary,
                 calibration_config=nuisance_stack_config.calibration,
             ),
             "view_metrics": {
                 view.name: nuisance_metrics(
-                    values,
-                    base_oof[target][:, index],
+                    values[mask],
+                    base_oof[target][mask, index],
                     binary=binary,
                     calibration_config=nuisance_stack_config.calibration,
                 )
@@ -1374,6 +1408,8 @@ def cohort_contrast_scores(
     outcome: Sequence[float],
     propensity_prediction: Sequence[float],
     outcome_prediction: Sequence[float],
+    *,
+    dina_nuisance=None,
 ) -> pd.DataFrame:
     """Calculate signed orthogonal cohort moments and robust standard errors."""
     x = sparse.csr_matrix(matrix, dtype=float)
@@ -1389,9 +1425,21 @@ def cohort_contrast_scores(
     denominator = float(np.dot(u, u))
     constant_effect = 0.0 if denominator <= 0.0 else float(np.dot(u, v) / denominator)
     contribution = u * (v - constant_effect * u)
+    centers = np.zeros(x.shape[1])
+    if dina_nuisance is not None:
+        from ..models import dina
+
+        contribution, weights, constant_effect = dina.score(
+            y, t, dina_nuisance["a"], dina_nuisance["nu"]
+        )
+        centers = np.asarray(x.T @ weights).ravel() / max(weights.sum(), 1e-15)
     n_rows = max(1, len(t))
-    moments = np.asarray(x.T @ contribution).ravel() / n_rows
+    moments = (np.asarray(x.T @ contribution).ravel() - centers * contribution.sum()) / n_rows
     squared_sum = np.asarray(x.power(2).T @ np.square(contribution)).ravel()
+    squared_sum += (
+        -2 * centers * np.asarray(x.T @ np.square(contribution)).ravel()
+        + centers**2 * np.square(contribution).sum()
+    )
     variances = np.maximum(0.0, squared_sum / n_rows - np.square(moments))
     robust_se = np.sqrt(variances / n_rows)
     scores = np.divide(
@@ -1414,6 +1462,9 @@ def cohort_contrast_scores(
             "support_control": support_control,
             "support_treated": support_treated,
             "constant_residual_effect": constant_effect,
+            "effect_objective": (
+                "bernoulli_dina_score" if dina_nuisance is not None else "orthogonal_r_score"
+            ),
         }
     )
 
@@ -1563,16 +1614,30 @@ def add_effect_stability(
     strata: np.ndarray,
     config: TfidfTopicDiscoveryConfig,
     random_state: int,
+    dina_nuisance=None,
 ) -> pd.DataFrame:
     result = scores.copy()
     x = sparse.csr_matrix(matrix)
     names = result["feature"].tolist()
     reference_sign = np.sign(result["signed_score"].to_numpy(dtype=float))
     source_agreements: List[np.ndarray] = []
-    for source_e, source_m in nuisance_sources:
-        source = cohort_contrast_scores(x, names, treatment, outcome, source_e, source_m)[
-            "signed_score"
-        ].to_numpy(dtype=float)
+    for source_values in nuisance_sources:
+        source_e, source_m = source_values[:2]
+        dn = None
+        if dina_nuisance is not None:
+            from ..models import dina
+
+            dn = dina.nuisances(
+                source_e,
+                *(
+                    source_values[2:]
+                    if len(source_values) == 4
+                    else (dina_nuisance["mu0"], dina_nuisance["mu1"])
+                ),
+            )
+        source = cohort_contrast_scores(
+            x, names, treatment, outcome, source_e, source_m, dina_nuisance=dn
+        )["signed_score"].to_numpy(dtype=float)
         source_agreements.append((np.sign(source) == reference_sign).astype(float))
     result["nuisance_source_agreement"] = (
         np.mean(np.vstack(source_agreements), axis=0)
@@ -1598,6 +1663,11 @@ def add_effect_stability(
             outcome[positions],
             stacked_e[positions],
             stacked_m[positions],
+            dina_nuisance=(
+                None
+                if dina_nuisance is None
+                else {k: v[positions] for k, v in dina_nuisance.items()}
+            ),
         )
         magnitude = sample["unsigned_score"].to_numpy(dtype=float)
         valid = np.where(eligible_support)[0]
@@ -1614,6 +1684,16 @@ def add_effect_stability(
         (outcome - stacked_m)
         - float(result["constant_residual_effect"].iloc[0]) * (treatment - stacked_e)
     )
+    if dina_nuisance is not None:
+        from ..models import dina
+
+        contribution, _, _ = dina.score(
+            outcome,
+            treatment,
+            dina_nuisance["a"],
+            dina_nuisance["nu"],
+            delta=float(result["constant_residual_effect"].iloc[0]),
+        )
     tail_agreement = np.zeros(len(result), dtype=float)
     csc = x.tocsc()
     for index in range(x.shape[1]):
@@ -2069,6 +2149,20 @@ def fit_tfidf_topic_context(
     outcome_result = joint_nuisance["outcome"]
     external_e, external_e_views = treatment_result["fitted"].predict(heldout_texts)
     external_m, external_m_views = outcome_result["fitted"].predict(heldout_texts)
+    dn = dv = None
+    if outcome_binary:
+        from ..models import dina
+
+        dn = dina.nuisances(
+            treatment_result["stacked_oof"],
+            joint_nuisance["mu0"]["stacked_oof"],
+            joint_nuisance["mu1"]["stacked_oof"],
+        )
+        dv = dina.nuisances(
+            external_e,
+            joint_nuisance["mu0"]["fitted"].predict(heldout_texts)[0],
+            joint_nuisance["mu1"]["fitted"].predict(heldout_texts)[0],
+        )
 
     vectorizer = _common_vectorizer(config)
     common_fit = vectorizer.fit_transform(fit_texts)
@@ -2132,6 +2226,14 @@ def fit_tfidf_topic_context(
 
     nuisance_sources = [
         (treatment_result["base_oof"][:, index], outcome_result["base_oof"][:, index])
+        + (
+            (
+                joint_nuisance["mu0"]["base_oof"][:, index],
+                joint_nuisance["mu1"]["base_oof"][:, index],
+            )
+            if outcome_binary
+            else ()
+        )
         for index in range(
             min(treatment_result["base_oof"].shape[1], outcome_result["base_oof"].shape[1])
         )
@@ -2144,6 +2246,7 @@ def fit_tfidf_topic_context(
             outcome,
             treatment_result["stacked_oof"],
             outcome_result["stacked_oof"],
+            dina_nuisance=dn,
         ),
         common_fit,
         treatment,
@@ -2154,6 +2257,7 @@ def fit_tfidf_topic_context(
         strata=strata,
         config=config,
         random_state=config.random_state + 501,
+        dina_nuisance=dn,
     )
 
     score_frames = {
@@ -2231,6 +2335,7 @@ def fit_tfidf_topic_context(
         # This block is used only for exact candidate-selection inner contexts.
         # Full outer contexts never read outer-held-out treatment or outcome.
         topic_score_tests = score_topic_banks(
+            dina_nuisance=(dn, dv) if dn is not None else None,
             fit_matrix=common_fit,
             heldout_matrix=common_heldout,
             feature_names=feature_names,
@@ -2300,6 +2405,8 @@ def fit_tfidf_topic_context(
                 treatment_result["base_oof"][position, index]
             )
             row[f"outcome_view__{view.name}"] = float(outcome_result["base_oof"][position, index])
+        if dn is not None:
+            row.update({"dina_" + k: float(v[position]) for k, v in dn.items()})
         oof_rows.append(row)
     external_rows: List[Dict[str, Any]] = []
     for position, row_id in enumerate(heldout_row_ids):
@@ -2313,6 +2420,8 @@ def fit_tfidf_topic_context(
         for view in views:
             row[f"treatment_view__{view.name}"] = float(external_e_views[view.name][position])
             row[f"outcome_view__{view.name}"] = float(external_m_views[view.name][position])
+        if dv is not None:
+            row.update({"dina_" + k: float(v[position]) for k, v in dv.items()})
         external_rows.append(row)
     nuisance_path = artifact_dir / "nuisance_predictions.parquet"
     pd.DataFrame([*oof_rows, *external_rows]).to_parquet(nuisance_path, index=False)

@@ -7,6 +7,10 @@ from . import stage2_multi_model_selection as numerical
 
 
 def effect_model_family(estimator, outcome_type):
+    if estimator == "dina":
+        if outcome_type != "binary":
+            raise ValueError("DINA final architecture requires binary outcomes")
+        return "grouped_bernoulli_dina"
     if estimator == "causal_forest":
         return "causal_forest_dml"
     if estimator == "linear_interactions":

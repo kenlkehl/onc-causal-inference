@@ -365,6 +365,8 @@ def standardized_cohort_moments(
     constant_effect: float,
     center_with_evaluation_treatment: bool = True,
     fixed_centers: Optional[np.ndarray] = None,
+    score_contribution=None,
+    score_weights=None,
 ) -> Dict[str, np.ndarray]:
     """Score fixed witness activations using cohort-level moments.
 
@@ -382,7 +384,7 @@ def standardized_cohort_moments(
     if fixed_centers is not None:
         centers = np.asarray(fixed_centers, dtype=float).reshape(-1)
     elif center_with_evaluation_treatment:
-        weights = np.square(u)
+        weights = np.square(u) if score_weights is None else np.asarray(score_weights, float)
         denominator = float(np.sum(weights))
         centers = (
             np.mean(values, axis=0)
@@ -394,6 +396,8 @@ def standardized_cohort_moments(
     if len(centers) != values.shape[1]:
         raise ValueError("One centering constant is required per activation column")
     contribution, _ = cohort_contribution(u, v, constant_effect=constant_effect)
+    if score_contribution is not None:
+        contribution = np.asarray(score_contribution, float)
     row_scores = (values - centers) * contribution[:, None]
     moments = np.mean(row_scores, axis=0)
     scales = np.std(row_scores, axis=0, ddof=1)

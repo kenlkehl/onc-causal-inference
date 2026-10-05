@@ -285,15 +285,15 @@ def _candidate_statistical_evidence(
                 "reason": _bounded_text(row.get("reason"), 500),
                 "rank": row.get("rank"),
                 "selected_top_n": bool(row.get("selected_top_n")),
+                "effect_objective": row.get("effect_objective", "squared_r_loss"),
+                "effect_scale": row.get("effect_scale", "outcome_difference"),
                 "heldout_r_loss_improvement": _finite_or_none(
                     row.get("heldout_r_loss_improvement")
                 ),
                 "heldout_relative_r_loss_improvement": _finite_or_none(
                     row.get("heldout_relative_r_loss_improvement")
                 ),
-                "interaction_degrees_of_freedom": row.get(
-                    "interaction_degrees_of_freedom"
-                ),
+                "interaction_degrees_of_freedom": row.get("interaction_degrees_of_freedom"),
             }
         )
 
@@ -307,6 +307,8 @@ def _candidate_statistical_evidence(
                 "feature_group_l2_norm": _finite_or_none(
                     (fold.get("feature_group_l2_norms") or {}).get(feature_id)
                 ),
+                "effect_objective": fold.get("effect_objective", "squared_r_loss"),
+                "effect_scale": fold.get("effect_scale", "outcome_difference"),
                 "joint_model_heldout_r_loss_improvement": _finite_or_none(
                     fold.get("heldout_r_loss_improvement")
                 ),
@@ -391,6 +393,9 @@ def build_stage2_role_evidence(
             "definition_fields_use_an_explicit_allowlist": True,
         },
         "methodology": {
+            "effect_objective": statistical_report.get("effect_objective", "squared_r_loss"),
+            "effect_scale": statistical_report.get("effect_scale", "outcome_difference"),
+            "binary_effect_loss_fields": "For binary DINA reports, legacy r_loss keys denote Bernoulli negative log likelihood gains.",
             "confounder": [
                 "multivariable grouped elastic-net treatment and marginal-outcome support",
                 (
@@ -399,8 +404,8 @@ def build_stage2_role_evidence(
                 ),
             ],
             "effect_modifier": [
-                "candidate-augmented univariable R-learner held-out R-loss comparisons",
-                "joint multivariable grouped elastic-net R-loss interaction selection",
+                "candidate-group DINA held-out likelihood comparisons for binary outcomes; candidate-augmented R-loss otherwise",
+                "joint grouped elastic-net DINA likelihood selection for binary outcomes; R-loss otherwise",
             ],
             "all_statistics_are_evidence_not_automatic_role_labels": True,
         },

@@ -21,10 +21,11 @@ from . import stage2_modifier_ranking as ranking
 from . import stage2_modifier_concepts as concepts
 from .stage2_prompt_catalog import PROMPT_VERSION
 from .stage2_effect_estimators import fit_interaction_effect
+from .stage2_dina import fit_effect as fit_dina_effect, unpack_nuisances as unpack_dina_nuisances
 from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = "stage2_nested_modifier_count_v3_concepts"
+SCHEMA_VERSION = "stage2_nested_modifier_count_v4_dina"
 
 
 def choose_modifier_count(fold_losses, *, rule):
@@ -74,7 +75,8 @@ def choose_effect_model(losses, *, rule):
     Equal losses (or the optional one-SE simplification rule) prefer fewer
     modifiers, then the linear architecture. Forest seeds are already averaged.
     """
-    order = sorted(losses, key=lambda pair: (pair[1], pair[0] != "linear_interactions"))
+    architecture_order = {"linear_interactions": 0, "dina": 1, "causal_forest": 2}
+    order = sorted(losses, key=lambda pair: (pair[1], architecture_order[pair[0]]))
     indexed = choose_modifier_count({i: losses[pair] for i, pair in enumerate(order)}, rule=rule)
     best, chosen = order[indexed["best_mean_count"]], order[indexed["chosen_additional_count"]]
     return {
@@ -99,7 +101,7 @@ def choose_effect_model(losses, *, rule):
             }
             for estimator in sorted({e for e, _ in order})
         },
-        "tie_break": "fewer_modifiers_then_linear_interactions",
+        "tie_break": "fewer_modifiers_then_linear_interactions_then_dina_then_causal_forest",
         "formal_error_guarantee": False,
     }
 
@@ -307,6 +309,8 @@ def select_modifier_count(
                 concepts.__file__,
                 analysis.__file__,
                 Path(__file__).with_name("stage2_effect_estimators.py"),
+                Path(__file__).with_name("stage2_dina.py"),
+                Path(__file__).parent.parent / "models" / "dina.py",
             )
         },
     }
@@ -345,7 +349,10 @@ def select_modifier_count(
         )
 
     def compute():
-        fold_records, losses = [], {(e, k): [] for e in cfg.estimators for k in counts}
+        estimators = tuple(e for e in cfg.estimators if e != "dina" or outcome_type == "binary")
+        if not estimators:
+            raise ValueError("no final architectures support this outcome type")
+        fold_records, losses = [], {(e, k): [] for e in estimators for k in counts}
         for position, split in enumerate(inner_splits, 1):
             number = int(split.get("inner_fold", position))
             train_ids, valid_ids = split["fit_row_ids"], split["heldout_row_ids"]
@@ -471,16 +478,64 @@ def select_modifier_count(
                     "ranking_path": str(root / "ranking/ranking.json"),
                 }
             )
+            dina_nuisance_cache = {}
             with threadpool_limits(limits=1):
                 for count in counts:
                     ids = [*locked_modifiers, *keys[:count]]
-                    for estimator in cfg.estimators:
+                    for estimator in estimators:
                         seed_losses = []
                         repeats = cfg.forest_seeds if estimator == "causal_forest" else 1
                         for repeat in range(repeats):
                             model_seed = fold_seed + 20_000 + repeat * 1_000_000
 
                             def score():
+                                if estimator == "dina":
+                                    try:
+                                        if not dina_nuisance_cache:
+                                            dina_nuisance_cache["raw"] = numerical._nuisances(
+                                                ft,
+                                                fv,
+                                                definitions,
+                                                t[keep],
+                                                y[keep],
+                                                binary=True,
+                                                policy=policy,
+                                                seed=model_seed + 100_000,
+                                            )
+                                        shared_nuisance = unpack_dina_nuisances(
+                                            dina_nuisance_cache["raw"]
+                                        )
+                                        fitted = fit_dina_effect(
+                                            train=ft,
+                                            valid=fv,
+                                            definitions=definitions,
+                                            modifier_ids=ids,
+                                            nuisance=shared_nuisance,
+                                            treatment=t[keep],
+                                            outcome=y[keep],
+                                            policy=policy,
+                                            seed=model_seed,
+                                        )
+                                    except numerical.NotEstimable as exc:
+                                        return {
+                                            "status": "not_estimable",
+                                            "reason": str(exc),
+                                            "r_loss": None,
+                                            "feature_ids": ids,
+                                            "validation_row_ids": fv._oci_row_id.astype(
+                                                int
+                                            ).tolist(),
+                                        }
+                                    errors = (yvr - tvr * fitted["tau"]) ** 2
+                                    return {
+                                        "feature_ids": ids,
+                                        "r_loss": float(errors.mean()),
+                                        "squared_errors": errors.tolist(),
+                                        "predictions": fitted["tau"].tolist(),
+                                        "log_odds_ratio": fitted["delta"].tolist(),
+                                        "model_audit": fitted["audit"],
+                                        "validation_row_ids": fv._oci_row_id.astype(int).tolist(),
+                                    }
                                 if estimator == "linear_interactions":
                                     return _score_interactions(
                                         train=ft,
@@ -515,7 +570,11 @@ def select_modifier_count(
                                 score,
                             )
                             seed_losses.append(cell["r_loss"])
-                        losses[estimator, count].append(float(np.mean(seed_losses)))
+                        losses[estimator, count].append(
+                            float(np.mean(seed_losses))
+                            if all(v is not None for v in seed_losses)
+                            else None
+                        )
                         LOGGER.info(
                             "Stage 2 effect model fold=%s estimator=%s additional=%s R-loss=%s",
                             number,
@@ -523,7 +582,20 @@ def select_modifier_count(
                             count,
                             losses[estimator, count][-1],
                         )
-        choice = choose_effect_model(losses, rule=cfg.selection_rule)
+        unavailable = {
+            f"{e}/{k}": values
+            for (e, k), values in losses.items()
+            if any(v is None for v in values)
+        }
+        evaluable = {
+            key: values for key, values in losses.items() if all(v is not None for v in values)
+        }
+        if not evaluable:
+            raise ValueError(
+                "no architecture/modifier-count combination is estimable on every validation fold"
+            )
+        choice = choose_effect_model(evaluable, rule=cfg.selection_rule)
+        choice["unavailable_models"] = unavailable
         full_rank = (
             get_ranking(statistical_report, directory / "full_training_ranking")
             if maximum
@@ -547,16 +619,19 @@ def select_modifier_count(
             "input_fingerprint": fingerprint,
             "choice": choice,
             "chosen_estimator": choice["chosen_estimator"],
-            "chosen_modifier_count": len(locked_modifiers) + min(choice["chosen_additional_count"], len(full_rank["ranking"])),
+            "chosen_modifier_count": len(locked_modifiers)
+            + min(choice["chosen_additional_count"], len(full_rank["ranking"])),
             "requested_additional_budget": choice["chosen_additional_count"],
-            "actual_additional_count": min(choice["chosen_additional_count"], len(full_rank["ranking"])),
+            "actual_additional_count": min(
+                choice["chosen_additional_count"], len(full_rank["ranking"])
+            ),
             "concept_review_enabled": cfg.concept_review,
             "locked_modifier_ids": locked_modifiers,
             "full_training_ranking": full_rank,
             "folds": fold_records,
             "count_policy": cfg.public_dict(),
-            "scoring": "joint architecture/count minimum mean fold R-loss; forest seeds averaged within fold; one deterministic interaction fit per fold/count",
-            "validation_estimators": list(cfg.estimators),
+            "scoring": "joint architecture/count minimum mean fold R-loss; forest seeds averaged within fold; one deterministic interaction/DINA fit per fold/count; all effects scored as probability differences for binary outcomes",
+            "validation_estimators": list(estimators),
             "validation_adjustment": "all frozen candidates for scoring nuisances and interaction main effects; selected prefix for effect inputs/interactions",
             "final_refit_adjustment": "retained confounders and modifiers; forest refits DML nuisances, interaction model retunes outcome penalty",
             "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},

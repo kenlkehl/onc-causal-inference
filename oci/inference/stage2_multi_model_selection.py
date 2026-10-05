@@ -10,6 +10,7 @@ columns are never inspected. Only aggregate summaries enter adjudication.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import replace
 from hashlib import sha256
 import logging
 from pathlib import Path
@@ -70,10 +71,23 @@ def numerical_identity(
         "measurements_sha256": _frame_hash(frame),
         "observed_labels_sha256": _frame_hash(labels),
         "outcome_type": outcome_type,
+        "dina_core_source_sha256": sha256(
+            (Path(__file__).parent.parent / "models" / "dina.py").read_bytes()
+        ).hexdigest(),
+        "dina_adapter_source_sha256": sha256(
+            Path(__file__).with_name("stage2_dina.py").read_bytes()
+        ).hexdigest(),
         "component_source_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
         "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
-        **({"matched_batch_source_sha256": sha256(Path(matched_batch.__file__).read_bytes()).hexdigest()}
-           if _matched_batch_enabled(policy.multi_model) else {}),
+        **(
+            {
+                "matched_batch_source_sha256": sha256(
+                    Path(matched_batch.__file__).read_bytes()
+                ).hexdigest()
+            }
+            if _matched_batch_enabled(policy.multi_model)
+            else {}
+        ),
     }
 
 
@@ -352,7 +366,64 @@ def _nuisances(train, valid, definitions, t, y, *, binary, policy, seed):
         )
     if not np.isfinite(e).all() or not np.isfinite(m).all():
         raise RuntimeError("nuisance cross-fitting did not predict every training row")
+    arm_predictions = {}
+    if binary:
+        try:
+            for arm in (0, 1):
+                oof = np.full(len(y), np.nan)
+                for j, (fit, hold) in enumerate(subfolds):
+                    rows = fit[t[fit] == arm]
+                    if not len(rows):
+                        raise NotEstimable("missing_treatment_arm_for_dina_nuisance")
+                    fitted = _fit_linear(
+                        train.iloc[rows],
+                        train.iloc[hold],
+                        definitions,
+                        y[rows],
+                        binary=True,
+                        kind="main",
+                        treatment=t[rows],
+                        valid_treatment=t[hold],
+                        policy=policy,
+                        seed=seed + 1000 + arm * 100 + j,
+                        ratio=policy.l1_ratio,
+                    )
+                    oof[hold] = fitted["prediction"]
+                    audits[j].setdefault("arm_outcome_models", []).append(
+                        {
+                            "arm": arm,
+                            "fit_row_ids": train.iloc[rows]._oci_row_id.astype(int).tolist(),
+                            "validation_row_ids": train.iloc[hold]._oci_row_id.astype(int).tolist(),
+                            **fitted["audit"],
+                        }
+                    )
+                rows = np.flatnonzero(t == arm)
+                fitted = _fit_linear(
+                    train.iloc[rows],
+                    valid,
+                    definitions,
+                    y[rows],
+                    binary=True,
+                    kind="main",
+                    treatment=t[rows],
+                    valid_treatment=np.zeros(len(valid)),
+                    policy=policy,
+                    seed=seed + 2000 + arm,
+                    ratio=policy.l1_ratio,
+                )
+                if not np.isfinite(oof).all():
+                    raise RuntimeError(
+                        "DINA arm nuisance cross-fitting did not predict every training row"
+                    )
+                arm_predictions[f"training_mu{arm}"] = oof.tolist()
+                arm_predictions[f"validation_mu{arm}"] = fitted["prediction"].tolist()
+        except NotEstimable as exc:
+            arm_predictions = {
+                "dina_nuisance_status": "not_estimable",
+                "dina_nuisance_reason": str(exc),
+            }
     return {
+        **arm_predictions,
         "training_propensity": e.tolist(),
         "training_outcome": m.tolist(),
         "validation_propensity": full[0]["prediction"].tolist(),
@@ -846,7 +917,7 @@ def select_stage2_features_multi_model(
         _write_json(directory / "input.json", {**identity, "input_fingerprint": fingerprint})
     cells, oof = [], []
     cfg = policy.multi_model
-    families = tuple(f for f in FAMILIES if f != "matched_batch_contrast" or _matched_batch_enabled(cfg))
+    families = cfg.active_families(outcome_type)
     by_id = {_key(f): f for f in definitions}
     with threadpool_limits(limits=1):
         for position, split in enumerate(inner_splits, 1):
@@ -908,7 +979,7 @@ def select_stage2_features_multi_model(
                 for family in families:
                     groups = (
                         subsets
-                        if family in {"predictive_forest", "causal_forest"}
+                        if family in {"predictive_forest", "causal_forest", "dina"}
                         else [list(by_id)]
                     )
                     for subset_index, feature_ids in enumerate(groups):
@@ -923,6 +994,7 @@ def select_stage2_features_multi_model(
                                 "univariable_rlearner",
                                 "causal_forest",
                                 "matched_batch_contrast",
+                                "dina",
                             }
                             keep = (
                                 linear.propensity_eligibility(
@@ -966,6 +1038,41 @@ def select_stage2_features_multi_model(
                                         effect_keep=linear.propensity_eligibility(
                                             e[rows], policy.min_propensity, policy.max_propensity
                                         ),
+                                    )
+                                elif binary and family in {
+                                    "orthogonal_linear",
+                                    "univariable_rlearner",
+                                    "dina",
+                                }:
+                                    from . import stage2_dina
+
+                                    nt, nv_dina = stage2_dina.unpack_nuisances(nuisance)
+                                    dina_nuisance = (
+                                        {k: v[rows][keep] for k, v in nt.items()},
+                                        {k: v[keepv] for k, v in nv_dina.items()},
+                                    )
+                                    fn = (
+                                        stage2_dina.candidate_evidence
+                                        if family == "univariable_rlearner"
+                                        else stage2_dina.joint_evidence
+                                    )
+                                    extra = (
+                                        {}
+                                        if family == "univariable_rlearner"
+                                        else {"permutation": family == "dina"}
+                                    )
+                                    result = fn(
+                                        fit,
+                                        hold,
+                                        selected_definitions,
+                                        tt,
+                                        yy,
+                                        ttval,
+                                        yyval,
+                                        policy=replace(policy, l1_ratio=ratio),
+                                        seed=cell_seed,
+                                        nuisance=dina_nuisance,
+                                        **extra,
                                     )
                                 elif family in {
                                     "penalized_main",

@@ -2887,6 +2887,7 @@ class AgenticAttentionVariableForestConfig:
             )
         effect_objective = str(self.effect_objective).strip().lower()
         if effect_objective not in {
+            "dina",
             "squared_r_loss",
             "logistic_r_loss",
             "pseudo_outcome_mse",

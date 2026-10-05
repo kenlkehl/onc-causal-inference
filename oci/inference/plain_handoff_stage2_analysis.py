@@ -8692,9 +8692,9 @@ def estimate_outer_fold(
     from .stage2_effect_estimators import effect_model_family, fit_interaction_effect
 
     model_family = effect_model_family(estimator, outcome_type)
-    if estimator == "linear_interactions":
+    if estimator in {"linear_interactions", "dina"}:
         if statistical_policy is None:
-            raise ValueError("linear interaction estimation requires a statistical policy")
+            raise ValueError("linear interaction or DINA estimation requires a statistical policy")
         statistical_policy.validate()
     validate_propensity_bounds(min_propensity, max_propensity)
     complete_path = output_dir / "complete.json"
@@ -8715,21 +8715,27 @@ def estimate_outer_fold(
             "propensity_clip": propensity_clip,
             "estimation_trees": estimation_trees,
             "estimator": estimator,
-            "interaction_policy": statistical_policy.public_dict()
-            if estimator == "linear_interactions"
-            else None,
-            "interaction_source_fingerprint": _value_fingerprint(
-                [
-                    Path(__file__).with_name(name).read_text()
-                    for name in (
-                        "stage2_effect_estimators.py",
-                        "stage2_multi_model_selection.py",
-                        "stage2_elastic_net_selection.py",
-                    )
-                ]
-            )
-            if estimator == "linear_interactions"
-            else None,
+            "interaction_policy": (
+                statistical_policy.public_dict()
+                if estimator in {"linear_interactions", "dina"}
+                else None
+            ),
+            "interaction_source_fingerprint": (
+                _value_fingerprint(
+                    [
+                        (Path(__file__).parent / name).read_text()
+                        for name in (
+                            "stage2_effect_estimators.py",
+                            "stage2_dina.py",
+                            "../models/dina.py",
+                            "stage2_multi_model_selection.py",
+                            "stage2_elastic_net_selection.py",
+                        )
+                    ]
+                )
+                if estimator in {"linear_interactions", "dina"}
+                else None
+            ),
             "dataset_modeling_fingerprint": _frame_fingerprint(
                 dataset[[unit_id_column, treatment_column, outcome_column]]
             ),
@@ -8892,6 +8898,30 @@ def estimate_outer_fold(
             ),
             "constant_effect_design": constant_effect_design,
         }
+    elif estimator == "dina":
+        from .stage2_dina import fit_effect as fit_dina_effect
+
+        result = fit_dina_effect(
+            train=eligible_fit,
+            valid=extracted_heldout.iloc[np.flatnonzero(heldout_keep)],
+            definitions=definitions,
+            modifier_ids=effect_ids,
+            treatment=t_fit[fit_keep],
+            outcome=y_fit[fit_keep],
+            policy=statistical_policy,
+            seed=seed + 20_000,
+        )
+        effect_predictions = {
+            "tau_pred": result["tau"],
+            "log_odds_ratio": result["delta"],
+            "dina_mu0": result["mu0"],
+            "dina_mu1": result["mu1"],
+        }
+        fit_audit = result["audit"]
+        architecture_diagnostics = {
+            "dina_fit_audit": fit_audit,
+            "cate_confidence_intervals": "not_computed_for_grouped_dina",
+        }
     else:
         # Shared with the inner validation search; no held-out labels enter this API.
         result = fit_interaction_effect(
@@ -8944,6 +8974,15 @@ def estimate_outer_fold(
             "mu1": mu1,
             "effect_eligible": heldout_keep,
             "aipw_score": aipw,
+            **(
+                {
+                    "dina_log_odds_ratio": scatter_prediction("log_odds_ratio"),
+                    "dina_mu0": scatter_prediction("dina_mu0"),
+                    "dina_mu1": scatter_prediction("dina_mu1"),
+                }
+                if estimator == "dina"
+                else {}
+            ),
             "estimated_cate": cate,
             "estimated_cate_lower_95": cate_lower_values,
             "estimated_cate_upper_95": cate_upper_values,

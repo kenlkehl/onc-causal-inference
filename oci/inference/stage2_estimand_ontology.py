@@ -28,7 +28,7 @@ from .stage2_multi_model_selection import _checkpoint, _frame_hash
 from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = "stage2_estimand_ontology_v1"
+SCHEMA_VERSION = "stage2_estimand_ontology_v2_dina"
 PROMPT_VERSION = "estimand_ontology_proposals_v1_20260926"
 DEFINITION_FIELDS = ("description", "value_type", "categories_or_unit",
                      "measurement_definition", "missing_value_rule")
@@ -230,11 +230,23 @@ def _reference_fold(frame, labels, definitions, split, *, binary, policy, seed, 
     if len(train) < policy.minimum_training_rows or len(np.unique(t)) < 2 or folds < 2:
         raise NotEstimable("insufficient training rows or treatment arms")
     e, m = np.full(len(train), np.nan), np.full(len(train), np.nan)
+    arms = {arm: np.full(len(train), np.nan) for arm in (0, 1)}
+    arm_valid = {}
     audit = []
     for a, b in StratifiedKFold(folds, shuffle=True, random_state=seed).split(train, t):
         design = _design(train.iloc[a], train.iloc[b], definitions)
         e[b], _ = _predict(design.train, design.valid, t[a], binary=True, penalty=policy.ridge_penalty)
         m[b], _ = _predict(design.train, design.valid, y[a], binary=binary, penalty=policy.ridge_penalty)
+        if binary:
+            for arm in (0, 1):
+                mask = t[a] == arm
+                arms[arm][b], _ = _predict(
+                    design.train[mask],
+                    design.valid,
+                    y[a][mask],
+                    binary=True,
+                    penalty=policy.ridge_penalty,
+                )
         audit.append({"fit_row_ids": train.iloc[a]._oci_row_id.tolist(),
                       "validation_row_ids": train.iloc[b]._oci_row_id.tolist()})
     design = _design(train, hold, definitions)
@@ -242,11 +254,31 @@ def _reference_fold(frame, labels, definitions, split, *, binary, policy, seed, 
     mv, _ = _predict(design.train, design.valid, y, binary=binary, penalty=policy.ridge_penalty)
     qv, cq = _predict(design.train, design.valid, y, binary=binary, penalty=policy.ridge_penalty,
                       treatment=t, valid_treatment=tv)
+    if binary:
+        from ..models import dina
+
+        for arm in (0, 1):
+            mask = t == arm
+            arm_valid[arm], _ = _predict(
+                design.train[mask], design.valid, y[mask], binary=True, penalty=policy.ridge_penalty
+            )
+        dn = dina.nuisances(e, arms[0], arms[1])
     train_mask, valid_mask = _overlap(e, bounds), _overlap(ev, bounds)
     r_evaluable = (int(train_mask.sum()) >= policy.minimum_overlap_rows
                    and int(valid_mask.sum()) >= policy.minimum_overlap_rows)
     cr = np.zeros(design.train.shape[1])
-    if r_evaluable:
+    if r_evaluable and binary:
+        model = dina.fit(
+            design.train[train_mask],
+            y[train_mask],
+            t[train_mask],
+            dn["a"][train_mask],
+            dn["nu"][train_mask],
+            groups=design.column_feature_ids,
+            regularization=policy.ridge_penalty / max(1, int(train_mask.sum())),
+        )
+        cr = model.coefficients
+    elif r_evaluable:
         _, cr = _r_fit(design.train[train_mask], design.valid,
                        (t - e)[train_mask], (y - m)[train_mask], policy.ridge_penalty)
     # This prescreen ranks opportunities. It never removes a candidate or role.
@@ -261,14 +293,30 @@ def _reference_fold(frame, labels, definitions, split, *, binary, policy, seed, 
             "effect_modifier": float(np.linalg.norm(cr[indices])),
         }
     return {
-        "fit_row_ids": list(fit), "validation_row_ids": list(valid),
-        "training_propensity": e.tolist(), "training_outcome": m.tolist(),
-        "validation_propensity": ev.tolist(), "validation_outcome": mv.tolist(),
+        "fit_row_ids": list(fit),
+        "validation_row_ids": list(valid),
+        **(
+            {
+                "training_mu0": arms[0].tolist(),
+                "training_mu1": arms[1].tolist(),
+                "validation_mu0": arm_valid[0].tolist(),
+                "validation_mu1": arm_valid[1].tolist(),
+            }
+            if binary
+            else {}
+        ),
+        "effect_objective": "bernoulli_dina" if binary else "squared_r_loss",
+        "training_propensity": e.tolist(),
+        "training_outcome": m.tolist(),
+        "validation_propensity": ev.tolist(),
+        "validation_outcome": mv.tolist(),
         "propensity_loss": float(_loss(tv, ev, True).mean()),
         "outcome_loss": float(_loss(yv, qv, binary).mean()),
-        "overlap_fraction": float(valid_mask.mean()), "r_evaluable": bool(r_evaluable),
+        "overlap_fraction": float(valid_mask.mean()),
+        "r_evaluable": bool(r_evaluable),
         "overlap_validation_row_ids": np.asarray(valid)[valid_mask].tolist(),
-        "crossfit_audit": audit, "screening_scores": scores,
+        "crossfit_audit": audit,
+        "screening_scores": scores,
     }
 
 
@@ -343,12 +391,41 @@ def _score_family(frame, labels, definitions, original, alternative, references,
             a, b = _overlap(e, bounds), _overlap(ev, bounds)
             # Fit encoders on precisely the rows used for the effect probe.
             design = _design(train.loc[a], hold.loc[b], effect_defs)
-            tau, _ = _r_fit(design.train, design.valid, (t - e)[a], (y - m)[a], policy.ridge_penalty)
-            rloss = float(np.mean(((yv - mv)[b] - (tv - ev)[b] * tau) ** 2))
-        result.append({"outcome_loss": qloss, "propensity_loss": eloss,
-                       "overlap_fraction": overlap, "r_loss": rloss,
-                       "validation_row_ids": list(valid),
-                       "overlap_validation_row_ids": ref["overlap_validation_row_ids"]})
+            if binary:
+                from ..models import dina
+                from .stage2_dina import unpack_nuisances
+
+                dn, dv = unpack_nuisances(ref)
+                model = dina.fit(
+                    design.train,
+                    y[a],
+                    t[a],
+                    dn["a"][a],
+                    dn["nu"][a],
+                    groups=design.column_feature_ids,
+                    regularization=policy.ridge_penalty / max(1, int(a.sum())),
+                )
+                rloss = float(
+                    dina.loss(
+                        yv[b], tv[b], dv["a"][b], dv["nu"][b], model.predict(design.valid)
+                    ).mean()
+                )
+            else:
+                tau, _ = _r_fit(
+                    design.train, design.valid, (t - e)[a], (y - m)[a], policy.ridge_penalty
+                )
+                rloss = float(np.mean(((yv - mv)[b] - (tv - ev)[b] * tau) ** 2))
+        result.append(
+            {
+                "outcome_loss": qloss,
+                "propensity_loss": eloss,
+                "overlap_fraction": overlap,
+                "r_loss": rloss,
+                "effect_objective": "bernoulli_dina" if binary else "squared_r_loss",
+                "validation_row_ids": list(valid),
+                "overlap_validation_row_ids": ref["overlap_validation_row_ids"],
+            }
+        )
     return result
 
 
@@ -402,14 +479,21 @@ def refine_estimand_ontologies(*, extracted_fit, labels, definitions, inner_spli
 
     def compute():
         report = {
-            "schema_version": SCHEMA_VERSION, "input_fingerprint": digest, "status": "complete",
-            "policy": policy.public_dict(), "original_features": len(originals),
-            "original_measurements_retained": True, "proposal_rounds": 1,
-            "outer_test_used": False, "oracle_used": False,
+            "schema_version": SCHEMA_VERSION,
+            "input_fingerprint": digest,
+            "status": "complete",
+            "policy": policy.public_dict(),
+            "original_features": len(originals),
+            "original_measurements_retained": True,
+            "proposal_rounds": 1,
+            "outer_test_used": False,
+            "oracle_used": False,
             "cv_scope": "tuning_conditional_on_discovered_catalog_and_shortlist",
-            "effect_probe": "ridge_r_learner_with_fixed_cross_fitted_reference_nuisances",
+            "effect_probe": "binary_dina_or_continuous_ridge_r_learner_with_fixed_cross_fitted_reference_nuisances",
             "confounder_probe": "ridge_outcome_given_treatment_and_all_original_candidates",
-            "causal_roles_assigned": False, "feature_reviews": [], "accepted_feature_ids": [],
+            "causal_roles_assigned": False,
+            "feature_reviews": [],
+            "accepted_feature_ids": [],
             "propensity_bounds": list(propensity_bounds),
         }
         try:

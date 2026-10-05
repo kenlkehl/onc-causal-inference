@@ -92,6 +92,7 @@ def _bank_contribution(
     fit_outcome_prediction: np.ndarray,
     heldout_propensity: np.ndarray,
     heldout_outcome_prediction: np.ndarray,
+    dina_nuisance=None,
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """Return held-out score contribution and feature-centering weights."""
     if bank == "treatment":
@@ -111,6 +112,21 @@ def _bank_contribution(
             "null_model": "fit_outcome_mean",
             "fit_baseline": baseline,
             "row_contribution": "heldout_outcome - fit_outcome_mean",
+        }
+    elif bank == "effect" and dina_nuisance is not None:
+        from ..models import dina
+
+        dn, dv = dina_nuisance
+        constant = dina.constant_effect(fit_outcome, fit_treatment, dn["a"], dn["nu"])
+        contribution, weights, _ = dina.score(
+            heldout_outcome, heldout_treatment, dv["a"], dv["nu"], delta=constant
+        )
+        definition = {
+            "null_model": "fit_oof_constant_dina_log_odds_ratio",
+            "fit_baseline": constant,
+            "row_contribution": "(T-a)*(Y-expit(nu+(T-a)*delta0))",
+            "centering": "DINA Fisher information",
+            "effect_scale": "conditional_log_odds_ratio",
         }
     elif bank == "effect":
         constant = _constant_effect(
@@ -1564,6 +1580,7 @@ def score_effect_orphan_ngram_clusters(
     fit_outcome_prediction: np.ndarray,
     heldout_propensity: np.ndarray,
     heldout_outcome_prediction: np.ndarray,
+    dina_nuisance=None,
     config: TfidfTopicDiscoveryConfig,
 ) -> Dict[str, Any]:
     """Build fit-side orphan groups and score their complete held-out family."""
@@ -1593,6 +1610,7 @@ def score_effect_orphan_ngram_clusters(
     )
     clusters = list(universe.pop("clusters", []))
     contribution, weights, definition = _bank_contribution(
+        dina_nuisance=dina_nuisance,
         bank="effect",
         fit_treatment=np.asarray(fit_treatment, dtype=float),
         fit_outcome=np.asarray(fit_outcome, dtype=float),
@@ -1601,9 +1619,7 @@ def score_effect_orphan_ngram_clusters(
         fit_propensity=np.asarray(fit_propensity, dtype=float),
         fit_outcome_prediction=np.asarray(fit_outcome_prediction, dtype=float),
         heldout_propensity=np.asarray(heldout_propensity, dtype=float),
-        heldout_outcome_prediction=np.asarray(
-            heldout_outcome_prediction, dtype=float
-        ),
+        heldout_outcome_prediction=np.asarray(heldout_outcome_prediction, dtype=float),
     )
     vocabulary = {str(name): index for index, name in enumerate(feature_names)}
     results = [
@@ -1684,6 +1700,7 @@ def score_topic_banks(
     fit_outcome_prediction: np.ndarray,
     heldout_propensity: np.ndarray,
     heldout_outcome_prediction: np.ndarray,
+    dina_nuisance=None,
     config: TfidfTopicDiscoveryConfig,
     scope_id: str,
     raw_ngram_scores: Mapping[str, Any] | None = None,
@@ -1736,6 +1753,7 @@ def score_topic_banks(
                 f"{bank_heldout_topics.shape}; expected {expected_heldout_shape}"
             )
         contribution, weights, definition = _bank_contribution(
+            dina_nuisance=dina_nuisance,
             bank=bank,
             fit_treatment=np.asarray(fit_treatment, dtype=float),
             fit_outcome=np.asarray(fit_outcome, dtype=float),
@@ -1744,9 +1762,7 @@ def score_topic_banks(
             fit_propensity=np.asarray(fit_propensity, dtype=float),
             fit_outcome_prediction=np.asarray(fit_outcome_prediction, dtype=float),
             heldout_propensity=np.asarray(heldout_propensity, dtype=float),
-            heldout_outcome_prediction=np.asarray(
-                heldout_outcome_prediction, dtype=float
-            ),
+            heldout_outcome_prediction=np.asarray(heldout_outcome_prediction, dtype=float),
         )
         results = [
             _single_topic_score(
@@ -1804,29 +1820,22 @@ def score_topic_banks(
             "selection_count": 0,
         }
     else:
-        output["effect_orphan_ngram_branch"] = (
-            score_effect_orphan_ngram_clusters(
-                fit_matrix=fit_matrix,
-                heldout_matrix=heldout_matrix,
-                feature_names=feature_names,
-                effect_scores=effect_score_frame,
-                effect_topics=list(
-                    (topic_banks.get("effect") or {}).get("topics") or []
-                ),
-                fit_treatment=np.asarray(fit_treatment, dtype=float),
-                fit_outcome=np.asarray(fit_outcome, dtype=float),
-                heldout_treatment=np.asarray(heldout_treatment, dtype=float),
-                heldout_outcome=np.asarray(heldout_outcome, dtype=float),
-                fit_propensity=np.asarray(fit_propensity, dtype=float),
-                fit_outcome_prediction=np.asarray(
-                    fit_outcome_prediction, dtype=float
-                ),
-                heldout_propensity=np.asarray(heldout_propensity, dtype=float),
-                heldout_outcome_prediction=np.asarray(
-                    heldout_outcome_prediction, dtype=float
-                ),
-                config=config,
-            )
+        output["effect_orphan_ngram_branch"] = score_effect_orphan_ngram_clusters(
+            dina_nuisance=dina_nuisance,
+            fit_matrix=fit_matrix,
+            heldout_matrix=heldout_matrix,
+            feature_names=feature_names,
+            effect_scores=effect_score_frame,
+            effect_topics=list((topic_banks.get("effect") or {}).get("topics") or []),
+            fit_treatment=np.asarray(fit_treatment, dtype=float),
+            fit_outcome=np.asarray(fit_outcome, dtype=float),
+            heldout_treatment=np.asarray(heldout_treatment, dtype=float),
+            heldout_outcome=np.asarray(heldout_outcome, dtype=float),
+            fit_propensity=np.asarray(fit_propensity, dtype=float),
+            fit_outcome_prediction=np.asarray(fit_outcome_prediction, dtype=float),
+            heldout_propensity=np.asarray(heldout_propensity, dtype=float),
+            heldout_outcome_prediction=np.asarray(heldout_outcome_prediction, dtype=float),
+            config=config,
         )
     return output
 

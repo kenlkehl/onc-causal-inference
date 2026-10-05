@@ -131,8 +131,8 @@ def test_serial_and_loky_top_level_folds_are_exact_and_overlap(
         operational_attestation_sink=process_attestations.append,
     )
 
-    assert set(serial) == set(parallel) == {"treatment", "outcome"}
-    for target in ("treatment", "outcome"):
+    assert set(serial) == set(parallel) == {"treatment", "outcome", "mu0", "mu1"}
+    for target in ("treatment", "outcome", "mu0", "mu1"):
         assert np.array_equal(
             serial[target]["base_oof"],
             parallel[target]["base_oof"],
@@ -269,7 +269,7 @@ def test_reversed_completion_merges_canonically_without_nested_pool(
     assert attestations[0]["completion_order"] != [1, 2, 3]
     assert attestations[0]["canonical_fold_order"] == [1, 2, 3]
     assert attestations[0]["subfold_joblib_pools_created"] is False
-    for target in ("treatment", "outcome"):
+    for target in ("treatment", "outcome", "mu0", "mu1"):
         assert np.array_equal(
             serial[target]["base_oof"],
             threaded[target]["base_oof"],

@@ -118,9 +118,13 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
     result = select_stage2_features_elastic_net(**arguments, checkpoint_dir=tmp_path)
     _, report, dependencies, latents = result
     assert not latents and len(dependencies) == 4
-    assert set(report["evaluable_cells_by_family"]) == set(arguments["policy"].multi_model.active_families())
+    assert set(report["evaluable_cells_by_family"]) == set(
+        arguments["policy"].multi_model.active_families(arguments["outcome_type"])
+    )
     if matched:
-        assert set(report["model_families"]) == set(FAMILIES)
+        assert set(report["model_families"]) == (
+            set(FAMILIES) if binary else set(FAMILIES) - {"dina"}
+        )
     assert all(v > 0 for v in report["evaluable_cells_by_family"].values())
     if matched:
         legacy_policy = replace(arguments["policy"], multi_model=replace(

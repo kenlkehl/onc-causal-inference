@@ -127,7 +127,7 @@
           "max_ranked_modifiers": 64,
           "selection_rule": "minimum_r_loss",
           "forest_seeds": 3,
-          "estimators": ["causal_forest", "linear_interactions"]
+          "estimators": ["causal_forest", "linear_interactions", "dina"]
         }
       }
     },

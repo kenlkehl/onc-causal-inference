@@ -316,6 +316,18 @@ def test_htr_nuisance_folds_resume_after_interruption(tmp_path, monkeypatch):
 
 
 def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
+    from oci.inference import stage1_dina
+    from oci.models import dina
+
+    def predictions(runner, model, frame, delta):
+        nuisance = dina.nuisances(
+            np.full(len(frame), 0.5), np.full(len(frame), 0.3), np.full(len(frame), 0.6)
+        )
+        mu0, mu1 = dina.counterfactuals(delta, nuisance["a"], nuisance["nu"])
+        return {**nuisance, "delta": delta, "tau": mu1 - mu0, "mu0": mu0, "mu1": mu1}
+
+    monkeypatch.setattr(stage1_dina, "neural_predictions", predictions)
+
     monkeypatch.setattr(multi_model_forest_stage1, "_EffectNet", _FakeHTRNet)
     train = pd.DataFrame(
         {

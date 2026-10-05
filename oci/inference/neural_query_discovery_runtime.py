@@ -40,8 +40,8 @@ from .tfidf_topic_discovery import (
 
 LOGGER = logging.getLogger(__name__)
 
-NEURAL_QUERY_DISCOVERY_RUNTIME_ID = "neural_query_in_memory_discovery_runtime_v2"
-NEURAL_QUERY_DISCOVERY_SUBFOLD_SCHEMA = "neural_query_in_memory_subfold_v2"
+NEURAL_QUERY_DISCOVERY_RUNTIME_ID = "neural_query_in_memory_discovery_runtime_v3_dina"
+NEURAL_QUERY_DISCOVERY_SUBFOLD_SCHEMA = "neural_query_in_memory_subfold_v3_dina"
 
 BANKS = ("treatment", "outcome", "effect")
 
@@ -245,6 +245,16 @@ def _fit_subfold(
         "treatment": nuisance["treatment"]["metrics"],
         "outcome": nuisance["outcome"]["metrics"],
     }
+    dn = dv = None
+    if outcome_binary:
+        from ..models import dina
+
+        dn = dina.nuisances(train_e, nuisance["mu0"]["stacked_oof"], nuisance["mu1"]["stacked_oof"])
+        dv = dina.nuisances(
+            validation_e,
+            nuisance["mu0"]["fitted"].predict(validation_texts)[0],
+            nuisance["mu1"]["fitted"].predict(validation_texts)[0],
+        )
     # The fitted sparse/tree stacks are not needed after their external
     # validation predictions freeze; release them before GPU query fitting.
     del nuisance
@@ -284,14 +294,23 @@ def _fit_subfold(
             )
         else:
             contribution, constant_effect = cohort_contribution(train_u, train_v)
+            weights = np.square(train_u)
+            if dn is not None:
+                contribution, weights, constant_effect = dina.score(
+                    train_y, train_t, dn["a"], dn["nu"]
+                )
             result = fit_soft_contrast_queries(
                 train_chunks,
                 contribution,
-                center_weights=np.square(train_u),
+                center_weights=weights,
                 config=bank_config,
                 seed=bank_seed,
                 device=device,
-                objective_name="constant_effect_orthogonalized_cohort_contrast",
+                objective_name=(
+                    "bernoulli_dina_score"
+                    if dn is not None
+                    else "constant_effect_orthogonalized_cohort_contrast"
+                ),
             )
             result["constant_effect"] = float(constant_effect)
 
@@ -320,6 +339,22 @@ def _fit_subfold(
                 validation_u,
                 validation_v,
                 constant_effect=float(result["constant_effect"]),
+                **(
+                    dict(
+                        zip(
+                            ("score_contribution", "score_weights"),
+                            dina.score(
+                                validation_y,
+                                validation_t,
+                                dv["a"],
+                                dv["nu"],
+                                delta=result["constant_effect"],
+                            )[:2],
+                        )
+                    )
+                    if dv is not None
+                    else {}
+                ),
             )
 
         candidates: list[dict[str, Any]] = []
@@ -382,6 +417,7 @@ def _fit_final_bank(
     config: NeuralQueryAgenticForestConfig,
     seed: int,
     device: str,
+    fit_dina=None,
 ) -> dict[str, Any]:
     """Build consensus and final-refit exactly one canonical query bank."""
 
@@ -487,16 +523,27 @@ def _fit_final_bank(
             fit_u,
             fit_v,
         )
+        weights = np.square(fit_u)
+        if outcome_binary:
+            if fit_dina is None:
+                raise ValueError("binary neural effect refit requires DINA nuisances")
+            from ..models import dina
+
+            contribution, weights, constant_effect = dina.score(
+                outcome_values, treatment_values, fit_dina["a"], fit_dina["nu"]
+            )
         refit = fit_soft_contrast_queries(
             resolved_chunks,
             contribution,
-            center_weights=np.square(fit_u),
+            center_weights=weights,
             config=refit_config,
             seed=refit_seed,
             device=str(device),
             initial_queries=initial_queries,
             objective_name=(
-                "constant_effect_orthogonalized_cohort_contrast"
+                "bernoulli_dina_score"
+                if outcome_binary
+                else "constant_effect_orthogonalized_cohort_contrast"
             ),
         )
         refit["constant_effect"] = float(constant_effect)
@@ -552,10 +599,13 @@ def fit_in_memory_query_discovery(
     devices: Sequence[str],
     seed: int,
     cpu_workers: int = 1,
+    fit_dina=None,
 ) -> dict[str, Any]:
     """Fit all three nested query banks without executable checkpoint I/O."""
 
     _validate_cpu_workers(cpu_workers)
+    if outcome_binary and fit_dina is None:
+        raise ValueError("binary neural-query discovery requires cross-fitted DINA nuisances")
     device_names = tuple(str(device) for device in devices)
     if not device_names:
         raise ValueError("neural-query discovery requires at least one device")
@@ -608,6 +658,7 @@ def fit_in_memory_query_discovery(
             "outcome": outcome_values.tolist(),
             "fit_e": fit_e_values.tolist(),
             "fit_m": fit_m_values.tolist(),
+            "fit_dina": fit_dina,
             "outcome_binary": bool(outcome_binary),
             "nuisance_views_sha256": _stable_hash(list(nuisance_views)),
             "nuisance_stack_scientific": asdict(nuisance_stack_config),
@@ -720,21 +771,22 @@ def fit_in_memory_query_discovery(
             for candidate in subfold["banks"][bank]["candidates"]
         ]
         final_tasks.append(
-                {
-                    "bank": bank,
-                    "bank_index": bank_index,
-                    "candidates": candidates,
-                    "row_ids": row_ids,
-                    "chunks": chunks,
-                    "texts": texts,
-                    "treatment": treatment_values,
-                    "outcome": outcome_values,
-                    "fit_e": fit_e_values,
-                    "fit_m": fit_m_values,
-                    "outcome_binary": bool(outcome_binary),
-                    "config": config,
-                    "seed": int(seed),
-                }
+            {
+                "bank": bank,
+                "bank_index": bank_index,
+                "candidates": candidates,
+                "row_ids": row_ids,
+                "chunks": chunks,
+                "texts": texts,
+                "treatment": treatment_values,
+                "outcome": outcome_values,
+                "fit_e": fit_e_values,
+                "fit_m": fit_m_values,
+                "fit_dina": fit_dina,
+                "outcome_binary": bool(outcome_binary),
+                "config": config,
+                "seed": int(seed),
+            }
         )
 
     final_rows = tuple(
@@ -835,6 +887,13 @@ def fit_context_query_discovery(
     )
     fit_e = np.asarray(nuisance["treatment"]["stacked_oof"], dtype=float)
     fit_m = np.asarray(nuisance["outcome"]["stacked_oof"], dtype=float)
+    fit_dina = None
+    if outcome_binary:
+        from ..models import dina
+
+        fit_dina = dina.nuisances(
+            fit_e, nuisance["mu0"]["stacked_oof"], nuisance["mu1"]["stacked_oof"]
+        )
     del nuisance
     return fit_in_memory_query_discovery(
         fit_ids=row_ids,
@@ -845,6 +904,7 @@ def fit_context_query_discovery(
         outcome_binary=bool(outcome_binary),
         fit_e=fit_e,
         fit_m=fit_m,
+        fit_dina=fit_dina,
         nuisance_views=list(nuisance_views),
         nuisance_stack_config=nuisance_stack_config,
         config=query_config,

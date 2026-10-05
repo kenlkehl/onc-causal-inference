@@ -672,8 +672,12 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
         runner = self._runner
         if runner is None:
             raise RuntimeError("HTR runner has not been initialized")
+        if objective == "dina" and str(runner.config.outcome_type).lower() != "binary":
+            raise ValueError("DINA requires binary outcomes")
         previous = getattr(runner.avf_config, "effect_objective", "pseudo_outcome_mse")
-        runner.avf_config.effect_objective = str(objective)
+        runner.avf_config.effect_objective = (
+            "dina" if str(runner.config.outcome_type).lower() == "binary" else str(objective)
+        )
         try:
             yield
         finally:
@@ -1075,7 +1079,17 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
                     heldout = train_df.iloc[heldout_pos]
                     raw_effect = runner._predict_effect_model(model, heldout)
                     raw_test = runner._predict_effect_model(model, test_df)
-                    if effect_objective == "logistic_r_loss":
+                    if effect_objective == "dina":
+                        from .stage1_dina import neural_predictions
+                        from ..models import dina
+
+                        dp = neural_predictions(runner, model, heldout, raw_effect)
+                        dt = neural_predictions(runner, model, test_df, raw_test)
+                        tau_hat, test_tau, tau_logit_modifier = dp["tau"], dt["tau"], dp["delta"]
+                        heldout_effect_loss = dina.loss(
+                            y[heldout_pos], t[heldout_pos], dp["a"], dp["nu"], dp["delta"]
+                        )
+                    elif effect_objective == "logistic_r_loss":
                         tau_logit_modifier = raw_effect
                         tau_hat = _logistic_r_tau_from_delta(
                             tau_logit_modifier,
@@ -1163,6 +1177,11 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
                         "tau_logit_modifier": tau_logit_modifier,
                         "r_loss": heldout_r_loss,
                         "effect_loss": heldout_effect_loss,
+                        "effect_loss_at_zero_tau": (
+                            dina.loss(y[heldout_pos], t[heldout_pos], dp["a"], dp["nu"], 0.0)
+                            if effect_objective == "dina"
+                            else r_df.iloc[heldout_pos]["effect_loss_at_zero_tau"].to_numpy()
+                        ),
                         "test_tau": test_tau,
                         "attention": fold_attention,
                         "evidence": {
@@ -1244,6 +1263,7 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
                 r_df.loc[heldout_pos, "tau_logit_modifier"] = result["tau_logit_modifier"]
                 r_df.loc[heldout_pos, "r_loss"] = result["r_loss"]
                 r_df.loc[heldout_pos, "effect_loss"] = result["effect_loss"]
+                r_df.loc[heldout_pos, "effect_loss_at_zero_tau"] = result["effect_loss_at_zero_tau"]
                 r_df.loc[heldout_pos, "effect_fold"] = result["fold"]
                 attention_rows.extend(result["attention"])
                 test_tau_predictions.append(np.asarray(result["test_tau"], dtype=float))
@@ -1359,6 +1379,11 @@ class MultiModelForestStage1HTRProvider(MultiModelHTREvidenceProvider):
                     total_folds=1,
                 )
                 tau_hat = runner._predict_effect_model(model, test_df)
+                if str(runner.config.outcome_type).lower() == "binary":
+                    from .stage1_dina import neural_predictions
+
+                    dp = neural_predictions(runner, model, test_df, tau_hat)
+                    tau_hat = dp["tau"]
         finally:
             if model is not None:
                 runner._cleanup_model(model)
@@ -2345,6 +2370,15 @@ class MultiModelForestStage1Runner:
         m_train = np.nanmean(np.vstack([item[2] for item in nuisance_train]), axis=0)
         e_test = np.nanmean(np.vstack([item[1] for item in nuisance_test]), axis=0)
         m_test = np.nanmean(np.vstack([item[2] for item in nuisance_test]), axis=0)
+        binary_dina = str(self.config.outcome_type).lower() == "binary"
+        dina_train = dina_test = None
+        if binary_dina:
+            from .stage1_dina import crossfit_nuisance
+
+            dina_train, dn_model = crossfit_nuisance(
+                texts_train, t, y, folds=self.nn_config.nuisance_folds, seed=61_000 + outer_fold
+            )
+            dina_test = dn_model.predict(texts_test)
         e_train_clip = np.clip(e_train, self.nn_config.e_clip, 1.0 - self.nn_config.e_clip)
         t_resid = t - e_train_clip
         y_resid = y - m_train
@@ -2386,6 +2420,10 @@ class MultiModelForestStage1Runner:
                 "target_source": "ensemble_mean_nuisance_inner_ensemble",
             }
         )
+        if binary_dina:
+            for key, value in dina_train.items():
+                ensemble_nuisance_train["dina_" + key] = value
+                ensemble_nuisance_test["dina_" + key] = dina_test[key]
         ensemble_payload = self._checkpointed_value(
             "assembly/nuisance_ensemble",
             lambda: {
@@ -2878,6 +2916,9 @@ class MultiModelForestStage1Runner:
                         view=view,
                         view_index=view_index,
                         target_name="effect_pseudo_target",
+                        dina_data=(
+                            (t, y) if str(self.config.outcome_type).lower() == "binary" else None
+                        ),
                         seed_offset=50_000,
                         train_row_ids=train_df["_oci_row_id"].to_numpy(),
                         test_row_ids=test_df["_oci_row_id"].to_numpy(),
@@ -2904,20 +2945,29 @@ class MultiModelForestStage1Runner:
                 weighted_unit = f"bow/effect/view_{int(view_index):03d}_weighted_r"
                 r_train, r_test, fold_rows = self._checkpointed_value(
                     weighted_unit,
-                    lambda: self._fit_bow_regression_train_test(
-                        texts_train,
-                        texts_test,
-                        pseudo_target,
-                        r_weight,
-                        outer_fold=outer_fold,
-                        view=view,
-                        view_index=view_index,
-                        target_name="effect_weighted_r",
-                        seed_offset=70_000,
-                        train_row_ids=train_df["_oci_row_id"].to_numpy(),
-                        test_row_ids=test_df["_oci_row_id"].to_numpy(),
-                        checkpoint_namespace=weighted_unit,
-                        checkpoint_dependencies=("assembly/nuisance_ensemble",),
+                    lambda: (
+                        (pseudo_train, pseudo_test, [])
+                        if binary_dina
+                        else self._fit_bow_regression_train_test(
+                            texts_train,
+                            texts_test,
+                            pseudo_target,
+                            r_weight,
+                            outer_fold=outer_fold,
+                            view=view,
+                            view_index=view_index,
+                            target_name="effect_weighted_r",
+                            dina_data=(
+                                (t, y)
+                                if str(self.config.outcome_type).lower() == "binary"
+                                else None
+                            ),
+                            seed_offset=70_000,
+                            train_row_ids=train_df["_oci_row_id"].to_numpy(),
+                            test_row_ids=test_df["_oci_row_id"].to_numpy(),
+                            checkpoint_namespace=weighted_unit,
+                            checkpoint_dependencies=("assembly/nuisance_ensemble",),
+                        )
                     ),
                     train_df=train_df,
                     test_df=test_df,
@@ -2971,39 +3021,56 @@ class MultiModelForestStage1Runner:
                     feature_rows,
                     train=pseudo_train,
                     test=pseudo_test,
-                    name=f"bow__{view.name}__effect_pseudo_target_pred",
+                    name=(
+                        f"bow__{view.name}__effect_dina_tau_pred"
+                        if binary_dina
+                        else f"bow__{view.name}__effect_pseudo_target_pred"
+                    ),
                     role="X",
                     source_family="bow",
                     outer_fold=outer_fold,
-                    objective="r_pseudo_outcome",
+                    objective=(
+                        "bernoulli_dina"
+                        if str(self.config.outcome_type).lower() == "binary"
+                        else "r_pseudo_outcome"
+                    ),
                     provenance="inner_oof_train_outer_train_fit_test",
                     view_config=_bow_view_to_dict(view),
                 )
-                _append_feature(
-                    x_train_cols,
-                    x_test_cols,
-                    x_names,
-                    feature_rows,
-                    train=r_train,
-                    test=r_test,
-                    name=f"bow__{view.name}__effect_weighted_r_tau_pred",
-                    role="X",
-                    source_family="bow",
-                    outer_fold=outer_fold,
-                    objective="direct_weighted_r",
-                    provenance="inner_oof_train_outer_train_fit_test",
-                    view_config=_bow_view_to_dict(view),
-                )
+                if not binary_dina:
+                    _append_feature(
+                        x_train_cols,
+                        x_test_cols,
+                        x_names,
+                        feature_rows,
+                        train=r_train,
+                        test=r_test,
+                        name=f"bow__{view.name}__effect_weighted_r_tau_pred",
+                        role="X",
+                        source_family="bow",
+                        outer_fold=outer_fold,
+                        objective=(
+                            "bernoulli_dina"
+                            if str(self.config.outcome_type).lower() == "binary"
+                            else "direct_weighted_r"
+                        ),
+                        provenance="inner_oof_train_outer_train_fit_test",
+                        view_config=_bow_view_to_dict(view),
+                    )
                 prediction_frames.append(
                     _source_prediction_frame(
                         train_df,
                         test_df,
                         outer_fold=outer_fold,
                         source_name=f"bow__{view.name}__effect",
-                        values={
-                            "tau_hat_pseudo_target": (pseudo_train, pseudo_test),
-                            "tau_hat_weighted_r": (r_train, r_test),
-                        },
+                        values=(
+                            {"tau_hat_dina": (pseudo_train, pseudo_test)}
+                            if binary_dina
+                            else {
+                                "tau_hat_pseudo_target": (pseudo_train, pseudo_test),
+                                "tau_hat_weighted_r": (r_train, r_test),
+                            }
+                        ),
                     )
                 )
                 nuisance_view = next(
@@ -3085,10 +3152,15 @@ class MultiModelForestStage1Runner:
         if self._htr_enabled():
             htr_effect_variants: Dict[str, Any] = {}
             htr_provider = self._htr_provider()
-            for effect_objective, feature_suffix in [
-                ("pseudo_outcome_mse", "effect_pseudo_target_pred"),
-                ("squared_r_loss", "effect_weighted_r_tau_pred"),
-            ]:
+            variants = (
+                [("dina", "effect_dina_tau_pred")]
+                if str(self.config.outcome_type).lower() == "binary"
+                else [
+                    ("pseudo_outcome_mse", "effect_pseudo_target_pred"),
+                    ("squared_r_loss", "effect_weighted_r_tau_pred"),
+                ]
+            )
+            for effect_objective, feature_suffix in variants:
                 if hasattr(htr_provider, "fit_effect_variant_inner_ensemble_predict"):
                     htr_effect_bundle = htr_provider.fit_effect_variant_inner_ensemble_predict(
                         train_df,
@@ -3227,6 +3299,7 @@ class MultiModelForestStage1Runner:
             emb = self._checkpointed_value(
                 "embedding/contrast_bundle",
                 lambda: self._embedding_feature_bundle(
+                    dina_nuisance=dina_train,
                     train_df=train_df,
                     test_df=test_df,
                     y=y,
@@ -3421,16 +3494,25 @@ class MultiModelForestStage1Runner:
             outcome_prediction = outcome_model.predict_proba(x_model)[:, 1]
             outcome_classification = True
 
-        effect_model = _make_bow_regressor(_model_params(view), random_state=303)
-        _fit_regressor(
-            effect_model,
-            x_model,
-            pseudo_target,
-            sample_weight=pseudo_target_sample_weight,
-            unsupported_sample_weight_policy=(
-                view.unsupported_sample_weight_policy
-            ),
-        )
+        if str(self.config.outcome_type).lower() == "binary":
+            from .stage1_dina import crossfit_nuisance
+            from ..models import dina
+
+            dn, _ = crossfit_nuisance(
+                texts, t, y, view=view, folds=self.nn_config.nuisance_folds, seed=303
+            )
+            effect_model = dina.fit(
+                x_model, y, t, dn["a"], dn["nu"], regularization=view.ridge_alpha / len(y)
+            )
+        else:
+            effect_model = _make_bow_regressor(_model_params(view), random_state=303)
+            _fit_regressor(
+                effect_model,
+                x_model,
+                pseudo_target,
+                sample_weight=pseudo_target_sample_weight,
+                unsupported_sample_weight_policy=(view.unsupported_sample_weight_policy),
+            )
         effect_coef = _model_feature_scores(effect_model, len(features))
         effect_prediction = effect_model.predict(x_model)
 
@@ -3480,6 +3562,14 @@ class MultiModelForestStage1Runner:
         return {
             "view_name": str(view.name),
             "view_config": _bow_view_to_dict(view),
+            "effect_objective": (
+                "bernoulli_dina" if self.config.outcome_type == "binary" else "squared_r_loss"
+            ),
+            "effect_coefficient_scale": (
+                "conditional_log_odds_ratio"
+                if self.config.outcome_type == "binary"
+                else "outcome_difference"
+            ),
             "n_features": int(len(features)),
             "n_bow_features": int(len(features)),
             "n_prespecified_features": 0,
@@ -3547,7 +3637,19 @@ class MultiModelForestStage1Runner:
                 ordered_fit_rows,
             ),
         )
+        dina_nuisance = None
+        if str(self.config.outcome_type).lower() == "binary":
+            from .stage1_dina import crossfit_nuisance
+
+            dina_nuisance, _ = crossfit_nuisance(
+                discovery_df[self.config.text_column].astype(str).tolist(),
+                t,
+                y,
+                folds=self.nn_config.nuisance_folds,
+                seed=49_001,
+            )
         return generator.build_evidence(
+            dina_nuisance=dina_nuisance,
             discovery_df=discovery_df,
             y=y,
             t=t,
@@ -3877,7 +3979,40 @@ class MultiModelForestStage1Runner:
         test_row_ids: Optional[Sequence[Any]] = None,
         checkpoint_namespace: Optional[str] = None,
         checkpoint_dependencies: Sequence[str] = (),
+        dina_data=None,
     ) -> Tuple[np.ndarray, np.ndarray, List[Dict[str, Any]]]:
+        if dina_data is not None:
+            from .stage1_dina import crossfit_effect
+
+            t, y = dina_data
+            fitted = crossfit_effect(
+                texts_train,
+                t,
+                y,
+                test_texts=texts_test,
+                view=view,
+                folds=self.nn_config.effect_folds,
+                seed=13_000 + int(seed_offset) + 100 * outer_fold + 1000 * view_index,
+            )
+            return (
+                fitted["tau"],
+                fitted["test_tau"],
+                [
+                    {
+                        "outer_fold": outer_fold,
+                        "source_family": "bow",
+                        "view_name": view.name,
+                        "objective": "bernoulli_dina",
+                        "target_name": target_name,
+                        "model": "sparse_dina_ridge",
+                        "effect_scale": "conditional_log_odds_ratio",
+                        "prediction_scale": "probability_difference",
+                        "heldout_dina_loss": float(fitted["loss"].mean()),
+                        "nested_nuisance_cross_fitting": True,
+                        "prediction_provenance": "inner_fold_model_heldout_and_outer_test",
+                    }
+                ],
+            )
         values = np.asarray(values, dtype=float)
         oof = np.full(len(values), np.nan, dtype=float)
         folds = _bounded_fold_count(
@@ -4046,6 +4181,7 @@ class MultiModelForestStage1Runner:
         pseudo_target: np.ndarray,
         t_resid: np.ndarray,
         outer_fold: int,
+        dina_nuisance=None,
     ) -> Dict[str, Any]:
         generator = self._embedding_generator()
         generator.prepare(self.dataset)
@@ -4067,6 +4203,17 @@ class MultiModelForestStage1Runner:
         for inner_fold, (fit_pos, heldout_pos) in enumerate(splitter.split(train_df), start=1):
             fit_pos = np.asarray(fit_pos, dtype=int)
             heldout_pos = np.asarray(heldout_pos, dtype=int)
+            fold_dina = None
+            if dina_nuisance is not None:
+                from .stage1_dina import crossfit_nuisance
+
+                fold_dina, _ = crossfit_nuisance(
+                    train_df.iloc[fit_pos][self.config.text_column].astype(str).tolist(),
+                    np.asarray(t)[fit_pos],
+                    np.asarray(y)[fit_pos],
+                    folds=self.nn_config.nuisance_folds,
+                    seed=40_000 + 100 * outer_fold + inner_fold,
+                )
             directions, fold_metadata = self._embedding_directions(
                 patient_embeddings=train_patient[fit_pos],
                 fit_row_ids=tuple(
@@ -4077,6 +4224,7 @@ class MultiModelForestStage1Runner:
                 ),
                 y=np.asarray(y, dtype=float)[fit_pos],
                 t=np.asarray(t, dtype=float)[fit_pos],
+                dina_nuisance=fold_dina,
                 pseudo_target=np.asarray(pseudo_target, dtype=float)[fit_pos],
                 t_resid=np.asarray(t_resid, dtype=float)[fit_pos],
                 outer_fold=1000 * int(outer_fold) + int(inner_fold),
@@ -4170,6 +4318,7 @@ class MultiModelForestStage1Runner:
         pseudo_target: np.ndarray,
         t_resid: np.ndarray,
         outer_fold: int,
+        dina_nuisance=None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         directions: List[Dict[str, Any]] = []
         metadata: List[Dict[str, Any]] = []
@@ -4236,11 +4385,18 @@ class MultiModelForestStage1Runner:
                 counts={"treatment": t_counts, "outcome": y_counts},
             )
 
+        if dina_nuisance is not None:
+            from ..models import dina
+
+            dina_score, dina_weights, _ = dina.score(y, t, dina_nuisance["a"], dina_nuisance["nu"])
+            pseudo_target = dina_score
         pseudo_labels, pseudo_mask = _tail_labels(
             pseudo_target,
             float(self.nn_config.embedding_contrast.pseudo_target_quantile),
         )
-        pseudo_weights = np.square(np.asarray(t_resid, dtype=float))
+        pseudo_weights = (
+            np.square(np.asarray(t_resid, dtype=float)) if dina_nuisance is None else dina_weights
+        )
         pseudo_direction, pseudo_counts = _weighted_binary_direction(
             patient_embeddings,
             pseudo_labels,
@@ -4256,16 +4412,28 @@ class MultiModelForestStage1Runner:
                 directions,
                 metadata,
                 outer_fold,
-                name="global_r_pseudo_target_contrast",
+                name=(
+                    "global_dina_fisher_score_contrast"
+                    if dina_nuisance is not None
+                    else "global_r_pseudo_target_contrast"
+                ),
                 direction=pseudo_direction,
                 role="X",
-                objective="r_pseudo_outcome",
-                contrast_family="global_r_pseudo_target",
+                objective=(
+                    "bernoulli_dina"
+                    if str(self.config.outcome_type).lower() == "binary"
+                    else "r_pseudo_outcome"
+                ),
+                contrast_family=(
+                    "global_dina_score" if dina_nuisance is not None else "global_r_pseudo_target"
+                ),
                 counts=pseudo_counts,
             )
         orthogonal_score = np.asarray(pseudo_target, dtype=float) * np.square(
             np.asarray(t_resid, dtype=float)
         )
+        if dina_nuisance is not None:
+            orthogonal_score = dina_score
         score_labels, score_mask = _tail_labels(
             orthogonal_score,
             float(self.nn_config.embedding_contrast.pseudo_target_quantile),
@@ -4280,11 +4448,21 @@ class MultiModelForestStage1Runner:
                 directions,
                 metadata,
                 outer_fold,
-                name="global_orthogonal_r_score_contrast",
+                name=(
+                    "global_dina_score_contrast"
+                    if dina_nuisance is not None
+                    else "global_orthogonal_r_score_contrast"
+                ),
                 direction=score_direction,
                 role="X",
-                objective="orthogonal_r_score",
-                contrast_family="global_orthogonal_r_score",
+                objective=(
+                    "bernoulli_dina_score" if dina_nuisance is not None else "orthogonal_r_score"
+                ),
+                contrast_family=(
+                    "global_dina_score"
+                    if dina_nuisance is not None
+                    else "global_orthogonal_r_score"
+                ),
                 counts=score_counts,
             )
 

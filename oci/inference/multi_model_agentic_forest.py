@@ -1258,6 +1258,7 @@ class MultiModelAgenticForestRunner:
             pseudo_target,
             t_resid**2,
             outer_fold,
+            dina_labels=(t, y) if self.config.outcome_type == "binary" else None,
             view=view,
             view_index=view_index,
             explicit_feature_dicts=explicit_feature_dicts,
@@ -1388,6 +1389,7 @@ class MultiModelAgenticForestRunner:
                 pseudo_target,
                 sample_weight,
                 outer_fold,
+                dina_labels=(t, y) if self.config.outcome_type == "binary" else None,
                 view=view,
                 view_index=view_index,
                 explicit_feature_dicts=explicit_feature_dicts,
@@ -1609,7 +1611,21 @@ class MultiModelAgenticForestRunner:
         explicit_feature_dicts: Optional[List[Dict[str, Any]]] = None,
         explicit_specs: Optional[List[ExplicitFeatureSpec]] = None,
         random_seed_offset: int = 0,
+        dina_labels=None,
     ) -> np.ndarray:
+        if dina_labels is not None:
+            from .stage1_dina import crossfit_effect
+
+            result = crossfit_effect(
+                texts,
+                *dina_labels,
+                view=view,
+                folds=self.nn_config.effect_folds,
+                seed=13_000 + outer_fold + 1000 * view_index + random_seed_offset,
+                explicit=explicit_feature_dicts,
+                specs=explicit_specs,
+            )
+            return result["tau"]
         oof = np.full(len(pseudo_target), np.nan, dtype=float)
         folds = _bounded_fold_count(self.nn_config.effect_folds, len(pseudo_target))
         splitter = KFold(
@@ -1689,6 +1705,33 @@ class MultiModelAgenticForestRunner:
             return _model_feature_scores(outcome_model, len(features))
 
         def fit_effect() -> np.ndarray:
+            if self.config.outcome_type == "binary":
+                from .stage1_dina import crossfit_nuisance, encode
+                from ..models import dina
+
+                dn, _ = crossfit_nuisance(
+                    texts,
+                    t,
+                    y,
+                    view=view,
+                    folds=self.nn_config.nuisance_folds,
+                    seed=303,
+                    explicit=explicit_feature_dicts,
+                    specs=explicit_specs,
+                )
+                xd, encoder = encode(
+                    texts, view=view, explicit=explicit_feature_dicts, specs=explicit_specs
+                )
+                model = dina.fit(
+                    xd,
+                    y,
+                    t,
+                    dn["a"],
+                    dn["nu"],
+                    groups=encoder.groups,
+                    regularization=view.ridge_alpha / len(y),
+                )
+                return model.coefficients
             effect_model = self._make_regressor(view, random_state=303)
             _fit_regressor(
                 effect_model,
@@ -1722,6 +1765,14 @@ class MultiModelAgenticForestRunner:
         return {
             "view_name": str(view.name),
             "view_config": _bow_view_to_dict(view),
+            "effect_objective": (
+                "bernoulli_dina" if self.config.outcome_type == "binary" else "squared_r_loss"
+            ),
+            "effect_coefficient_scale": (
+                "conditional_log_odds_ratio"
+                if self.config.outcome_type == "binary"
+                else "outcome_difference"
+            ),
             "n_features": int(len(features)),
             "n_bow_features": int(len(vectorizer.get_feature_names_out())),
             "n_prespecified_features": int(len(explicit_specs or [])),
@@ -2168,7 +2219,19 @@ class MultiModelAgenticForestRunner:
                     ordered_fit_rows,
                 ),
             )
+            dina_nuisance = None
+            if self.config.outcome_type == "binary":
+                from .stage1_dina import crossfit_nuisance
+
+                dina_nuisance, _ = crossfit_nuisance(
+                    discovery_df[self.config.text_column].astype(str).tolist(),
+                    t,
+                    y,
+                    folds=self.nn_config.nuisance_folds,
+                    seed=49_001,
+                )
             return generator.build_evidence(
+                dina_nuisance=dina_nuisance,
                 discovery_df=discovery_df,
                 y=y,
                 t=t,

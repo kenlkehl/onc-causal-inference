@@ -45,7 +45,7 @@ from .stage2_multi_model_config import Stage2MultiModelConfig, multi_model_confi
 
 LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "stage2_all_evidence_statistical_components_v2_calibration_overlap"
+SCHEMA_VERSION = "stage2_all_evidence_statistical_components_v3_dina"
 TEMPORAL_SCOPE = "pre_index_treatment"
 
 
@@ -1284,8 +1284,26 @@ def _candidate_r_learner_test(
     binary_outcome: bool,
     config: Stage2ElasticNetSelectionConfig,
     seed: int,
+    dina_nuisance=None,
 ) -> dict[str, Any]:
-    """Score one candidate using elastic-net nuisances and held-out R-loss."""
+    """Score one candidate under binary DINA or continuous R-loss."""
+    if binary_outcome:
+        from .stage2_dina import legacy_screen
+
+        return legacy_screen(
+            train=train,
+            valid=valid,
+            definitions=[feature],
+            treatment=treatment_train,
+            outcome=outcome_train,
+            valid_treatment=treatment_valid,
+            valid_outcome=outcome_valid,
+            nuisance=dina_nuisance,
+            policy=config,
+            seed=seed,
+            candidate=True,
+        )
+
 
     train_eligible = propensity_eligibility(
         base_e_train, config.min_propensity, config.max_propensity
@@ -1710,6 +1728,21 @@ def _joint_modifier_elastic_net_fold(
 ) -> dict[str, Any]:
     """Fit one multivariable group-elastic-net R-loss interaction screen."""
 
+    if context.get("binary_outcome"):
+        from .stage2_dina import legacy_screen
+
+        return legacy_screen(
+            train=context["train"],
+            valid=context["valid"],
+            definitions=definitions,
+            treatment=context["treatment_train"],
+            outcome=context["outcome_train"],
+            valid_treatment=context["treatment_valid"],
+            valid_outcome=context["outcome_valid"],
+            nuisance=context["dina_nuisance"],
+            policy=config,
+            seed=seed,
+        )
     context = dict(context)
     trim = {}
     for part in ("train", "valid"):
@@ -1835,6 +1868,17 @@ def _joint_modifier_elastic_net_fold(
         "heldout_full_r_loss": full_loss,
         "heldout_r_loss_improvement": reduced_loss - full_loss,
     }
+
+
+def _modifier_loss_summary(rows):
+    values = [
+        float(row["heldout_r_loss_improvement"])
+        for row in rows
+        if row.get("heldout_r_loss_improvement") is not None
+    ]
+    return (
+        (float(np.mean(values)), float(np.mean(np.asarray(values) > 0))) if values else (None, None)
+    )
 
 
 def select_stage2_features_elastic_net(
@@ -2211,6 +2255,34 @@ def select_stage2_features_elastic_net(
                 "nested_modifier_training_crossfit_folds": len(augmentation_splits),
             }
         )
+        dina_nuisance = None
+        if binary_outcome:
+            from .stage2_dina import unpack_nuisances
+            from .stage2_multi_model_selection import _nuisances
+
+            # Use the candidate catalog in the nuisance fit so candidate main
+            # effects cannot masquerade as log-odds effect modification.
+            from .stage2_multi_model_selection import NotEstimable
+
+            try:
+                dina_nuisance = unpack_nuisances(
+                    _nuisances(
+                        train,
+                        valid,
+                        original,
+                        t_train,
+                        y_train,
+                        binary=True,
+                        policy=policy,
+                        seed=seed + 40_000 + 1000 * position,
+                    )
+                )
+            except NotEstimable as exc:
+                dina_nuisance = {
+                    "status": "not_evaluable",
+                    "reason": str(exc),
+                    "effect_objective": "bernoulli_dina",
+                }
         modifier_contexts.append(
             {
                 "split": split,
@@ -2225,6 +2297,8 @@ def select_stage2_features_elastic_net(
                 "base_m_train": nested_m_train,
                 "base_m_valid": m_valid,
                 "augmentation_splits": augmentation_splits,
+                "binary_outcome": binary_outcome,
+                "dina_nuisance": dina_nuisance,
             }
         )
     if np.isnan(oof_e).any() or np.isnan(oof_m).any():
@@ -2277,6 +2351,7 @@ def select_stage2_features_elastic_net(
                 augmentation_splits=context["augmentation_splits"],
                 feature=feature,
                 binary_outcome=binary_outcome,
+                dina_nuisance=context["dina_nuisance"],
                 config=policy,
                 seed=seed + 100_000 * position + candidate_position,
             )
@@ -2594,28 +2669,22 @@ def select_stage2_features_elastic_net(
             "selected_in_any_inner_fold_feature_ids": sorted(
                 _selected_in_any_inner_fold(modifier_elastic_net_votes)
             ),
-            "mean_heldout_r_loss_improvement": float(
-                np.mean(
-                    [float(row["heldout_r_loss_improvement"]) for row in modifier_elastic_net_folds]
-                )
-            ),
-            "positive_heldout_r_loss_improvement_fraction": float(
-                np.mean(
-                    np.asarray(
-                        [
-                            float(row["heldout_r_loss_improvement"])
-                            for row in modifier_elastic_net_folds
-                        ]
-                    )
-                    > 0.0
-                )
-            ),
+            "mean_heldout_r_loss_improvement": _modifier_loss_summary(modifier_elastic_net_folds)[
+                0
+            ],
+            "positive_heldout_r_loss_improvement_fraction": _modifier_loss_summary(
+                modifier_elastic_net_folds
+            )[1],
             "folds": modifier_elastic_net_folds,
         },
         "decisions": decisions,
         "retained_feature_ids": [_feature_key(feature) for feature in selected],
         "measurement_dependency_feature_ids": [_feature_key(feature) for feature in selected],
     }
+    if binary_outcome:
+        from .stage2_dina import label_binary_report
+
+        report = label_binary_report(report)
     if policy.selection_mode == "independent_tasks":
         from .stage2_taskwise_policy import finalize_taskwise_report
 

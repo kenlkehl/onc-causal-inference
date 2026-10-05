@@ -12,7 +12,7 @@ import torch.nn as nn
 from ..config import AgenticAttentionVariableForestConfig
 from ..utils.calibration import clip_probability
 
-EFFECT_OBJECTIVES = {"squared_r_loss", "logistic_r_loss", "pseudo_outcome_mse"}
+EFFECT_OBJECTIVES = {"squared_r_loss", "logistic_r_loss", "pseudo_outcome_mse", "dina"}
 
 
 def effect_objective_name(config: AgenticAttentionVariableForestConfig) -> str:
@@ -20,7 +20,7 @@ def effect_objective_name(config: AgenticAttentionVariableForestConfig) -> str:
     if value not in EFFECT_OBJECTIVES:
         raise ValueError(
             "agentic_attention_variable_forest.effect_objective must be one of "
-            "'squared_r_loss', 'logistic_r_loss', or 'pseudo_outcome_mse'"
+            "'dina', 'squared_r_loss', 'logistic_r_loss', or 'pseudo_outcome_mse'"
         )
     return value
 

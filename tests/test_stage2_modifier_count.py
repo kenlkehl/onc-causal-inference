@@ -81,7 +81,11 @@ def test_count_rule_and_configuration_keep_legacy_policies_separate():
             )
     config = statistical_selection_config_from_mapping({"selection_mode": "multi_model"})
     assert config.multi_model.modifier_count.enabled
-    assert config.multi_model.modifier_count.estimators == ("causal_forest", "linear_interactions")
+    assert config.multi_model.modifier_count.estimators == (
+        "causal_forest",
+        "linear_interactions",
+        "dina",
+    )
     assert config.multi_model.modifier_count.selection_rule == "minimum_r_loss"
     assert statistical_selection_config_from_mapping(config.public_dict()) == config
     disabled = replace(
@@ -324,8 +328,8 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
             assert np.allclose(cell["squared_errors"], expected)
             assert np.isclose(cell["r_loss"], expected.mean())
             all_ids.append(cell["validation_row_ids"])
-        assert (
-            len(all_ids) == 12
+        assert len(all_ids) == (
+            16 if binary else 12
         )  # Four sizes: two forest seeds and one interaction fit; common patients.
     options = audit["choice"]["options"]
     expected_choice = min(
@@ -337,7 +341,11 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
     )
     assert audit["chosen_estimator"] == expected_choice[3]
     assert audit["choice"]["chosen_additional_count"] == expected_choice[1]
-    assert set(options) == {"causal_forest", "linear_interactions"}
+    assert set(options) == (
+        {"causal_forest", "linear_interactions", "dina"}
+        if binary
+        else {"causal_forest", "linear_interactions"}
+    )
     changed = arguments["dataset"].copy()
     changed.loc[96:, ["treatment", "outcome"]] = 1e12
     changed["oracle"] = "DO_NOT_READ_CHANGED"

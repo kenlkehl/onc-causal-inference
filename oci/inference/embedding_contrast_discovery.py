@@ -367,6 +367,7 @@ class EmbeddingContrastEvidenceGenerator:
         t_resid: Any,
         pseudo_target_names: Optional[Sequence[str]] = None,
         importance: Optional[Dict[str, Any]] = None,
+        dina_nuisance=None,
     ) -> Dict[str, Any]:
         """Return agent-facing embedding contrast evidence for one discovery fold."""
         if not self.enabled:
@@ -414,6 +415,7 @@ class EmbeddingContrastEvidenceGenerator:
             y=y_array,
             t=t_array,
             pseudo_targets=pseudo_targets,
+            dina_nuisance=dina_nuisance,
         ):
             contrasts.append(
                 self._build_one_contrast(
@@ -681,6 +683,7 @@ class EmbeddingContrastEvidenceGenerator:
         y: np.ndarray,
         t: np.ndarray,
         pseudo_targets: Sequence[Tuple[str, np.ndarray, np.ndarray]],
+        dina_nuisance=None,
     ) -> List[Dict[str, Any]]:
         specs: List[Dict[str, Any]] = []
         treatment_labels, treatment_mask = _binary_labels(t)
@@ -738,6 +741,41 @@ class EmbeddingContrastEvidenceGenerator:
                 )
             )
 
+        if dina_nuisance is not None:
+            from ..models import dina
+
+            contribution, weights, constant = dina.score(
+                y, t, dina_nuisance["a"], dina_nuisance["nu"]
+            )
+            score_labels, score_mask = _tail_labels(
+                contribution, float(self.embedding_config.pseudo_target_quantile)
+            )
+            weighted_modes = [bool(self.embedding_config.pseudo_target_weighted)]
+            if weighted_modes[0] and bool(
+                getattr(self.embedding_config, "include_orthogonal_r_score_contrasts", True)
+            ):
+                weighted_modes.append(False)
+            for weighted in weighted_modes:
+                specs.append(
+                    {
+                        "name": "dina_fisher_score" if weighted else "dina_score",
+                        "positive_label": "higher_DINA_score",
+                        "negative_label": "lower_DINA_score",
+                        "labels": score_labels,
+                        "mask": score_mask,
+                        "sample_weights": weights if weighted else None,
+                        "role_hint": "effect_modifier",
+                        "metadata": {
+                            "contrast_family": "dina_score",
+                            "score_formula": "(T-a)*(Y-expit(nu+(T-a)*delta0))",
+                            "constant_log_odds_ratio": constant,
+                            "effect_scale": "conditional_log_odds_ratio",
+                        },
+                    }
+                )
+            return specs
+        if str(self.config.outcome_type).lower() == "binary":
+            raise ValueError("binary whole-cohort effect contrasts require DINA nuisances")
         multiple_pseudo_targets = len(pseudo_targets) > 1
         for pseudo_name, pseudo_target, t_resid in pseudo_targets:
             pseudo_labels, pseudo_mask = _tail_labels(

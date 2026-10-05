@@ -112,3 +112,35 @@ def test_final_interaction_dispatch_overlap_resume_and_no_heldout_label_use(monk
     # An architecture change must not reuse the interaction result.
     forest = analysis.estimate_outer_fold(**{**kwargs, "estimator": "causal_forest"})
     assert forest["model_family"] == "causal_forest_dml" and ("effect", 12) in calls
+
+
+def test_final_dina_dispatch_probability_scale_honesty_and_resume(monkeypatch, tmp_path):
+    from oci.inference import stage2_dina
+
+    kwargs, calls = final_fixture(monkeypatch, tmp_path)
+    kwargs.update(
+        estimator="dina", statistical_policy=small_policy(), min_propensity=0.1, max_propensity=0.9
+    )
+    diagnostics = analysis.estimate_outer_fold(**kwargs)
+    frame = pd.read_csv(tmp_path / "predictions.csv")
+    assert diagnostics["model_family"] == "grouped_bernoulli_dina"
+    assert not any(c[0] == "effect" for c in calls)
+    np.testing.assert_allclose(
+        frame.estimated_cate, frame.dina_mu1 - frame.dina_mu0, equal_nan=True
+    )
+    assert frame.loc[frame.effect_eligible, "dina_log_odds_ratio"].notna().all()
+    assert frame.loc[~frame.effect_eligible, "estimated_cate"].isna().all()
+    assert frame.estimated_cate_lower_95.isna().all()
+    assert diagnostics["confidence_interval_95"] is not None
+    changed = kwargs["dataset"].copy()
+    changed.loc[18:, "outcome"] = 1 - changed.loc[18:, "outcome"]
+    analysis.estimate_outer_fold(
+        **(kwargs | dict(dataset=changed, output_dir=tmp_path / "changed"))
+    )
+    pd.testing.assert_series_equal(
+        frame.estimated_cate, pd.read_csv(tmp_path / "changed/predictions.csv").estimated_cate
+    )
+    monkeypatch.setattr(
+        stage2_dina, "fit_effect", lambda **k: pytest.fail("cached DINA fit recomputed")
+    )
+    assert analysis.estimate_outer_fold(**kwargs) == diagnostics

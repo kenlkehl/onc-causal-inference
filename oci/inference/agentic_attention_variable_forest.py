@@ -7,6 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 import gc
 import hashlib
 import json
+import copy
 import logging
 import os
 import queue
@@ -71,7 +72,7 @@ logger = logging.getLogger(__name__)
 
 VALID_ROLES = {"confounder", "effect_modifier"}
 VALID_TYPES = {"categorical", "continuous"}
-EFFECT_OBJECTIVES = {"squared_r_loss", "logistic_r_loss", "pseudo_outcome_mse"}
+EFFECT_OBJECTIVES = {"squared_r_loss", "logistic_r_loss", "pseudo_outcome_mse", "dina"}
 
 
 def _running_inside_loky_worker() -> bool:
@@ -95,12 +96,14 @@ def _effect_objective_name(config: AgenticAttentionVariableForestConfig) -> str:
     if value not in EFFECT_OBJECTIVES:
         raise ValueError(
             "agentic_attention_variable_forest.effect_objective must be one of "
-            "'squared_r_loss', 'logistic_r_loss', or 'pseudo_outcome_mse'"
+            "'dina', 'squared_r_loss', 'logistic_r_loss', or 'pseudo_outcome_mse'"
         )
     return value
 
 
 def _effect_loss_label(effect_objective: str) -> str:
+    if effect_objective == "dina":
+        return "bernoulli_dina_loss"
     if effect_objective == "logistic_r_loss":
         return "logistic_r_loss"
     if effect_objective == "pseudo_outcome_mse":
@@ -681,6 +684,9 @@ class AgenticAttentionVariableForestRunner:
             "agentic_attention_variable_forest",
             AgenticAttentionVariableForestConfig(),
         )
+        if str(config.outcome_type).lower() == "binary":
+            self.avf_config = copy.deepcopy(self.avf_config)
+            self.avf_config.effect_objective = "dina"
         self.agent_search_config = getattr(config.architecture, "agentic_feature_search")
         self.cf_config: ExplicitFeatureForestConfig = getattr(
             config.architecture,
@@ -1694,8 +1700,8 @@ class AgenticAttentionVariableForestRunner:
     ) -> Dict[str, Any]:
         folds = _bounded_fold_count(self.avf_config.effect_folds, len(df))
         effect_objective = _effect_objective_name(self.avf_config)
-        if effect_objective == "logistic_r_loss" and self.config.outcome_type != "binary":
-            raise ValueError("logistic_r_loss effect objective requires binary outcomes")
+        if effect_objective in {"logistic_r_loss", "dina"} and self.config.outcome_type != "binary":
+            raise ValueError("Bernoulli effect objectives require binary outcomes")
         r_df = nuisance_predictions.copy()
         r_df["tau_hat_r_stage"] = np.nan
         r_df["tau_logit_modifier"] = np.nan
@@ -1821,7 +1827,19 @@ class AgenticAttentionVariableForestRunner:
                 )
                 raw_effect = self._predict_effect_model(model, heldout)
                 heldout_pseudo_outcome = r_pseudo_outcome[heldout_pos]
-                if effect_objective == "logistic_r_loss":
+                if effect_objective == "dina":
+                    from .stage1_dina import neural_predictions
+                    from ..models import dina
+
+                    dp = neural_predictions(self, model, heldout, raw_effect)
+                    tau_hat, tau_logit_modifier = dp["tau"], dp["delta"]
+                    heldout_effect_loss = dina.loss(
+                        y[heldout_pos], t[heldout_pos], dp["a"], dp["nu"], dp["delta"]
+                    )
+                    r_df.loc[heldout_pos, "effect_loss_at_zero_tau"] = dina.loss(
+                        y[heldout_pos], t[heldout_pos], dp["a"], dp["nu"], 0.0
+                    )
+                elif effect_objective == "logistic_r_loss":
                     tau_logit_modifier = raw_effect
                     tau_hat = _logistic_r_tau_from_delta(
                         tau_logit_modifier,
@@ -2659,8 +2677,8 @@ class AgenticAttentionVariableForestRunner:
     def _crossfit_joint_rlearner(self, df: pd.DataFrame, outer_fold: int) -> Dict[str, Any]:
         folds = _bounded_fold_count(self.avf_config.nuisance_folds, len(df))
         effect_objective = _effect_objective_name(self.avf_config)
-        if effect_objective == "logistic_r_loss" and self.config.outcome_type != "binary":
-            raise ValueError("logistic_r_loss effect objective requires binary outcomes")
+        if effect_objective in {"logistic_r_loss", "dina"} and self.config.outcome_type != "binary":
+            raise ValueError("Bernoulli effect objectives require binary outcomes")
 
         predictions = pd.DataFrame(
             {
@@ -2789,7 +2807,15 @@ class AgenticAttentionVariableForestRunner:
                 )
                 if effect_objective == "pseudo_outcome_mse":
                     train_eligible = train_eligible & np.isfinite(r_pseudo_outcome)
-                if effect_objective == "logistic_r_loss":
+                if effect_objective == "dina":
+                    from .stage1_dina import neural_predictions
+                    from ..models import dina
+
+                    dp = neural_predictions(self, model, heldout, raw_effect)
+                    tau_hat, tau_logit_modifier = dp["tau"], dp["delta"]
+                    effect_loss = dina.loss(y, t, dp["a"], dp["nu"], dp["delta"])
+                    effect_loss_at_zero = dina.loss(y, t, dp["a"], dp["nu"], 0.0)
+                elif effect_objective == "logistic_r_loss":
                     tau_logit_modifier = raw_effect
                     tau_hat = _logistic_r_tau_from_delta(
                         tau_logit_modifier,
@@ -3426,11 +3452,20 @@ class AgenticAttentionVariableForestRunner:
         model.extractor.fit_tokenizer(
             df.iloc[positions][self.config.text_column].astype(str).tolist()
         )
+        dina_fields = {}
+        if str(self.config.outcome_type).lower() == "binary":
+            from .stage1_dina import prepare_neural_nuisance
+            from ..models import dina
+
+            dina_fields = prepare_neural_nuisance(
+                self, model, df, positions, seed=70_000 + 100 * int(outer_fold) + int(fold)
+            )
         train_loader = self._make_text_loader(
             model,
             df,
             positions,
             fields={
+                **dina_fields,
                 "t": df[self.config.treatment_column].to_numpy(dtype=np.float32),
                 "y": df[self.config.outcome_column].to_numpy(dtype=np.float32),
             },
@@ -3511,10 +3546,17 @@ class AgenticAttentionVariableForestRunner:
                         1.0 - float(self.avf_config.e_clip),
                     )
                 )
+                if dina_fields:
+                    e_for_r = batch["dina_e"].to(self.device, non_blocking=True)
                 train_eligible = (e_for_r >= float(self.avf_config.r_stage_min_propensity)) & (
                     e_for_r <= float(self.avf_config.r_stage_max_propensity)
                 )
-                if effect_objective == "logistic_r_loss":
+                if dina_fields:
+                    da = batch["dina_a"].to(self.device, non_blocking=True)
+                    nu = batch["dina_nu"].to(self.device, non_blocking=True)
+                    effect_loss_vector = dina.torch_loss(y, t, da, nu, effect, reduction="none")
+                    effect_mask = train_eligible
+                elif effect_objective == "logistic_r_loss":
                     baseline_logit = torch.logit(torch.clamp(m_for_r, 1e-4, 1.0 - 1e-4))
                     logits = baseline_logit + (t - e_for_r) * effect
                     effect_loss_vector = F.binary_cross_entropy_with_logits(
@@ -3933,11 +3975,20 @@ class AgenticAttentionVariableForestRunner:
         model.extractor.fit_tokenizer(
             df.iloc[positions][self.config.text_column].astype(str).tolist()
         )
+        dina_fields = {}
+        if str(self.config.outcome_type).lower() == "binary":
+            from .stage1_dina import prepare_neural_nuisance
+            from ..models import dina
+
+            dina_fields = prepare_neural_nuisance(
+                self, model, df, positions, seed=70_000 + 100 * int(outer_fold) + int(fold)
+            )
         train_loader = self._make_text_loader(
             model,
             df,
             positions,
             fields={
+                **dina_fields,
                 "outcome": np.asarray(outcomes, dtype=np.float32),
                 "treatment": np.asarray(treatments, dtype=np.float32),
                 "e_hat": np.asarray(e_hat, dtype=np.float32),
@@ -3988,7 +4039,13 @@ class AgenticAttentionVariableForestRunner:
                 t_residual = batch["t_residual"].to(self.device, non_blocking=True)
                 optimizer.zero_grad(set_to_none=True)
                 effect = model(batch["model_input"])
-                if effect_objective == "logistic_r_loss":
+                if dina_fields:
+                    y = batch["outcome"].to(self.device, non_blocking=True)
+                    t = batch["treatment"].to(self.device, non_blocking=True)
+                    da = batch["dina_a"].to(self.device, non_blocking=True)
+                    nu = batch["dina_nu"].to(self.device, non_blocking=True)
+                    loss = dina.torch_loss(y, t, da, nu, effect)
+                elif effect_objective == "logistic_r_loss":
                     y = batch["outcome"].to(self.device, non_blocking=True)
                     t = batch["treatment"].to(self.device, non_blocking=True)
                     e_batch = batch["e_hat"].to(self.device, non_blocking=True)

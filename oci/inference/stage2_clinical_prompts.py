@@ -134,10 +134,11 @@ METHODS = {
     "univariable": "Univariable association or interaction model",
     "penalized_main": "Penalized main-effect model",
     "penalized_interactions": "Penalized outcome model with treatment interactions",
-    "orthogonal_linear": "Penalized linear model of treatment/outcome residuals",
-    "univariable_rlearner": "Univariable R-learner",
+    "orthogonal_linear": "Grouped DINA log-odds model for binary outcomes; residual linear model otherwise",
+    "univariable_rlearner": "Candidate DINA model for binary outcomes; R-learner otherwise",
     "predictive_forest": "Predictive forest",
     "causal_forest": "Causal forest",
+    "dina": "Grouped Gao-Hastie DINA log-odds effect model",
     "matched_batch_contrast": "Matched patient-batch contrast model",
 }
 SCORES = {
@@ -145,7 +146,8 @@ SCORES = {
     "penalized_main": "coefficient-group magnitude",
     "penalized_interactions": "coefficient-group magnitude",
     "orthogonal_linear": "coefficient-group magnitude",
-    "univariable_rlearner": "validation R-loss improvement over a constant effect",
+    "univariable_rlearner": "validation DINA likelihood gain for binary outcomes, R-loss gain otherwise, over a constant effect",
+    "dina": "validation DINA loss increase after jointly shuffling all levels of the variable",
     "predictive_forest": "validation prediction-loss increase after shuffling the variable",
     "causal_forest": "validation R-loss increase after shuffling the variable in the same fitted forest",
     "matched_batch_contrast": "fractional reduction in validation batch-deviation error beyond bin intercepts",

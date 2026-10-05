@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v3"
+SCHEMA_VERSION = "stage2_multi_model_selection_v4_dina"
 from .stage2_prompt_catalog import PROMPT_VERSION
 FAMILIES = (
     "univariable",
@@ -14,9 +14,10 @@ FAMILIES = (
     "univariable_rlearner",
     "predictive_forest",
     "causal_forest",
+    "dina",
     "matched_batch_contrast",
 )
-FINAL_ESTIMATORS = ("causal_forest", "linear_interactions")
+FINAL_ESTIMATORS = ("causal_forest", "linear_interactions", "dina")
 
 
 @dataclass(frozen=True)
@@ -79,7 +80,7 @@ class ModifierCountConfig:
             or len(set(self.estimators)) != len(self.estimators)
         ):
             raise ValueError(
-                "modifier_count.estimators must be a nonempty unique list of causal_forest and/or linear_interactions"
+                "modifier_count.estimators must be a nonempty unique list of causal_forest, linear_interactions, and/or dina"
             )
         for name in ("max_ranked_modifiers", "forest_seeds", "concept_top_n_per_fold"):
             value = getattr(self, name)
@@ -187,8 +188,13 @@ class Stage2MultiModelConfig:
             result.pop("matched_batch")
         return result
 
-    def active_families(self):
-        return tuple(f for f in FAMILIES if f != "matched_batch_contrast" or self.matched_batch.enabled)
+    def active_families(self, outcome_type=None):
+        return tuple(
+            f
+            for f in FAMILIES
+            if (f != "matched_batch_contrast" or self.matched_batch.enabled)
+            and (f != "dina" or outcome_type in {None, "binary"})
+        )
 
 
 def multi_model_config_from_mapping(
@@ -201,6 +207,7 @@ def multi_model_config_from_mapping(
         SCHEMA_VERSION,
         "stage2_multi_model_selection_v1",
         "stage2_multi_model_selection_v2",
+        "stage2_multi_model_selection_v3",
     }:
         raise ValueError("unsupported multi_model schema_version")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)

@@ -224,8 +224,11 @@ def numerical_inputs():
     splits = [{"inner_fold": k + 1, "fit_row_ids": ids[ids % 2 != k].tolist(),
                "heldout_row_ids": ids[ids % 2 == k].tolist()} for k in range(2)]
     config = selection.Stage2ElasticNetSelectionConfig(
-        selection_mode="independent_tasks", internal_cv_folds=2,
-        regularization_grid_size=3, max_iter=80, optimization_tolerance=1e-4,
+        selection_mode="independent_tasks",
+        internal_cv_folds=2,
+        regularization_grid_size=3,
+        max_iter=1000,
+        optimization_tolerance=1e-4,
     )
     return dict(dataset=dataset, extracted_fit=frame.iloc[:100], definitions=defs,
                 inner_splits=splits, treatment_column="a", outcome_column="y",
