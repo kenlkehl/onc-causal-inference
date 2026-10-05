@@ -5475,12 +5475,12 @@ def _harmonize_training_extraction(
     output_dir: Path,
     request_json: RequestJSON,
     max_prompt_chars: int,
+    workers: int = 1,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Any]]:
-    updated: list[dict[str, Any]] = []
-    newly_requested: list[str] = []
-    fallbacks: list[dict[str, Any]] = []
-    mapping_normalizations: list[dict[str, Any]] = []
-    for raw_feature in definitions:
+    from .stage2_parallel import ordered_map
+
+    def harmonize_feature(raw_feature):
+        newly_requested, fallbacks, mapping_normalizations = [], [], []
         feature = dict(raw_feature)
         if str(feature.get("value_type") or "").strip().lower() == "continuous":
             observations = _mixed_value_observations(extracted, feature)
@@ -5561,7 +5561,15 @@ def _harmonize_training_extraction(
                         feature["modeling_strategy"] = (
                             "continuous_with_categorical_fallback"
                         )
-        updated.append(_normalized_feature_modeling_definition(feature))
+        return (_normalized_feature_modeling_definition(feature),
+                newly_requested, fallbacks, mapping_normalizations)
+
+    rows = ordered_map(harmonize_feature, definitions, workers=workers,
+                       thread_name="stage2-harmonization")
+    updated = [row[0] for row in rows]
+    newly_requested = [value for row in rows for value in row[1]]
+    fallbacks = [value for row in rows for value in row[2]]
+    mapping_normalizations = [value for row in rows for value in row[3]]
     harmonized, application = _apply_harmonization_plans(
         extracted,
         updated,
@@ -8439,6 +8447,7 @@ def _extract_training_with_ontology_feedback(
     note_search: NoteSearchConfig | None = None,
     context_strategy: str = "full_record",
     colbert: ColBERTConfig | None = None,
+    interpretation_workers: int = 1,
     decision_extraction: Any | None = None,
     decision_client: Any | None = None,
     prior_extracted: pd.DataFrame | None = None,
@@ -8460,6 +8469,7 @@ def _extract_training_with_ontology_feedback(
             context_margin_tokens=context_margin_tokens, deferred_retry_passes=deferred_retry_passes,
             note_search=note_search, context_strategy=context_strategy, colbert=colbert,
             decision_extraction=decision_extraction, decision_client=decision_client,
+            ontology_workers=interpretation_workers,
             prior_extracted=prior_extracted, prior_definitions=prior_definitions,
             prior_failure_summary=prior_failure_summary,
         )
@@ -9123,6 +9133,7 @@ def _run_fold_analysis_legacy(
             output_dir=round_dir / "extraction",
             feedback_dir=round_dir / "ontology_refinement",
             request_json=request_json,
+            interpretation_workers=int(getattr(config, "workers", 1)),
             workers=config.workers,
             max_prompt_chars=config.extraction_max_prompt_chars,
             feature_batch_size=extraction_feature_batch_size,
@@ -9140,6 +9151,7 @@ def _run_fold_analysis_legacy(
             definitions=current,
             output_dir=round_dir / "harmonization",
             request_json=request_json,
+            workers=int(getattr(config, "workers", 1)),
             max_prompt_chars=config.max_prompt_chars,
         )
         _write_json(
@@ -9373,6 +9385,7 @@ def _run_fold_analysis_legacy(
             output_dir=output_dir / "extraction" / "fit",
             feedback_dir=output_dir / "extraction" / "fit_ontology_refinement",
             request_json=request_json,
+            interpretation_workers=int(getattr(config, "workers", 1)),
             workers=config.workers,
             max_prompt_chars=config.extraction_max_prompt_chars,
             feature_batch_size=extraction_feature_batch_size,
@@ -9385,6 +9398,7 @@ def _run_fold_analysis_legacy(
             definitions=current,
             output_dir=output_dir / "extraction" / "fit" / "harmonization",
             request_json=request_json,
+            workers=int(getattr(config, "workers", 1)),
             max_prompt_chars=config.max_prompt_chars,
         )
         _write_frame(
@@ -9950,6 +9964,7 @@ def run_fold_analysis(
                 output_dir=round_dir / "extraction",
                 feedback_dir=round_dir / "failure_ontology_refinement",
                 request_json=request_json,
+                interpretation_workers=int(getattr(config, "workers", 1)),
                 workers=extraction_workers,
                 max_prompt_chars=int(config.extraction_max_prompt_chars),
                 feature_batch_size=extraction_feature_batch_size,
@@ -9980,6 +9995,7 @@ def run_fold_analysis(
             definitions=extracted_definitions,
             output_dir=round_dir / "harmonization",
             request_json=request_json,
+            workers=int(getattr(config, "workers", 1)),
             max_prompt_chars=int(config.max_prompt_chars),
         )
         summaries = feature_summaries(extracted, extracted_definitions)
@@ -10058,6 +10074,7 @@ def run_fold_analysis(
             output_dir=output_dir / "extraction" / "all_candidates_fit",
             feedback_dir=output_dir / "extraction" / "all_candidates_fit_refinement",
             request_json=request_json,
+            interpretation_workers=int(getattr(config, "workers", 1)),
             workers=extraction_workers,
             max_prompt_chars=int(config.extraction_max_prompt_chars),
             feature_batch_size=extraction_feature_batch_size,
@@ -10076,6 +10093,7 @@ def run_fold_analysis(
             definitions=current,
             output_dir=output_dir / "extraction" / "all_candidates_fit_harmonization",
             request_json=request_json,
+            workers=int(getattr(config, "workers", 1)),
             max_prompt_chars=int(config.max_prompt_chars),
         )
     else:
@@ -10123,6 +10141,7 @@ def run_fold_analysis(
             measured, harmonized_definitions, _ = _harmonize_training_extraction(
                 extracted=measured, definitions=alternatives,
                 output_dir=directory / "harmonization", request_json=request_json,
+                workers=int(getattr(config, "workers", 1)),
                 max_prompt_chars=int(config.max_prompt_chars),
             )
             return measured, harmonized_definitions
@@ -10372,6 +10391,7 @@ def run_fold_analysis(
                     definitions=consolidated_definitions,
                     statistical_report=elastic_net_report,
                     request_json=request_json,
+                    workers=int(getattr(config, "workers", 1)),
                     output_dir=selection_dir / "role_adjudication",
                     policy=config.role_adjudication,
                 )

@@ -39,6 +39,7 @@ def command(dataset: Path, output: str, env: dict[str, str]) -> list[str]:
         "STAGE2_EXTRACTION_MODEL": "--stage2-extraction-model",
         "STAGE2_EXTRACTION_WORKERS": "--stage2-extraction-workers",
         "STAGE2_DECISION_PREPARATION_WORKERS": "--stage2-decision-preparation-workers",
+        "STAGE2_VLLM_CO_RESIDENT_ALL_GPUS": "--stage2-vllm-co-resident-all-gpus",
         "STAGE2_COLBERT_DEVICES": "--stage2-colbert-devices",
         "STAGE2_COLBERT_WORKERS_PER_DEVICE": "--stage2-colbert-workers-per-device",
         "STAGE2_COLBERT_CACHE_DIR": "--stage2-colbert-cache-dir",

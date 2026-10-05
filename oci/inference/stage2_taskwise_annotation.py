@@ -15,8 +15,9 @@ def _annotation_validator(value):
     return dict(value)
 
 
-def annotate_taskwise_selection(*, definitions, statistical_report, request_json, output_dir, policy):
+def annotate_taskwise_selection(*, definitions, statistical_report, request_json, output_dir, policy, workers=1):
     from .stage2_role_adjudication import _fingerprint, _write_json, build_stage2_role_evidence
+    from .stage2_parallel import ordered_map
     policy.validate()
     selected, decisions, routing = route_from_statistical_report(definitions, statistical_report)
     evidence = build_stage2_role_evidence(definitions=definitions, statistical_report=statistical_report, policy=policy)
@@ -25,8 +26,8 @@ def annotate_taskwise_selection(*, definitions, statistical_report, request_json
     identity = {"version": SCHEMA_VERSION, "prompt": clinical_prompts.PROMPT_VERSION, "evidence": evidence,
                 "decisions": decisions, "model": statistical_report.get("adjudication_model_identity")}
     by_id = {r["feature_id"]: r for r in decisions}
-    annotations, failures = [], []
-    for index, card in enumerate(evidence["candidates"]):
+    def annotate(item):
+        index, card = item
         feature_id = card["feature_id"]
         messages = clinical_prompts.messages("20_advisory_roles", clinical_prompts.evidence_input(evidence, [card])
             + "\n\nRecorded decision\n" + clinical_prompts.readable(by_id[feature_id]))
@@ -37,10 +38,13 @@ def annotate_taskwise_selection(*, definitions, statistical_report, request_json
             if isinstance(exc, OSError) and not isinstance(exc, TimeoutError):
                 raise
             failure = {"feature_id": feature_id, "error_type": type(exc).__name__}
-            failures.append(failure)
             _write_json(directory / "batches" / f"batch_{index + 1:03d}" / "failure.json", failure)
-            continue
-        annotations.append({"feature_id": feature_id, **response})
+            return None, failure
+        return {"feature_id": feature_id, **response}, None
+    responses = ordered_map(annotate, enumerate(evidence["candidates"]), workers=workers,
+                            thread_name="stage2-role-annotation")
+    annotations = [row[0] for row in responses if row[0] is not None]
+    failures = [row[1] for row in responses if row[1] is not None]
     report = {"schema_version": SCHEMA_VERSION, "status": "complete_with_annotation_failures" if failures else "complete",
         "mode": "annotation_only", "selection_authority": INDEPENDENT_TASKS, "llm_may_change_selection": False,
         "failure_policy": "keep_numerical_selection_record_annotation_failure", "input_fingerprint": _fingerprint(identity),

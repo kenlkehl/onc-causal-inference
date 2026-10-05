@@ -9,6 +9,33 @@ is unchanged.
 
 ## Root single-run launchers
 
+For two self-managed models that fit together, enable
+`stage2.vllm_co_resident_all_gpus: true` (CLI
+`--stage2-vllm-co-resident-all-gpus 1`, launcher environment
+`STAGE2_VLLM_CO_RESIDENT_ALL_GPUS=1`). Both models then stay resident on the union
+of their configured GPU lists throughout Stage 2. Each model retains its
+tensor-parallel width; the union must divide evenly by both widths. Replica
+counts and disjoint HTTP/rendezvous ports are derived from that union. This
+works with any dataset, fold count, or compatible number of selected GPUs and
+honors logical indices after `CUDA_VISIBLE_DEVICES`.
+
+Set explicit `--gpu-memory-utilization` arguments for both pools. Their fractions
+must total at most 0.90, reserving room for retrieval and CUDA contexts. For
+example, Gemma at `0.50` and Plumb at `0.28` use the same allocation on every
+selected GPU. ColBERT retains its separately configured devices and workers.
+The default allocation remains available when this mode is disabled.
+
+Independent feature requests for ontology revision, mixed-value harmonization,
+and role adjudication run concurrently within each fold using `stage2.workers`.
+All folds share the primary model's global request limit and load-aware replica
+router. Per-server admission also respects the configured vLLM sequence limit.
+Refinement rounds and dependent theme-merging rounds remain ordered; feature
+outputs and reports retain their original input order. Revision evidence samples
+are collected in one bounded scan shared by the reviewed features, preserving
+the existing sampling order and character budgets. Worker counts and serving
+allocation do not enter prompt or measurement identities, and existing feature
+checkpoints remain reusable after a restart.
+
 Fresh runs through `run_one_conf_one_mod.sh`, `run_five_conf_five_mod.sh`, and
 their H100/RTX PRO 6000 variants **default to Plumb decision extraction**.
 They use ColBERT excerpts, one feature per prompt, the 3000-token cap, three

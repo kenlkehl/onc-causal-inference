@@ -262,6 +262,30 @@ def test_saved_cpu_and_retrieval_worker_overrides_preserve_science_and_checkpoin
     assert tree(tmp_path) == before
 
 
+def test_saved_co_resident_override_preserves_science_and_checkpoints(tmp_path):
+    config = saved_fixture(tmp_path)
+    source = config.output_dir / "run_config.json"
+    raw = json.loads(source.read_text())
+    raw["stage2"]["endpoint"] = ""
+    raw["stage2"]["vllm"] = {"gpus": [0], "gpus_per_server": 1,
+        "extra_args": ["--gpu-memory-utilization", "0.50"]}
+    raw["stage2"]["extraction_llm"]["endpoint"] = ""
+    raw["stage2"]["extraction_llm"]["vllm"] = {"gpus": [0, 1], "gpus_per_server": 1,
+        "extra_args": ["--gpu-memory-utilization", "0.28"]}
+    write(source, raw)
+    before = tree(tmp_path)
+    args = launcher.command(config.dataset, str(config.output_dir), {
+        "OCI_RUN_CONFIG": str(source), "STAGE2_VLLM_CO_RESIDENT_ALL_GPUS": "1"})
+    parsed = workflow.build_parser().parse_args(args)
+    after_raw, directory = workflow._raw_config_from_args(parsed)
+    after = workflow.compile_config(after_raw, config_dir=directory)
+    assert after.stage2.vllm_co_resident_all_gpus is True
+    assert after.stage2.model == config.stage2.model
+    assert after.stage2.extraction_llm.model == config.stage2.extraction_llm.model
+    preflight.preflight_stage2(after)
+    assert tree(tmp_path) == before
+
+
 @pytest.mark.parametrize("wrapper", ["run_one_conf_one_mod.sh", "run_five_conf_five_mod.sh"])
 def test_wrappers_delegate_saved_config_without_injecting_defaults(tmp_path, wrapper):
     fake = tmp_path / "python"

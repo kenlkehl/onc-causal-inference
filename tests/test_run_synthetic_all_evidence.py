@@ -22,6 +22,7 @@ import pytest
     (False, {"STAGE2_COLBERT_WORKERS_PER_DEVICE": "4"}),
     (False, {"STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES": "1048576"}),
     (False, {"STAGE2_DECISION_PREPARATION_WORKERS": "16"}),
+    (False, {"STAGE2_VLLM_CO_RESIDENT_ALL_GPUS": "0"}),
     (False, {
         "STAGE2_DECISION_EXTRACTION": "0",
         "STAGE2_VLLM_EXTRA_ARGS_JSON": '["--max-model-len","196608"]',
@@ -117,6 +118,7 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     assert config.stage2.colbert.workers_per_device == int(overrides.get("STAGE2_COLBERT_WORKERS_PER_DEVICE", "1"))
     assert config.stage2.colbert.query_cache_max_bytes == int(overrides.get("STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES", str(1024**3)))
     assert config.stage2.decision_preparation_workers == int(overrides.get("STAGE2_DECISION_PREPARATION_WORKERS", "0"))
+    assert config.stage2.vllm_co_resident_all_gpus == bool(int(overrides.get("STAGE2_VLLM_CO_RESIDENT_ALL_GPUS", "0")))
     if not managed:
         assert config.stage2.extraction_llm.vllm is None
         return

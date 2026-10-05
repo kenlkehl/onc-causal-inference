@@ -265,7 +265,8 @@ def _merge_validator(themes):
     return validate
 
 
-def adjudicate_multi_model_roles(*, definitions, statistical_report, request_json, output_dir, policy):
+def adjudicate_multi_model_roles(*, definitions, statistical_report, request_json, output_dir, policy, workers=1):
+    from .stage2_parallel import ordered_map
     policy.validate()
     if not policy.enabled:
         raise ValueError("multi_model requires LLM role adjudication")
@@ -285,12 +286,14 @@ def adjudicate_multi_model_roles(*, definitions, statistical_report, request_jso
     def theme_messages(batch):
         return clinical_prompts.messages("15_model_themes", clinical_prompts.evidence_input(evidence, batch))
     batches = _bounded_batches(cards, theme_messages, maximum_items=maximum_items, maximum_chars=maximum_chars)
-    themes = []
-    for index, batch in enumerate(batches):
+    def initial_themes(item):
+        index, batch = item
         response = request(f"themes/initial_{index:03d}", theme_messages(batch),
             _themes_validator([c["feature_id"] for c in batch],
                 {r["evidence_id"] for c in batch for r in c["modeling_evidence"]}, maximum=len(batch), cards=batch))
-        themes.extend(response["themes"])
+        return response["themes"]
+    themes = [theme for group in ordered_map(initial_themes, enumerate(batches), workers=workers,
+              thread_name="stage2-role-themes") for theme in group]
     # Summarize overlaps when useful. Context limits never force unrelated merges.
     level = 0
     while len(themes) > 1:
@@ -300,27 +303,30 @@ def adjudicate_multi_model_roles(*, definitions, statistical_report, request_jso
             return clinical_prompts.messages("16_merge_themes", theme_text(batch, by_id))
         batches = _bounded_batches(sorted(themes, key=lambda t: t["name"].casefold()), merge_messages,
             maximum_items=max(len(themes), maximum_items), maximum_chars=maximum_chars)
-        reduced = []
-        for index, batch in enumerate(batches):
+        def merge(item):
+            index, batch = item
             if len(batch) == 1:
-                reduced.extend(batch)
-            else:
-                reduced.extend(request(f"themes/merge_{level:03d}_{index:03d}", merge_messages(batch), _merge_validator(batch))["themes"])
+                return batch
+            return request(f"themes/merge_{level:03d}_{index:03d}", merge_messages(batch), _merge_validator(batch))["themes"]
+        reduced = [theme for group in ordered_map(merge, enumerate(batches), workers=workers,
+                   thread_name="stage2-role-theme-merge") for theme in group]
         changed = len(reduced) < len(themes)
         themes = reduced
         if not changed:
             break
         level += 1
     _write_json(directory / "themes.json", {"themes": themes, "all_candidate_ids_preserved": True})
-    decisions = []
     definitions_by_id = {_feature_id(f): f for f in definitions}
-    for index, card in enumerate(cards):
+    def review(item):
+        index, card = item
         relevant = [t for t in themes if card["feature_id"] in t["member_feature_ids"]]
         messages = clinical_prompts.messages("17_model_roles", clinical_prompts.evidence_input(evidence, [card])
             + "\n\nRelated clinical themes\n" + theme_text(relevant, by_id))
         response = request(f"roles/batch_{index:03d}", messages,
             _decision_validator([definitions_by_id[card["feature_id"]]], [card]))
-        decisions.extend(response["decisions"])
+        return response["decisions"]
+    decisions = [decision for group in ordered_map(review, enumerate(cards), workers=workers,
+                 thread_name="stage2-role-review") for decision in group]
     combined = _decision_validator(definitions, cards)({"summary": "Clinical role reviews", "decisions": decisions})
     selected = _selected_from_adjudication(definitions=definitions, adjudication=combined)
     for feature in selected:

@@ -580,6 +580,7 @@ def adjudicate_stage2_roles(
     request_json: RequestJSON,
     output_dir: Path,
     policy: Stage2RoleAdjudicationConfig,
+    workers: int = 1,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     """Package evidence, checkpoint bounded LLM decisions, and apply them."""
 
@@ -591,7 +592,7 @@ def adjudicate_stage2_roles(
 
         return adjudicate_multi_model_roles(
             definitions=definitions, statistical_report=statistical_report,
-            request_json=request_json, output_dir=output_dir, policy=policy,
+            request_json=request_json, output_dir=output_dir, policy=policy, workers=workers,
         )
     from .stage2_taskwise_policy import independent_tasks_enabled
 
@@ -600,7 +601,7 @@ def adjudicate_stage2_roles(
 
         return annotate_taskwise_selection(
             definitions=definitions, statistical_report=statistical_report,
-            request_json=request_json, output_dir=output_dir, policy=policy,
+            request_json=request_json, output_dir=output_dir, policy=policy, workers=workers,
         )
     from .stage2_prompt_io import request_review
 
@@ -609,12 +610,17 @@ def adjudicate_stage2_roles(
     identity = {"evidence": _fingerprint(evidence), "policy": policy.public_dict(),
                 "model": statistical_report.get("adjudication_model_identity"), "prompt": PROMPT_VERSION}
     _write_json(output_dir / "evidence.json", evidence)
-    decisions = []
-    for index, (feature, card) in enumerate(zip(definitions, evidence["candidates"])):
+    from .stage2_parallel import ordered_map
+
+    def review(item):
+        index, (feature, card) = item
         messages = clinical_prompts.messages("14_default_roles", clinical_prompts.evidence_input(evidence, [card]))
-        response = request_review(output_dir / "batches" / f"batch_{index + 1:03d}", messages,
+        return request_review(output_dir / "batches" / f"batch_{index + 1:03d}", messages,
             _role_response_validator(definitions=[feature]), request_json=request_json, identity=identity)
-        decisions.extend(response["decisions"])
+
+    responses = ordered_map(review, enumerate(zip(definitions, evidence["candidates"])),
+                            workers=workers, thread_name="stage2-role-review")
+    decisions = [decision for response in responses for decision in response["decisions"]]
     adjudication = _role_response_validator(definitions=definitions)({"summary": "Clinical role reviews", "decisions": decisions})
     selected = _selected_from_adjudication(definitions=definitions, adjudication=adjudication)
     report = {"schema_version": SCHEMA_VERSION, "prompt_version": PROMPT_VERSION, "status": "complete",

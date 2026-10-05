@@ -99,7 +99,9 @@ from .stage2_estimand_ontology_config import (
 )
 from .vllm_server_pool import (
     ManagedVLLMConfig,
+    co_resident_vllm_configs,
     launch_managed_vllm_servers,
+    managed_argument,
     managed_vllm_config_from_mapping,
     validate_managed_vllm_pool_isolation,
 )
@@ -141,7 +143,7 @@ DEFAULT_EXTRACTION_REASONING_EFFORT = "none"
 STAGE2_REQUEST_KINDS = frozenset({"interpretation", "extraction"})
 MANAGED_MODEL_PHASE_SCHEMA_VERSION = "stage2_managed_model_phase_v1"
 DEFAULT_VLLM_RAPID_SWITCH_SECONDS = 15 * 60.0
-MANAGED_VLLM_ALLOCATION_MODES = frozenset({"all_gpus", "configured_split"})
+MANAGED_VLLM_ALLOCATION_MODES = frozenset({"all_gpus", "configured_split", "co_resident_all_gpus"})
 SUPPORTED_REASONING_EFFORTS = frozenset(
     {"auto", "none", "minimal", "low", "medium", "high", "xhigh", "max"}
 )
@@ -1003,6 +1005,9 @@ class PlainHandoffStage2Config:
     repetition_penalty: float | None = None
     explicit_features: tuple[Stage2ExplicitFeature, ...] = ()
     vllm: ManagedVLLMConfig | None = None
+    # Runtime serving allocation only. Both managed models stay resident across
+    # their configured GPU union, with explicit memory budgets for each role.
+    vllm_co_resident_all_gpus: bool = False
     # When two pipeline-managed models request each other again within this
     # interval, keep both resident on their configured GPU splits for the rest
     # of the run. Zero retains all-GPU alternation unconditionally.
@@ -1294,6 +1299,12 @@ class PlainHandoffStage2Config:
                     "stage2.extraction_llm must be a Stage2ExtractionLLMConfig object"
                 )
             self.extraction_llm.validate(require_model=require_model)
+        if type(self.vllm_co_resident_all_gpus) is not bool:
+            raise ValueError("stage2.vllm_co_resident_all_gpus must be true or false")
+        if self.vllm_co_resident_all_gpus:
+            if self.vllm is None or self.extraction_llm is None or self.extraction_llm.vllm is None:
+                raise ValueError("co-resident all-GPU serving requires two managed model pools")
+            co_resident_vllm_configs(self.vllm, self.extraction_llm.vllm)
         if self.max_review_rounds < 1:
             raise ValueError("stage2.max_review_rounds must be positive")
         if self.ontology_refinement_min_failure_patients < 2:
@@ -1756,6 +1767,7 @@ def plain_stage2_config_from_mapping(
         **{name: raw.get(name) for name in SAMPLING_FIELDS},
         explicit_features=explicit_features,
         vllm=managed_vllm,
+        vllm_co_resident_all_gpus=raw.get("vllm_co_resident_all_gpus", False),
         vllm_rapid_switch_seconds=float(
             raw.get(
                 "vllm_rapid_switch_seconds",
@@ -1873,6 +1885,7 @@ def _resolve_extraction_llm_model(
         workers=extraction.workers,
         extraction_llm=None,
         vllm=None,
+        vllm_co_resident_all_gpus=False,
         runtime_endpoints=(),
     )
     resolved = _resolve_stage2_model(transport_config)
@@ -3214,10 +3227,11 @@ class _RoundRobinOpenAICompletion:
 
 
 class _LoadAwareOpenAICompletion:
-    """Route HTTP attempts to an available equivalent external extractor."""
+    """Route HTTP attempts to an available equivalent model server."""
 
-    def __init__(self, endpoints: Sequence[ExtractionEndpoint], *, api_key: str) -> None:
-        self.pool = EndpointPool(endpoints, api_key=api_key)
+    def __init__(self, endpoints: Sequence[ExtractionEndpoint], *, api_key: str,
+                 latency_weighted: bool = True) -> None:
+        self.pool = EndpointPool(endpoints, api_key=api_key, latency_weighted=latency_weighted)
 
     def __call__(self, messages: Sequence[Mapping[str, str]], config: PlainHandoffStage2Config) -> str:
         try:
@@ -6883,7 +6897,17 @@ class PlainHandoffStage2:
         config.validate()
         self.config = config
         self.clinical_question = str(clinical_question)
-        routed_completion = completion or _RoundRobinOpenAICompletion(endpoints)
+        routed_completion = completion
+        if routed_completion is None:
+            if config.vllm is not None:
+                server_limit = int(managed_argument(config.vllm, "--max-num-seqs", config.workers))
+                server_limit = min(server_limit, math.ceil(config.workers / len(endpoints)))
+                routed_completion = _LoadAwareOpenAICompletion(
+                    tuple(ExtractionEndpoint(url, server_limit) for url in endpoints),
+                    api_key=config.api_key, latency_weighted=False,
+                )
+            else:
+                routed_completion = _RoundRobinOpenAICompletion(endpoints)
         self.completion = _ConcurrencyLimitedCompletion(
             routed_completion,
             max_concurrency=config.workers,
@@ -6903,6 +6927,7 @@ class PlainHandoffStage2:
                 ),
                 extraction_llm=None,
                 vllm=None,
+                vllm_co_resident_all_gpus=False,
                 runtime_endpoints=(),
                 runtime_model_family="",
                 runtime_sampling_model="",
@@ -6958,6 +6983,7 @@ class PlainHandoffStage2:
                 workers=extraction.workers,
                 extraction_llm=None,
                 vllm=None,
+                vllm_co_resident_all_gpus=False,
                 runtime_endpoints=(),
                 runtime_model_family="",
                 runtime_sampling_model="",
@@ -8996,6 +9022,15 @@ def run_plain_handoff_stage2(
             "Stage 2 extraction is runtime-disabled; preserving extractor model "
             "identity without launching its managed vLLM pool"
         )
+    co_resident = config.vllm_co_resident_all_gpus
+    if co_resident:
+        primary_vllm, expanded_extraction = co_resident_vllm_configs(config.vllm, extraction_vllm or extraction.vllm)
+        if extraction_vllm is not None:
+            extraction_vllm = expanded_extraction
+        extraction = replace(extraction, vllm=expanded_extraction)
+        config = replace(config, vllm=primary_vllm, extraction_llm=extraction)
+        LOGGER.info("Stage 2 co-resident managed models gpus=%s primary_replicas=%s extractor_replicas=%s",
+                    list(primary_vllm.gpus), primary_vllm.server_count, expanded_extraction.server_count if extraction_vllm is not None else 0)
     if config.vllm is None and extraction_vllm is None:
         return run_with_config(
             config,
@@ -9037,7 +9072,7 @@ def run_plain_handoff_stage2(
     def record_decision_phase(status, phase, gpus, *, allocation_mode):
         _write_json(managed_root / "model_phase.json", {
             "schema_version": MANAGED_MODEL_PHASE_SCHEMA_VERSION,
-            "status": status, "phase": phase, "active_role": "interpretation",
+            "status": status, "phase": phase, "active_role": "concurrent" if co_resident else "interpretation",
             "allocation_mode": allocation_mode, "model": config.model,
             "gpus": list(gpus), "configured_gpu_allocations": {
                 "interpretation": list(config.vllm.gpus),
@@ -9109,9 +9144,9 @@ def run_plain_handoff_stage2(
                                 "gpus=%s and freeing gpus=%s for Plumb",
                                 list(config.vllm.gpus), list(extra_gpus))
             if extraction is not None and extraction_vllm is not None:
-                if config.decision_extraction.enabled and config.vllm is not None:
-                    record_decision_phase("starting", "decision_extraction",
-                        config.vllm.gpus, allocation_mode="configured_split")
+                if (config.decision_extraction.enabled or co_resident) and config.vllm is not None:
+                    record_decision_phase("starting", "decision_extraction" if config.decision_extraction.enabled else "concurrent_roles",
+                        config.vllm.gpus, allocation_mode="co_resident_all_gpus" if co_resident else "configured_split")
                 extraction_endpoints = stack.enter_context(
                     launch_managed_vllm_servers(
                         config=extraction_vllm,
@@ -9129,23 +9164,23 @@ def run_plain_handoff_stage2(
                     runtime_config,
                     extraction_llm=runtime_extraction,
                 )
-            if config.decision_extraction.enabled and config.vllm is not None and extraction_vllm is not None:
-                record_decision_phase("running", "decision_extraction",
-                    config.vllm.gpus, allocation_mode="configured_split")
+            if (config.decision_extraction.enabled or co_resident) and config.vllm is not None and extraction_vllm is not None:
+                record_decision_phase("running", "decision_extraction" if config.decision_extraction.enabled else "concurrent_roles",
+                    config.vllm.gpus, allocation_mode="co_resident_all_gpus" if co_resident else "configured_split")
             result = run_with_config(
                 runtime_config,
                 runtime_dataset=dataset,
                 runtime_primary_completion=completion,
                 runtime_extraction_completion=extraction_completion,
             )
-            if config.decision_extraction.enabled and config.vllm is not None and extraction_vllm is not None:
-                record_decision_phase("complete", "decision_extraction",
-                    config.vllm.gpus, allocation_mode="configured_split")
+            if (config.decision_extraction.enabled or co_resident) and config.vllm is not None and extraction_vllm is not None:
+                record_decision_phase("complete", "decision_extraction" if config.decision_extraction.enabled else "concurrent_roles",
+                    config.vllm.gpus, allocation_mode="co_resident_all_gpus" if co_resident else "configured_split")
             return result
 
     # Prepare every fold on the GPU union before starting the classifier pool.
     # Later ontology revisions use the retained configured primary allocation.
-    if config.decision_extraction.enabled:
+    if config.decision_extraction.enabled or co_resident:
         if prepare_decisions:
             expanded = _all_gpu_interpretation_vllm_config(config.vllm, extraction_vllm)
             if expanded.effective_gpus_per_server() != config.vllm.effective_gpus_per_server():

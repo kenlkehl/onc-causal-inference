@@ -4,8 +4,10 @@ from tests.stage2_prompt_spy import prompt_inputs, role_response
 
 import inspect
 import json
+import threading
 
 import pytest
+
 
 from oci.inference.stage2_role_adjudication import (
     EVIDENCE_SCHEMA_VERSION,
@@ -290,3 +292,24 @@ def test_adjudication_batches_large_candidate_sets_and_aggregates_in_order(tmp_p
     assert [row["feature_id"] for row in selected] == feature_ids
     assert report["batch_count"] == 5
     assert report["max_candidates_per_request"] == 1
+
+
+def test_parallel_feature_roles_preserve_order_and_reuse_each_checkpoint(tmp_path):
+    definitions = [_definition(f"candidate_{i}") for i in range(3)]
+    barrier = threading.Barrier(3)
+    calls = []
+
+    def request(messages, validate, **kwargs):
+        supplied = prompt_inputs(messages)["candidates"]
+        calls.extend(card["feature_id"] for card in supplied)
+        barrier.wait(timeout=5)
+        return validate(role_response(confounder=True))
+
+    args = dict(definitions=definitions, statistical_report=_statistical_report([f["feature_id"] for f in definitions]),
+                output_dir=tmp_path / "roles", policy=Stage2RoleAdjudicationConfig())
+    parallel = adjudicate_stage2_roles(request_json=request, workers=3, **args)
+    assert set(calls) == {f["feature_id"] for f in definitions}
+    assert [row["feature_id"] for row in parallel[1]["decisions"]] == [f["feature_id"] for f in definitions]
+    restored = adjudicate_stage2_roles(request_json=lambda *a, **k: pytest.fail("per-feature checkpoint reused"),
+                                       workers=2, **args)
+    assert restored == parallel
