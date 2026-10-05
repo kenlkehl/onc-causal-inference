@@ -26,10 +26,10 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
     # NVIDIA omits IT from this repository name; the checkpoint is instruction tuned.
     source "${repo_root}/scripts/stage2_extraction_defaults.sh" nvidia/Gemma-4-26B-A4B-NVFP4
     if [[ "$STAGE2_DECISION_EXTRACTION" == "1" ]]; then
-        # One Gemma server supports ontology work while seven Plumb replicas extract.
+        # Gemma shares GPU 0 with one of the eight Plumb extraction replicas.
         export STAGE2_MODEL="${STAGE2_MODEL:-nvidia/Gemma-4-26B-A4B-NVFP4}"
         export STAGE2_VLLM_GPUS="${STAGE2_VLLM_GPUS:-cuda:0}"
-        export STAGE2_EXTRACTION_VLLM_GPUS="${STAGE2_EXTRACTION_VLLM_GPUS:-cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7}"
+        export STAGE2_EXTRACTION_VLLM_GPUS="${STAGE2_EXTRACTION_VLLM_GPUS:-cuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7}"
         export STAGE2_EXTRACTION_WORKERS="${STAGE2_EXTRACTION_WORKERS:-128}"
     else
         # The legacy backend shares matching models or alternates different models.
@@ -59,6 +59,9 @@ if [[ -z "${OCI_RUN_CONFIG:-}" && "${STAGE2_ONLY:-0}" != "1" && "${STAGE2_RESELE
     # budget, including the primary role's 100,000-token output allowance.
     # Plumb already has a separate short-window serving preset above.
     vllm_extra_args='["--gpu-memory-utilization","0.90","--max-model-len","262144","--max-num-seqs","32"]'
+    if [[ "$STAGE2_DECISION_EXTRACTION" == "1" ]]; then
+        vllm_extra_args='["--gpu-memory-utilization","0.50","--max-model-len","262144","--max-num-seqs","32"]'
+    fi
     export STAGE2_VLLM_EXTRA_ARGS_JSON="${STAGE2_VLLM_EXTRA_ARGS_JSON:-${vllm_extra_args}}"
     export STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON="${STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON:-${vllm_extra_args}}"
 fi

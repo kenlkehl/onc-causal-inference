@@ -711,8 +711,9 @@ def test_feature_definition_only_run_never_starts_managed_extractor(
 
 
 @pytest.mark.parametrize("prepared,definition_only", [(False, False), (True, False), ("partial", False), (False, True)])
+@pytest.mark.parametrize("shared_primary_gpu", [False, True])
 def test_decision_preparation_uses_all_gpus_then_retains_primary(
-    tmp_path, monkeypatch, prepared, definition_only,
+    tmp_path, monkeypatch, prepared, definition_only, shared_primary_gpu,
 ):
     from oci.inference.stage2_decision_ontology import prepare_ontologies
     from oci.inference.plain_handoff_stage2_analysis import initial_feature_modeling_definitions
@@ -720,7 +721,7 @@ def test_decision_preparation_uses_all_gpus_then_retains_primary(
     config = plain_stage2_config_from_mapping({
         "model": "gemma", "vllm": {"gpus": [0], "gpus_per_server": 1},
         "decision_extraction": {"enabled": True},
-        "extraction_llm": {"model": "plumb", "vllm": {"gpus": list(range(1, 8)), "gpus_per_server": 1}},
+        "extraction_llm": {"model": "plumb", "vllm": {"gpus": list(range(0 if shared_primary_gpu else 1, 8)), "gpus_per_server": 1}},
     }, default_workers=4)
     output = tmp_path / "stage2"
     (tmp_path / "handoff.jsonl").write_text(json.dumps({"outer_fold": 1}) + "\n"
@@ -749,6 +750,7 @@ def test_decision_preparation_uses_all_gpus_then_retains_primary(
             assert "start-ontology_preparation" not in lifecycle or "stop-ontology_preparation" in lifecycle
             assert "stop-orchestrator" not in lifecycle
             assert "--runner" in kwargs["config"].extra_args
+            assert kwargs["config"].gpus == tuple(f"cuda:{i}" for i in range(0 if shared_primary_gpu else 1, 8))
         try:
             yield tuple(f"http://127.0.0.1:{p}/v1" for p in kwargs["config"].effective_ports())
         finally:
@@ -760,10 +762,12 @@ def test_decision_preparation_uses_all_gpus_then_retains_primary(
             assert self.config.workers >= 32
             assert kwargs["decision_ontology_preparation_only"] is (not definition_only)
             assert "start-extractor" not in lifecycle
+            phase = json.loads((output / "vllm_servers/model_phase.json").read_text())
+            assert phase["gpus"] == [f"cuda:{i}" for i in range(8)]
             lifecycle.append("prepare")
             return {"phase": "feature_definitions" if definition_only else "decision_ontology_preparation"}
         assert self.config.runtime_endpoints == ("http://127.0.0.1:8010/v1",)
-        assert len(self.config.extraction_llm.runtime_endpoints) == 7
+        assert len(self.config.extraction_llm.runtime_endpoints) == (8 if shared_primary_gpu else 7)
         lifecycle.append("extract")
         return {"phase": "causal_estimation"}
 

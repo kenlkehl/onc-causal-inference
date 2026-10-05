@@ -121,12 +121,14 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     ).split(",")
     extraction_gpus = overrides.get(
         "STAGE2_EXTRACTION_VLLM_GPUS",
-        "cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7" if decision else "cuda:4,cuda:5,cuda:6,cuda:7",
+        ("cuda:0,cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7" if rtx else
+         "cuda:1,cuda:2,cuda:3,cuda:4,cuda:5,cuda:6,cuda:7") if decision else "cuda:4,cuda:5,cuda:6,cuda:7",
     ).split(",")
     for pool, gpus in ((config.stage2.vllm, primary_gpus), (config.stage2.extraction_llm.vllm, extraction_gpus)):
         assert pool.server_count == len(gpus)
         assert pool.gpu_groups() == tuple((gpu,) for gpu in gpus)
-    assert not set(primary_gpus) & set(extraction_gpus)
+    expected_overlap = {"cuda:0"} if rtx and decision and "STAGE2_EXTRACTION_VLLM_GPUS" not in overrides else set()
+    assert set(primary_gpus) & set(extraction_gpus) == expected_overlap
     assert set(primary_gpus + extraction_gpus) == {f"cuda:{i}" for i in range(8)}
     assert config.stage2.extraction_llm.workers == int(overrides.get(
         "STAGE2_EXTRACTION_WORKERS", "128" if decision else "32",
@@ -137,7 +139,7 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     ):
         extra_args = json.loads(settings[setting])
         expected = json.loads(overrides[variable]) if variable in overrides else [
-            "--gpu-memory-utilization", "0.90", "--max-model-len", "262144" if rtx else "128000",
+            "--gpu-memory-utilization", "0.50" if rtx and decision else "0.90", "--max-model-len", "262144" if rtx else "128000",
             "--max-num-seqs", "32",
         ]
         if decision and variable == "STAGE2_EXTRACTION_VLLM_EXTRA_ARGS_JSON" and variable not in overrides:

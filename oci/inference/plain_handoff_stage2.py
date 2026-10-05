@@ -9040,13 +9040,13 @@ def run_plain_handoff_stage2(
                     "Plumb starts only after all folds finish preparation",
                     len(runtime_config.runtime_endpoints), runtime_config.workers)
         record_decision_phase("running", "decision_ontology_preparation",
-            (*config.vllm.gpus, *extraction_vllm.gpus), allocation_mode="all_gpus")
+            tuple(dict.fromkeys((*config.vllm.gpus, *extraction_vllm.gpus))), allocation_mode="all_gpus")
         result = run_with_config(runtime_config, runtime_dataset=None,
             runtime_primary_completion=completion,
             runtime_extraction_completion=_DisabledExtractionCompletion(),
             runtime_decision_ontology_preparation_only=dataset is not None)
         record_decision_phase("preparation_complete", "decision_ontology_preparation",
-            (*config.vllm.gpus, *extraction_vllm.gpus), allocation_mode="all_gpus")
+            tuple(dict.fromkeys((*config.vllm.gpus, *extraction_vllm.gpus))), allocation_mode="all_gpus")
         return result
 
     def run_configured_managed_pools() -> Mapping[str, Any]:

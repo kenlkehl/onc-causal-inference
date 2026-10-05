@@ -36,12 +36,13 @@ The eight-GPU presets first run Gemma 4 26B replicas across all eight GPUs for
 feature discovery and initial ontology preparation. Numeric bounds and ambiguous
 types are prepared concurrently from feature contracts, with a checkpoint per
 feature. All folds finish this phase before patient extraction starts. Gemma on
-GPU 0 stays loaded while the temporary Gemma replicas on GPUs 1–7 stop and are
-replaced by seven Plumb replicas, all with tensor parallelism of one. Completed
-preparation checkpoints are reused on restart; once all are complete, the run
-starts directly with the configured one-Gemma/seven-Plumb allocation. H100 uses the
-Red Hat AI FP8-dynamic Gemma checkpoint; RTX PRO 6000 uses NVIDIA's NVFP4
-checkpoint. Extraction allows 128 concurrent requests across the seven replicas;
+GPU 0 stays loaded while the temporary Gemma replicas on GPUs 1–7 stop and Plumb
+starts, with tensor parallelism of one. H100 uses seven Plumb replicas on GPUs
+1–7 and the Red Hat AI FP8-dynamic Gemma checkpoint on GPU 0. RTX PRO 6000 uses
+eight Plumb replicas on GPUs 0–7; its NVIDIA NVFP4 Gemma server shares GPU 0
+with Plumb and uses 50% GPU-memory allocation. Completed preparation checkpoints
+are reused on restart; once all are complete, the run starts directly with this
+configured allocation. Extraction allows 128 concurrent requests across the replicas;
 each Plumb scheduler allows up to eight sequences within its token budget.
 Plumb uses a 3072-token server window, bf16, eager mode,
 and 28% GPU-memory allocation per replica; the primary model retains its
