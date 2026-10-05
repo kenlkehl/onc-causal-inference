@@ -7019,7 +7019,9 @@ class PlainHandoffStage2:
             extraction_identity = None
             extraction_runtime_identity = None
         self.decision_client = None
-        if config.decision_extraction.enabled:
+        if config.decision_extraction.enabled and not isinstance(
+            extraction_completion, _DisabledExtractionCompletion
+        ):
             from .stage2_decision_client import VLLMDecisionClient
 
             self.decision_client = VLLMDecisionClient.from_config(config)
@@ -8102,6 +8104,7 @@ class PlainHandoffStage2:
         outcome_type: str = "binary",
         inner_folds: int = 5,
         seed: int = 42,
+        decision_ontology_preparation_only: bool = False,
     ) -> Mapping[str, Any]:
         discovery_packets = list(packets)
         complete_path = output_dir / "complete.json"
@@ -8329,6 +8332,25 @@ class PlainHandoffStage2:
                 },
             )
 
+        if decision_ontology_preparation_only:
+            from .plain_handoff_stage2_analysis import initial_feature_modeling_definitions
+            from .stage2_decision_ontology import prepare_ontologies
+
+            definitions = initial_feature_modeling_definitions(final["features"])
+            round_dir = output_dir / "ontology_supervision" / "round_001"
+            _write_json(round_dir / "definitions_before_extraction.json", {"features": definitions})
+
+            def request_ontology_json(messages, validate, *, request_kind="interpretation"):
+                if request_kind != "interpretation":
+                    raise RuntimeError("Ontology preparation accepts only primary-model requests")
+                return _request_json(messages=messages, validate=validate,
+                    config=self.config, completion=self.completion, request_kind=request_kind)
+
+            prepare_ontologies(definitions,
+                output_dir=round_dir / "failure_ontology_refinement",
+                request_json=request_ontology_json, workers=self.config.workers)
+            return final
+
         if dataset is None:
             _write_json(
                 complete_path,
@@ -8540,7 +8562,12 @@ class PlainHandoffStage2:
         outcome_type: str = "binary",
         inner_folds: int = 5,
         seed: int = 42,
+        decision_ontology_preparation_only: bool = False,
     ) -> Mapping[str, Any]:
+        if decision_ontology_preparation_only and (
+            dataset is not None or not self.config.decision_extraction.enabled
+        ):
+            raise ValueError("Decision ontology preparation requires decision extraction and no patient dataset")
         handoff_path = Path(handoff_path)
         output_dir = Path(output_dir)
         if dataset is not None and (
@@ -8624,6 +8651,7 @@ class PlainHandoffStage2:
                         outcome_type=outcome_type,
                         inner_folds=inner_folds,
                         seed=seed,
+                        decision_ontology_preparation_only=decision_ontology_preparation_only,
                     ): outer_fold
                     for outer_fold in outer_fold_ids
                 }
@@ -8641,6 +8669,8 @@ class PlainHandoffStage2:
                         raise
                     LOGGER.info("Stage 2 completed outer_fold=%s", outer_fold)
         fold_results = [fold_results_by_id[outer_fold] for outer_fold in outer_fold_ids]
+        if decision_ontology_preparation_only:
+            return {"phase": "decision_ontology_preparation", "outer_folds": len(fold_results)}
         _write_jsonl(output_dir / "features_by_outer_fold.jsonl", fold_results)
         name_counts: Counter[str] = Counter()
         for result in fold_results:
@@ -8910,6 +8940,7 @@ def run_plain_handoff_stage2(
         runtime_dataset: pd.DataFrame | None,
         runtime_primary_completion: CompletionFunction | None,
         runtime_extraction_completion: CompletionFunction | None,
+        runtime_decision_ontology_preparation_only: bool = False,
     ) -> Mapping[str, Any]:
         return PlainHandoffStage2(
             config=runtime_config,
@@ -8929,6 +8960,7 @@ def run_plain_handoff_stage2(
             outcome_type=outcome_type,
             inner_folds=inner_folds,
             seed=seed,
+            decision_ontology_preparation_only=runtime_decision_ontology_preparation_only,
         )
 
     extraction = config.extraction_llm
@@ -8964,6 +8996,59 @@ def run_plain_handoff_stage2(
 
     managed_root = Path(output_dir) / "vllm_servers"
 
+    def decision_preparation_complete() -> bool:
+        from .plain_handoff_stage2_analysis import initial_feature_modeling_definitions
+        from .stage2_decision_ontology import preparation_complete
+
+        packets_path = Path(output_dir) / "evidence_compilation" / "packets.jsonl"
+        if not packets_path.is_file():
+            packets_path = Path(handoff_path)
+        if not packets_path.is_file():
+            return False
+        fold_ids = {int(json.loads(line)["outer_fold"])
+                    for line in packets_path.read_text().splitlines() if line.strip()}
+        if not fold_ids:
+            return False
+        for fold_id in sorted(fold_ids):
+            fold = Path(output_dir) / f"outer_{fold_id:03d}"
+            path = fold / "feature_definitions.json"
+            if not path.is_file():
+                return False
+            definitions = initial_feature_modeling_definitions(json.loads(path.read_text())["features"])
+            if not preparation_complete(definitions,
+                    output_dir=fold / "ontology_supervision/round_001/failure_ontology_refinement"):
+                return False
+        return True
+
+    prepare_decisions = bool(config.decision_extraction.enabled
+        and config.vllm is not None and extraction_vllm is not None
+        and (dataset is None or not decision_preparation_complete()))
+
+    def record_decision_phase(status, phase, gpus, *, allocation_mode):
+        _write_json(managed_root / "model_phase.json", {
+            "schema_version": MANAGED_MODEL_PHASE_SCHEMA_VERSION,
+            "status": status, "phase": phase, "active_role": "interpretation",
+            "allocation_mode": allocation_mode, "model": config.model,
+            "gpus": list(gpus), "configured_gpu_allocations": {
+                "interpretation": list(config.vllm.gpus),
+                "extraction": list(extraction_vllm.gpus),
+            }, "recorded_at": _now(),
+        })
+
+    def run_decision_preparation(runtime_config):
+        LOGGER.info("Stage 2 decision ontology preparation replicas=%s request_workers=%s; "
+                    "Plumb starts only after all folds finish preparation",
+                    len(runtime_config.runtime_endpoints), runtime_config.workers)
+        record_decision_phase("running", "decision_ontology_preparation",
+            (*config.vllm.gpus, *extraction_vllm.gpus), allocation_mode="all_gpus")
+        result = run_with_config(runtime_config, runtime_dataset=None,
+            runtime_primary_completion=completion,
+            runtime_extraction_completion=_DisabledExtractionCompletion(),
+            runtime_decision_ontology_preparation_only=dataset is not None)
+        record_decision_phase("preparation_complete", "decision_ontology_preparation",
+            (*config.vllm.gpus, *extraction_vllm.gpus), allocation_mode="all_gpus")
+        return result
+
     def run_configured_managed_pools() -> Mapping[str, Any]:
         """Run with each managed model on its exact configured allocation."""
 
@@ -8988,7 +9073,35 @@ def run_plain_handoff_stage2(
                     endpoint=primary_endpoints[0],
                     runtime_endpoints=tuple(primary_endpoints),
                 )
+                if prepare_decisions:
+                    expanded = _all_gpu_interpretation_vllm_config(config.vllm, extraction_vllm)
+                    extra_gpus = tuple(gpu for gpu in expanded.gpus if gpu not in config.vllm.gpus)
+                    width = config.vllm.effective_gpus_per_server()
+                    if extra_gpus:
+                        temporary = replace(config.vllm,
+                            gpus=extra_gpus, server_count=len(extra_gpus) // width,
+                            gpus_per_server=width,
+                            ports=expanded.effective_ports()[config.vllm.server_count:],
+                            internal_port_base=extraction_vllm.internal_port_base)
+                        validate_managed_vllm_pool_isolation(config.vllm, temporary)
+                        with launch_managed_vllm_servers(config=temporary,
+                                model=config.model, api_key=config.api_key,
+                                output_dir=managed_root / "ontology_preparation") as extra_endpoints:
+                            preparation_config = replace(runtime_config,
+                                workers=max(config.workers, expanded.server_count * 4),
+                                runtime_endpoints=(*primary_endpoints, *extra_endpoints))
+                            preparation_result = run_decision_preparation(preparation_config)
+                    else:
+                        preparation_result = run_decision_preparation(runtime_config)
+                    if dataset is None:
+                        return preparation_result
+                    LOGGER.info("Stage 2 ontology preparation barrier complete; retaining primary "
+                                "gpus=%s and freeing gpus=%s for Plumb",
+                                list(config.vllm.gpus), list(extra_gpus))
             if extraction is not None and extraction_vllm is not None:
+                if config.decision_extraction.enabled and config.vllm is not None:
+                    record_decision_phase("starting", "decision_extraction",
+                        config.vllm.gpus, allocation_mode="configured_split")
                 extraction_endpoints = stack.enter_context(
                     launch_managed_vllm_servers(
                         config=extraction_vllm,
@@ -9006,17 +9119,36 @@ def run_plain_handoff_stage2(
                     runtime_config,
                     extraction_llm=runtime_extraction,
                 )
-            return run_with_config(
+            if config.decision_extraction.enabled and config.vllm is not None and extraction_vllm is not None:
+                record_decision_phase("running", "decision_extraction",
+                    config.vllm.gpus, allocation_mode="configured_split")
+            result = run_with_config(
                 runtime_config,
                 runtime_dataset=dataset,
                 runtime_primary_completion=completion,
                 runtime_extraction_completion=extraction_completion,
             )
+            if config.decision_extraction.enabled and config.vllm is not None and extraction_vllm is not None:
+                record_decision_phase("complete", "decision_extraction",
+                    config.vllm.gpus, allocation_mode="configured_split")
+            return result
 
-    # A pooling classifier cannot share a generative server or participate in
-    # the completion-triggered all-GPU model swapping protocol. Keep exactly
-    # the user's configured allocations, with separate resident endpoints.
+    # Prepare every fold on the GPU union before starting the classifier pool.
+    # Later ontology revisions use the retained configured primary allocation.
     if config.decision_extraction.enabled:
+        if prepare_decisions:
+            expanded = _all_gpu_interpretation_vllm_config(config.vllm, extraction_vllm)
+            if expanded.effective_gpus_per_server() != config.vllm.effective_gpus_per_server():
+                # Unequal tensor-parallel layouts cannot retain a subset of the
+                # preparation pool. Release it before loading the exact split.
+                with launch_managed_vllm_servers(config=expanded, model=config.model,
+                        api_key=config.api_key, output_dir=managed_root / "ontology_preparation") as endpoints:
+                    preparation_result = run_decision_preparation(replace(config,
+                        endpoint=endpoints[0], runtime_endpoints=tuple(endpoints),
+                        workers=max(config.workers, expanded.server_count * 4)))
+                if dataset is None:
+                    return preparation_result
+                prepare_decisions = False
         return run_configured_managed_pools()
 
     primary_vllm = config.vllm

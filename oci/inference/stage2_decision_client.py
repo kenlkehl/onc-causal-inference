@@ -58,7 +58,7 @@ class VLLMDecisionClient:
         self.timeout = float(timeout)
         if self.timeout <= 0 or not math.isfinite(self.timeout):
             raise ValueError("decision request timeout must be positive and finite")
-        self.pool = EndpointPool(endpoints)
+        self.pool = EndpointPool(endpoints, api_key=api_key, latency_weighted=False)
         self.capacity = threading.BoundedSemaphore(max(1, min(workers, self.pool.capacity)))
         self._tokenizer = tokenizer
         self._tokenizer_lock = threading.Lock()

@@ -214,11 +214,106 @@ def test_numeric_bounds_prepared_without_patient_data_then_reused(tmp_path):
     assert analysis._feature_extraction_fingerprint(a[0]) != analysis._feature_extraction_fingerprint(changed)
 
 
+def test_parallel_ontology_preparation_preserves_order_and_checkpoints(tmp_path):
+    import threading
+    from oci.inference.stage2_decision_ontology import preparation_complete
+
+    definitions = [feature(f"weight_{i}") for i in range(8)]
+    for f in definitions:
+        del f["decision_ontology"]
+    original = copy.deepcopy(definitions)
+    barrier = threading.Barrier(4)
+
+    def reviewer(messages, validate, **kwargs):
+        barrier.wait(timeout=5)  # Four independent feature requests must overlap.
+        assert kwargs["request_kind"] == "interpretation"
+        assert set(json.loads(messages[1]["content"])) == {"feature"}
+        return validate({"value_type": "continuous", "categories_or_unit": ["kg"],
+                         "decision_ontology": {"minimum": 0, "maximum": 250}, "rationale": "Plausible domain"})
+
+    prepared = prepare_ontologies(definitions, output_dir=tmp_path, request_json=reviewer, workers=4)
+    assert [f["name"] for f in prepared] == [f["name"] for f in definitions]
+    assert definitions == original
+    assert preparation_complete(definitions, output_dir=tmp_path)
+    assert len(list((tmp_path / "preparation").glob("*/response.json"))) == 8
+    cached = prepare_ontologies(definitions, output_dir=tmp_path, workers=4,
+        request_json=lambda *a, **kw: pytest.fail("completed preparation was repeated"))
+    assert cached == prepared
+    definitions[0]["measurement_definition"] = "A different measurement contract"
+    assert not preparation_complete(definitions, output_dir=tmp_path)
+
+
+@pytest.mark.parametrize("count,target,call_count", [(14, 13, 1), (15, 14, 2), (33, 32, 2), (197, 14, 3)])
+def test_large_categorical_ontology_preserves_values_with_bounded_choice_groups(count, target, call_count):
+    f = feature(categorical=True)
+    f["categories_or_unit"] = [f"value_{i}" for i in range(count)]
+    original = copy.deepcopy(f)
+
+    def choose(evidence, criterion, options):
+        assert 2 <= len(options) <= 16
+        for key, description in options:
+            if key == f"category_{target}":
+                return key
+            if key.startswith("group_") and f'"value_{target}"' in description:
+                return key
+        pytest.fail("target category missing from offered choices")
+
+    client = FakeClient(choose=choose)
+    result = decision.measure_feature(feature=f, source="Documented measurement",
+                                      evidence=evidence("Documented measurement"), client=client)
+    assert result["value"] == f"value_{target}" and result["status"] == "accepted"
+    assert len(result["calls"]) == call_count
+    assert f == original
+    if count > 14:
+        initial_groups = [json.loads(description.split(": ", 1)[1])
+                          for key, description in result["calls"][0]["options"] if key.startswith("group_")]
+        assert [value for group in initial_groups for value in group] == f["categories_or_unit"]
+
+
+@pytest.mark.parametrize("answers,status", [
+    ([decision.MISSING], "not_documented"),
+    ([decision.NONE], "none_of_above"),
+    (["group_0", decision.NONE], "category_selection_failed"),
+])
+def test_grouped_category_exits_preserve_missingness_and_do_not_expand_wrong_branches(answers, status):
+    f = feature(categorical=True)
+    f["categories_or_unit"] = [f"value_{i}" for i in range(15)]
+    result = decision.measure_feature(feature=f, source="Documented measurement",
+                                      evidence=evidence("Documented measurement"), client=FakeClient(answers))
+    assert result["value"] is None and result["status"] == status
+    assert result["outside_initial_domain"] == (status == "none_of_above")
+
+
+@pytest.mark.parametrize("unit,measurement", [
+    ("unitless", "A dimensionless symptom score."),
+    ("mg", "The explicitly documented medication dose in mg."),
+])
+def test_missing_numeric_unit_prepared_from_contract_without_mutating_frozen_definition(tmp_path, unit, measurement):
+    f = feature()
+    f["categories_or_unit"] = []
+    f["measurement_definition"] = measurement
+    del f["decision_ontology"]
+    original = copy.deepcopy(f)
+
+    def reviewer(messages, validate, **kwargs):
+        payload = json.loads(messages[1]["content"])
+        assert set(payload) == {"feature"}
+        assert payload["feature"]["categories_or_unit"] == []
+        return validate({"value_type": "continuous", "categories_or_unit": [unit],
+                         "decision_ontology": {"minimum": 0, "maximum": 100}, "rationale": measurement})
+
+    prepared = prepare_ontologies([f], output_dir=tmp_path, request_json=reviewer)
+    assert prepared[0]["categories_or_unit"] == [unit]
+    assert prepared[0]["decision_ontology"] == {"minimum": 0, "maximum": 100}
+    assert f == original
+
+
 def test_threshold_excludes_missing_and_verification_failure_and_small_counts():
     policy = DecisionExtractionConfig(enabled=True)
     base = {"feature_name": "weight", "failure_kind": "none_of_above", "patient_count": 3, "patient_fraction": .2}
     assert triggered_patterns({"feature_failure_patterns": [base]}, policy)
     for changes in ({"failure_kind": "not_documented"}, {"failure_kind": "numeric_verification_failed"},
+                    {"failure_kind": "category_selection_failed"},
                     {"patient_count": 2}, {"patient_fraction": .19}):
         assert not triggered_patterns({"feature_failure_patterns": [{**base, **changes}]}, policy)
 
@@ -277,6 +372,33 @@ def test_client_sends_pretokenized_classify_request_and_releases_capacity_on_err
     assert client.pool.snapshot()[0]["in_flight"] == 0
     assert client.capacity.acquire(blocking=False)
     client.capacity.release()
+
+
+def test_classifier_dispatch_uses_all_replicas_despite_slow_initial_timings():
+    class Tokenizer:
+        def apply_chat_template(self, messages, **kwargs):
+            return "rendered"
+
+        def encode(self, text, **kwargs):
+            return [1, 2, 3]
+
+    endpoints = tuple(ExtractionEndpoint(f"http://replica-{i}.test/v1", 128) for i in range(7))
+    called = []
+
+    def transport(endpoint, payload, timeout):
+        called.append(endpoint)
+        return {"model": "plumb", "data": [{"num_classes": 16, "probs": [8, 0]+[-1]*14}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 0}}
+
+    client = VLLMDecisionClient(policy=DecisionExtractionConfig(enabled=True), model="plumb",
+        endpoints=endpoints, api_key="test-secret", workers=128, tokenizer=Tokenizer(), transport=transport)
+    client.pool._metrics_reader = None
+    assert client.pool._api_key == "test-secret"
+    for i, state in enumerate(client.pool._states):
+        state.latency_seconds = .01 if i in (0, 2, 5) else 10
+    for _ in range(70):
+        assert client.decide("Evidence", "Criterion", [("true", "True"), ("false", "False")])["selected"] == "true"
+    assert [called.count(e.endpoint) for e in endpoints] == [10] * 7
 
 
 def test_explicit_ontologies_are_immutable_and_missing_never_triggers_review(tmp_path, retrieval):

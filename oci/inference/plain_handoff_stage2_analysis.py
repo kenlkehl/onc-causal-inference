@@ -9786,6 +9786,22 @@ def _run_stage2_statistical_selection(
         ).result()
 
 
+def initial_feature_modeling_definitions(definitions):
+    """Normalize the contracts used by both preparation and initial extraction."""
+    current = []
+    for raw_feature in definitions:
+        feature = dict(raw_feature)
+        value_type = str(feature.get("value_type") or "ambiguous").strip().lower()
+        if value_type in {"binary", "categorical", "ordinal"}:
+            feature["categories_or_unit"] = _validated_closed_category_values(
+                value_type=value_type,
+                values=feature.get("categories_or_unit") or [],
+                source=f"feature {feature.get('name')!r}",
+            )
+        current.append(_normalized_feature_modeling_definition(feature))
+    return current
+
+
 def run_fold_analysis(
     *,
     dataset: pd.DataFrame,
@@ -9875,17 +9891,7 @@ def run_fold_analysis(
     frozen_review_convergence: dict[str, Any] | None = None
     frozen_heldout_measurement_cache: dict[str, Any] | None = None
     if frozen_snapshot is None:
-        current: list[dict[str, Any]] = []
-        for raw_feature in definitions:
-            feature = dict(raw_feature)
-            value_type = str(feature.get("value_type") or "ambiguous").strip().lower()
-            if value_type in {"binary", "categorical", "ordinal"}:
-                feature["categories_or_unit"] = _validated_closed_category_values(
-                    value_type=value_type,
-                    values=feature.get("categories_or_unit") or [],
-                    source=f"feature {feature.get('name')!r}",
-                )
-            current.append(_normalized_feature_modeling_definition(feature))
+        current = initial_feature_modeling_definitions(definitions)
         review_rounds = 0
         ontology_refinement_rounds = 0
         review_converged = False

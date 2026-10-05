@@ -710,6 +710,79 @@ def test_feature_definition_only_run_never_starts_managed_extractor(
     ]
 
 
+@pytest.mark.parametrize("prepared,definition_only", [(False, False), (True, False), ("partial", False), (False, True)])
+def test_decision_preparation_uses_all_gpus_then_retains_primary(
+    tmp_path, monkeypatch, prepared, definition_only,
+):
+    from oci.inference.stage2_decision_ontology import prepare_ontologies
+    from oci.inference.plain_handoff_stage2_analysis import initial_feature_modeling_definitions
+
+    config = plain_stage2_config_from_mapping({
+        "model": "gemma", "vllm": {"gpus": [0], "gpus_per_server": 1},
+        "decision_extraction": {"enabled": True},
+        "extraction_llm": {"model": "plumb", "vllm": {"gpus": list(range(1, 8)), "gpus_per_server": 1}},
+    }, default_workers=4)
+    output = tmp_path / "stage2"
+    (tmp_path / "handoff.jsonl").write_text(json.dumps({"outer_fold": 1}) + "\n"
+        + (json.dumps({"outer_fold": 2}) + "\n" if prepared == "partial" else ""))
+    if prepared:
+        f = {"name": "color", "description": "Color", "value_type": "categorical",
+             "categories_or_unit": ["red", "blue"], "measurement_definition": "Recorded color"}
+        fold = output / "outer_001"
+        fold.mkdir(parents=True)
+        (fold / "feature_definitions.json").write_text(json.dumps({"features": [f]}))
+        prepare_ontologies(initial_feature_modeling_definitions([f]),
+            output_dir=fold / "ontology_supervision/round_001/failure_ontology_refinement",
+            request_json=lambda *a, **kw: pytest.fail("categorical feature needs no preparation"))
+    lifecycle = []
+
+    @contextmanager
+    def fake_launch(**kwargs):
+        role = kwargs["output_dir"].name
+        lifecycle.append(f"start-{role}")
+        if role == "ontology_preparation":
+            assert kwargs["model"] == "gemma"
+            assert kwargs["config"].gpus == tuple(f"cuda:{i}" for i in range(1, 8))
+            assert kwargs["config"].server_count == 7
+            assert kwargs["config"].effective_ports() == tuple(range(8011, 8018))
+        if role == "extractor":
+            assert "start-ontology_preparation" not in lifecycle or "stop-ontology_preparation" in lifecycle
+            assert "stop-orchestrator" not in lifecycle
+            assert "--runner" in kwargs["config"].extra_args
+        try:
+            yield tuple(f"http://127.0.0.1:{p}/v1" for p in kwargs["config"].effective_ports())
+        finally:
+            lifecycle.append(f"stop-{role}")
+
+    def fake_run(self, **kwargs):
+        if kwargs["dataset"] is None:
+            assert len(self.config.runtime_endpoints) == 8
+            assert self.config.workers >= 32
+            assert kwargs["decision_ontology_preparation_only"] is (not definition_only)
+            assert "start-extractor" not in lifecycle
+            lifecycle.append("prepare")
+            return {"phase": "feature_definitions" if definition_only else "decision_ontology_preparation"}
+        assert self.config.runtime_endpoints == ("http://127.0.0.1:8010/v1",)
+        assert len(self.config.extraction_llm.runtime_endpoints) == 7
+        lifecycle.append("extract")
+        return {"phase": "causal_estimation"}
+
+    monkeypatch.setattr(stage2_workflow, "launch_managed_vllm_servers", fake_launch)
+    monkeypatch.setattr(PlainHandoffStage2, "run", fake_run)
+    monkeypatch.setattr(stage2_workflow, "_served_model_ids", lambda c: [c.model])
+    result = run_plain_handoff_stage2(handoff_path=tmp_path / "handoff.jsonl",
+        output_dir=output, clinical_question="test", config=config,
+        dataset=None if definition_only else object())
+    expected = ["start-orchestrator"]
+    if prepared is not True:
+        expected += ["start-ontology_preparation", "prepare", "stop-ontology_preparation"]
+    if not definition_only:
+        expected += ["start-extractor", "extract", "stop-extractor"]
+    expected += ["stop-orchestrator"]
+    assert lifecycle == expected
+    assert result["phase"] == ("feature_definitions" if definition_only else "causal_estimation")
+
+
 def test_managed_resume_after_extraction_starts_loads_all_gpu_extractor_immediately(
     tmp_path,
     monkeypatch,

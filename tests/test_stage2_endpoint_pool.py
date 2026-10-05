@@ -183,6 +183,52 @@ def test_recent_latency_prefers_faster_servers():
     servers.release(faster, duration_seconds=1)
 
 
+def test_homogeneous_pool_reuses_idle_servers_after_slow_startup():
+    servers = routing.EndpointPool(
+        [routing.ExtractionEndpoint(f"http://replica-{i}.test/v1", 128) for i in range(7)],
+        metrics_reader=None, latency_weighted=False)
+    # Reproduce a few warmed replicas and otherwise healthy replicas with
+    # slower early timings. No later sample can correct starvation by itself.
+    for i, state in enumerate(servers._states):
+        state.latency_seconds = .01 if i in (0, 2, 5) else 10
+    held = [servers.reserve() for _ in range(128)]
+    counts = [held.count(i) for i in range(7)]
+    assert min(counts) == 18 and max(counts) == 19
+    for i in held:
+        servers.release(i, duration_seconds=.01 if i in (0, 2, 5) else 10)
+    sequential = []
+    for _ in range(140):
+        i = servers.reserve()
+        sequential.append(i)
+        servers.release(i, duration_seconds=.01 if i in (0, 2, 5) else 10)
+    assert [sequential.count(i) for i in range(7)] == [20] * 7
+
+
+def test_homogeneous_pool_still_respects_capacity_shared_load_and_recovery():
+    now = [100.0]
+    servers = pool(clock=lambda: now[0], latency_weighted=False)
+    servers._states[0].metrics = {"running": 20, "waiting": 10, "cache_fraction": .95}
+    servers._states[0].metrics_at = now[0]
+    held = [servers.reserve(), servers.reserve()]
+    assert held == [1, 1]
+    fallback = servers.reserve()  # The preferred replica is at capacity.
+    assert fallback == 0
+    servers.release(fallback, duration_seconds=1, transport_failed=True, succeeded=False)
+    for i in held:
+        servers.release(i, duration_seconds=1)
+    now[0] += 16  # Both cooldown and shared-load observation expire.
+    healthy = servers.reserve()
+    assert healthy == 1
+    probe = servers.reserve()
+    assert probe == 0
+    while_probe_runs = servers.reserve()
+    assert while_probe_runs == 1
+    servers.release(healthy, duration_seconds=1)
+    servers.release(while_probe_runs, duration_seconds=1)
+    servers.release(probe, duration_seconds=1)
+    assert servers.snapshot()[0]["cooldown_seconds"] == 0
+
+
 def test_failed_server_gets_one_probe_after_cooldown_then_recovers():
     now = [100.0]
     servers = pool(clock=lambda: now[0])

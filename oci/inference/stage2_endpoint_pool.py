@@ -128,6 +128,8 @@ class EndpointPool:
     Metrics refresh in short-lived background threads; network monitoring never
     blocks an extraction request. Missing/stale metrics fall back to local load.
     HTTP transport failures impose bounded cooldowns with one recovery probe.
+    Homogeneous decision replicas can ignore historical response latency so
+    slow startup samples do not permanently exclude otherwise idle capacity.
     """
 
     def __init__(
@@ -135,6 +137,7 @@ class EndpointPool:
         metrics_reader: Callable[[str, str], Mapping[str, float]] | None = read_vllm_load,
         clock: Callable[[], float] = time.monotonic,
         metrics_poll_seconds: float = 5.0,
+        latency_weighted: bool = True,
     ) -> None:
         if not endpoints or metrics_poll_seconds <= 0:
             raise ValueError("endpoint pool requires servers and a positive metrics interval")
@@ -147,6 +150,7 @@ class EndpointPool:
         self.capacity = sum(endpoint.max_concurrency for endpoint in endpoints)
         self._api_key, self._metrics_reader, self._clock = api_key, metrics_reader, clock
         self._metrics_poll_seconds = metrics_poll_seconds
+        self._latency_weighted = latency_weighted
         self._condition = threading.Condition()
         self._cursor = 0
 
@@ -193,7 +197,7 @@ class EndpointPool:
             external = max(0.0, reported - state.local_at_metrics)
             cache = min(1.0, state.metrics.get("cache_fraction", 0))
             pressure += 4 * max(0.0, cache - 0.8) / 0.2
-        latency = state.latency_seconds or reference_latency
+        latency = (state.latency_seconds or reference_latency) if self._latency_weighted else 1.0
         return (state.in_flight + external + 1) / state.config.max_concurrency * latency * pressure
 
     def reserve(self, *, deadline: float | None = None) -> int:

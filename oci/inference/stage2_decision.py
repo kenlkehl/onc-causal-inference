@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .stage2_decision_client import decision_messages
 
-SCHEMA = "stage2-plumb-decision-v1"
+SCHEMA = "stage2-plumb-decision-v2-grouped-categories"
 MISSING = "__not_documented__"
 NONE = "__none_of_above__"
 
@@ -21,8 +21,8 @@ def validate_ontology(feature):
     if not isinstance(values, (list, tuple)) or any(not isinstance(v, str) or not v.strip() for v in values):
         raise ValueError("decision features require categories_or_unit strings")
     if kind in {"binary", "categorical", "ordinal"}:
-        if not 1 <= len(values) <= 14 or len(set(values)) != len(values):
-            raise ValueError("decision categorical ontologies require 1–14 distinct categories")
+        if not values or len(set(values)) != len(values):
+            raise ValueError("decision categorical ontologies require distinct nonempty categories")
         if kind == "binary" and len(values) != 2:
             raise ValueError("decision binary ontologies require exactly two categories")
     elif kind == "continuous":
@@ -46,7 +46,8 @@ def policy_identity(policy, colbert):
 
     return {"method": "plumb_decision", "schema": SCHEMA, "decision": policy.public_dict(),
             "retrieval": retrieval_identity(colbert), "readout": "LAST/raw_A_to_P_logits",
-            "option_order": "declared_categories_or_ascending_bins_then_exits"}
+            "option_order": "declared_categories_or_ascending_bins_then_exits",
+            "categorical_readout": "recursive_declared_order_groups_at_most_14_plus_exits"}
 
 
 def claim_output_method(output_dir, policy, colbert, *, fold_root=False):
@@ -128,16 +129,37 @@ def measure_feature(*, feature, source, evidence, client):
         return {"value": None, "status": "not_documented", "calls": calls}
     contract = _contract(feature)
     if feature["value_type"] != "continuous":
-        values = feature["categories_or_unit"]
-        options = [(f"category_{i}", f"category_{i}: {v}") for i, v in enumerate(values)]
-        options.extend([(MISSING, "not_documented: The excerpts do not establish the feature's value; missing or unresolved evidence."),
-                        (NONE, "none_of_above: The excerpts establish a value, but NONE of the declared categories represents it.")])
+        values = list(feature["categories_or_unit"])
+        offset, group_level = 0, 0
+        exits = [(MISSING, "not_documented: The excerpts do not establish the feature's value; missing or unresolved evidence."),
+                 (NONE, "none_of_above: The excerpts establish a value, but NONE of the listed categories represents it.")]
+        while len(values) > 14:
+            group_level += 1
+            group_size = math.ceil(len(values) / 14)
+            groups = [values[i:i + group_size] for i in range(0, len(values), group_size)]
+            options = [(f"group_{i}", "The documented category is one of: " + json.dumps(group, ensure_ascii=False))
+                       for i, group in enumerate(groups)] + exits
+            answer = decide(contract + "\nSelect the group containing the documented category under the "
+                            "measurement and conflict rules. Category groups only organize the choices; "
+                            "they do not combine or rename the original categories. Do not infer absence "
+                            "from silence. Use only the supplied evidence.", options, f"category_group_{group_level}")
+            key = answer["selected"]
+            if key in {MISSING, NONE}:
+                status = ("none_of_above" if group_level == 1 else "category_selection_failed") if key == NONE else "not_documented"
+                return {"value": None, "status": status,
+                        "outside_initial_domain": key == NONE and group_level == 1, "calls": calls}
+            group_index = int(key.removeprefix("group_"))
+            offset += group_index * group_size
+            values = groups[group_index]
+        options = [(f"category_{offset + i}", f"category_{offset + i}: {v}") for i, v in enumerate(values)] + exits
         answer = decide(contract + "\nSelect the documented category under the measurement and conflict rules. "
                         "Do not infer absence from silence. Use only the supplied evidence.", options, "category")
         key = answer["selected"]
-        value = values[int(key.removeprefix("category_"))] if key not in {MISSING, NONE} else None
-        status = "accepted" if value is not None else "none_of_above" if key == NONE else "not_documented"
-        return {"value": value, "status": status, "calls": calls}
+        value = feature["categories_or_unit"][int(key.removeprefix("category_"))] if key not in {MISSING, NONE} else None
+        status = ("accepted" if value is not None else
+                  ("category_selection_failed" if group_level else "none_of_above") if key == NONE else "not_documented")
+        return {"value": value, "status": status,
+                "outside_initial_domain": key == NONE and group_level == 0, "calls": calls}
 
     lo, hi = (float(feature["decision_ontology"][k]) for k in ("minimum", "maximum"))
     upper_inclusive = True
@@ -248,7 +270,7 @@ def extract_rows(*, dataset, row_ids, text_column, definitions, output_dir, work
         name = feature["name"]
         counts = Counter(r["status"] for r in results[name])
         feature_summary[name] = {"patient_count": len(row_ids), "status_counts": dict(counts)}
-        for status in ("none_of_above", "numeric_verification_failed"):
+        for status in ("none_of_above", "numeric_verification_failed", "category_selection_failed"):
             rows = sorted(r["row_id"] for r in results[name] if r["status"] == status)
             if rows:
                 patterns.append({"feature_name": name, "failure_kind": status, "reason": status,

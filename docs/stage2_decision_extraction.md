@@ -32,8 +32,14 @@ STAGE2_EXTRACTION_MODEL=plumb-4b \
 ./run_five_conf_five_mod.sh /path/to/plumb-run
 ```
 
-The eight-GPU presets manage one Gemma 4 26B primary server on GPU 0 and seven
-Plumb replicas on GPUs 1–7, all with tensor parallelism of one. H100 uses the
+The eight-GPU presets first run Gemma 4 26B replicas across all eight GPUs for
+feature discovery and initial ontology preparation. Numeric bounds and ambiguous
+types are prepared concurrently from feature contracts, with a checkpoint per
+feature. All folds finish this phase before patient extraction starts. Gemma on
+GPU 0 stays loaded while the temporary Gemma replicas on GPUs 1–7 stop and are
+replaced by seven Plumb replicas, all with tensor parallelism of one. Completed
+preparation checkpoints are reused on restart; once all are complete, the run
+starts directly with the configured one-Gemma/seven-Plumb allocation. H100 uses the
 Red Hat AI FP8-dynamic Gemma checkpoint; RTX PRO 6000 uses NVIDIA's NVFP4
 checkpoint. Extraction allows 128 concurrent requests across the seven replicas;
 each Plumb scheduler allows up to eight sequences within its token budget.
@@ -69,7 +75,10 @@ settings, or decision policy. Existing generative-extraction measurements are
 not interchangeable with decision measurements. To use an existing classifier,
 replace `extraction_llm.vllm` with an `endpoint` such as
 `http://127.0.0.1:8134/v1`, and set `model` to that server's advertised model ID.
-Multiple equivalent endpoints retain the existing load/capacity router.
+Multiple equivalent endpoints use current in-flight and shared load, capacity,
+and round-robin ties. Decision dispatch ignores historical response latency,
+so slow startup requests cannot leave healthy replicas permanently idle.
+Transport failures still trigger bounded cooldown and a single recovery probe.
 
 The tested runtime is vLLM **0.30.0**; no upgrade to the machine's active workers
 was necessary. The optional dependency extra `.[decision-extraction]` declares
@@ -108,8 +117,10 @@ contains raw logits. The client checks its length, finite values, model ID,
 prompt-token count, and absence of generated tokens; invalid responses or
 transport failures stop extraction rather than becoming clinical missingness.
 Transport retries are bounded. Generative repair/fallback is disabled for this
-backend. Primary and decision servers use their configured allocations; the
-generative backend's alternating all-GPU model swap does not apply.
+backend. Initial feature preparation uses the union of the configured managed
+GPU allocations. Extraction and later ontology revisions use their configured
+resident split; the generative backend's completion-triggered model swap does
+not apply. External-server configurations retain their supplied endpoints.
 
 The original 24 choice, noul, and score fixtures were run through this conversion:
 all top answers agreed with JevK5, and the largest probability difference was
@@ -119,13 +130,21 @@ saved in `artifacts/plumb_feasibility/vllm_probe/comparison.json`.
 ## Feature ontologies and retrieval
 
 Every prompt contains exactly one feature. Binary, categorical, and ordinal
-features use their existing `categories_or_unit` ontology, with at most 14
-declared categories plus separate **not documented** and **none of the above**
-options. Binary features require exactly two declared categories. Category order
+features use their existing `categories_or_unit` ontology. Each decision offers
+at most 14 category choices plus separate **not documented** and **none of the above**
+options. Larger ontologies first select a group of categories, then select within
+that group, recursively if needed. All original values and their declared order
+are preserved. Rejection within an already selected group is recorded as
+`category_selection_failed` and does not trigger ontology expansion.
+Binary features require exactly two declared categories. Category order
 is preserved; numeric bins are ascending; exit options come last. These models
 are sensitive to option ordering, so the order is recorded and frozen.
 
-Continuous features need one canonical unit and an inclusive initial domain:
+Continuous features need one canonical unit and an inclusive initial domain.
+For saved numeric features without a listed unit, ontology preparation proposes
+a canonical unit from the feature's measurement contract, using `unitless` for
+dimensionless counts, ratios, and scores. The original frozen definitions remain
+unchanged:
 
 ```json
 {
@@ -143,8 +162,8 @@ Continuous features need one canonical unit and an inclusive initial domain:
 If numeric bounds are absent, the primary LLM proposes and validates them from
 the feature contract **before viewing patient measurements**. Ambiguous discovered
 features are similarly converted to a closed ontology; investigator-supplied
-features must have a concrete type. Ontologies with unsupported types, excessive
-categories, missing units, or invalid bounds fail explicitly.
+features must have a concrete type. Ontologies with unsupported types, empty or
+duplicate categories, invalid units, or invalid bounds fail explicitly.
 
 The existing ColBERT retriever ranks chunks from that patient's record for that
 feature. Whole chunks are included in rank order and rendered in source order.
