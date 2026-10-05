@@ -61,6 +61,19 @@ remain the same. Prompt packing tokenizes candidate prefixes in one batch, keeps
 the original first-over-budget stopping rule, and sends the chosen token IDs
 directly to Plumb without tokenizing the final prompt again.
 
+Feature-query embeddings share one host-memory cache across all retrieval
+workers and outer folds using that pool. The cache is scoped to the pool's
+encoder/checkpoint signature and exact feature query text; patient text never
+enters it. Concurrent misses for the same query encode it once and share the
+result. Its LRU vector budget defaults to 1 GiB; configure
+`stage2.colbert.query_cache_max_bytes`, `STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES`,
+or `--stage2-colbert-query-cache-max-bytes` (bytes; `0` disables retention).
+Keys and array bookkeeping add a small amount of host memory above this budget.
+The setting is excluded from encoding and measurement identities, so completed
+extractions and patient indexes remain compatible. Aggregate cache counters
+(hits, misses, coalesced requests, encodings, evictions, and retained bytes) are
+logged once per minute during retrieval.
+
 Set `stage2.decision_preparation_workers` (or
 `STAGE2_DECISION_PREPARATION_WORKERS`,
 `--stage2-decision-preparation-workers`) to a positive integer to prepare prompts

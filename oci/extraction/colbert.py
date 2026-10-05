@@ -8,7 +8,7 @@ locks across processes. No fitted cohort statistics or outcomes enter retrieval.
 
 from collections import OrderedDict
 from collections.abc import Mapping
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import contextmanager
 import fcntl
 import hashlib
@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 import tempfile
 import threading
+import time
 import zipfile
 
 import numpy as np
@@ -242,12 +243,97 @@ def render_context(text, ranked):
     )
 
 
+class _QueryCache:
+    """Model-scoped host vectors with bounded LRU retention and shared misses.
+
+    Encode owned misses before waiting on another caller's misses. Overlapping
+    multi-query requests therefore cannot wait on each other in a cycle.
+    """
+
+    def __init__(self, max_bytes):
+        self.max_bytes = max_bytes
+        self.values = OrderedDict()
+        self.pending = {}
+        self.bytes = 0
+        self.lock = threading.Lock()
+        self.hits = self.misses = self.coalesced = self.encoded = self.evictions = 0
+        self._next_report = time.monotonic() + 60
+
+    def _info(self):
+        return {"entries": len(self.values), "vector_bytes": self.bytes, "max_bytes": self.max_bytes,
+                "hits": self.hits, "misses": self.misses, "coalesced": self.coalesced,
+                "encoded": self.encoded, "evictions": self.evictions, "in_flight": len(self.pending)}
+
+    def info(self):
+        with self.lock:
+            return self._info()
+
+    def get_many(self, queries, encode, *, batch_size):
+        answers, owned = {}, []
+        with self.lock:
+            for query in dict.fromkeys(queries):
+                if query in self.values:
+                    self.values.move_to_end(query)
+                    answers[query] = self.values[query]
+                    self.hits += 1
+                elif query in self.pending:
+                    answers[query] = self.pending[query]
+                    self.coalesced += 1
+                else:
+                    future = Future()
+                    self.pending[query] = answers[query] = future
+                    owned.append(query)
+                    self.misses += 1
+            report = None
+            if time.monotonic() >= self._next_report:
+                self._next_report = time.monotonic() + 60
+                report = self._info()
+        if report is not None:
+            LOGGER.info("ColBERT shared query cache %s", " ".join(f"{k}={v}" for k, v in report.items()))
+        try:
+            for start in range(0, len(owned), batch_size):
+                batch = owned[start:start + batch_size]
+                vectors = normalized_vectors(encode(batch))
+                if len(vectors) != len(batch):
+                    raise ValueError("ColBERT encoder returned the wrong number of queries")
+                for query, vector in zip(batch, vectors, strict=True):
+                    with self.lock:
+                        if vector.nbytes <= self.max_bytes:
+                            while self.values and self.bytes + vector.nbytes > self.max_bytes:
+                                _, removed = self.values.popitem(last=False)
+                                self.bytes -= removed.nbytes
+                                self.evictions += 1
+                            self.values[query] = vector
+                            self.bytes += vector.nbytes
+                        self.encoded += 1
+                    # Future callbacks/waiters must not run under our cache lock.
+                    answers[query].set_result(vector)
+                    with self.lock:
+                        if self.pending.get(query) is answers[query]:
+                            del self.pending[query]
+        except BaseException as error:
+            with self.lock:
+                failed = []
+                for query in owned:
+                    future = answers[query]
+                    if not future.done():
+                        if self.pending.get(query) is future:
+                            del self.pending[query]
+                        failed.append(future)
+            for future in failed:
+                future.set_exception(error)
+            raise
+        # Keep request-local references even if a later publication evicts an
+        # entry. This also supports a cache smaller than one multi-query request.
+        return [answers[q].result() if isinstance(answers[q], Future) else answers[q] for q in queries]
+
+
 class _DeviceWorker:
-    def __init__(self, config, device, folder, signature):
+    def __init__(self, config, device, folder, signature, query_cache=None):
         self.config, self.device, self.folder, self.signature = config, device, folder, signature
         self.encoder = None
         self.stream = None
-        self.queries = OrderedDict()
+        self.query_cache = query_cache if query_cache is not None else _QueryCache(config.query_cache_max_bytes)
         self.patients = OrderedDict()
         self.patient_cache_bytes = 0
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"colbert-{device}")
@@ -335,17 +421,12 @@ class _DeviceWorker:
         key = digest(identity)
         path = Path(self.config.cache_dir).expanduser() / "patients" / key[:2] / (key + ".npz")
         chunks, vectors, batches, cache_hit = self._patient_index(path, identity, text)
-        missing = list(dict.fromkeys(q for q in queries if q not in self.queries))
-        for start in range(0, len(missing), self.config.batch_size):
-            batch = missing[start : start + self.config.batch_size]
-            values = normalized_vectors(self.encoder.encode(batch, query=True))
-            if len(values) != len(batch):
-                raise ValueError("ColBERT encoder returned the wrong number of queries")
-            self.queries.update(zip(batch, values, strict=True))
+        query_vectors = self.query_cache.get_many(queries,
+            lambda batch: self.encoder.encode(batch, query=True), batch_size=self.config.batch_size)
         hits = []
-        for query in queries:
+        for query_vector in query_vectors:
             scores = maxsim_scores(
-                self.queries[query],
+                query_vector,
                 vectors,
                 device=self.device,
                 batch_size=self.config.score_batch_size,
@@ -363,8 +444,6 @@ class _DeviceWorker:
                     for rank, i in enumerate(order)
                 ]
             )
-        while len(self.queries) > 512:
-            self.queries.popitem(last=False)
         # The manifest is patient-independent; only vectors of exactly this text are searched.
         return {
             "context": render_context(text, [h for group in hits for h in group]),
@@ -391,15 +470,18 @@ class ColBERTRetriever:
         devices = config.devices
         if devices == ("auto",):
             devices = tuple(f"cuda:{i}" for i in range(torch.cuda.device_count())) or ("cpu",)
+        # This pool owns one immutable encoder signature. Query text is the
+        # remaining cache key; patient text never enters query encoding/cache.
+        self.query_cache = _QueryCache(config.query_cache_max_bytes)
         self.workers = [
-            _DeviceWorker(config, device, folder, self.signature)
+            _DeviceWorker(config, device, folder, self.signature, self.query_cache)
             for _ in range(config.workers_per_device)
             for device in devices
         ]
         self.lock, self.next_worker = threading.Lock(), 0
         LOGGER.info(
-            "ColBERT retrieval devices=%s workers_per_device=%s total_workers=%s cache=%s",
-            devices, config.workers_per_device, len(self.workers), config.cache_dir,
+            "ColBERT retrieval devices=%s workers_per_device=%s total_workers=%s cache=%s shared_query_cache_max_bytes=%s",
+            devices, config.workers_per_device, len(self.workers), config.cache_dir, config.query_cache_max_bytes,
         )
 
     def retrieve(self, text, features, *, top_k=None):
@@ -447,6 +529,7 @@ def get_retriever(config=None):
         digest(config.encoding_identity()),
         config.devices,
         config.workers_per_device,
+        config.query_cache_max_bytes,
         str(Path(config.cache_dir).expanduser().resolve()),
         config.batch_size,
         config.score_batch_size,

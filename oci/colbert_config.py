@@ -21,6 +21,9 @@ class ColBERTConfig:
     top_k: int = 20
     # Runtime concurrency; excluded from encoding and measurement identities.
     workers_per_device: int = 1
+    # Runtime host-vector budget shared by the entire retrieval pool. Zero
+    # disables retention; concurrent misses are still coalesced.
+    query_cache_max_bytes: int = 1024 * 1024 * 1024
 
     def __post_init__(self):
         for name in ("model_name", "cache_dir"):
@@ -53,6 +56,8 @@ class ColBERTConfig:
                 raise ValueError(f"colbert.{name} must be a positive integer")
         if self.query_length < 8:
             raise ValueError("colbert.query_length must be at least 8")
+        if type(self.query_cache_max_bytes) is not int or self.query_cache_max_bytes < 0:
+            raise ValueError("colbert.query_cache_max_bytes must be a nonnegative integer")
         if type(self.chunk_overlap) is not int or not 0 <= self.chunk_overlap < self.chunk_size:
             raise ValueError(
                 "colbert.chunk_overlap must be nonnegative and smaller than chunk_size"

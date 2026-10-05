@@ -36,6 +36,7 @@ For the production workflow, put these fields in `stage2`:
     "revision": null,
     "devices": ["auto"],
     "workers_per_device": 1,
+    "query_cache_max_bytes": 1073741824,
     "cache_dir": ".oci_cache/colbert",
     "chunk_size": 64,
     "chunk_overlap": 0,
@@ -63,9 +64,16 @@ devices, such as `["cuda:0", "cuda:1"]`, use logical indices after
 per device (default 1) for a retriever configuration across concurrent folds and
 patient tasks. Each worker has its own encoder, serial task queue, and CUDA stream,
 so multiple workers on a GPU can overlap work. Embedding batches and MaxSim scoring
-execute on those workers independently of the LLM servers. Each worker also has
-its own query cache and a patient-vector cache bounded to 16 patients and 128 MiB
-of combined host/GPU data. The content-addressed disk cache is shared; concurrent
+execute on those workers independently of the LLM servers. One query-vector cache
+is shared across all workers using the pool's exact encoder signature and feature
+query text. Concurrent misses for a query encode it once; all callers receive the
+same host vector. LRU retention is bounded by `query_cache_max_bytes` (default
+1 GiB of vectors plus key/array overhead; `0` disables retention). This runtime
+setting is excluded from encoding and measurement identities. Configure it with
+`--stage2-colbert-query-cache-max-bytes` or `STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES`
+in the launchers. Aggregate cache counters are logged once per minute.
+Each worker retains a separate patient-vector cache bounded to 16 patients and
+128 MiB of combined host/GPU data. The content-addressed disk cache is shared; concurrent
 workers still encode a new patient index only once. Increasing the worker count
 reuses existing indexes and extraction checkpoints. CPU devices support the same
 worker-count setting, without CUDA streams.
@@ -132,8 +140,8 @@ STAGE2_COLBERT_TOP_K=20 ./run_one_conf_one_mod.sh
 
 Supported overrides are `STAGE2_EXTRACTION_CONTEXT_STRATEGY` and
 `STAGE2_COLBERT_MODEL`, `REVISION`, `DEVICES`, `WORKERS_PER_DEVICE`, `CACHE_DIR`,
-`CHUNK_SIZE`, `CHUNK_OVERLAP`, `QUERY_LENGTH`, `BATCH_SIZE`, and `TOP_K` (each with the
-`STAGE2_COLBERT_` prefix). The Python CLI exposes matching
+`QUERY_CACHE_MAX_BYTES`, `CHUNK_SIZE`, `CHUNK_OVERLAP`, `QUERY_LENGTH`, `BATCH_SIZE`,
+and `TOP_K` (each with the `STAGE2_COLBERT_` prefix). The Python CLI exposes matching
 `--stage2-colbert-*` options and `--stage2-extraction-context-strategy`.
 Advanced settings can also be supplied with `--set stage2.colbert.KEY=VALUE`.
 

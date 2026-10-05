@@ -42,6 +42,7 @@ def command(dataset: Path, output: str, env: dict[str, str]) -> list[str]:
         "STAGE2_COLBERT_DEVICES": "--stage2-colbert-devices",
         "STAGE2_COLBERT_WORKERS_PER_DEVICE": "--stage2-colbert-workers-per-device",
         "STAGE2_COLBERT_CACHE_DIR": "--stage2-colbert-cache-dir",
+        "STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES": "--stage2-colbert-query-cache-max-bytes",
         "STAGE2_COLBERT_BATCH_SIZE": "--stage2-colbert-batch-size",
     }
     for prefix, flag in (

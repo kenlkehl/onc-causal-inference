@@ -248,11 +248,13 @@ def test_saved_cpu_and_retrieval_worker_overrides_preserve_science_and_checkpoin
     args = launcher.command(config.dataset, str(config.output_dir), {
         "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
         "STAGE2_COLBERT_WORKERS_PER_DEVICE": "4",
+        "STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES": "1048576",
         "STAGE2_DECISION_PREPARATION_WORKERS": "16",
     })
     raw, directory = workflow._raw_config_from_args(workflow.build_parser().parse_args(args))
     expanded = workflow.compile_config(raw, config_dir=directory)
     assert expanded.stage2.colbert.workers_per_device == 4
+    assert expanded.stage2.colbert.query_cache_max_bytes == 1048576
     assert expanded.stage2.decision_preparation_workers == 16
     assert expanded.stage2.colbert.measurement_identity() == config.stage2.colbert.measurement_identity()
     assert expanded.stage2.colbert.encoding_identity() == config.stage2.colbert.encoding_identity()

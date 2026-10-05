@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager, nullcontext
 from dataclasses import replace
 from pathlib import Path
+from collections import Counter
 import re
 import json
 import threading
@@ -284,7 +285,7 @@ def test_workers_per_gpu_use_independent_streams_and_share_indexes(tmp_path, bac
     monkeypatch.setattr(colbert_encoder.ColBERTEncoder, "encode", encode)
     with ThreadPoolExecutor(max_workers=count) as pool:
         results = list(pool.map(
-            lambda _: retriever.retrieve("red same patient", [{"name": "red"}]), range(count)
+            lambda i: retriever.retrieve("red same patient", [{"name": f"red {i}"}]), range(count)
         ))
     assert len(retriever.workers) == count
     assert len({worker.stream for worker in retriever.workers}) == count
@@ -318,6 +319,145 @@ def test_worker_count_changes_pool_but_preserves_measurement_identity(tmp_path, 
 def test_workers_per_device_requires_positive_integer(value):
     with pytest.raises(ValueError, match="workers_per_device must be a positive integer"):
         colbert_config_from_mapping({"workers_per_device": value})
+
+
+def test_query_vectors_shared_across_workers_patients_and_scoped_to_encoder(tmp_path, backend):
+    config = replace(settings(tmp_path), devices=("cuda:0", "cuda:1"))
+    retriever = colbert.get_retriever(config)
+    first = retriever.retrieve("red first patient", [{"name": "red"}])
+    second = retriever.retrieve("blue second patient", [{"name": "red"}])
+    assert backend["queries"] == 1
+    assert backend["devices"] == {"cuda:0", "cuda:1"}
+    assert first["source_sha256"] != second["source_sha256"]
+    assert second["hits"][0][0]["text"] in "blue second patient"
+    assert all(w.query_cache is retriever.query_cache for w in retriever.workers)
+    assert retriever.query_cache.info()["hits"] == 1
+    other = colbert.get_retriever(replace(config, model_name="different-encoder"))
+    assert other.query_cache is not retriever.query_cache
+    other.retrieve("red first patient", [{"name": "red"}])
+    assert backend["queries"] == 2
+
+
+def _await_cache_counter(cache, key, expected):
+    deadline = time.monotonic() + 5
+    while cache.info()[key] < expected and time.monotonic() < deadline:
+        time.sleep(.005)
+    assert cache.info()[key] == expected
+
+
+def test_concurrent_query_misses_encode_once_and_share_exact_array():
+    cache = colbert._QueryCache(1024)
+    barrier = threading.Barrier(8)
+    started, release = threading.Event(), threading.Event()
+    calls = []
+
+    def encode(batch):
+        calls.append(batch)
+        started.set()
+        assert release.wait(5)
+        return [np.array([[1., 0.]], dtype=np.float32)]
+
+    def request(_):
+        barrier.wait(timeout=5)
+        return cache.get_many(["query"], encode, batch_size=32)[0]
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        jobs = [pool.submit(request, i) for i in range(8)]
+        try:
+            assert started.wait(5)
+            _await_cache_counter(cache, "coalesced", 7)
+        finally:
+            release.set()
+        vectors = [job.result(timeout=5) for job in jobs]
+    assert calls == [["query"]]
+    assert all(vector is vectors[0] for vector in vectors)
+    assert cache.info() == {"entries": 1, "vector_bytes": 8, "max_bytes": 1024,
+        "hits": 0, "misses": 1, "coalesced": 7, "encoded": 1, "evictions": 0, "in_flight": 0}
+
+
+def test_overlapping_multi_query_requests_encode_owned_misses_before_waiting():
+    cache = colbert._QueryCache(1024)
+    barrier = threading.Barrier(2)
+    calls = []
+    vectors = {"a": [1., 0.], "b": [0., 1.], "c": [1., 1.]}
+
+    def encode(batch):
+        calls.extend(batch)
+        barrier.wait(timeout=5)
+        return [np.array([vectors[q]], dtype=np.float32) for q in batch]
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        jobs = [pool.submit(cache.get_many, queries, encode, batch_size=32)
+                for queries in (["a", "b"], ["b", "c"])]
+        left, right = [job.result(timeout=5) for job in jobs]
+    assert Counter(calls) == {"a": 1, "b": 1, "c": 1}
+    assert left[1] is right[0]
+    assert cache.info()["encoded"] == 3 and cache.info()["coalesced"] == 1
+
+
+def test_query_encoding_failure_reaches_waiters_and_allows_retry():
+    cache = colbert._QueryCache(1024)
+    started, release = threading.Event(), threading.Event()
+
+    def fail(batch):
+        started.set()
+        assert release.wait(5)
+        raise ValueError("failed query encoding")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(cache.get_many, ["q"], fail, batch_size=32)
+        assert started.wait(5)
+        second = pool.submit(cache.get_many, ["q"], fail, batch_size=32)
+        try:
+            _await_cache_counter(cache, "coalesced", 1)
+        finally:
+            release.set()
+        for job in (first, second):
+            with pytest.raises(ValueError, match="failed query encoding"):
+                job.result(timeout=5)
+    assert cache.info()["in_flight"] == cache.info()["entries"] == 0
+    result = cache.get_many(["q"], lambda batch: [np.array([[1., 0.]])], batch_size=32)
+    np.testing.assert_array_equal(result[0], [[1., 0.]])
+    assert cache.info()["misses"] == 2 and cache.info()["encoded"] == 1
+
+
+def test_query_cache_lru_bounds_duplicates_and_request_local_references():
+    cache = colbert._QueryCache(16)
+    vectors = {"a": [1., 0.], "b": [0., 1.], "c": [1., 1.]}
+
+    def encode(batch):
+        return [np.array([vectors[q]], dtype=np.float32) for q in batch]
+
+    cache.get_many(["a", "b"], encode, batch_size=1)
+    cache.get_many(["a"], encode, batch_size=1)
+    cache.get_many(["c"], encode, batch_size=1)
+    assert list(cache.values) == ["a", "c"]  # a hit refreshed the LRU order
+    result = cache.get_many(["a", "b", "a", "c"], encode, batch_size=1)
+    assert result[0] is result[2]
+    for actual, query in zip(result, ["a", "b", "a", "c"], strict=True):
+        np.testing.assert_array_equal(actual, colbert.normalized_vectors(encode([query]))[0])
+    assert cache.info()["vector_bytes"] == 16 and cache.info()["entries"] == 2
+    for limit in (0, 7):
+        small = colbert._QueryCache(limit)
+        for _ in range(2):
+            assert len(small.get_many(["a"], encode, batch_size=32)) == 1
+        assert small.info()["entries"] == small.info()["vector_bytes"] == 0
+        assert small.info()["encoded"] == 2
+
+
+@pytest.mark.parametrize("value", [-1, True, 1.5, None, "1024"])
+def test_query_cache_budget_validation(value):
+    with pytest.raises(ValueError, match="query_cache_max_bytes must be a nonnegative integer"):
+        colbert_config_from_mapping({"query_cache_max_bytes": value})
+
+
+def test_query_cache_budget_preserves_measurement_identity_and_selects_runtime_pool(tmp_path, backend):
+    config = settings(tmp_path)
+    small = replace(config, query_cache_max_bytes=16)
+    assert small.encoding_identity() == config.encoding_identity()
+    assert small.measurement_identity() == config.measurement_identity()
+    before, after = colbert.get_retriever(config), colbert.get_retriever(small)
+    assert before is not after and after.query_cache.max_bytes == 16
 
 
 def test_config_and_feature_query_exclude_roles_and_outcomes(tmp_path):

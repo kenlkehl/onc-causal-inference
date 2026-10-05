@@ -3024,6 +3024,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="independent retrieval encoder workers per device (default: 1)",
     )
     parser.add_argument("--stage2-colbert-cache-dir")
+    parser.add_argument("--stage2-colbert-query-cache-max-bytes", type=int,
+        help="shared host-vector query cache budget (default: 1 GiB; 0 disables retention)")
     parser.add_argument("--stage2-colbert-chunk-size", type=int)
     parser.add_argument("--stage2-colbert-chunk-overlap", type=int)
     parser.add_argument("--stage2-colbert-query-length", type=int)
@@ -3421,6 +3423,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
         "model_name": args.stage2_colbert_model, "revision": args.stage2_colbert_revision,
         "devices": args.stage2_colbert_devices, "cache_dir": args.stage2_colbert_cache_dir,
         "workers_per_device": args.stage2_colbert_workers_per_device,
+        "query_cache_max_bytes": args.stage2_colbert_query_cache_max_bytes,
         "chunk_size": args.stage2_colbert_chunk_size, "chunk_overlap": args.stage2_colbert_chunk_overlap,
         "query_length": args.stage2_colbert_query_length, "batch_size": args.stage2_colbert_batch_size,
         "top_k": args.stage2_colbert_top_k,
