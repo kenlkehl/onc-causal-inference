@@ -242,16 +242,18 @@ def test_saved_command_rejects_cohort_and_output_mismatch(tmp_path):
         launcher.command(config.dataset, "", {**env, "STAGE2_CONSOLIDATION_MAX_ROUNDS": "1"})
 
 
-def test_saved_retrieval_worker_override_preserves_science_and_checkpoints(tmp_path):
+def test_saved_cpu_and_retrieval_worker_overrides_preserve_science_and_checkpoints(tmp_path):
     config = saved_fixture(tmp_path)
     before = tree(tmp_path)
     args = launcher.command(config.dataset, str(config.output_dir), {
         "OCI_RUN_CONFIG": str(config.output_dir / "run_config.json"),
         "STAGE2_COLBERT_WORKERS_PER_DEVICE": "4",
+        "STAGE2_DECISION_PREPARATION_WORKERS": "16",
     })
     raw, directory = workflow._raw_config_from_args(workflow.build_parser().parse_args(args))
     expanded = workflow.compile_config(raw, config_dir=directory)
     assert expanded.stage2.colbert.workers_per_device == 4
+    assert expanded.stage2.decision_preparation_workers == 16
     assert expanded.stage2.colbert.measurement_identity() == config.stage2.colbert.measurement_identity()
     assert expanded.stage2.colbert.encoding_identity() == config.stage2.colbert.encoding_identity()
     preflight.preflight_stage2(expanded)

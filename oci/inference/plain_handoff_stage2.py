@@ -937,6 +937,8 @@ class PlainHandoffStage2Config:
     extraction_context_strategy: str = "colbert"
     colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
     decision_extraction: DecisionExtractionConfig = field(default_factory=DecisionExtractionConfig)
+    # Runtime throughput only; excluded from ontology and measurement identities.
+    decision_preparation_workers: int = 0
     # Long records are processed in ordered, lossless source chunks. This is a
     # token cap rather than a target: the planner shrinks a chunk when feature
     # definitions and carried-forward state need more of the context window.
@@ -1097,6 +1099,8 @@ class PlainHandoffStage2Config:
         if not isinstance(self.decision_extraction, DecisionExtractionConfig):
             raise ValueError("stage2.decision_extraction must be a DecisionExtractionConfig")
         self.decision_extraction.validate()
+        if type(self.decision_preparation_workers) is not int or self.decision_preparation_workers < 0:
+            raise ValueError("stage2.decision_preparation_workers must be a nonnegative integer")
         if self.decision_extraction.enabled:
             if self.extraction_context_strategy != "colbert" or self.extraction_note_search.enabled:
                 raise ValueError("decision extraction requires ColBERT retrieval without note_search")
@@ -1646,6 +1650,7 @@ def plain_stage2_config_from_mapping(
         extraction_context_strategy=raw.get("extraction_context_strategy", "colbert"),
         colbert=colbert_config_from_mapping(raw.get("colbert")),
         decision_extraction=decision_config_from_mapping(raw.get("decision_extraction")),
+        decision_preparation_workers=raw.get("decision_preparation_workers", 0),
         interpretation_reasoning_effort=interpretation_reasoning_effort,
         extraction_reasoning_effort=extraction_reasoning_effort,
         max_prompt_chars=int(raw.get("max_prompt_chars", 100_000)),
@@ -8942,26 +8947,31 @@ def run_plain_handoff_stage2(
         runtime_extraction_completion: CompletionFunction | None,
         runtime_decision_ontology_preparation_only: bool = False,
     ) -> Mapping[str, Any]:
-        return PlainHandoffStage2(
+        runner = PlainHandoffStage2(
             config=runtime_config,
             clinical_question=clinical_question,
             completion=runtime_primary_completion,
             extraction_completion=runtime_extraction_completion,
             extraction_tokenizer=extraction_tokenizer,
-        ).run(
-            handoff_path=handoff_path,
-            output_dir=output_dir,
-            dataset=runtime_dataset,
-            split_provenance_path=split_provenance_path,
-            unit_id_column=unit_id_column,
-            text_column=text_column,
-            treatment_column=treatment_column,
-            outcome_column=outcome_column,
-            outcome_type=outcome_type,
-            inner_folds=inner_folds,
-            seed=seed,
-            decision_ontology_preparation_only=runtime_decision_ontology_preparation_only,
         )
+        try:
+            return runner.run(
+                handoff_path=handoff_path,
+                output_dir=output_dir,
+                dataset=runtime_dataset,
+                split_provenance_path=split_provenance_path,
+                unit_id_column=unit_id_column,
+                text_column=text_column,
+                treatment_column=treatment_column,
+                outcome_column=outcome_column,
+                outcome_type=outcome_type,
+                inner_folds=inner_folds,
+                seed=seed,
+                decision_ontology_preparation_only=runtime_decision_ontology_preparation_only,
+            )
+        finally:
+            if runner.decision_client is not None:
+                runner.decision_client.close()
 
     extraction = config.extraction_llm
     extraction_vllm = extraction.vllm if extraction is not None else None

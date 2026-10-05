@@ -3014,6 +3014,8 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--stage2-extraction-context-strategy", choices=("colbert", "full_record"))
+    parser.add_argument("--stage2-decision-preparation-workers", type=int,
+        help="shared CPU processes for decision prompt packing/tokenization (default: 0, in-process)")
     parser.add_argument("--stage2-colbert-model")
     parser.add_argument("--stage2-colbert-revision")
     parser.add_argument("--stage2-colbert-devices", help="auto, cpu, or comma-separated logical CUDA devices")
@@ -3426,6 +3428,7 @@ def _raw_config_from_args(args: argparse.Namespace) -> tuple[dict[str, Any], Pat
     if any(value is not None for value in colbert_overrides.values()):
         stage2.setdefault("colbert", {}).update({k: v for k, v in colbert_overrides.items() if v is not None})
     stage2_numeric_overrides = {
+        "decision_preparation_workers": args.stage2_decision_preparation_workers,
         "max_tokens": args.stage2_max_tokens,
         "extraction_max_tokens": args.stage2_extraction_max_tokens,
         "vllm_rapid_switch_seconds": args.stage2_vllm_rapid_switch_seconds,

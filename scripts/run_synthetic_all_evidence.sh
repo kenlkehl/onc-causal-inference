@@ -371,6 +371,9 @@ if [[ -n "${stage2_extraction_max_tokens}" ]]; then
         --stage2-extraction-max-tokens "${stage2_extraction_max_tokens}"
     )
 fi
+if [[ -n "${STAGE2_DECISION_PREPARATION_WORKERS:-}" ]]; then
+    stage2_policy_args+=(--stage2-decision-preparation-workers "${STAGE2_DECISION_PREPARATION_WORKERS}")
+fi
 # All root quickstarts delegate here. Retrieval indexes are shared across runs,
 # outer folds, ontology revisions, and answering endpoints for this cohort.
 stage2_policy_args+=(--stage2-extraction-context-strategy "${STAGE2_EXTRACTION_CONTEXT_STRATEGY:-colbert}")

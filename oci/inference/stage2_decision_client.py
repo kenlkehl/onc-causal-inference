@@ -5,14 +5,19 @@ Normalize only the offered letters, after applying Plumb's temperature.
 """
 
 import json
+import logging
 import math
+import multiprocessing
 import threading
 import time
+from concurrent.futures import ProcessPoolExecutor
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .stage2_decision_config import LETTERS
 from .stage2_endpoint_pool import EndpointPool, ExtractionEndpoint
+
+LOGGER = logging.getLogger(__name__)
 
 SYSTEM = (
     "Apply the supplied criterion to the supplied evidence. Choose exactly one listed option. "
@@ -52,8 +57,15 @@ def probabilities_from_response(response, options, temperature, *, prompt_tokens
 
 class VLLMDecisionClient:
     def __init__(self, *, policy, model, endpoints, api_key="EMPTY", timeout=120,
-                 workers=4, tokenizer=None, transport=None):
+                 workers=4, tokenizer=None, transport=None, preparation_workers=0):
         policy.validate()
+        if type(preparation_workers) is not int or preparation_workers < 0:
+            raise ValueError("decision_preparation_workers must be a nonnegative integer")
+        self.preparation_workers = preparation_workers
+        self._preparation_pool = None
+        self._preparation_lock = threading.Lock()
+        self._preparation_worker_pids = set()
+        self._closed = False
         self.policy, self.model, self.api_key = policy, model, api_key
         self.timeout = float(timeout)
         if self.timeout <= 0 or not math.isfinite(self.timeout):
@@ -76,7 +88,8 @@ class VLLMDecisionClient:
         endpoints = route.endpoints or tuple(ExtractionEndpoint(url, route.workers)
             for url in (route.runtime_endpoints or (route.endpoint,)))
         return cls(policy=config.decision_extraction, model=route.model, endpoints=endpoints,
-                   api_key=route.api_key, workers=route.workers, timeout=config.request_timeout)
+                   api_key=route.api_key, workers=route.workers, timeout=config.request_timeout,
+                   preparation_workers=config.decision_preparation_workers)
 
     @property
     def tokenizer(self):
@@ -98,10 +111,46 @@ class VLLMDecisionClient:
         return self.tokenizer.encode(text, add_special_tokens=False)
 
     def encode_batch(self, conversations):
-        tokenizer = self.tokenizer
-        texts = [tokenizer.apply_chat_template(messages, tokenize=False,
-            add_generation_prompt=True, enable_thinking=False) for messages in conversations]
-        return tokenizer(texts, add_special_tokens=False)["input_ids"]
+        from .stage2_decision_preparation import encode_conversations
+
+        return encode_conversations(self.tokenizer, conversations)
+
+    def prepare_prompt(self, *, source, ranked, criterion, options):
+        from .stage2_decision_preparation import initialize_worker, prepare_in_worker
+
+        with self._preparation_lock:
+            if self._closed:
+                raise RuntimeError("decision client is closed")
+            if self._preparation_pool is None:
+                if not self.preparation_workers:
+                    raise ValueError("CPU preparation requires decision_preparation_workers > 0")
+                # Validate and populate the tokenizer cache before children load
+                # the same revision offline. No models or tensors cross IPC.
+                self.tokenizer
+                self._preparation_pool = ProcessPoolExecutor(
+                    max_workers=self.preparation_workers,
+                    mp_context=multiprocessing.get_context("spawn"),
+                    initializer=initialize_worker,
+                    initargs=(self.policy.tokenizer_name, self.policy.tokenizer_revision),
+                )
+                LOGGER.info("Stage 2 decision CPU preparation processes=%s start_method=spawn",
+                            self.preparation_workers)
+            ranges = [{key: hit[key] for key in ("start", "end", "chunk_index")} for hit in ranked]
+            future = self._preparation_pool.submit(prepare_in_worker,
+                source, ranges, criterion, options, self.policy.max_prompt_tokens)
+        pid, prepared = future.result(timeout=self.timeout)
+        with self._preparation_lock:
+            if pid not in self._preparation_worker_pids:
+                self._preparation_worker_pids.add(pid)
+                LOGGER.info("Stage 2 decision CPU preparation worker ready pid=%s", pid)
+        return prepared
+
+    def close(self):
+        with self._preparation_lock:
+            self._closed = True
+            pool, self._preparation_pool = self._preparation_pool, None
+        if pool is not None:
+            pool.shutdown(wait=True, cancel_futures=True)
 
     def _http(self, endpoint, payload, timeout):
         url = endpoint.rstrip("/").removesuffix("/v1") + "/classify"

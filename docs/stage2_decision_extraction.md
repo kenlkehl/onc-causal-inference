@@ -61,6 +61,18 @@ remain the same. Prompt packing tokenizes candidate prefixes in one batch, keeps
 the original first-over-budget stopping rule, and sends the chosen token IDs
 directly to Plumb without tokenizing the final prompt again.
 
+Set `stage2.decision_preparation_workers` (or
+`STAGE2_DECISION_PREPARATION_WORKERS`,
+`--stage2-decision-preparation-workers`) to a positive integer to prepare prompts
+across CPU cores. For example, `STAGE2_DECISION_PREPARATION_WORKERS=16` creates
+one pool of 16 processes shared by all outer folds. The default `0` prepares
+prompts in the main process. Each child loads only the configured tokenizer,
+with CUDA disabled and one native thread; source rendering, chat formatting,
+and tokenization run in that child. The processes use the `spawn` start method
+and shut down when the Stage 2 driver exits. Classifier routing and its global
+request limit remain in the parent. This setting does not change prompt tokens,
+retrieval rankings, measurement identities, or checkpoint compatibility.
+
 Explicit saved-run launches (`OCI_RUN_CONFIG` with `STAGE2_ONLY=1`, including
 preflight and reselection) preserve the saved backend and model configuration.
 The new defaults apply to fresh configuration construction; choose a fresh
