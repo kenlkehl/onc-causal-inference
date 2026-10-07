@@ -519,6 +519,13 @@ def test_whole_fold_uses_decisions_and_freezes_measurements(tmp_path, monkeypatc
         clinical_question="Effect?", unit_id_column="patient_id", text_column="text", treatment_column="treatment",
         outcome_column="outcome", outcome_type="binary", inner_folds=2, seed=3, output_dir=tmp_path,
         request_json=lambda *a, **kw: pytest.fail("unexpected generative request"), config=config, decision_client=client)
+    # Managed serving prepares ontologies before the extractor starts, including
+    # older checkpoints that predate the fold's measurement-method marker.
+    round_dir = tmp_path / "ontology_supervision" / "round_001"
+    analysis._write_json(round_dir / "definitions_before_extraction.json",
+                         {"features": args["definitions"]})
+    prepare_ontologies(args["definitions"],
+        output_dir=round_dir / "failure_ontology_refinement", request_json=args["request_json"])
     result = analysis.run_fold_analysis(**args)
     assert result["estimation"]["status"] == "tested"
     assert len(client.calls) == (4 if categorical else 16)
@@ -526,3 +533,40 @@ def test_whole_fold_uses_decisions_and_freezes_measurements(tmp_path, monkeypatc
     analysis.run_fold_analysis(**args)
     assert len(client.calls) == (4 if categorical else 16)
     assert json.loads((tmp_path / "measurement_method.json").read_text())["method"] == "plumb_decision"
+
+
+@pytest.mark.parametrize("artifact", [
+    "ontology_supervision/round_001/extraction/extracted.csv",
+    "ontology_supervision/round_001/extraction/decisions/row_00000000/result.json",
+    "ontology_supervision/round_001/harmonization/result.json",
+    "ontology_supervision/round_001/failure_ontology_refinement/round_001/extraction/extracted.csv",
+    "extraction/extracted.csv",
+    "preselection/complete.json",
+])
+def test_unmarked_measurements_still_block_prepared_fold(tmp_path, retrieval, artifact):
+    prepare_ontologies([feature()],
+        output_dir=tmp_path / "ontology_supervision/round_001/failure_ontology_refinement",
+        request_json=lambda *a, **kw: pytest.fail("unexpected generative request"))
+    path = tmp_path / artifact
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{}")
+    with pytest.raises(ValueError, match="Existing measurements"):
+        decision.claim_output_method(tmp_path, DecisionExtractionConfig(enabled=True),
+                                     ColBERTConfig(devices=("cpu",)), fold_root=True)
+    assert not (tmp_path / "measurement_method.json").exists()
+
+
+def test_prepared_fold_rejects_changed_measurement_policy(tmp_path, retrieval):
+    f = feature()
+    del f["decision_ontology"]
+    prepare_ontologies([f],
+        output_dir=tmp_path / "ontology_supervision/round_001/failure_ontology_refinement",
+        request_json=lambda messages, validate, **kw: validate({
+            "value_type": "continuous", "categories_or_unit": ["kg"],
+            "decision_ontology": {"minimum": 0, "maximum": 250}, "rationale": "Plausible domain"}))
+    policy, retrieval_config = DecisionExtractionConfig(enabled=True), ColBERTConfig(devices=("cpu",))
+    original = decision.claim_output_method(tmp_path, policy, retrieval_config, fold_root=True)
+    assert decision.claim_output_method(tmp_path, policy, retrieval_config, fold_root=True) == original
+    with pytest.raises(ValueError, match="Decision measurement policy changed"):
+        decision.claim_output_method(tmp_path, policy, replace(retrieval_config, top_k=10), fold_root=True)
+    assert json.loads((tmp_path / "measurement_method.json").read_text()) == original

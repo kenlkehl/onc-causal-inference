@@ -8365,8 +8365,11 @@ class PlainHandoffStage2:
 
         if decision_ontology_preparation_only:
             from .plain_handoff_stage2_analysis import initial_feature_modeling_definitions
+            from .stage2_decision import claim_output_method
             from .stage2_decision_ontology import prepare_ontologies
 
+            claim_output_method(output_dir, self.config.decision_extraction,
+                                self.config.colbert, fold_root=True)
             definitions = initial_feature_modeling_definitions(final["features"])
             round_dir = output_dir / "ontology_supervision" / "round_001"
             _write_json(round_dir / "definitions_before_extraction.json", {"features": definitions})

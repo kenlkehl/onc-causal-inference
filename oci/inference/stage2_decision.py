@@ -50,6 +50,30 @@ def policy_identity(policy, colbert):
             "categorical_readout": "recursive_declared_order_groups_at_most_14_plus_exits"}
 
 
+def _ontology_preparation_only(directory):
+    """Recognize contract-only checkpoints written before any measurements."""
+    for round_dir in directory.iterdir():
+        if not round_dir.is_dir() or not round_dir.name.startswith("round_"):
+            return False
+        for entry in round_dir.iterdir():
+            if entry.name == "definitions_before_extraction.json" and entry.is_file():
+                continue
+            if entry.name != "failure_ontology_refinement" or not entry.is_dir():
+                return False
+            for checkpoint in entry.iterdir():
+                if checkpoint.name == "prepared_ontologies.json" and checkpoint.is_file():
+                    continue
+                if checkpoint.name != "preparation" or not checkpoint.is_dir():
+                    return False
+                for request in checkpoint.iterdir():
+                    if not request.is_dir() or any(
+                        not item.is_file() or item.name not in {"request.json", "response.json"}
+                        for item in request.iterdir()
+                    ):
+                        return False
+    return True
+
+
 def claim_output_method(output_dir, policy, colbert, *, fold_root=False):
     from .plain_handoff_stage2_analysis import _write_json
 
@@ -59,9 +83,10 @@ def claim_output_method(output_dir, policy, colbert, *, fold_root=False):
         if json.loads(path.read_text()) != identity:
             raise ValueError("Decision measurement policy changed; use a fresh Stage 2 output directory")
     elif any((Path(output_dir) / p).exists() for p in (
-        ("ontology_supervision", "extraction", "preselection") if fold_root
+        ("extraction", "preselection") if fold_root
         else ("colbert", "batches", "pages", "extracted.csv", "decisions")
-    )):
+    )) or (fold_root and (Path(output_dir) / "ontology_supervision").exists()
+           and not _ontology_preparation_only(Path(output_dir) / "ontology_supervision")):
         raise ValueError("Existing measurements have no compatible decision policy; use a fresh output directory")
     _write_json(path, identity)
     return identity
