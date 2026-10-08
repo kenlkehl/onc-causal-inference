@@ -1931,7 +1931,7 @@ def _codex_extraction_prompt(
     specs: List[ExplicitFeatureSpec],
     *,
     max_text_length: Optional[int] = None,
-    context_strategy: str = "tail",
+    context_strategy: str = "full_record",
     source_text_temporally_valid_by_design: bool = False,
 ) -> str:
     task_prompt = build_extraction_prompt(
@@ -1942,7 +1942,7 @@ def _codex_extraction_prompt(
         source_text_temporally_valid_by_design=source_text_temporally_valid_by_design,
     )
     complete_document = (
-        str(context_strategy).strip().lower().replace("-", "_") == "tail"
+        str(context_strategy).strip().lower().replace("-", "_") in {"full_record", "tail"}
         and max_text_length is None
         and not str(clinical_text).startswith("[oci_colbert_v1]")
     )
@@ -2706,7 +2706,7 @@ class VLLMExplicitFeatureExtractionProvider:
             context_strategy=getattr(
                 self.feature_config,
                 "extraction_context_strategy",
-                "colbert",
+                "full_record",
             ),
             source_text_temporally_valid_by_design=bool(
                 getattr(
@@ -3052,7 +3052,7 @@ class VLLMExplicitFeatureExtractionProvider:
             "extraction_context_strategy": getattr(
                 self.feature_config,
                 "extraction_context_strategy",
-                "colbert",
+                "full_record",
             ),
             "extraction_context_compactor_version": CONTRACT_LEXICAL_CONTEXT_VERSION,
             "extraction_grouping_version": EXTRACTION_GROUPING_VERSION,
@@ -3129,7 +3129,7 @@ class CodexCLIExplicitFeatureExtractionProvider(VLLMExplicitFeatureExtractionPro
 
     def _cache_config(self, specs: List[ExplicitFeatureSpec]) -> Dict[str, Any]:
         context_strategy = (
-            str(getattr(self.feature_config, "extraction_context_strategy", "tail"))
+            str(getattr(self.feature_config, "extraction_context_strategy", "full_record"))
             .strip()
             .lower()
             .replace("-", "_")
@@ -3152,7 +3152,7 @@ class CodexCLIExplicitFeatureExtractionProvider(VLLMExplicitFeatureExtractionPro
             "codex_cli_extra_args": _codex_extra_args(
                 getattr(self.feature_config, "codex_cli_extra_args", [])
             ),
-            "complete_document": context_strategy == "tail",
+            "complete_document": context_strategy in {"full_record", "tail"},
             "extraction_max_text_length": self.feature_config.extraction_max_text_length,
             "extraction_grouping_strategy": getattr(
                 self.feature_config,
@@ -3228,7 +3228,7 @@ class CodexCLIExplicitFeatureExtractionProvider(VLLMExplicitFeatureExtractionPro
         specs: List[ExplicitFeatureSpec],
     ) -> Dict[str, Any]:
         context_strategy = (
-            str(getattr(self.feature_config, "extraction_context_strategy", "tail"))
+            str(getattr(self.feature_config, "extraction_context_strategy", "full_record"))
             .strip()
             .lower()
             .replace("-", "_")

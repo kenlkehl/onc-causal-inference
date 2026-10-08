@@ -194,7 +194,7 @@ def build_extraction_prompt(
     clinical_text: str,
     specs: List[ExplicitFeatureSpec],
     max_text_length: Optional[int] = None,
-    context_strategy: str = "tail",
+    context_strategy: str = "full_record",
     source_text_temporally_valid_by_design: bool = False,
     colbert: ColBERTConfig | None = None,
 ) -> str:
@@ -204,8 +204,8 @@ def build_extraction_prompt(
         clinical_text: Clinical text to extract from
         specs: List of feature specifications
         max_text_length: Maximum context characters to include
-        context_strategy: Historical ``tail`` truncation or deterministic
-            ``contract_lexical_rag`` retrieval
+        context_strategy: ``full_record`` (default), or an explicitly selected
+            truncation, paging, or retrieval strategy
         source_text_temporally_valid_by_design: Trust source-text timing and do
             not impose a treatment-time eligibility boundary
 
@@ -257,7 +257,10 @@ def build_extraction_prompt(
 
     text = str(clinical_text)
     strategy = str(context_strategy).strip().lower().replace("-", "_")
-    if strategy == "colbert":
+    if strategy == "full_record":
+        if max_text_length is not None and len(text) > int(max_text_length):
+            raise ValueError("full_record exceeds extraction_max_text_length; increase the budget or select complete_paged_v1")
+    elif strategy == "colbert":
         from .colbert import get_retriever
         retrieval_config = colbert or ColBERTConfig()
         text = get_retriever(retrieval_config).retrieve(text, specs, top_k=retrieval_config.top_k)["context"]
@@ -282,7 +285,7 @@ def build_extraction_prompt(
             raise ValueError("complete_paged_v1 received an oversized unpaged input")
     else:
         raise ValueError(
-            "context_strategy must be 'colbert', 'tail', 'contract_lexical_rag', or "
+            "context_strategy must be 'full_record', 'colbert', 'tail', 'contract_lexical_rag', or "
             "'complete_paged_v1'"
         )
 
@@ -566,16 +569,18 @@ class VLLMFeatureExtractor:
         temperature: float = 0.0,
         max_tokens: int = 1024,
         max_text_length: Optional[int] = None,
-        context_strategy: str = "colbert",
+        context_strategy: str = "full_record",
         source_text_temporally_valid_by_design: bool = False,
         schema_repair_attempts: Optional[int] = None,
         fail_closed: bool = False,
         colbert: ColBERTConfig | None = None,
+        max_variables_per_extraction_request: int = 10,
     ):
         """Initialize extractor.
 
         Args:
             specs: List of feature specifications
+            max_variables_per_extraction_request: Variable count per request (default 10)
             mode: "server", "start_server", or "python_api"
             server_url: URL for vLLM server (used in server modes)
             model_name: Model name/path for vLLM
@@ -595,7 +600,7 @@ class VLLMFeatureExtractor:
             temperature: LLM temperature (0 for deterministic)
             max_tokens: Maximum tokens in response
             max_text_length: Maximum clinical text characters included in prompt
-            context_strategy: ``colbert`` (default), ``tail``, or ``contract_lexical_rag``
+            context_strategy: ``full_record`` (default), or an explicit retrieval/paging strategy
             source_text_temporally_valid_by_design: Trust source-text timing
                 instead of imposing a treatment-time eligibility boundary
         """
@@ -656,6 +661,9 @@ class VLLMFeatureExtractor:
         self._client_pool: Optional[OpenAIClientPool] = None
         self._llm = None
         self._server_process = None
+        self.max_variables_per_extraction_request = int(max_variables_per_extraction_request)
+        if not 1 <= self.max_variables_per_extraction_request <= 10:
+            raise ValueError("max_variables_per_extraction_request must be in [1, 10]")
 
         logger.info(
             "VLLMFeatureExtractor initialized: mode=%s, model=%s, "
@@ -757,11 +765,24 @@ class VLLMFeatureExtractor:
             if self._llm is None:
                 self._init_python_api()
 
+    def _feature_groups(self) -> List[List[ExplicitFeatureSpec]]:
+        maximum = self.max_variables_per_extraction_request
+        return [self.specs[start : start + maximum] for start in range(0, len(self.specs), maximum)]
+
     def _extract_single_server(self, text: str) -> Dict[str, ExplicitFeatureValue]:
+        """Extract one patient's variables in bounded requests and merge them."""
+        result = {}
+        for specs in self._feature_groups():
+            result.update(self._extract_single_server_group(text, specs))
+        return result
+
+    def _extract_single_server_group(
+        self, text: str, specs: List[ExplicitFeatureSpec]
+    ) -> Dict[str, ExplicitFeatureValue]:
         """Extract features from single text using server API."""
         prompt = build_extraction_prompt(
             text,
-            self.specs,
+            specs,
             max_text_length=self.max_text_length,
             context_strategy=self.context_strategy,
             colbert=self.colbert,
@@ -816,7 +837,7 @@ class VLLMFeatureExtractor:
                 if content:
                     parsed = _parse_extraction_response_with_issues(
                         content,
-                        self.specs,
+                        specs,
                     )
                     result = parsed.values
                     # Track best partial result (fewest missing values)
@@ -843,7 +864,7 @@ class VLLMFeatureExtractor:
                                     "role": "user",
                                     "content": build_extraction_repair_prompt(
                                         parsed.issues,
-                                        self.specs,
+                                        specs,
                                         source_text_temporally_valid_by_design=(
                                             self.source_text_temporally_valid_by_design
                                         ),
@@ -887,7 +908,7 @@ class VLLMFeatureExtractor:
             raise ValueError("production extraction exhausted its single schema repair")
         if best_result is not None:
             return best_result
-        return self._missing_result()
+        return _missing_values_for_specs(specs)
 
     def _complete_page_completion(
         self,
@@ -1083,12 +1104,21 @@ class VLLMFeatureExtractor:
         return _missing_values_for_specs(self.specs)
 
     def _extract_batch_python_api(self, texts: List[str]) -> List[Dict[str, ExplicitFeatureValue]]:
+        results = [{} for _ in texts]
+        for specs in self._feature_groups():
+            for result, group_result in zip(results, self._extract_batch_python_api_group(texts, specs), strict=True):
+                result.update(group_result)
+        return results
+
+    def _extract_batch_python_api_group(
+        self, texts: List[str], specs: List[ExplicitFeatureSpec]
+    ) -> List[Dict[str, ExplicitFeatureValue]]:
         """Extract features from batch using vLLM Python API."""
         from vllm import SamplingParams
 
         def prepare(text):
             return build_extraction_prompt(
-                text, self.specs, max_text_length=self.max_text_length,
+                text, specs, max_text_length=self.max_text_length,
                 context_strategy=self.context_strategy, colbert=self.colbert,
                 source_text_temporally_valid_by_design=self.source_text_temporally_valid_by_design,
             )
@@ -1127,9 +1157,9 @@ class VLLMFeatureExtractor:
         for output in outputs:
             if output.outputs and len(output.outputs) > 0:
                 content = output.outputs[0].text.strip()
-                result = parse_extraction_response(content, self.specs)
+                result = parse_extraction_response(content, specs)
             else:
-                result = self._missing_result()
+                result = _missing_values_for_specs(specs)
             results.append(result)
 
         return results
@@ -1262,9 +1292,10 @@ def extract_explicit_features(
     temperature: float = 0.0,
     max_tokens: int = 1024,
     max_text_length: Optional[int] = None,
-    context_strategy: str = "colbert",
+    context_strategy: str = "full_record",
     batch_size: int = 32,
     colbert: ColBERTConfig | None = None,
+    max_variables_per_extraction_request: int = 10,
 ) -> pd.DataFrame:
     """Convenience function to extract features from texts.
 
@@ -1288,8 +1319,9 @@ def extract_explicit_features(
         temperature: LLM temperature
         max_tokens: Max response tokens
         max_text_length: Maximum clinical text characters included in prompt
-        context_strategy: ``colbert`` (default), ``tail``, or ``contract_lexical_rag``
+        context_strategy: ``full_record`` (default), or an explicit retrieval/paging strategy
         batch_size: Batch size for processing
+        max_variables_per_extraction_request: Variable count per request (default 10)
 
     Returns:
         DataFrame with columns: explicit_feat_{name}, explicit_feat_{name}_missing
@@ -1315,6 +1347,7 @@ def extract_explicit_features(
         max_text_length=max_text_length,
         context_strategy=context_strategy,
         colbert=colbert,
+        max_variables_per_extraction_request=max_variables_per_extraction_request,
     )
 
     try:

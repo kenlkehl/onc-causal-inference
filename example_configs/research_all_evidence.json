@@ -96,7 +96,7 @@
     "estimation_trees": 200,
     "propensity_clip": 0.02,
     "explicit_features": [],
-    "extraction_context_strategy": "colbert",
+    "extraction_context_strategy": "full_record",
     "colbert": {
       "model_name": "lightonai/GTE-ModernColBERT-v1",
       "devices": [

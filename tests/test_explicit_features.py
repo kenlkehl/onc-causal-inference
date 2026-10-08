@@ -307,6 +307,29 @@ def test_parse_extraction_response_strips_inline_reasoning_trace():
     assert parsed["age"].is_missing is False
 
 
+@pytest.mark.parametrize("mode", ["server", "python_api"])
+@pytest.mark.parametrize("maximum", [10, 4])
+def test_standalone_extraction_batches_variables_and_preserves_patient_values(monkeypatch, mode, maximum):
+    specs = [ExplicitFeatureSpec(name=f"f_{i}", type="continuous", roles=["confounder"]) for i in range(23)]
+    extractor = VLLMFeatureExtractor(specs, mode=mode, max_variables_per_extraction_request=maximum)
+    monkeypatch.setattr(extractor, "_ensure_initialized", lambda: None)
+    calls = []
+
+    def group(text, group_specs):
+        calls.append((text, [s.name for s in group_specs]))
+        return {s.name: ExplicitFeatureValue(s.name, s.type, int(text) + int(s.name[2:]), False) for s in group_specs}
+
+    monkeypatch.setattr(extractor, "_extract_single_server_group", group)
+    monkeypatch.setattr(extractor, "_extract_batch_python_api_group", lambda texts, specs: [group(t, specs) for t in texts])
+    results = extractor.extract(["100", "200"], batch_size=2, show_progress=False)
+    assert len(calls) == 2 * ((23 + maximum - 1) // maximum)
+    assert all(len(names) <= maximum for _, names in calls)
+    assert [len(names) for text, names in calls if text == "100"] == [maximum] * (23 // maximum) + [23 % maximum]
+    for text, result in zip([100, 200], results):
+        assert list(result) == [s.name for s in specs]
+        assert [result[s.name].value for s in specs] == [text + i for i in range(23)]
+
+
 def test_build_extraction_prompt_truncates_to_note_tail():
     specs = [
         ExplicitFeatureSpec(name="age", type="continuous", roles=["confounder"]),
@@ -316,6 +339,7 @@ def test_build_extraction_prompt_truncates_to_note_tail():
         "beginning age 44. " + ("middle " * 20) + "end age 71.",
         specs,
         max_text_length=30,
+        context_strategy="tail",
     )
 
     assert "end age 71" in prompt

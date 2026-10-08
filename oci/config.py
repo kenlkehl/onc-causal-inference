@@ -237,9 +237,9 @@ class ExplicitFeatureExtractionConfig:
     complete_page_context_chars: Optional[int] = None
     complete_page_max_chars: Optional[int] = None
     complete_reconciliation_fan_in: Optional[int] = None
-    # Request packing and retrieval from cached patient token vectors.
+    # LLM request packing; retrieval is an explicit opt-in.
     extraction_grouping_strategy: str = "clinical_domain"
-    extraction_context_strategy: str = "colbert"
+    extraction_context_strategy: str = "full_record"
     colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
     extraction_provider: str = "openai"
     # Opt-in for datasets whose text has already been made temporally valid by
@@ -280,10 +280,10 @@ class ExplicitFeatureExtractionConfig:
             )
         self.extraction_grouping_strategy = grouping
         context = str(self.extraction_context_strategy).strip().lower().replace("-", "_")
-        if context not in {"colbert", "tail", "contract_lexical_rag", "complete_paged_v1"}:
+        if context not in {"full_record", "colbert", "tail", "contract_lexical_rag", "complete_paged_v1"}:
             raise ValueError(
                 "explicit_features.extraction_context_strategy must be "
-                "'colbert', 'tail', 'contract_lexical_rag', or 'complete_paged_v1'"
+                "'full_record', 'colbert', 'tail', 'contract_lexical_rag', or 'complete_paged_v1'"
             )
         self.extraction_context_strategy = context
         if self.extraction_max_text_length is not None:

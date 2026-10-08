@@ -244,6 +244,21 @@ def test_agentic_selection_policy_does_not_invalidate_feature_definitions():
     assert definition_inputs(resumed_config) == definition_inputs(prior_config)
 
 
+def test_stage2_defaults_to_full_record_llm_and_retains_decision_opt_in():
+    config = plain_stage2_config_from_mapping({"endpoint": "http://test/v1", "model": "gemma"}, default_workers=2)
+    assert config.extraction_context_strategy == "full_record"
+    assert config.extraction_feature_batch_size == 10
+    assert config.decision_extraction.enabled is False
+    assert stage2_analysis._configured_serial_extraction(config)["context_strategy"] == "full_record"
+    decision = plain_stage2_config_from_mapping({
+        "endpoint": "http://test/v1", "model": "gemma",
+        "decision_extraction": {"enabled": True},
+        "extraction_llm": {"endpoint": "http://plumb/v1", "model": "crh225/plumb-4b"},
+    }, default_workers=2)
+    assert decision.extraction_context_strategy == "colbert"
+    assert decision.decision_extraction.enabled is True
+
+
 def test_stage2_analysis_defaults_pre_refinement_config_fields(caplog):
     class PreRefinementConfig:
         pass

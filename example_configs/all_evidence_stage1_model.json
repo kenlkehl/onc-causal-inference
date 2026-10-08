@@ -1265,7 +1265,7 @@
       "codex_cli_reasoning_effort": "medium",
       "enabled": true,
       "extraction_batch_size": 100,
-      "extraction_context_strategy": "colbert",
+      "extraction_context_strategy": "full_record",
       "extraction_max_retries": 3,
       "extraction_max_text_length": 14000,
       "extraction_max_tokens": 25000,

@@ -6,8 +6,8 @@
 # Re-run with the same output directory to resume compatible checkpoints.
 # Explicit saved Stage 2 launches retain their saved model and serving settings.
 
-# Extraction defaults to Plumb decisions over cached ColBERT excerpts.
-# Set STAGE2_DECISION_EXTRACTION=0 for the legacy LLM extractor.
+# Extraction defaults to full-record LLM requests with ten variables at a time.
+# Set STAGE2_DECISION_EXTRACTION=1 to opt into Plumb/ColBERT extraction.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

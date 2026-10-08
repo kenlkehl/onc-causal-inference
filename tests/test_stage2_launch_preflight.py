@@ -136,6 +136,28 @@ def saved_fixture(tmp_path, managed=False):
     return config
 
 
+@pytest.mark.parametrize("dependent_path", [None, "outer_001/extraction/extracted.csv",
+    "outer_001/ontology_supervision/round_001/prepared_ontologies.json",
+    "outer_001/final_definitions.json", "causal_estimate.json"])
+def test_preflight_allows_extractor_change_only_after_measurement_cleanup(tmp_path, dependent_path):
+    config = saved_fixture(tmp_path)
+    root = config.output_dir / "stage2"
+    write(root / "model_identity.json", {
+        "primary": {"selected_model": config.stage2.model},
+        "extraction": {"selected_model": "previous-plumb"},
+    })
+    write(root / "outer_001/feature_definitions.json", {"features": []})
+    if dependent_path:
+        write(root / dependent_path, {})
+    before = tree(tmp_path)
+    if dependent_path:
+        with pytest.raises(RuntimeError, match="saved extraction model ID"):
+            preflight.preflight_stage2(config)
+    else:
+        assert preflight.preflight_stage2(config)["status"] == "validated"
+    assert tree(tmp_path) == before
+
+
 def test_saved_launcher_accepts_pool_override_without_changing_science(tmp_path):
     config = saved_fixture(tmp_path)
     endpoints = [{"endpoint": "http://a.test/v1", "max_concurrency": 2},

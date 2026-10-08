@@ -1,7 +1,8 @@
 # ColBERT feature extraction
 
 New all-evidence runs and standalone explicit-feature extractors default to
-`colbert`. OCI implements the encoder, token chunking, exact MaxSim retrieval,
+full-record LLM extraction with ten variables per request. Select `colbert`
+explicitly to use retrieval. OCI implements the encoder, token chunking, exact MaxSim retrieval,
 cache, and extraction integration itself. The reference MatchMiner repository
 is not imported, installed, or required. Existing Torch, Transformers,
 Hugging Face Hub, and safetensors dependencies are sufficient.
@@ -50,7 +51,7 @@ For the production workflow, put these fields in `stage2`:
 
 The same `colbert` object and `extraction_context_strategy` field are supported in
 `explicit_features` for standalone/agentic workflows. Python callers can pass
-`colbert=ColBERTConfig(...)` to `VLLMFeatureExtractor` or
+`context_strategy="colbert", colbert=ColBERTConfig(...)` to `VLLMFeatureExtractor` or
 `extract_explicit_features`. Compatible checkpoints contain a Transformer and
 a trained `1_Dense` identity projection, with ColBERT query/document markers,
 punctuation masks, and query expansion settings. Other checkpoint layouts fail
@@ -128,10 +129,11 @@ already have matching completed definitions; missing or incompatible upstream
 checkpoints fail rather than regenerate under the old model ID. Remove existing
 extraction-and-later artifacts before changing a saved run's serving identity.
 
-Every `run_*.sh` in the repository root delegates to the shared launcher and
-defaults to ColBERT. For example:
+Root single-run launchers default to full-record LLM extraction. Select
+ColBERT explicitly for retrieval-based context. For example:
 
 ```bash
+STAGE2_EXTRACTION_CONTEXT_STRATEGY=colbert \
 STAGE2_COLBERT_DEVICES=cuda:0,cuda:1 \
 STAGE2_COLBERT_WORKERS_PER_DEVICE=4 \
 STAGE2_COLBERT_CACHE_DIR=/persistent/oci-colbert-cache \

@@ -598,8 +598,12 @@ def test_standalone_prompt_retrieval_and_overflow_fail_closed(tmp_path, backend)
     feature = ExplicitFeatureSpec(
         "red", "continuous", description="red value", roles=["confounder"]
     )
-    assert ExplicitFeatureExtractionConfig().extraction_context_strategy == "colbert"
-    assert VLLMFeatureExtractor([feature], colbert=config).context_strategy == "colbert"
+    assert ExplicitFeatureExtractionConfig().extraction_context_strategy == "full_record"
+    assert VLLMFeatureExtractor([feature], colbert=config).context_strategy == "full_record"
+    full_prompt = build_extraction_prompt("red value blue irrelevant", [feature])
+    assert "red value blue irrelevant" in full_prompt
+    with pytest.raises(ValueError, match="exceeds"):
+        build_extraction_prompt("red value", [feature], max_text_length=1)
     prompt = build_extraction_prompt(
         "red value blue irrelevant", [feature], context_strategy="colbert", colbert=config
     )
@@ -610,7 +614,7 @@ def test_standalone_prompt_retrieval_and_overflow_fail_closed(tmp_path, backend)
         )
 
 
-def test_stage2_default_roundtrip_and_mode_use_only_retrieved_source(
+def test_stage2_colbert_opt_in_roundtrip_and_mode_use_only_retrieved_source(
     tmp_path, backend, monkeypatch
 ):
     from dataclasses import asdict
@@ -620,7 +624,8 @@ def test_stage2_default_roundtrip_and_mode_use_only_retrieved_source(
 
     install(monkeypatch)
     config = stage2.PlainHandoffStage2Config(
-        endpoint="http://unused/v1", model="test", colbert=settings(tmp_path, top_k=1)
+        endpoint="http://unused/v1", model="test", colbert=settings(tmp_path, top_k=1),
+        extraction_context_strategy="colbert"
     )
     assert config.extraction_context_strategy == "colbert"
     assert colbert_config_from_mapping(asdict(config)["colbert"]) == config.colbert

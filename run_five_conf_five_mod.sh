@@ -23,8 +23,8 @@
 #     STAGE2_SELECTION_MODE=independent_tasks OCI_PREFLIGHT_ONLY=1 ./run_five_conf_five_mod.sh
 #   See docs/stage2_independent_tasks.md for archived-source migration and resume.
 
-# Extraction defaults to Plumb decisions over cached ColBERT excerpts.
-# Set STAGE2_DECISION_EXTRACTION=0 for the legacy LLM extractor.
+# Extraction defaults to full-record LLM requests with ten variables at a time.
+# Set STAGE2_DECISION_EXTRACTION=1 to opt into Plumb/ColBERT extraction.
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"

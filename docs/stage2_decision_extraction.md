@@ -37,18 +37,18 @@ allocation do not enter prompt or measurement identities, and existing feature
 checkpoints remain reusable after a restart.
 
 Fresh runs through `run_one_conf_one_mod.sh`, `run_five_conf_five_mod.sh`, and
-their H100/RTX PRO 6000 variants **default to Plumb decision extraction**.
-They use ColBERT excerpts, one feature per prompt, the 3000-token cap, three
+their H100/RTX PRO 6000 variants default to full-record LLM extraction with ten
+variables per request. Set `STAGE2_DECISION_EXTRACTION=1` to opt into Plumb.
+Plumb uses ColBERT excerpts, one feature per prompt, the 3000-token cap, three
 numeric narrowing passes, and independent ±5% verification described below.
-The primary model still defines and reviews ontologies. To select the original
-generative extractor and its model preset:
+The primary model still defines and reviews ontologies. For an explicit Plumb run:
 
 ```bash
-STAGE2_DECISION_EXTRACTION=0 ./run_five_conf_five_mod.sh /path/to/legacy-run
+STAGE2_DECISION_EXTRACTION=1 ./run_five_conf_five_mod.sh /path/to/plumb-run
 ```
 
-The base one/five scripts expect an external primary server on port 8010 and
-a Plumb classification server on port 8020 by default. Configure
+With Plumb selected, the base one/five scripts expect an external primary server
+on port 8010 and a Plumb classification server on port 8020. Configure
 `STAGE2_EXTRACTION_ENDPOINT` and `STAGE2_EXTRACTION_MODEL` to match an existing
 classifier, or use the managed extraction `STAGE2_EXTRACTION_VLLM_*` settings.
 The external-server example below uses port 8134 and served name `plumb-4b`:

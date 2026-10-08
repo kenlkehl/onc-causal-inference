@@ -72,6 +72,7 @@ def _run_explicit_feature_extraction(
     cache_config["patient_text_hash"] = hashlib.sha256(json.dumps(
         dataset[config.text_column].fillna("").astype(str).tolist(),
         ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+    cache_config["max_variables_per_extraction_request"] = feature_config.max_variables_per_extraction_request
     cache_config["extraction_context_strategy"] = feature_config.extraction_context_strategy
     if feature_config.extraction_context_strategy == "colbert":
         from ..extraction.colbert import retrieval_identity
@@ -101,6 +102,7 @@ def _run_explicit_feature_extraction(
             max_text_length=feature_config.extraction_max_text_length,
             context_strategy=feature_config.extraction_context_strategy,
             colbert=feature_config.colbert,
+            max_variables_per_extraction_request=feature_config.max_variables_per_extraction_request,
         )
         try:
             cached = extractor.extract_to_dataframe(

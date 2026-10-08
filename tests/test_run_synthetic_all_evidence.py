@@ -21,7 +21,8 @@ import pytest
     (False, {"STAGE2_SELECTION_MODE": "multi_model"}),
     (False, {"STAGE2_SELECTION_MODE": "llm_roles"}),
     (False, {"STAGE2_SELECTION_MODE": "independent_tasks"}),
-    (False, {"STAGE2_DECISION_EXTRACTION": "0"}),
+    (False, {"STAGE2_DECISION_EXTRACTION": "1"}),
+    (False, {"STAGE2_EXTRACTION_CONTEXT_STRATEGY": "colbert", "STAGE2_EXTRACTION_FEATURE_BATCH_SIZE": "3"}),
     (False, {"STAGE2_COLBERT_WORKERS_PER_DEVICE": "4"}),
     (False, {"STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES": "1048576"}),
     (False, {"STAGE2_DECISION_PREPARATION_WORKERS": "16"}),
@@ -33,6 +34,7 @@ import pytest
         "STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS": "131072",
     }),
     (False, {
+        "STAGE2_DECISION_EXTRACTION": "1",
         "STAGE2_MODEL": "custom-gemma",
         "STAGE2_EXTRACTION_MODEL": "custom-plumb",
         "STAGE2_VLLM_GPUS": "cuda:0,cuda:1",
@@ -86,7 +88,7 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
         return
 
     assert "oci.inference.research_all_evidence_workflow" in args
-    decision = overrides.get("STAGE2_DECISION_EXTRACTION", "1") == "1"
+    decision = overrides.get("STAGE2_DECISION_EXTRACTION", "0") == "1"
     rtx = "rtxpro6000" in launcher
     h100 = "h100" in launcher
     managed = rtx or h100
@@ -105,7 +107,8 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     assert args[args.index("--stage2-extraction-model") + 1] == overrides.get(
         "STAGE2_EXTRACTION_MODEL", "crh225/plumb-4b" if decision else legacy,
     )
-    assert args[args.index("--stage2-extraction-context-strategy") + 1] == "colbert"
+    context_strategy = overrides.get("STAGE2_EXTRACTION_CONTEXT_STRATEGY", "colbert" if decision else "full_record")
+    assert args[args.index("--stage2-extraction-context-strategy") + 1] == context_strategy
     assert args[args.index("--stage2-colbert-cache-dir") + 1] == str(repo_root / ".oci_cache/colbert")
     settings = dict(args[i + 1].split("=", 1) for i, arg in enumerate(args) if arg == "--set")
     assert json.loads(settings["stage2.decision_extraction.enabled"]) is decision
@@ -131,7 +134,8 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
     )
     assert config.stage2.decision_extraction.enabled is decision
     assert config.stage2.decision_extraction.max_prompt_tokens == 3000
-    assert config.stage2.extraction_context_strategy == "colbert"
+    assert config.stage2.extraction_context_strategy == context_strategy
+    assert config.stage2.extraction_feature_batch_size == int(overrides.get("STAGE2_EXTRACTION_FEATURE_BATCH_SIZE", "10"))
     assert config.stage2.colbert.workers_per_device == int(overrides.get("STAGE2_COLBERT_WORKERS_PER_DEVICE", "1"))
     assert config.stage2.colbert.query_cache_max_bytes == int(overrides.get("STAGE2_COLBERT_QUERY_CACHE_MAX_BYTES", str(1024**3)))
     assert config.stage2.decision_preparation_workers == int(overrides.get("STAGE2_DECISION_PREPARATION_WORKERS", "0"))

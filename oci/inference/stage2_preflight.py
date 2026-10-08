@@ -188,7 +188,7 @@ def preflight_stage2(
         raise RuntimeError("dataset unit IDs must be nonmissing and unique")
     from .tfidf_topic_stage1 import tfidf_topic_dataset_fingerprints
     from .tfidf_topic_split_registry import validate_handoff_rows_against_split_registry
-    from .plain_handoff_stage2 import _load_stage2_splits
+    from .plain_handoff_stage2 import _has_extraction_dependent_checkpoints, _load_stage2_splits
     from .plain_handoff_stage2_evidence import stage1_embedding_cache_dependency_identity
 
     applied = workflow.ExperimentConfig.from_dict(
@@ -296,6 +296,11 @@ def preflight_stage2(
         models = _object(stage2 / "model_identity.json")
         for role, model in (("primary", config.stage2.model), ("extraction", extraction.model)):
             if (models.get(role) or {}).get("selected_model") != model:
+                # Match the runner's resume contract: changing the extractor
+                # is allowed after its measurements and downstream outputs
+                # have been removed, while discovery remains frozen.
+                if role == "extraction" and not _has_extraction_dependent_checkpoints(stage2):
+                    continue
                 raise RuntimeError(f"saved {role} model ID differs from requested Stage 2 model")
     return {
         "status": "validated",

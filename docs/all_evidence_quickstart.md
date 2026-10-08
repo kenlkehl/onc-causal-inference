@@ -3,15 +3,13 @@
 Run these commands from the repository root after `uv sync --frozen`.
 The complete Stage 1 workflow needs CUDA GPUs. Stage 2 can use external
 OpenAI-compatible servers or pipeline-managed vLLM. Patient feature extraction
-defaults to [cached ColBERT retrieval](colbert_extraction.md), using all visible
-GPUs for retrieval or CPU when none are available. Configure `stage2.colbert.devices`
-to choose dedicated retrieval devices; LLM server concurrency remains independent.
-
-The root `run_one_conf*` and `run_five_conf*` single-run launchers now default
-to [Plumb decision extraction](stage2_decision_extraction.md), with one feature
-per prompt and at most 3000 tokens. Set `STAGE2_DECISION_EXTRACTION=0` for their
-original LLM extractor. Explicit saved-run launches preserve their saved
-backend. The JSON workflow examples below retain their configured backend.
+defaults to full-record LLM extraction with ten variables per patient request.
+Long records are read in lossless ordered chunks. Set
+`STAGE2_EXTRACTION_FEATURE_BATCH_SIZE` to change the variable count in root
+launchers. [ColBERT retrieval](colbert_extraction.md) and
+[Plumb decision extraction](stage2_decision_extraction.md) remain opt-in through
+`STAGE2_EXTRACTION_CONTEXT_STRATEGY=colbert` and `STAGE2_DECISION_EXTRACTION=1`,
+respectively. Explicit saved-run launches preserve their saved backend.
 
 ## Start the multi-model workflow
 

@@ -91,7 +91,7 @@ stage2_operationalization_max_prompt_chars="${STAGE2_OPERATIONALIZATION_MAX_PROM
 stage2_consolidation_batch_size="${STAGE2_CONSOLIDATION_BATCH_SIZE:-}"
 stage2_consolidation_alphabetical_rounds="${STAGE2_CONSOLIDATION_ALPHABETICAL_ROUNDS:-}"
 stage2_consolidation_max_rounds="${STAGE2_CONSOLIDATION_MAX_ROUNDS:-}"
-stage2_extraction_feature_batch_size="${STAGE2_EXTRACTION_FEATURE_BATCH_SIZE:-}"
+stage2_extraction_feature_batch_size="${STAGE2_EXTRACTION_FEATURE_BATCH_SIZE:-10}"
 stage2_ontology_refinement_min_failure_patients="${STAGE2_ONTOLOGY_REFINEMENT_MIN_FAILURE_PATIENTS:-}"
 stage2_max_ontology_refinement_rounds="${STAGE2_MAX_ONTOLOGY_REFINEMENT_ROUNDS:-}"
 stage2_cluster_similarity_threshold="${STAGE2_CLUSTER_SIMILARITY_THRESHOLD:-}"
@@ -379,7 +379,12 @@ if [[ -n "${STAGE2_DECISION_PREPARATION_WORKERS:-}" ]]; then
 fi
 # All root quickstarts delegate here. Retrieval indexes are shared across runs,
 # outer folds, ontology revisions, and answering endpoints for this cohort.
-stage2_policy_args+=(--stage2-extraction-context-strategy "${STAGE2_EXTRACTION_CONTEXT_STRATEGY:-colbert}")
+if (( stage2_decision_extraction )); then
+    stage2_context_default=colbert
+else
+    stage2_context_default=full_record
+fi
+stage2_policy_args+=(--stage2-extraction-context-strategy "${STAGE2_EXTRACTION_CONTEXT_STRATEGY:-${stage2_context_default}}")
 stage2_policy_args+=(--stage2-colbert-cache-dir "${STAGE2_COLBERT_CACHE_DIR:-${repo_root}/.oci_cache/colbert}")
 for colbert_setting in MODEL REVISION DEVICES WORKERS_PER_DEVICE QUERY_CACHE_MAX_BYTES CHUNK_SIZE CHUNK_OVERLAP QUERY_LENGTH BATCH_SIZE TOP_K; do
     variable="STAGE2_COLBERT_${colbert_setting}"

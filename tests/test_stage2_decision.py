@@ -505,6 +505,7 @@ def test_whole_fold_uses_decisions_and_freezes_measurements(tmp_path, monkeypatc
     config = PlainHandoffStage2Config(endpoint="http://primary.test/v1", model="primary",
         extraction_llm=Stage2ExtractionLLMConfig(endpoint="http://plumb.test/v1", model="plumb", workers=1),
         decision_extraction=client.policy, colbert=ColBERTConfig(devices=("cpu",)),
+        extraction_context_strategy="colbert",
         role_adjudication=Stage2RoleAdjudicationConfig(enabled=False), estimation_trees=10)
     monkeypatch.setattr(analysis, "_request_aggregate_ontology_supervisor",
                         lambda **kw: pytest.fail("unconditional ontology LLM review attempted"))

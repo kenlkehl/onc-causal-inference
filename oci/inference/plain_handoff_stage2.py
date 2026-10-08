@@ -936,7 +936,7 @@ class PlainHandoffStage2Config:
     extraction_max_prompt_chars: int = DEFAULT_EXTRACTION_MAX_PROMPT_CHARS
     extraction_feature_batch_size: int = DEFAULT_EXTRACTION_FEATURE_BATCH_SIZE
     extraction_note_search: NoteSearchConfig = field(default_factory=NoteSearchConfig)
-    extraction_context_strategy: str = "colbert"
+    extraction_context_strategy: str = "full_record"
     colbert: ColBERTConfig = field(default_factory=ColBERTConfig)
     decision_extraction: DecisionExtractionConfig = field(default_factory=DecisionExtractionConfig)
     # Runtime throughput only; excluded from ontology and measurement identities.
@@ -1658,7 +1658,11 @@ def plain_stage2_config_from_mapping(
         extraction_stream=raw.get("extraction_stream", False),
         extraction_deferred_retry_passes=raw.get("extraction_deferred_retry_passes", 1),
         extraction_note_search=note_search_config_from_mapping(raw.get("extraction_note_search")),
-        extraction_context_strategy=raw.get("extraction_context_strategy", "colbert"),
+        extraction_context_strategy=raw.get(
+            "extraction_context_strategy",
+            "colbert" if decision_config_from_mapping(raw.get("decision_extraction")).enabled
+            else "full_record",
+        ),
         colbert=colbert_config_from_mapping(raw.get("colbert")),
         decision_extraction=decision_config_from_mapping(raw.get("decision_extraction")),
         decision_preparation_workers=raw.get("decision_preparation_workers", 0),
