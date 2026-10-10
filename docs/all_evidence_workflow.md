@@ -1467,8 +1467,11 @@ preserves any validated value and decision note from earlier chunks.
 Exclusions apply to that request only; the candidate catalog is unchanged.
 `field_recovery.json` records the excluded fields and each reduced request.
 Further field failures can reduce the batch again, with at most one exclusion
-per field. Scalar/type and closed-category failures retain their existing
-field-level recovery. Unattributable malformed responses use the ordinary
+per field. Repeated scalar/type or closed-category errors move to field-level
+recovery after the configured non-thinking repairs and one thinking repair
+(five off, then one on by default), retaining valid fields from the response.
+This avoids spending the full repair budget rereading a record for an unchanged
+definition mismatch. Unattributable malformed responses use the ordinary
 bounded repair policy; transport failures propagate for checkpoint recovery.
 The extraction directory aggregates those events by feature,
 failure kind, and distinct patient in `failure_summary.json`. A generic malformed
@@ -1478,9 +1481,20 @@ at least `ontology_refinement_min_failure_patients` outer-training patients (3
 by default), a one-feature ontology-refinement component receives the frozen
 definition, aggregate count, and a bounded list of failed model outputs—but no
 patient text, treatment, outcome, or held-out information. It may keep the
-definition or revise only its description, value type, categories or unit,
-measurement rule, and missingness rule. The feature name, identity, roles, and
-support remain fixed. The revised features are then re-extracted across the
+definition or revise its description, value type, categories or unit,
+measurement rule, and missingness rule. `ambiguous` remains a valid type with
+no declared categories; reviewers must not invent categories to remove it.
+Categories describe possible patient answers, not attribute names. A composite
+that requires simultaneous findings may instead be split into 2–20 scalar
+components, such as separate binary indicators for anatomical sites. Components
+inherit evidence provenance and roles, receive stable identities derived from
+the parent and component name, and replace the original composite. Missing
+mentions remain unknown unless the record explicitly supports a negative.
+Splits and conversions from ambiguous to closed categories receive a separate
+semantic check before extraction; rejected proposals are repaired, with an
+audited keep of the original definition if the check cannot be satisfied.
+Ordinary revisions preserve feature names and identities. Revised or new
+component features are then re-extracted across the
 training patients and merged with cached unchanged-feature columns before
 monitoring runs again, for at most `max_ontology_refinement_rounds` revisions (2 by default),
 before aggregate ontology supervision proceeds. Investigator-configured explicit ontologies

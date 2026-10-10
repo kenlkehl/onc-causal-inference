@@ -47,7 +47,9 @@ from .plain_handoff_stage2_evidence import (
 from .stage1_architectures import DEFAULT_STAGE1_ARCHITECTURES
 from .plain_handoff_stage2_analysis import (
     EXTRACTION_FIELD_REPAIR_LIMIT,
+    _ExtractionCategoryError,
     _ExtractionFieldError,
+    _ExtractionValueError,
     Stage2RequestExhaustedError,
     Stage2ResponseValidationError,
     infrastructure_failure_audit_paths,
@@ -3866,6 +3868,19 @@ def _request_json(
                         f"Stage 2 field validation remained invalid after "
                         f"{EXTRACTION_FIELD_REPAIR_LIMIT} repairs: {exc}"
                     ) from error
+            if (request_kind == "extraction"
+                    and isinstance(exc, (_ExtractionCategoryError, _ExtractionValueError))
+                    and attempt > int(config.thinking_after_response_repairs)
+                    and repeated_error_count >= 2):
+                # Five non-thinking repairs and one thinking repair have already
+                # been tried under the default policy. Preserve the returned
+                # good fields and let the caller map/review the failing fields,
+                # rather than rereading the whole record for an unchanged error.
+                request_audit.event("extraction_semantic_repair_handoff",
+                                    error_type=type(exc).__name__, error=str(exc)[:2000])
+                raise Stage2ResponseValidationError(
+                    f"Repeated extraction contract failure after thinking repair: {exc}"
+                ) from exc
             fallback_trigger: str | None = None
             if conservative_validation_fallback is not None:
                 if repeated_error_count >= int(fallback_after_same_error):

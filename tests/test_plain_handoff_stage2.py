@@ -2395,7 +2395,7 @@ def test_resume_retries_only_checkpoints_with_stale_range_ontology_repairs(tmp_p
     assert audit["previous_audit"]["resolution"] == "conservative_null"
 
 
-def test_extraction_uses_note_free_category_ontology_after_fifteen_failed_repairs(
+def test_extraction_maps_repeated_category_error_after_one_thinking_repair(
     tmp_path: Path,
 ):
     note = "PRIVATE_NOTE_SENTINEL: prior immunotherapy was documented."
@@ -2466,7 +2466,7 @@ def test_extraction_uses_note_free_category_ontology_after_fifteen_failed_repair
         max_prompt_chars=config.max_prompt_chars,
     )
 
-    assert jobs == ["extract_stage2_patient_variables"] * 16 + [
+    assert jobs == ["extract_stage2_patient_variables"] * 7 + [
         "map_extracted_values_to_declared_category_ontology"
     ]
     assert ontology_body is not None

@@ -77,7 +77,9 @@ def test_co_resident_models_remain_resident_for_all_folds(tmp_path, monkeypatch,
         vllm=pool([2]), vllm_co_resident_all_gpus=True,
         extraction_llm=workflow.Stage2ExtractionLLMConfig(endpoint="", model="extract-model",
             vllm=pool([2, 5, 7], port=8110, fraction="0.28", internal=30000)),
-        decision_extraction=DecisionExtractionConfig(enabled=decision), runtime_disable_extraction=disabled)
+        decision_extraction=DecisionExtractionConfig(enabled=decision),
+        extraction_context_strategy="colbert" if decision else "full_record",
+        runtime_disable_extraction=disabled)
     lifecycle, allocations = [], {}
 
     @contextmanager

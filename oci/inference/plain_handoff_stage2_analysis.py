@@ -78,7 +78,7 @@ PAGE_EXTRACTION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observations_v6_advisor
 PAGE_OBSERVATION_FEATURE_BATCH_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_observation_feature_batch_v2_advisory_quotes'
 PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v7_reported_occurrences'
 EXTRACTION_ROUTING_SCHEMA_VERSION = 'stage2_extraction_mode_split_v1'
-REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v1_clinical_prompts_20260923'
+REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v2_scalar_contract_20261010'
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
 ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v9_architecture_search"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
@@ -92,7 +92,7 @@ HELDOUT_MEASUREMENT_REUSE_SCHEMA_VERSION = (
 STAGE2_RESELECTION_MIGRATION_SCHEMA_VERSION = "stage2_reselection_migration_v1"
 EXTRACTION_ISSUE_SCHEMA_VERSION = "stage2_extraction_issues_v1"
 PENDING_CATEGORY_ONTOLOGY_SCHEMA_VERSION = 'stage2_pending_category_ontology_v1_clinical_prompts_20260923'
-ONTOLOGY_REFINEMENT_CHECKPOINT_SCHEMA_VERSION = 'stage2_training_failure_ontology_refinement_v2_request_policy_clinical_prompts_20260923'
+ONTOLOGY_REFINEMENT_CHECKPOINT_SCHEMA_VERSION = 'stage2_training_failure_ontology_refinement_v3_scalar_contract_20261010'
 INCREMENTAL_REFINEMENT_EXTRACTION_SCHEMA_VERSION = (
     "stage2_incremental_refinement_extraction_v1_feature_delta"
 )
@@ -7556,7 +7556,7 @@ def _validate_ontology_refinement(
     *,
     feature: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Validate a bounded same-feature ontology decision."""
+    """Validate a clarification or an explicit decomposition into scalar features."""
     if value.get("action") == "revise" and "definition" in value:
         fields = {"description", "value_type", "categories_or_unit", "measurement_definition", "missing_value_rule"}
         if set(value) != {"action", "reason", "definition"} or not isinstance(value["definition"], Mapping) or set(value["definition"]) != fields:
@@ -7567,8 +7567,8 @@ def _validate_ontology_refinement(
     if feature.get("configured_explicit_feature") is True:
         raise ValueError("investigator-configured feature ontology cannot be revised")
     action = str(value.get("action") or "").strip().lower()
-    if action not in {"keep", "revise"}:
-        raise ValueError("ontology refinement action must be keep or revise")
+    if action not in {"keep", "revise", "split"}:
+        raise ValueError("ontology refinement action must be keep, revise, or split")
     decision: dict[str, Any] = {
         "feature_id": str(feature["feature_id"]),
         "feature_name": str(feature["name"]),
@@ -7578,6 +7578,39 @@ def _validate_ontology_refinement(
     if action == "keep":
         return decision
 
+    if action == "split":
+        components = value.get("components")
+        if not isinstance(components, list) or not 2 <= len(components) <= 20:
+            raise ValueError("split requires 2 to 20 independently measurable components")
+        normalized_components = []
+        seen = set()
+        for component in components:
+            if not isinstance(component, Mapping):
+                raise ValueError("each split component must be a clinical definition")
+            name = str(component.get("name") or "").strip()
+            key = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+            if not key or key in seen:
+                raise ValueError("split component names must be distinct clinical names")
+            seen.add(key)
+            normalized = _validate_ontology_refinement(
+                {**component, "action": "revise", "reason": decision["reason"]},
+                feature=feature,
+            )
+            if normalized["value_type"] == "binary":
+                missingness_contract = (
+                    "Return null when this component is not assessed or not mentioned. "
+                    "A negative answer requires an explicit negative finding for this "
+                    "component; never infer it from other components being present. "
+                )
+                if not normalized["missing_value_rule"].startswith(missingness_contract):
+                    normalized["missing_value_rule"] = missingness_contract + normalized["missing_value_rule"]
+            normalized_components.append({
+                "name": name,
+                **{k: normalized[k] for k in ONTOLOGY_DEFINITION_FIELDS},
+            })
+        decision["components"] = normalized_components
+        return decision
+
     description = str(value.get("description") or "").strip()
     value_type = str(value.get("value_type") or "").strip().lower()
     categories = value.get("categories_or_unit")
@@ -7585,7 +7618,7 @@ def _validate_ontology_refinement(
     missing_value_rule = str(value.get("missing_value_rule") or "").strip()
     if not description:
         raise ValueError("a revised ontology requires description")
-    if value_type not in {"binary", "categorical", "continuous", "ordinal"}:
+    if value_type not in {"binary", "categorical", "continuous", "ordinal", "ambiguous"}:
         raise ValueError("a revised ontology requires an operational value_type")
     if not isinstance(categories, list):
         raise ValueError("a revised ontology requires a categories_or_unit array")
@@ -7596,7 +7629,9 @@ def _validate_ontology_refinement(
             values=clean_categories,
             source=f"refined feature {feature['feature_id']!r}",
         )
-    elif len(clean_categories) > 1:
+    elif value_type == "ambiguous" and clean_categories:
+        raise ValueError("an ambiguous scalar has no declared categories or unit")
+    elif value_type == "continuous" and len(clean_categories) > 1:
         raise ValueError("a revised continuous ontology may name at most one unit")
     if not measurement_definition:
         raise ValueError("a revised ontology requires measurement_definition")
@@ -7612,6 +7647,80 @@ def _validate_ontology_refinement(
         }
     )
     return decision
+
+
+ONTOLOGY_DEFINITION_FIELDS = (
+    "description", "value_type", "categories_or_unit", "measurement_definition",
+    "missing_value_rule",
+)
+
+
+def _apply_ontology_decision(feature, decision):
+    """Keep provenance and stable identities when replacing a composite variable."""
+    if decision is None or decision["action"] == "keep":
+        return [dict(feature)]
+    if decision["action"] == "split":
+        result = []
+        for component in decision["components"]:
+            # Parent identity namespaces components, so independent reviews cannot
+            # collide with each other or overwrite existing investigator features.
+            key = re.sub(r"[^a-z0-9]+", "_", component["name"].lower()).strip("_")
+            child = {**feature, **{k: component[k] for k in ONTOLOGY_DEFINITION_FIELDS},
+                     "name": f"{feature['name']}__{key}",
+                     "feature_id": f"{feature['feature_id']}__{key}",
+                     "clinical_label": f"{clinical_prompts.label(feature)}: {component['name']}",
+                     "ontology_parent_feature_id": feature["feature_id"],
+                     "ontology_split_reason": decision["reason"]}
+            for field in ("harmonization_plan", "harmonization_fallback", "decision_ontology"):
+                child.pop(field, None)
+            result.append(_refresh_conflict_resolution(child))
+        return result
+    revised = {**feature, **{k: decision[k] for k in ONTOLOGY_DEFINITION_FIELDS}}
+    if all(revised.get(k) == feature.get(k) for k in ONTOLOGY_DEFINITION_FIELDS):
+        return [dict(feature)]
+    for field in ("harmonization_plan", "harmonization_fallback", "decision_ontology"):
+        revised.pop(field, None)
+    return [_refresh_conflict_resolution(revised)]
+
+
+def _request_scalar_ontology_decision(*, messages, feature, request_json, output_dir):
+    """Independently check semantic type changes before cohort-wide extraction."""
+    original_messages = list(messages)
+    checks = []
+    for attempt in range(3):
+        decision = request_json(messages, lambda v: _validate_ontology_refinement(v, feature=feature),
+                                request_kind="interpretation")
+        risky_conversion = (decision["action"] == "revise"
+            and feature.get("value_type") == "ambiguous"
+            and decision["value_type"] in {"binary", "categorical", "ordinal"})
+        if decision["action"] != "split" and not risky_conversion:
+            return decision
+        proposed = _apply_ontology_decision(feature, decision)
+
+        def validate_check(value):
+            if set(value) != {"valid", "reason"} or not isinstance(value["valid"], bool):
+                raise ValueError("return valid (boolean) and reason (text)")
+            if not isinstance(value["reason"], str) or not value["reason"].strip():
+                raise ValueError("explain whether the proposed scalar contract preserves the measurement")
+            return dict(value)
+
+        check = request_json(clinical_prompts.messages("ontology_scalar_contract",
+            "Original variable\n" + clinical_prompts.feature_text(feature)
+            + "\n\nProposed definitions\n" + clinical_prompts.definitions_text(proposed)),
+            validate_check, request_kind="interpretation")
+        checks.append({"attempt": attempt + 1, "decision": decision, "check": check})
+        _write_json(Path(output_dir) / "scalar_contract_checks.json", {"checks": checks})
+        if check["valid"]:
+            return decision
+        messages = [*original_messages, {"role": "assistant", "content": json.dumps(decision)},
+                    {"role": "user", "content": "The proposed definition failed its scalar contract check: "
+                     + check["reason"] + " Correct the definition or split it into independent scalar variables. "
+                     "Ambiguous is an allowed type; never invent category labels to satisfy a schema."}]
+    # Keeping the original measurements is safer than replacing them with a
+    # definition known to be incompatible. This is explicit in the audit.
+    return {"feature_id": feature["feature_id"], "feature_name": feature["name"],
+            "action": "keep", "reason": "Scalar contract check rejected proposed changes: " + checks[-1]["check"]["reason"],
+            "validation_fallback": True}
 
 
 def _aggregate_ontology_supervisor_prompt(*, feature: Mapping[str, Any], summary: Mapping[str, Any],
@@ -7823,14 +7932,13 @@ def _request_aggregate_ontology_supervisor(
         feature_dir.mkdir(parents=True, exist_ok=True)
         _write_json(feature_dir / "input.json", {**input_value, "input_fingerprint": fingerprint})
         try:
-            decision = request_json(
-                _aggregate_ontology_supervisor_prompt(
+            decision = _request_scalar_ontology_decision(
+                messages=_aggregate_ontology_supervisor_prompt(
                     feature=feature,
                     summary=summary,
                     failure_patterns=failures,
                 ),
-                lambda value: _validate_ontology_refinement(value, feature=feature),
-                request_kind="interpretation",
+                feature=feature, request_json=request_json, output_dir=feature_dir,
             )
         except Stage2ResponseValidationError as exc:
             decision = {
@@ -7873,26 +7981,10 @@ def _request_aggregate_ontology_supervisor(
     for raw_feature in definitions:
         feature = dict(raw_feature)
         decision = decisions[str(feature["feature_id"])]
-        if decision["action"] == "revise":
-            before = {
-                key: copy.deepcopy(feature.get(key))
-                for key in (
-                    "description",
-                    "value_type",
-                    "categories_or_unit",
-                    "measurement_definition",
-                    "missing_value_rule",
-                )
-            }
-            for key in before:
-                feature[key] = copy.deepcopy(decision[key])
-            after = {key: copy.deepcopy(feature.get(key)) for key in before}
-            if _value_fingerprint(before) != _value_fingerprint(after):
-                feature.pop("harmonization_plan", None)
-                feature.pop("harmonization_fallback", None)
-                feature = _refresh_conflict_resolution(feature)
-                changed_ids.append(str(feature["feature_id"]))
-        updated.append(feature)
+        replacements = _apply_ontology_decision(feature, decision)
+        if replacements != [feature]:
+            changed_ids.extend(str(f["feature_id"]) for f in replacements)
+        updated.extend(replacements)
 
     report = {
         "schema_version": REVIEW_CHECKPOINT_SCHEMA_VERSION,
@@ -8026,9 +8118,9 @@ def _request_ontology_refinements(
             {**feature_input, "input_fingerprint": feature_fingerprint},
         )
         try:
-            decision = request_json(
-                messages,
-                lambda value: _validate_ontology_refinement(value, feature=feature),
+            decision = _request_scalar_ontology_decision(
+                messages=messages, feature=feature, request_json=request_json,
+                output_dir=feature_dir,
             )
         except Stage2ResponseValidationError as exc:
             decision = {
@@ -8077,32 +8169,10 @@ def _request_ontology_refinements(
         feature = dict(raw_feature)
         name = str(feature["name"])
         decision = decisions_by_name.get(name)
-        if decision is not None and decision["action"] == "revise":
-            before = {
-                key: copy.deepcopy(feature.get(key))
-                for key in (
-                    "description",
-                    "value_type",
-                    "categories_or_unit",
-                    "measurement_definition",
-                    "missing_value_rule",
-                )
-            }
-            for key in (
-                "description",
-                "value_type",
-                "categories_or_unit",
-                "measurement_definition",
-                "missing_value_rule",
-            ):
-                feature[key] = copy.deepcopy(decision[key])
-            after = {key: copy.deepcopy(feature.get(key)) for key in before}
-            if _value_fingerprint(before) != _value_fingerprint(after):
-                feature.pop("harmonization_plan", None)
-                feature.pop("harmonization_fallback", None)
-                feature = _refresh_conflict_resolution(feature)
-                changed_names.append(name)
-        updated.append(feature)
+        replacements = _apply_ontology_decision(feature, decision)
+        if replacements != [feature]:
+            changed_names.extend(f["name"] for f in replacements)
+        updated.extend(replacements)
 
     ordered_decisions = [
         decisions_by_name[str(feature["name"])]
@@ -8633,7 +8703,7 @@ def _extract_training_with_ontology_feedback(
             repeated_patterns=repeated,
             output_dir=round_dir,
             request_json=request_json,
-            workers=workers,
+            workers=interpretation_workers,
         )
         rounds.append(
             {
