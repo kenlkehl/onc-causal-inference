@@ -1336,6 +1336,10 @@ def _request_validated_extraction(
 ) -> dict[str, Any]:
     """Recover field failures with smaller prompts and category failures by mapping."""
 
+    if validate_response is None and len(row_ids) == 1:
+        response_schema = response_schema or _extraction_response_schema
+        response_instructions = response_instructions or _extraction_output_instructions
+
     issue_audit_path = ontology_audit_path.with_name("extraction_issues.json")
     pending_path = ontology_audit_path.with_name("pending_category_ontology.json")
     pending_input_fingerprint = _value_fingerprint(
@@ -1422,7 +1426,7 @@ def _request_validated_extraction(
                 validator = _StructuredExtractionValidator(
                     validate_candidate,
                     {"type": "json_schema", "json_schema": {
-                        "name": "serial_clinical_measurements", "strict": True,
+                        "name": "clinical_measurements", "strict": True,
                         "schema": response_schema(definitions),
                     }},
                     response_instructions(definitions) if response_instructions else "",
@@ -1831,7 +1835,33 @@ def _extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], rows: Sequen
         raise ValueError("Stage 2 extraction prompts must contain exactly one patient's record")
     return clinical_prompts.messages("05_extract_patient",
         clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
-        + "\n\nPatient record\n" + str(rows[0].get("text") or ""))
+        + "\n\nPatient record\n" + str(rows[0].get("text") or "")
+        + "\n\nEnd of patient record.\n" + _extraction_output_instructions(definitions))
+
+
+def _extraction_response_schema(definitions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    clinical_prompts.label_map(definitions)
+    properties = {}
+    for feature in definitions:
+        value_type = feature.get("value_type", "ambiguous")
+        types = (["number", "string", "null"] if value_type == "continuous"
+                 else ["string", "null"] if value_type in {"binary", "categorical", "ordinal"}
+                 else ["number", "string", "boolean", "null"])
+        properties[clinical_prompts.label(feature)] = {"type": types}
+    return {"type": "object", "properties": properties,
+            "required": list(properties), "additionalProperties": False}
+
+
+def _extraction_output_instructions(definitions: Sequence[Mapping[str, Any]]) -> str:
+    example = {clinical_prompts.label(d): None for d in definitions}
+    return (
+        "Return exactly one JSON object with the complete variable names shown below as keys. "
+        "Copy each key exactly, including all text on both sides of any colon. "
+        "Related components are separate variables; do not replace them with a parent name "
+        "or nest them inside another object. Each value is a supported scalar or null. "
+        "The nulls in this example are format placeholders, not suggested answers:\n"
+        + json.dumps(example, ensure_ascii=False, separators=(",", ":"))
+    )
 
 
 @dataclass(frozen=True)
@@ -1869,7 +1899,8 @@ def _serial_output_instructions(definitions: Sequence[Mapping[str, Any]]) -> str
     return (
         "Update only the listed clinical variables using the record section and prior values. "
         "Return exactly one JSON object with values and decision_notes, each containing every "
-        "requested variable. Values are supported scalars or null. Decision notes retain the "
+        "requested variable. Copy each complete key exactly, including all text on both sides "
+        "of any colon; keep related components separate. Values are supported scalars or null. Decision notes retain the "
         "date or conflict information needed for the next section, as a short string or null. "
         "The nulls in this example are format placeholders, not suggested answers:\n"
         + json.dumps(example, ensure_ascii=False, separators=(",", ":"))

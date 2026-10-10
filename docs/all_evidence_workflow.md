@@ -745,6 +745,12 @@ fingerprint check remains enforced. The chunk planner reserves the larger of the
 two configured extraction ceilings so a reasoning repair has sufficient room.
 Extraction always isolates one patient and never sends more than the configured
 feature batch (ten variables by default). Full-record LLM extraction is the default.
+Full-record requests include an exact response-key example after the record and
+send a JSON schema to compatible endpoints. Complete clinical names, including
+both sides of a colon in a split feature, are quoted and retained as separate
+keys. Parent-only answers are rejected with the expected component names; they
+are never assigned to a component by guessing. Servers that reject schemas use
+the same prompt and validation through the existing JSON-only fallback.
 The optional `extraction_context_strategy: "colbert"` embeds complete
 prepared patient records into reusable disk-cached token vectors and retrieves
 question-specific excerpts for each measurement. Retrieval workers run across

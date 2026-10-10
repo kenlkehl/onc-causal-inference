@@ -2051,7 +2051,8 @@ def test_stage2_extraction_prompt_does_not_ascii_escape_clinical_text():
 
     assert note in messages[1]["content"]
     assert "\\u60a3" not in messages[1]["content"]
-    assert messages[1]["content"].endswith(note)
+    record = messages[1]["content"].split("\n\nPatient record\n", 1)[1]
+    assert record.split("\n\nEnd of patient record.\n", 1)[0] == note
 
 
 def test_ordinal_integer_range_is_expanded_in_prompt_and_validation():

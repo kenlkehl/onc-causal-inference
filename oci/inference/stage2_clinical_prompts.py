@@ -39,6 +39,15 @@ def resolve_label(value, mapping):
     matches = {target for name, target in mapping.items()
                if label(value).casefold() == label(name).casefold()}
     if len(matches) != 1:
+        components = [name for name in mapping
+                      if ":" in name and label(value).casefold()
+                      == label(name.rsplit(":", 1)[0]).casefold()]
+        if components:
+            raise ValueError(
+                f"unknown or ambiguous clinical variable {value!r}; this is a parent name. "
+                "Return each component separately using its complete name, including "
+                "the text after the colon: " + json.dumps(components, ensure_ascii=False)
+            )
         raise ValueError(f"unknown or ambiguous clinical variable {value!r}")
     return matches.pop()
 
@@ -68,7 +77,9 @@ def scalar(value) -> str:
 
 
 def feature_text(feature, *, include_conflict=True):
-    lines = [label(feature)]
+    # Quote the complete label so a colon in a split component is part of its
+    # name, rather than a delimiter between the variable and its definition.
+    lines = [json.dumps(label(feature), ensure_ascii=False)]
     for key, title in (("description", "Meaning"), ("value_type", "Value type"),
                        ("measurement_definition", "Measurement rule"),
                        ("missing_value_rule", "Missing-value rule"),

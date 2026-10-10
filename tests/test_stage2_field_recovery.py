@@ -202,7 +202,7 @@ def test_serial_invalid_value_and_metadata_recover_prior_state(
     assert len(calls) == 2
     assert result == prior
     failure = json.loads((tmp_path / "extraction_failure.json").read_text())
-    assert "carry_forward_state" in failure["validation_error"]
+    assert "decision_notes" in failure["validation_error"]
     assert not (tmp_path / "invalid_feature_value_repair.json").exists()
     assert not (tmp_path / "pending_category_ontology.json").exists()
 
