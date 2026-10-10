@@ -768,6 +768,13 @@ The same lossless planner handles retrieved context that exceeds an LLM request
 budget. The exact extraction tokenizer must be present locally under the configured
 model ID, either in the managed vLLM download directory or Hugging Face cache.
 
+Serial chunk requests return `values` and `decision_notes`, both keyed by every
+requested clinical variable. A task and output-format reminder follows the record
+section. Compatible endpoints receive a JSON schema for that response; endpoints
+that reject schemas can fall back to JSON-only serving with the same validation
+and thinking controls. Repairs repeat the clinical output contract, and request
+audits record the negotiated response format.
+
 Extraction separates variables whose conflict strategy is `mode` (most frequent
 value) from the other measurements. Only mode variables use observation-by-
 observation extraction with supporting quotations. Other variables return scalar

@@ -1331,6 +1331,8 @@ def _request_validated_extraction(
     messages_for_definitions: Callable[[Sequence[Mapping[str, Any]]], Sequence[Mapping[str, str]]],
     validate_response: Callable[..., dict[str, Any]] | None = None,
     prior_response: Mapping[str, Any] | None = None,
+    response_schema: Callable[[Sequence[Mapping[str, Any]]], dict[str, Any]] | None = None,
+    response_instructions: Callable[[Sequence[Mapping[str, Any]]], str] | None = None,
 ) -> dict[str, Any]:
     """Recover field failures with smaller prompts and category failures by mapping."""
 
@@ -1415,9 +1417,19 @@ def _request_validated_extraction(
             feature_ids=[str(feature.get("feature_id") or feature["name"])
                          for feature in definitions],
         ):
+            validator = validate_candidate
+            if response_schema is not None:
+                validator = _StructuredExtractionValidator(
+                    validate_candidate,
+                    {"type": "json_schema", "json_schema": {
+                        "name": "serial_clinical_measurements", "strict": True,
+                        "schema": response_schema(definitions),
+                    }},
+                    response_instructions(definitions) if response_instructions else "",
+                )
             validated_response = request_json(
                 messages,
-                validate_candidate,
+                validator,
                 request_kind="extraction",
             )
         pending_path.unlink(missing_ok=True)
@@ -1470,6 +1482,7 @@ def _request_validated_extraction(
                     ontology_audit_path=recovery_dir / "category_ontology_repair.json",
                     messages_for_definitions=messages_for_definitions,
                     validate_response=validate_response, prior_response=prior_response,
+                    response_schema=response_schema, response_instructions=response_instructions,
                 )
             else:
                 recovered = {"rows": [{"row_id": int(row_id), "values": {}} for row_id in row_ids]}
@@ -1821,6 +1834,48 @@ def _extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], rows: Sequen
         + "\n\nPatient record\n" + str(rows[0].get("text") or ""))
 
 
+@dataclass(frozen=True)
+class _StructuredExtractionValidator:
+    """Carry a task's wire contract alongside its semantic validator."""
+
+    validate: Callable[[Mapping[str, Any]], dict[str, Any]]
+    response_format: Mapping[str, Any]
+    repair_instructions: str
+
+    def __call__(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return self.validate(value)
+
+
+def _serial_response_schema(definitions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    clinical_prompts.label_map(definitions)
+    labels = [clinical_prompts.label(d) for d in definitions]
+    values = {
+        clinical_prompts.label(d): {"type": ["number", "string", "null"]
+            if d["value_type"] == "continuous" else ["string", "null"]}
+        for d in definitions
+    }
+    notes = {name: {"type": ["string", "null"], "maxLength": MAX_SERIAL_FEATURE_STATE_CHARS}
+             for name in labels}
+    return {"type": "object", "properties": {
+        name: {"type": "object", "properties": properties, "required": labels,
+               "additionalProperties": False}
+        for name, properties in (("values", values), ("decision_notes", notes))
+    }, "required": ["values", "decision_notes"], "additionalProperties": False}
+
+
+def _serial_output_instructions(definitions: Sequence[Mapping[str, Any]]) -> str:
+    example = {key: {clinical_prompts.label(d): None for d in definitions}
+               for key in ("values", "decision_notes")}
+    return (
+        "Update only the listed clinical variables using the record section and prior values. "
+        "Return exactly one JSON object with values and decision_notes, each containing every "
+        "requested variable. Values are supported scalars or null. Decision notes retain the "
+        "date or conflict information needed for the next section, as a short string or null. "
+        "The nulls in this example are format placeholders, not suggested answers:\n"
+        + json.dumps(example, ensure_ascii=False, separators=(",", ":"))
+    )
+
+
 def _serial_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row_id: int,
     chunk_text: str, prior_values: Mapping[str, Any], prior_feature_state: Mapping[str, Any],
     chunk_index: int, char_start: int, char_end: int, document_chars: int) -> list[dict[str, str]]:
@@ -1828,7 +1883,8 @@ def _serial_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row_i
         f"decision note: {clinical_prompts.scalar(prior_feature_state.get(d['name']))}" for d in definitions)
     return clinical_prompts.messages("06_serial_chunk",
         clinical_prompts.definitions_text(_prompt_feature_definitions(definitions))
-        + "\n\nValues found so far\n" + prior + "\n\nNext section of the record\n" + chunk_text)
+        + "\n\nValues found so far\n" + prior + "\n\nNext section of the record\n" + chunk_text
+        + "\n\nEnd of record section.\n" + _serial_output_instructions(definitions))
 
 
 def _page_extraction_prompt_template(*, definitions: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
@@ -2098,6 +2154,9 @@ def _validate_serial_extraction(
 ) -> dict[str, Any]:
     """Validate cumulative values plus bounded policy metadata for the next chunk."""
     if set(value) == {"values", "decision_notes"}:
+        for field in ("values", "decision_notes"):
+            if not isinstance(value[field], Mapping):
+                raise ValueError(f"{field} must be a JSON object keyed by every requested clinical variable")
         value = {"rows": [{"row_id": int(row_id),
             "values": _named_extraction_values(value["values"], definitions),
             "carry_forward_state": _named_extraction_values(value["decision_notes"], definitions)}]}
@@ -2109,14 +2168,17 @@ def _validate_serial_extraction(
     )
     rows = value.get("rows")
     if not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], Mapping):
-        raise ValueError("serial extraction response requires one patient row")
+        raise ValueError(
+            "Return one JSON object with exactly values and decision_notes; "
+            "both must be objects keyed by every requested clinical variable"
+        )
     row = rows[0]
     raw_state = row.get("carry_forward_state")
     if not isinstance(raw_state, Mapping):
-        raise ValueError("serial extraction row requires a carry_forward_state object")
+        raise ValueError("Include decision_notes as an object keyed by every requested clinical variable")
     if set(map(str, raw_state)) != set(feature_names):
         raise ValueError(
-            "serial extraction carry_forward_state must contain every supplied feature exactly"
+            "decision_notes must contain every requested clinical variable exactly once"
         )
     state: dict[str, str | None] = {}
     for name in feature_names:
@@ -3265,6 +3327,8 @@ def _serial_extract_feature_batch(
                 ),
                 prior_response={"rows": [{"row_id": row_id, "values": prior_values,
                     "carry_forward_state": prior_feature_state}]},
+                response_schema=_serial_response_schema,
+                response_instructions=_serial_output_instructions,
             )
             if failure_path.is_file():
                 # A malformed later response must not erase validated state from

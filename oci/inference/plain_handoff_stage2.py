@@ -1022,6 +1022,9 @@ class PlainHandoffStage2Config:
     # A bounded repair may temporarily strengthen the request-level reasoning
     # policy. This override is transport state, not scientific configuration.
     runtime_reasoning_effort: str | None = None
+    # One task's response contract, supplied by its validator. It never enters
+    # discovery/measurement identities or the persisted scientific config.
+    runtime_response_format: Mapping[str, Any] | None = None
     # Absolute monotonic deadline and remaining HTTP-call allowance for one
     # transport-retry turn. These are populated only by the request runner so
     # compatibility negotiation cannot create unbounded hidden attempts.
@@ -1418,6 +1421,7 @@ class PlainHandoffStage2Config:
 
     def public_dict(self) -> dict[str, Any]:
         values = asdict(self)
+        values.pop("runtime_response_format", None)
         values["api_key"] = "<redacted>"
         values["extraction_llm"] = (
             self.extraction_llm.public_dict() if self.extraction_llm is not None else None
@@ -2919,6 +2923,12 @@ def _openai_request_variants(
         name: request_policy[name] for name in ("repetition_penalty", "top_k", "min_p")
         if name in request_policy
     }
+    preferred_format = base_kwargs.get("response_format") or {"type": "json_object"}
+    response_formats = [preferred_format]
+    if preferred_format.get("type") == "json_schema":
+        # External compatible servers can reject JSON schemas. Retain the task
+        # reminder and semantic validator when negotiating JSON-only serving.
+        response_formats.append({"type": "json_object"})
     family_bodies: list[dict[str, Any]] = []
     if model_family in {"qwen3", "gemma4", "lfm2.5"}:
         if model_family == "lfm2.5":
@@ -2951,28 +2961,28 @@ def _openai_request_variants(
         strict = {**dict(base_kwargs), "extra_body": family_bodies[0]}
         if wire_reasoning_effort is not None:
             strict["reasoning_effort"] = wire_reasoning_effort
-        return [{**strict, "response_format": {"type": "json_object"}}, strict]
+        unformatted = {k: v for k, v in strict.items() if k != "response_format"}
+        return [{**strict, "response_format": fmt} for fmt in response_formats] + [unformatted]
 
     variants: list[dict[str, Any]] = []
     seen: set[str] = set()
     reasoning_variants = (True, False) if wire_reasoning_effort is not None else (False,)
     for extra_body in family_bodies:
         for include_reasoning in reasoning_variants:
-            candidate = {
-                **dict(base_kwargs),
-                "response_format": {"type": "json_object"},
-            }
-            if include_reasoning:
-                candidate["reasoning_effort"] = wire_reasoning_effort
-            if extra_body:
-                candidate["extra_body"] = extra_body
-            key = json.dumps(candidate, sort_keys=True, default=str)
-            if key not in seen:
-                seen.add(key)
-                variants.append(candidate)
+            for response_format in response_formats:
+                candidate = {**dict(base_kwargs), "response_format": response_format}
+                if include_reasoning:
+                    candidate["reasoning_effort"] = wire_reasoning_effort
+                if extra_body:
+                    candidate["extra_body"] = extra_body
+                key = json.dumps(candidate, sort_keys=True, default=str)
+                if key not in seen:
+                    seen.add(key)
+                    variants.append(candidate)
     # Last-resort OpenAI-compatible endpoints may support neither structured
     # output nor any reasoning/sampling extension. The prompt still requires JSON.
     bare = dict(base_kwargs)
+    bare.pop("response_format", None)
     key = json.dumps(bare, sort_keys=True, default=str)
     if key not in seen:
         variants.append(bare)
@@ -3051,6 +3061,8 @@ def _openai_completion(
         },
         "max_tokens": request_policy["max_tokens"],
     }
+    if config.runtime_response_format is not None:
+        base_kwargs["response_format"] = dict(config.runtime_response_format)
     prompt_chars = sum(len(str(message.get("content") or "")) for message in messages)
     if prompt_chars > int(config.max_prompt_chars):
         raise ValueError(
@@ -3122,6 +3134,7 @@ def _openai_completion(
             sampling={name: kwargs.get(name, (kwargs.get("extra_body") or {}).get(name))
                       for name in SAMPLING_FIELDS},
             chat_template_kwargs=(kwargs.get("extra_body") or {}).get("chat_template_kwargs"),
+            response_format=(kwargs.get("response_format") or {}).get("type"),
             sampling_provenance=request_policy["sampling_provenance"],
             read_timeout_seconds=min(float(config.request_timeout), remaining),
         )
@@ -3596,7 +3609,7 @@ def _transport_retry_messages(
 
 
 def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None = None, repeated_error_count: int = 1) -> dict[str, str]:
-    del repair_context, repeated_error_count
+    del repeated_error_count
     if isinstance(exc, _Stage2OutputLengthError):
         content = (
             "Your preceding answer ended before the JSON object was complete. "
@@ -3610,6 +3623,9 @@ def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None 
             "Use the task and information above to return the complete corrected JSON object. "
             "Preserve supported values and use null when the definition requires it."
         )
+    instructions = (repair_context or {}).get("response_instructions")
+    if isinstance(instructions, str) and instructions:
+        content += "\n\n" + instructions
     return {"role": "user", "content": content}
 
 
@@ -3699,7 +3715,11 @@ def _request_json(
         config,
         runtime_request_kind=str(request_policy["request_kind"]),
         runtime_reasoning_effort=initial_reasoning_effort,
+        runtime_response_format=getattr(validate, "response_format", None),
     )
+    response_instructions = getattr(validate, "repair_instructions", None)
+    if isinstance(response_instructions, str) and response_instructions:
+        repair_context = {**(repair_context or {}), "response_instructions": response_instructions}
     base_conversation = [dict(message) for message in messages]
     conversation = [dict(message) for message in base_conversation]
     first_error: Exception | None = None
