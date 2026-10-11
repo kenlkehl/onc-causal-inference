@@ -151,6 +151,8 @@ How to decide
 
 Report each distinct value-bearing occurrence once, in the order it appears in the supplied text. Include repeated results on different dates. Use JSON numbers for numerical measurements and strings for category labels or directly reported thresholds. Include a short supporting quotation with each occurrence. Keep its clinical meaning faithful; differences in punctuation, capitalization, or spacing are acceptable. Include a date only when its sentence or heading links it to the finding. Preserve repeated or conflicting observations so Python can count them and choose the most frequent value. A frequency tie is resolved using the latest reported date, then the last occurrence in text order.
 
+If the measurement definition calls for null, omit that occurrence from the observations array. Do not create placeholder observations for missing values, unrelated findings, or mentions that lack the requested attribute. An explicitly documented negative category is a supported value and should be included. Report only occurrences present in this section; stop after the last one without cycling through the record again.
+
 What to return
 
 Return one JSON object with observations, an array. Each observation has feature (an existing clinical variable name), value (a scalar), quote (supporting wording from the record), and governing_date_quote (the linked date, or null). Use {"observations": []} when no observation is supported.""",

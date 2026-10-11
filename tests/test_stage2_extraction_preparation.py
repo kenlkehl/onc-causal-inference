@@ -43,7 +43,8 @@ def test_prepared_page_prompts_preserve_lossless_coverage_and_every_batch_budget
     batches = [[definition(0)], [dict(definition(1), description="Long definition. " * 40)]]
     templates = [analysis._page_extraction_prompt_template(definitions=b) for b in batches]
     tokenizer = CharacterTokenizer()
-    overhead = max(analysis.prompt_token_count(tokenizer, p) for p in templates)
+    overhead = max(analysis.prompt_token_count(tokenizer, analysis._render_page_extraction_prompt(p, ""))
+                   for p in templates)
     budget = overhead + 200
     char_budget = 100_000 if token_limited else budget
     token_budget = budget if token_limited else 100_000
@@ -110,7 +111,7 @@ def test_extraction_starts_before_later_patients_are_planned_and_reuses_checkpoi
 def test_partial_paged_patient_retry_preserves_mode_counts_and_completed_pages(tmp_path, monkeypatch):
     install(monkeypatch)
     feature = definition()
-    prefix = analysis._prompt_chars(analysis._page_extraction_prompt_template(definitions=[feature]))
+    prefix = analysis._prompt_chars(analysis._page_extraction_prompt(definitions=[feature], row={"text": ""}))
     calls = []
 
     def request(messages, validate, *, request_kind):

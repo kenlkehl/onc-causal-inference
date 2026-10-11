@@ -50,6 +50,7 @@ from .plain_handoff_stage2_analysis import (
     _ExtractionCategoryError,
     _ExtractionFieldError,
     _ExtractionValueError,
+    _PageObservationValidationError,
     Stage2RequestExhaustedError,
     Stage2ResponseValidationError,
     infrastructure_failure_audit_paths,
@@ -3628,6 +3629,14 @@ def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None 
             "Numerical category labels may be JSON numbers or quoted strings; "
             "use the declared values and null only as required by the measurement definition."
         )
+    elif isinstance(exc, _PageObservationValidationError):
+        content = (
+            f"Your preceding observation list needs this correction: {exc}. "
+            "Return the complete observations array with each supported, nonmissing "
+            "occurrence and its supporting quote. Preserve valid repeated occurrences. "
+            "Omit null or unavailable placeholders instead of recording them as observations. "
+            'If no supported values occur in the section, return {"observations": []}.'
+        )
     elif isinstance(exc, _Stage2OutputLengthError):
         content = (
             "Your preceding answer ended before the JSON object was complete. "
@@ -3885,12 +3894,13 @@ def _request_json(
                         f"{EXTRACTION_FIELD_REPAIR_LIMIT} repairs: {exc}"
                     ) from error
             if (request_kind == "extraction"
-                    and isinstance(exc, (_ExtractionCategoryError, _ExtractionValueError))
+                    and isinstance(exc, (_ExtractionCategoryError, _ExtractionValueError,
+                                         _PageObservationValidationError))
                     and attempt > int(config.thinking_after_response_repairs)
-                    and repeated_error_count >= 2):
+                    and (repeated_error_count >= 2 or isinstance(exc, _PageObservationValidationError))):
                 # Five non-thinking repairs and one thinking repair have already
                 # been tried under the default policy. Preserve the returned
-                # good fields and let the caller map/review the failing fields,
+                # good fields/observations and let the caller audit the failures,
                 # rather than rereading the whole record for an unchanged error.
                 request_audit.event("extraction_semantic_repair_handoff",
                                     error_type=type(exc).__name__, error=str(exc)[:2000])

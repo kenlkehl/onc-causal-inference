@@ -1928,10 +1928,47 @@ def _page_extraction_prompt_template(*, definitions: Sequence[Mapping[str, Any]]
     return messages
 
 
-def _page_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row: Mapping[str, Any]) -> list[dict[str, str]]:
-    messages = _page_extraction_prompt_template(definitions=definitions)
-    messages[-1]["content"] = (messages[-1]["content"] + str(row.get("text") or "")).strip()
+def _page_output_instructions() -> str:
+    return (
+        "Return exactly one JSON object with an observations array. Each observation has "
+        "exactly feature, value, quote, and governing_date_quote. Copy the complete clinical "
+        "variable name into feature. Use a supported scalar value, a short supporting quote, "
+        "and the linked date quote or null. Include only occurrences that support the requested "
+        "attribute under its measurement definition; do not infer it from other measurements. "
+        "For example, severity alone does not establish symptom frequency. "
+        "Omit missing-value placeholders. Preserve real repeated occurrences, reporting each "
+        "once in source order, and stop after the last supported occurrence. "
+        'Return {"observations": []} if there are none.'
+    )
+
+
+def _page_response_schema(definitions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    properties = _extraction_response_schema(definitions)["properties"]
+    # Leave category normalization to the semantic validator, including numeric
+    # category labels. Null placeholders remain valid JSON and are omitted locally.
+    value_types = sorted({t for schema in properties.values() for t in schema["type"]})
+    observation = {"type": "object", "properties": {
+        "feature": {"type": "string", "enum": list(properties)},
+        "value": {"type": value_types},
+        "quote": {"type": ["string", "null"]},
+        "governing_date_quote": {"type": ["string", "null"]},
+    }, "required": ["feature", "value", "quote", "governing_date_quote"],
+        "additionalProperties": False}
+    return {"type": "object", "properties": {
+        "observations": {"type": "array", "items": observation},
+    }, "required": ["observations"], "additionalProperties": False}
+
+
+def _render_page_extraction_prompt(template: Sequence[Mapping[str, str]], text: str) -> list[dict[str, str]]:
+    messages = [dict(message) for message in template]
+    messages[-1]["content"] = (messages[-1]["content"] + text
+        + "\n\nEnd of record section.\n" + _page_output_instructions()).strip()
     return messages
+
+
+def _page_extraction_prompt(*, definitions: Sequence[Mapping[str, Any]], row: Mapping[str, Any]) -> list[dict[str, str]]:
+    return _render_page_extraction_prompt(
+        _page_extraction_prompt_template(definitions=definitions), str(row.get("text") or ""))
 
 
 def _prompt_chars(messages: Sequence[Mapping[str, str]]) -> int:
@@ -2434,8 +2471,10 @@ def _validate_page_observations(
     page_index = int(page_meta.get("page_index"))
     page_char_start = int(page_meta.get("char_start"))
     definition_by_name = {str(definition["name"]): definition for definition in definitions}
+    labels = clinical_prompts.label_map(definitions)
     normalized: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
+    omitted_missing = 0
 
     for observation_index, raw in enumerate(raw_observations, start=1):
         feature_name = ""
@@ -2445,7 +2484,25 @@ def _validate_page_observations(
             if "feature" in raw:
                 if set(raw) != {"feature", "value", "quote", "governing_date_quote"}:
                     raise ValueError("each observation requires feature, value, quote, and governing_date_quote")
-                feature_name = clinical_prompts.resolve_label(raw["feature"], clinical_prompts.label_map(definitions))
+                feature_name = clinical_prompts.resolve_label(raw["feature"], labels)
+            else:
+                feature_name = str(raw.get("feature_name") or "")
+            if feature_name not in definition_by_name:
+                raise ValueError("feature_name is not one of the supplied features")
+            if "value" not in raw:
+                raise ValueError("observation must include value")
+            scalar_response = _validate_extraction(
+                {"rows": [{"row_id": row_id, "values": {feature_name: raw["value"]}}]},
+                row_ids=[row_id], definitions=[definition_by_name[feature_name]],
+            )
+            scalar = scalar_response["rows"][0]["values"][feature_name]
+            if scalar is None:
+                # A missing-value placeholder is not a value-bearing occurrence
+                # and cannot vote in the mode. Omit it before date/quote parsing;
+                # declared negative categories remain nonmissing after validation.
+                omitted_missing += 1
+                continue
+            if "feature" in raw:
                 date_quote = raw["governing_date_quote"]
                 quote, quote_start, quote_end, _ = _quote_span(text=text, quote=raw["quote"],
                     reported_start=None, reported_end=None, label="observation quote")
@@ -2458,25 +2515,6 @@ def _validate_page_observations(
                        "evidence_start": quote_start, "evidence_end": quote_end,
                        "recorded_at": _canonical_time_evidence(date_quote) if date_quote is not None else None,
                        "recorded_at_evidence": date_quote, "recorded_at_start": date_start, "recorded_at_end": date_end}
-            feature_name = str(raw.get("feature_name") or "")
-            if feature_name not in definition_by_name:
-                raise ValueError("feature_name is not one of the supplied features")
-            scalar_response = _validate_extraction(
-                {
-                    "rows": [
-                        {
-                            "row_id": row_id,
-                            "values": {feature_name: raw.get("value")},
-                        }
-                    ]
-                },
-                row_ids=[row_id],
-                definitions=[definition_by_name[feature_name]],
-            )
-            scalar = scalar_response["rows"][0]["values"][feature_name]
-            if scalar is None:
-                raise ValueError("a page observation must contain a supported nonmissing value")
-
             evidence, evidence_start, evidence_end, evidence_offset_resolution = (
                 _quote_span(
                     text=text,
@@ -2522,12 +2560,13 @@ def _validate_page_observations(
                     "recorded_at evidence and offsets must be null when recorded_at is null"
                 )
 
+            retained_index = len(normalized) + 1
             identity_value = {
                 "row_id": row_id,
                 "feature_name": feature_name,
                 "value": scalar,
                 "page_index": page_index,
-                "observation_index": observation_index,
+                "observation_index": retained_index,
                 "recorded_at": recorded_at,
             }
             normalized.append(
@@ -2541,7 +2580,7 @@ def _validate_page_observations(
                     "source_start": page_char_start + evidence_start if evidence_start is not None else None,
                     "source_end": page_char_start + evidence_end if evidence_end is not None else None,
                     "page_index": page_index,
-                    "observation_index": observation_index,
+                    "observation_index": retained_index,
                     "evidence_status": "model_reported",
                     "recorded_at": recorded_at,
                     "recorded_at_evidence": recorded_at_evidence,
@@ -2583,6 +2622,8 @@ def _validate_page_observations(
             }
         ]
     }
+    if omitted_missing:
+        request_audit.event("page_missing_observations_omitted", count=omitted_missing)
     if issues:
         raise _PageObservationValidationError(issues=issues, response=normalized_response)
     return normalized_response
@@ -2610,10 +2651,14 @@ def _request_validated_page_observations(
         ):
             validated = request_json(
                 messages,
-                lambda candidate: _validate_page_observations(
-                    candidate,
-                    page=page,
-                    definitions=definitions,
+                _StructuredExtractionValidator(
+                    validate=lambda candidate: _validate_page_observations(
+                        candidate, page=page, definitions=definitions),
+                    response_format={"type": "json_schema", "json_schema": {
+                        "name": "stage2_page_observations", "strict": True,
+                        "schema": _page_response_schema(definitions),
+                    }},
+                    repair_instructions=_page_output_instructions(),
                 ),
                 request_kind="extraction",
             )
@@ -2985,8 +3030,8 @@ def _lossless_extraction_pages(
             "an empty Stage 2 row exceeded the prompt budget before note text was added; "
             "increase stage2.extraction_max_prompt_chars or shorten the feature definitions"
         )
-    # The page prompt contains a fixed instruction/definition prefix followed
-    # by the source text. Prepare that prefix once per feature batch, rather
+    # The page prompt contains a fixed instruction/definition prefix, source
+    # text, and output reminder. Prepare each prefix once per feature batch, rather
     # than rebuilding all clinical definitions at every binary-search step.
     if prompt_templates is None:
         prompt_templates = [
@@ -2996,8 +3041,7 @@ def _lossless_extraction_pages(
 
     def fits(text: str) -> bool:
         for template in prompt_templates:
-            messages = [dict(message) for message in template]
-            messages[-1]["content"] = (messages[-1]["content"] + text).strip()
+            messages = _render_page_extraction_prompt(template, text)
             if _prompt_chars(messages) > int(max_prompt_chars):
                 return False
             if tokenizer is not None:
@@ -3635,11 +3679,16 @@ def extract_rows(
         LOGGER.info("Stage 2 extraction routing root=%s scalar_features=%s mode_features=%s quotation_policy=mode_only_advisory",
                     output_dir, len(value_definitions), len(mode_definitions))
         cancelled = threading.Event()
+        request_slots = threading.BoundedSemaphore(max(1, int(workers)))
 
         def split_request(*args, **kwargs):
-            if cancelled.is_set():
-                raise _ExtractionCancelledError("Sibling extraction strategy failed")
-            return request_json(*args, **kwargs)
+            # Both strategies can use the complete pool as work becomes ready.
+            # Preserve the caller's limit even without a global LLM admission
+            # wrapper (e.g. standalone extraction and custom request clients).
+            with request_slots:
+                if cancelled.is_set():
+                    raise _ExtractionCancelledError("Sibling extraction strategy failed")
+                return request_json(*args, **kwargs)
 
         def extract_group(name, group, group_workers):
             return extract_rows(
@@ -3656,12 +3705,10 @@ def extract_rows(
                 context_strategy=context_strategy, colbert=colbert,
             )
 
-        mode_workers = max(1, int(workers) // 8)
-        value_workers = max(1, int(workers) - mode_workers)
         frames = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(2, max(1, int(workers)))) as pool:
-            futures = [pool.submit(extract_group, name, group, n) for name, group, n in (
-                ("values", value_definitions, value_workers), ("mode", mode_definitions, mode_workers))]
+            futures = [pool.submit(extract_group, name, group, max(1, int(workers)))
+                       for name, group in (("values", value_definitions), ("mode", mode_definitions))]
             try:
                 for future in concurrent.futures.as_completed(futures):
                     frames.append(future.result())

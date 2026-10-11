@@ -1376,10 +1376,14 @@ The extraction model's tokenizer must therefore be available locally under its
 configured model ID (the managed vLLM download directory or Hugging Face cache).
 The CLI equivalents begin with `--stage2-extraction-*`.
 Concurrency is controlled by `stage2.extraction_llm.workers`; patient batching
-is not configurable. Only mode-aggregated variables request observation-level
-supporting quotations. Scalar extraction does not require quotations, and quoted
+is not configurable. Scalar and mode extraction share this request limit, and
+either branch can use all available slots as the other finishes. Only mode-aggregated
+variables request observation-level supporting quotations. Scalar extraction does
+not require quotations, and quoted
 spans are not required to match the source text exactly. Occurrences and typed
-values still undergo validation.
+values still undergo validation. Mode extraction omits null placeholders from
+frequency counts while retaining documented negative categories and repeated
+occurrences. Both branches send structured response schemas to compatible endpoints.
 
 An optional `stage2.extraction_note_search.enabled: true` path uses a persistent,
 isolated Python REPL to search the patient's full record and extract each feature

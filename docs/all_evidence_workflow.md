@@ -795,7 +795,9 @@ This also applies to character-budget callers without a tokenizer. A single mode
 variable therefore cannot switch the entire candidate set to observation extraction.
 Mixed sets run under separate `by_strategy/values` and `by_strategy/mode` checkpoint
 trees, with a combined patient matrix and failure summary at the extraction root.
-The two groups share the configured request admission limits.
+The two groups share the configured request admission limits. Either group can
+use the full configured worker pool when the other has no requests ready; no
+fixed fraction of workers is reserved for mode extraction.
 
 The opt-in `extraction_note_search` configuration replaces scalar full-record
 reading with a bounded Python search loop. Each patient/feature batch has an
@@ -824,6 +826,15 @@ mismatches do not trigger repairs. Python records source offsets when it can loc
 the quotation unambiguously, and otherwise leaves them null. Offsets are audit
 metadata, not an acceptance condition. Valid feature names, scalar types, category
 ontologies, nonempty supporting text, and parseable supplied dates remain checked.
+Missing-value placeholders are omitted before quotation/date validation and do
+not vote in the mode. Explicit negative categories and real repeated occurrences
+remain observations. Mode requests carry a JSON response schema on compatible
+endpoints and repeat the output contract after the record and in repair prompts.
+The page planner includes that reminder in its character and token budgets.
+Under the default repair policy, persistent invalid observations receive five
+thinking-off repairs followed by one thinking-on repair; if still invalid, the
+existing issue ledger records the dropped observations and valid ones are retained.
+`thinking_after_response_repairs` controls the thinking-off repair count.
 
 Python counts the reported occurrences and chooses the most frequent value without
 another LLM call. Ties use the latest reported governing date, then the last reported
