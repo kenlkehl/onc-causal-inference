@@ -115,3 +115,36 @@ def test_serial_and_page_split_names_remain_distinct():
         {"feature": k, "value": v, "quote": text, "governing_date_quote": None}
         for k, v in zip(labels, [1500, "unchanged"])]}, page=page, definitions=definitions)
     assert [x["feature_name"] for x in result["rows"][0]["observations"]] == [d["name"] for d in definitions]
+
+
+@pytest.mark.parametrize("kind,categories,number", [
+    ("ordinal", ["0", "1", "2", "3", "4", "5"], 3),
+    ("categorical", ["1", "2", "3"], 2),
+    ("binary", ["0", "1"], 1),
+])
+@pytest.mark.parametrize("serial", [False, True])
+def test_numeric_category_wire_values_pass_schema_and_semantic_validation(kind, categories, number, serial):
+    import jsonschema
+
+    definition = {**components()[0], "value_type": kind, "categories_or_unit": categories}
+    definitions = [definition]
+    key = prompts.label(definition)
+    schema = (analysis._serial_response_schema if serial else analysis._extraction_response_schema)(definitions)
+    for value in [number, str(number), None]:
+        response = {key: value}
+        if serial:
+            response = {"values": response, "decision_notes": {key: None}}
+        jsonschema.validate(response, schema)
+        result = (analysis._validate_serial_extraction(response, row_id=0, definitions=definitions)
+                  if serial else analysis._validate_extraction(response, row_ids=[0], definitions=definitions))
+        assert result["rows"][0]["values"][definition["name"]] == (None if value is None else str(number))
+    # Permitting numeric serialization must not bypass the clinical ontology.
+    response = {key: 999}
+    if serial:
+        response = {"values": response, "decision_notes": {key: None}}
+    jsonschema.validate(response, schema)
+    with pytest.raises(analysis._ExtractionCategoryError):
+        if serial:
+            analysis._validate_serial_extraction(response, row_id=0, definitions=definitions)
+        else:
+            analysis._validate_extraction(response, row_ids=[0], definitions=definitions)

@@ -2516,6 +2516,10 @@ class _Stage2OutputLengthError(ValueError):
     """The server exhausted the available completion length."""
 
 
+class _Stage2OutputWhitespaceError(_Stage2OutputLengthError):
+    """Abort a streamed JSON formatting loop and request a fresh response."""
+
+
 class _Stage2TransportFailure(RuntimeError):
     """Carry the number of real HTTP calls consumed by one completion call."""
 
@@ -3147,6 +3151,7 @@ def _openai_completion(
                     response, deadline=logical_deadline,
                     deadline_error=Stage2RequestExhaustedError,
                     incomplete_error=_RetryableStage2ResponseError,
+                    whitespace_error=_Stage2OutputWhitespaceError,
                 )
             request_audit.event(
                 "http_attempt_completed", provider_request_id=getattr(response, "id", None),
@@ -3158,6 +3163,10 @@ def _openai_completion(
             request_audit.event("http_attempt_failed", error_type=type(exc).__name__,
                                 error=str(exc)[:2000],
                                 duration_seconds=round(time.monotonic() - attempt_started, 3))
+            if isinstance(exc, _Stage2OutputWhitespaceError):
+                # The server responded, but generation made no JSON progress.
+                # Send this through response repair, not network retry/backoff.
+                raise
             if (
                 variant_index == len(variants)
                 or not _openai_optional_parameter_error(exc)
@@ -3612,7 +3621,14 @@ def _transport_retry_messages(
 
 def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None = None, repeated_error_count: int = 1) -> dict[str, str]:
     del repeated_error_count
-    if isinstance(exc, _Stage2OutputLengthError):
+    if isinstance(exc, _Stage2OutputWhitespaceError):
+        content = (
+            f"Your preceding response was interrupted: {exc}. "
+            "Return the complete JSON object without repeated formatting whitespace. "
+            "Numerical category labels may be JSON numbers or quoted strings; "
+            "use the declared values and null only as required by the measurement definition."
+        )
+    elif isinstance(exc, _Stage2OutputLengthError):
         content = (
             "Your preceding answer ended before the JSON object was complete. "
             "Return a complete JSON object using the task and information above. "

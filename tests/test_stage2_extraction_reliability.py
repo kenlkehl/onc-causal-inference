@@ -145,7 +145,8 @@ def collect(stream, deadline=None):
     return audit.collect_stream(
         stream, deadline=deadline or time.monotonic() + 60,
         deadline_error=analysis.Stage2RequestExhaustedError,
-        incomplete_error=workflow._RetryableStage2ResponseError)
+        incomplete_error=workflow._RetryableStage2ResponseError,
+        whitespace_error=workflow._Stage2OutputWhitespaceError)
 
 
 def test_stream_records_reasoning_progress_and_final_usage(tmp_path):
@@ -210,6 +211,56 @@ def test_stream_read_failure_is_retryable_and_preserves_partial_audit(tmp_path):
     assert events(path)[-1]["reasoning_chars"] == len("in flight")
     assert events(path)[-1]["event"] == "stream_failed"
     assert stream.closed
+
+
+def test_stream_aborts_whitespace_loop_across_chunks_and_records_no_patient_text(tmp_path):
+    stream = Stream([chunk('{"grade":'), chunk(' \t\n' * 50), chunk(' \t\n' * 50),
+                     chunk('3}', finish="stop")])
+    path = tmp_path / "events.jsonl"
+    with audit.context(_audit_path=path), pytest.raises(workflow._Stage2OutputWhitespaceError, match="whitespace loop"):
+        collect(stream)
+    assert stream.closed
+    assert events(path)[-1]["event"] == "stream_failed"
+    assert '"grade"' not in path.read_text()
+
+
+def test_stream_preserves_quoted_whitespace_escapes_reasoning_and_normal_formatting():
+    text = json.dumps({"text": 'a"' + ' ' * 300 + '\\' + ' ' * 300, "grade": 3}, indent=2)
+    # Single-character chunks exercise escaped quotes/backslashes at boundaries.
+    stream = Stream([chunk(reasoning=' ' * 500), *[chunk(c) for c in text], chunk(finish="stop")])
+    response = collect(stream)
+    assert response.choices[0].message.content == text
+    assert response.choices[0].message.reasoning_content == ' ' * 500
+
+
+def test_stream_whitespace_failure_uses_error_guided_response_repair_without_transport_retry(monkeypatch):
+    import openai
+    requests = []
+    streams = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.chat = NS(completions=NS(create=self.create))
+
+        def create(self, **kwargs):
+            requests.append(kwargs)
+            stream = Stream([chunk('{"grade":' + ' ' * 300)] if len(requests) == 1
+                            else [chunk('{"grade":3}', finish="stop")])
+            streams.append(stream)
+            return stream
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(openai, "OpenAI", Client)
+    result = workflow._request_json(messages=[{"role": "user", "content": "Extract grade."}],
+        config=config(extraction_stream=True), completion=workflow._openai_completion,
+        validate=dict, request_kind="extraction")
+    assert result == {"grade": 3}
+    assert len(requests) == 2 and all(s.closed for s in streams)
+    assert "whitespace loop" in requests[1]["messages"][-1]["content"]
+    assert "Numerical category labels" in requests[1]["messages"][-1]["content"]
+    assert not any(m["role"] == "assistant" for m in requests[1]["messages"])
 
 
 @pytest.mark.parametrize("finish", ["stop", "length"])

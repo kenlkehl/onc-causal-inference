@@ -220,7 +220,7 @@ def test_feature_slices_and_heldout_path_use_the_selected_method(tmp_path, fake_
     def request(messages, validate, *, request_kind):
         text = messages[-1]["content"]
         definition_text = text.split("Record length:")[0]
-        name = "ecog" if "\necog\n" in definition_text else "age"
+        name = "ecog" if '\n"ecog"\n' in definition_text else "age"
         calls.append(name)
         if "Search cells remaining: 3" in text:
             return validate(python_action())

@@ -1844,8 +1844,12 @@ def _extraction_response_schema(definitions: Sequence[Mapping[str, Any]]) -> dic
     properties = {}
     for feature in definitions:
         value_type = feature.get("value_type", "ambiguous")
-        types = (["number", "string", "null"] if value_type == "continuous"
-                 else ["string", "null"] if value_type in {"binary", "categorical", "ordinal"}
+        # Numeric category labels (e.g. ECOG 3) may arrive as JSON numbers.
+        # The semantic validator still maps them to declared categories and
+        # rejects out-of-ontology values. A string-only grammar can otherwise
+        # trap numeric-score generation in an endless whitespace sequence.
+        types = (["number", "string", "null"]
+                 if value_type in {"continuous", "binary", "categorical", "ordinal"}
                  else ["number", "string", "boolean", "null"])
         properties[clinical_prompts.label(feature)] = {"type": types}
     return {"type": "object", "properties": properties,
@@ -1879,11 +1883,7 @@ class _StructuredExtractionValidator:
 def _serial_response_schema(definitions: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     clinical_prompts.label_map(definitions)
     labels = [clinical_prompts.label(d) for d in definitions]
-    values = {
-        clinical_prompts.label(d): {"type": ["number", "string", "null"]
-            if d["value_type"] == "continuous" else ["string", "null"]}
-        for d in definitions
-    }
+    values = _extraction_response_schema(definitions)["properties"]
     notes = {name: {"type": ["string", "null"], "maxLength": MAX_SERIAL_FEATURE_STATE_CHARS}
              for name in labels}
     return {"type": "object", "properties": {

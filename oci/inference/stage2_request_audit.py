@@ -14,6 +14,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 LOGGER = logging.getLogger(__name__)
+MAX_JSON_WHITESPACE_RUN = 256
 _CONTEXT: ContextVar[dict | None] = ContextVar("stage2_request_audit", default=None)
 
 
@@ -84,7 +85,7 @@ def usage_fields(usage):
             for key in ("prompt_tokens", "completion_tokens", "total_tokens")}
 
 
-def collect_stream(stream, *, deadline, deadline_error, incomplete_error):
+def collect_stream(stream, *, deadline, deadline_error, incomplete_error, whitespace_error=None):
     """Consume final text and reasoning separately; never accept partial output.
 
     The HTTP client enforces read inactivity. A watchdog also closes a silent
@@ -99,6 +100,8 @@ def collect_stream(stream, *, deadline, deadline_error, incomplete_error):
     last_progress = None
     progress_reported = False
     chunk_count = 0
+    in_string = escaped = False
+    whitespace_run = 0
     deadline_reached = threading.Event()
 
     def expire():
@@ -129,6 +132,31 @@ def collect_stream(stream, *, deadline, deadline_error, incomplete_error):
                     raise incomplete_error("Stage 2 streamed text must contain string deltas")
                 content.append(text)
                 reasoning.append(thought)
+                # Stop grammar-constrained generation that emits formatting
+                # forever instead of a value. Track strings/escapes across SSE
+                # chunks so legitimate text and separate reasoning are untouched.
+                if whitespace_error is not None:
+                    for char in text:
+                        if in_string:
+                            if escaped:
+                                escaped = False
+                            elif char == "\\":
+                                escaped = True
+                            elif char == '"':
+                                in_string = False
+                        elif char == '"':
+                            in_string = True
+                            whitespace_run = 0
+                        elif char in " \t\r\n":
+                            whitespace_run += 1
+                            if whitespace_run >= MAX_JSON_WHITESPACE_RUN:
+                                raise whitespace_error(
+                                    "Stage 2 stopped a JSON whitespace loop after "
+                                    f"{MAX_JSON_WHITESPACE_RUN} consecutive formatting "
+                                    "characters outside a string"
+                                )
+                        else:
+                            whitespace_run = 0
                 if text or thought:
                     chunk_count += 1
                     last_progress = time.monotonic()

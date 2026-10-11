@@ -1257,7 +1257,11 @@ allowance such as 4,096 therefore needs a separate, larger reasoning allowance.
 The planner reserves output space within the actual server context window and
 reduces chunk sizes or repair output as needed. Streaming can be enabled with
 `extraction_stream: true`; the checked-in examples enable it. Separate reasoning
-fields and inline reasoning delimiters are supported.
+fields and inline reasoning delimiters are supported. Streaming extraction aborts
+runs of 256 formatting-whitespace characters outside JSON strings and retries
+with explicit error feedback. Quoted text and separate reasoning are preserved.
+Full-record and serial extraction schemas accept numeric category labels as
+numbers or strings; semantic validation still enforces the declared categories.
 
 A logical request, including transport retries and validator-guided repair
 turns, is bounded by `request_timeout` (14400 seconds by default in the core

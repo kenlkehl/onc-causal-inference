@@ -543,7 +543,13 @@ HTTP calls use `request_attempt_timeout` (3600 seconds by default) for transport
 timeouts. With `extraction_stream: true`, this bounds waiting for the next network
 read, so active streaming can continue longer than 3600 seconds, up to the shared
 logical deadline. Streaming is opt-in (false when omitted) for endpoint
-compatibility; the recommended example enables it. Retryable transport failures
+compatibility; the recommended example enables it. Streamed extraction stops
+after 256 consecutive formatting-whitespace characters outside JSON strings;
+this triggers response repair with the concrete error, rather than accepting a
+partial response or retrying it as a network failure. Numeric category labels
+are permitted as JSON numbers or strings in full-record and serial response
+schemas, then normalized and checked against the declared categories.
+Retryable transport failures
 receive at most `transport_max_attempts` (6 by default) per response attempt,
 including compatibility negotiation. A completed response that fails JSON parsing or schema validation receives up
 to `max_response_repairs` validator-guided retries (15 by default). Every retry
