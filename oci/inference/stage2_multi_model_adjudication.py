@@ -8,6 +8,8 @@ an explicit final decision; themes never merge or change its measurements.
 
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Mapping
 from hashlib import sha256
 import json
 import math
@@ -29,6 +31,12 @@ from .stage2_prompt_io import request_review
 
 PROMPT_VERSION = clinical_prompts.PROMPT_VERSION
 SYSTEM_PROMPT = clinical_prompts.SYSTEM_PROMPTS["17_model_roles"]
+# This predecessor has identical evidence, prompts, and accepted normalized
+# responses. Revalidate its completed reviews without repeating successful LLM
+# work when installing the stricter diagnostics and theme recovery below.
+_COMPATIBLE_SOURCE_HASHES = (
+    "505082edb7e50381746a08fcc9c6cca01a206afdb6f79695bf8750c86b4117ac",
+)
 
 
 def _number(value, *, integer=False):
@@ -165,31 +173,73 @@ def _themes_validator(member_ids, evidence_ids, *, maximum, cards=()):
     member_ids, evidence_ids = set(member_ids), set(evidence_ids)
     labels = {clinical_prompts.label(c["definition"]): c["feature_id"] for c in cards}
     by_id = {c["feature_id"]: c for c in cards}
+    if cards and (len(labels) != len(cards) or set(by_id) != member_ids):
+        raise ValueError("theme inputs require distinct clinical labels and complete candidate cards")
+    display = {key: clinical_prompts.label(c["definition"]) for key, c in by_id.items()}
+
+    def names(keys):
+        return json.dumps([display.get(key, key) for key in sorted(keys)], ensure_ascii=False)
+
+    roster = ("Copy each complete variable name exactly once, including all colon-separated "
+        "components. Do not shorten names or combine distinct measurements. "
+        "Required variable names: " + names(member_ids))
 
     def validate(response):
+        if not isinstance(response, Mapping):
+            raise ValueError("theme review requires an object containing themes")
         themes = response.get("themes")
         if not isinstance(themes, list) or not 1 <= len(themes) <= maximum:
             raise ValueError(f"theme review requires 1 through {maximum} themes")
-        cleaned, covered = [], set()
+        cleaned, counts = [], Counter()
         for theme in themes:
+            if not isinstance(theme, Mapping):
+                raise ValueError("each theme must be an object")
             if "members" in theme:
-                members = [clinical_prompts.resolve_label(x, labels) for x in theme["members"]]
+                if not isinstance(theme["members"], list) or not theme["members"]:
+                    raise ValueError("theme members must be a nonempty list of variable names")
+                try:
+                    members = [clinical_prompts.resolve_label(x, labels) for x in theme["members"]]
+                except ValueError as exc:
+                    raise ValueError(f"{exc}. {roster}") from exc
                 cites = [r["evidence_id"] for key in members for r in by_id[key]["modeling_evidence"]]
             else:
                 members, cites = theme.get("member_feature_ids"), theme.get("evidence_ids")
-            if (not isinstance(members, list) or not members or len(set(members)) != len(members)
-                    or not set(members) <= member_ids or covered & set(members)):
-                raise ValueError("each clinical variable must appear in exactly one theme")
-            if not isinstance(cites, list) or not set(cites) <= evidence_ids:
+            if (not isinstance(members, list) or not members
+                    or any(not isinstance(key, str) for key in members)):
+                raise ValueError("theme members must be a nonempty list of variable names")
+            if not set(members) <= member_ids:
+                raise ValueError("unknown clinical variables: " + names(set(members) - member_ids)
+                    + ". " + roster)
+            if (not isinstance(cites, list) or any(not isinstance(key, str) for key in cites)
+                    or not set(cites) <= evidence_ids):
                 raise ValueError("theme provenance contains unknown evidence")
-            covered.update(members)
+            counts.update(members)
             cleaned.append({"name": _text(theme.get("name"), 300), "member_feature_ids": members,
                 "evidence_ids": list(dict.fromkeys(cites)), "interpretation": _text(theme.get("interpretation")),
                 "disagreements": _text(theme.get("disagreements"), empty=True),
                 "evidence_attachment": "Available member evidence attached by Python."})
-        if covered != member_ids:
-            raise ValueError("include every supplied variable in a theme")
+        missing = member_ids - counts.keys()
+        duplicates = {key for key, count in counts.items() if count > 1}
+        if missing or duplicates:
+            raise ValueError("include every supplied variable in exactly one theme; "
+                f"missing variables: {names(missing)}; repeated variables: {names(duplicates)}. " + roster)
         return {"themes": cleaned}
+
+    validate.repair_instructions = roster
+    if cards:
+        validate.response_format = {"type": "json_schema", "json_schema": {
+            "name": "clinical_themes", "strict": True, "schema": {
+                "type": "object", "additionalProperties": False, "required": ["themes"],
+                "properties": {"themes": {"type": "array", "minItems": 1, "maxItems": maximum,
+                    "items": {"type": "object", "additionalProperties": False,
+                        "required": ["name", "members", "interpretation", "disagreements"],
+                        "properties": {
+                            "name": {"type": "string", "minLength": 1, "maxLength": 300},
+                            "members": {"type": "array", "minItems": 1, "maxItems": len(cards),
+                                "items": {"type": "string", "enum": list(labels)}},
+                            "interpretation": {"type": "string", "minLength": 1, "maxLength": 4000},
+                            "disagreements": {"type": "string", "maxLength": 4000},
+                        }}}}}}}
     return validate
 
 
@@ -278,21 +328,71 @@ def adjudicate_multi_model_roles(*, definitions, statistical_report, request_jso
     identity = {"evidence": _fingerprint(evidence), "policy": policy.public_dict(), "prompt": PROMPT_VERSION,
                 "model": statistical_report.get("adjudication_model_identity"),
                 "source_sha256": sha256(Path(__file__).read_bytes()).hexdigest()}
+    compatible_identities = [{**identity, "source_sha256": value} for value in _COMPATIBLE_SOURCE_HASHES]
     _write_json(directory / "evidence.json", evidence)
     cards = evidence["candidates"]
     by_id = {c["feature_id"]: c for c in cards}
-    def request(name, messages, validate):
-        return request_review(directory / name, messages, validate, request_json=request_json,
-                              identity=identity, maximum_chars=maximum_chars)
+    theme_recoveries = {}
+
+    def request(name, messages, validate, *, recover=None, strategy=None):
+        # Only exhausted response validation is recoverable here. Transport,
+        # checkpoint-integrity, and programming errors must still propagate.
+        from .plain_handoff_stage2_analysis import Stage2ResponseValidationError
+        recovery_path = directory / name / "recovery.json"
+        recovery_key = _fingerprint({"messages": messages, "identity": identity})
+        saved = json.loads(recovery_path.read_text()) if recover and recovery_path.exists() else {}
+        if saved.get("input_fingerprint") == recovery_key:
+            theme_recoveries[name] = saved
+            theme_recoveries.update(saved.get("child_recoveries", {}))
+
+        def request_or_recover(messages, validate, **kwargs):
+            record = theme_recoveries.get(name)
+            if record is None:
+                try:
+                    return request_json(messages, validate, **kwargs)
+                except Stage2ResponseValidationError as exc:
+                    if recover is None:
+                        raise
+                    record = {"input_fingerprint": recovery_key, "strategy": strategy,
+                        "error": str(exc), "status": "started"}
+                    _write_json(recovery_path, record)
+            response = validate(recover())
+            record = {**record, "status": "complete", "child_recoveries": {
+                key: value for key, value in theme_recoveries.copy().items()
+                if key.startswith(name + "/")}}
+            _write_json(recovery_path, record)
+            theme_recoveries[name] = record
+            return response
+
+        return request_review(directory / name, messages, validate, request_json=request_or_recover,
+            identity=identity, compatible_identities=compatible_identities, maximum_chars=maximum_chars)
     def theme_messages(batch):
         return clinical_prompts.messages("15_model_themes", clinical_prompts.evidence_input(evidence, batch))
     batches = _bounded_batches(cards, theme_messages, maximum_items=maximum_items, maximum_chars=maximum_chars)
+    def review_theme_batch(name, batch):
+        def recover():
+            if len(batch) == 1:
+                # Grouping provides context, not a role decision. Keep a neutral
+                # singleton and let the subsequent role review assess its evidence.
+                card = batch[0]
+                return {"themes": [{"name": clinical_prompts.label(card["definition"])[:300],
+                    "member_feature_ids": [card["feature_id"]],
+                    "evidence_ids": [r["evidence_id"] for r in card["modeling_evidence"]],
+                    "interpretation": "Theme review was unavailable. Assess this variable using its supplied evidence.",
+                    "disagreements": "No theme-level assessment is available."}]}
+            middle = len(batch) // 2
+            return {"themes": [*review_theme_batch(name + "/split_0", batch[:middle]),
+                *review_theme_batch(name + "/split_1", batch[middle:])]}
+
+        response = request(name, theme_messages(batch),
+            _themes_validator([c["feature_id"] for c in batch],
+                {r["evidence_id"] for c in batch for r in c["modeling_evidence"]}, maximum=len(batch), cards=batch),
+            recover=recover, strategy="split_batch" if len(batch) > 1 else "neutral_singleton")
+        return response["themes"]
+
     def initial_themes(item):
         index, batch = item
-        response = request(f"themes/initial_{index:03d}", theme_messages(batch),
-            _themes_validator([c["feature_id"] for c in batch],
-                {r["evidence_id"] for c in batch for r in c["modeling_evidence"]}, maximum=len(batch), cards=batch))
-        return response["themes"]
+        return review_theme_batch(f"themes/initial_{index:03d}", batch)
     themes = [theme for group in ordered_map(initial_themes, enumerate(batches), workers=workers,
               thread_name="stage2-role-themes") for theme in group]
     # Summarize overlaps when useful. Context limits never force unrelated merges.
@@ -308,7 +408,8 @@ def adjudicate_multi_model_roles(*, definitions, statistical_report, request_jso
             index, batch = item
             if len(batch) == 1:
                 return batch
-            return request(f"themes/merge_{level:03d}_{index:03d}", merge_messages(batch), _merge_validator(batch))["themes"]
+            return request(f"themes/merge_{level:03d}_{index:03d}", merge_messages(batch), _merge_validator(batch),
+                recover=lambda: {"themes": batch}, strategy="retain_unmerged_themes")["themes"]
         reduced = [theme for group in ordered_map(merge, enumerate(batches), workers=workers,
                    thread_name="stage2-role-theme-merge") for theme in group]
         changed = len(reduced) < len(themes)
@@ -335,6 +436,7 @@ def adjudicate_multi_model_roles(*, definitions, statistical_report, request_jso
             feature["selection_source"] = "multi_model_llm_adjudication"
     report = {"schema_version": SCHEMA_VERSION, "prompt_version": PROMPT_VERSION, "status": "complete",
               "evidence_fingerprint": identity["evidence"], "themes": themes, **combined,
+              "theme_recoveries": theme_recoveries,
               "retained_feature_ids": [_feature_id(f) for f in selected]}
     _write_json(directory / "response.json", report)
     _write_json(directory / "complete.json", {"status": "complete", "identity": identity,
