@@ -8,6 +8,7 @@ This validates Stage 2 conditional on the supplied catalog, not upstream discove
 
 from copy import deepcopy
 from hashlib import sha256
+import json
 import logging
 import math
 from pathlib import Path
@@ -26,6 +27,28 @@ from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_VERSION = "stage2_nested_modifier_count_v4_dina"
+_RANKING_REPAIR_PREDECESSOR = "4ea0b9330769f8975385859a9720bdcf699cd85f914c753ce61dd209928166d3"
+
+
+def _compatible_ranking_directories(output_dir, identity):
+    """Only reuse review inputs that differ by the audited response-repair fix.
+
+    Numerical fits keep their independent cache identity. Count/model scoring
+    checkpoints retain the current source fingerprint and are not migrated here.
+    """
+    directories = []
+    for previous_ranking in ranking.COMPATIBLE_SOURCE_HASHES:
+        previous = {**identity, "sources": {**identity["sources"],
+            "stage2_modifier_count.py": _RANKING_REPAIR_PREDECESSOR,
+            "stage2_modifier_ranking.py": previous_ranking}}
+        key = _fingerprint(previous)
+        directory = Path(output_dir) / key[:20]
+        path = directory / "input.json"
+        if path.exists():
+            if json.loads(path.read_text()) != {**previous, "input_fingerprint": key}:
+                raise ValueError("compatible modifier-count review inputs do not match their fingerprint")
+            directories.append(directory)
+    return directories
 
 
 def choose_modifier_count(fold_losses, *, rule):
@@ -316,6 +339,7 @@ def select_modifier_count(
     }
     fingerprint = _fingerprint(identity)
     directory = Path(output_dir) / fingerprint[:20]
+    compatible_ranking_dirs = _compatible_ranking_directories(output_dir, identity)
     _write_json(directory / "input.json", {**identity, "input_fingerprint": fingerprint})
     base_numerical_dir = Path(numerical_checkpoint_dir) / base_fingerprint[:20]
     locked_modifiers = [
@@ -342,6 +366,7 @@ def select_modifier_count(
             statistical_report=report,
             request_json=request_json,
             output_dir=root,
+            compatible_output_dirs=[p / root.relative_to(directory) for p in compatible_ranking_dirs],
             role_policy=role_policy,
             maximum=maximum,
             maximum_chars=policy.multi_model.max_prompt_chars,
