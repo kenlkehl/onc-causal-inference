@@ -10494,6 +10494,11 @@ def run_fold_analysis(
         and statistical_policy.multi_model.modifier_count.enabled
     ):
         selection_input["modifier_count_estimation_trees"] = int(config.estimation_trees)
+        # A completed selection must not bypass a changed ranking criterion.
+        # Numerical evidence has its own independent identity and remains reusable.
+        selection_input["modifier_ranking_source_sha256"] = hashlib.sha256(
+            Path(__file__).with_name("stage2_modifier_ranking.py").read_bytes()
+        ).hexdigest()
     if statistical_policy.selection_mode == "multi_model" and getattr(
         getattr(statistical_policy.multi_model, "matched_batch", None), "enabled", False
     ):

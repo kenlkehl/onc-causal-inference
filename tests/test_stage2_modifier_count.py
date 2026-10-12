@@ -1,7 +1,6 @@
 """Nested ranking, fixed scoring populations, role protection, and resume integrity."""
 
 from dataclasses import replace
-from tests.stage2_prompt_spy import prompt_inputs
 
 import json
 
@@ -16,23 +15,11 @@ from oci.inference.stage2_elastic_net_selection import (
     statistical_selection_config_from_mapping,
 )
 from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
-from tests.test_stage2_multi_model import sample_inputs, role_fixture
+from tests.test_stage2_multi_model import sample_inputs
 
 
-def ranking_request(messages, validate, **kwargs):
-    assert "DO_NOT" not in json.dumps(messages)
-    payload = prompt_inputs(messages)
-    # A deterministic stand-in for an LLM ordering; the numerical fits are real.
-    priority = {"m": 0, "c": 1, "noise": 2, "other": 3}
-    cards = sorted(
-        payload["candidates"],
-        key=lambda c: (priority.get(c["feature_id"], 10), c["feature_id"]),
-    )
-    if payload["task"] == "merge_stage2_modifier_ranking":
-        return validate({"preferred_feature": cards[0]["definition"]["name"].replace("_", " "),
-                         "rationale": "Compare supplied effect evidence."})
-    return validate({"ordered_groups": [{"features": [card["definition"]["name"].replace("_", " ")],
-                                        "rationale": "Compare supplied effect evidence."} for card in cards]})
+def ranking_request(*args, **kwargs):
+    pytest.fail("statistical modifier ranking must not request an LLM")
 
 
 def test_count_rule_and_configuration_keep_legacy_policies_separate():
@@ -107,67 +94,6 @@ def test_count_rule_and_configuration_keep_legacy_policies_separate():
                     "multi_model": {"modifier_count": change},
                 }
             )
-
-
-def test_bounded_ranking_covers_candidates_preserves_locks_and_detects_corruption(
-    tmp_path,
-):
-    definitions, report = role_fixture()
-    policy = Stage2RoleAdjudicationConfig(max_candidates_per_request=2)
-    calls, seen = [], set()
-
-    def request(messages, validate, **kwargs):
-        payload = prompt_inputs(messages)
-        assert len(payload["candidates"]) <= 2
-        seen.update(c["feature_id"] for c in payload["candidates"])
-        calls.append(payload["task"])
-        return ranking_request(messages, validate, **kwargs)
-
-    arguments = dict(
-        definitions=definitions,
-        statistical_report=report,
-        role_policy=policy,
-        maximum=3,
-        maximum_chars=100_000,
-        model_identity="controlled-response",
-        output_dir=tmp_path,
-    )
-    first = ranking.rank_modifier_candidates(**arguments, request_json=request)
-    assert [r["feature_id"] for r in first["ranking"]] == ["f1", "f2", "f3"]
-    assert seen == {f"f{i}" for i in range(1, 7)} and "f0" in first["locked_feature_ids"]
-    assert "merge_stage2_modifier_ranking" in calls
-    resumed = ranking.rank_modifier_candidates(
-        **arguments,
-        request_json=lambda *a, **k: pytest.fail("cached ranking requested again"),
-    )
-    assert resumed == first
-    path = next(p for p in tmp_path.glob("requests/*/response.json") if "ranking" in json.loads(p.read_text()))
-    cached = json.loads(path.read_text())
-    cached["ranking"][0]["rationale"] = "changed"
-    path.write_text(json.dumps(cached))
-    with pytest.raises(ValueError, match="hash does not match"):
-        ranking.rank_modifier_candidates(**arguments, request_json=request)
-
-
-def test_rank_validator_rejects_foreign_evidence_and_invalid_merges():
-    definitions, report = role_fixture()
-    evidence = ranking.build_multi_model_role_evidence(
-        definitions=definitions,
-        statistical_report=report,
-        policy=Stage2RoleAdjudicationConfig(),
-    )
-    cards = evidence["candidates"][1:3]
-    refs = {
-        c["feature_id"]: [r["evidence_id"] for r in c["modeling_evidence"] if r["role"] == "effect"]
-        for c in cards
-    }
-    rows = [{"feature_id": k, "evidence_ids": v, "rationale": "Evidence."} for k, v in refs.items()]
-    validate = ranking._ranking_validator(cards, [["f1", "f2"]])
-    with pytest.raises(ValueError, match="prior order"):
-        validate({"ranking": rows[::-1]})
-    rows[0]["evidence_ids"] = rows[1]["evidence_ids"]
-    with pytest.raises(ValueError, match="own supplied"):
-        validate({"ranking": rows})
 
 
 def test_zero_budget_preserves_confounders_and_exact_investigator_roles():

@@ -1728,8 +1728,14 @@ recurrence counts, and ordering.
 
 Joint modifier-count and final-estimator search is enabled by default in
 `multi_model`. Inside each count-validation training partition, the pipeline
-rebuilds numerical evidence and LLM rankings, including concept review when
-enabled. It compares ranked modifier prefixes across causal forests, penalized
+rebuilds numerical evidence and deterministic statistical rankings, including
+clinical concept review when enabled. Ranking combines individual effect-model
+validation gain, joint DINA permutation importance for binary outcomes, and
+causal-forest permutation importance. Each source uses a within-method positive
+percentile, fold consistency, and evaluation coverage. The final support score is
+`0.5 * max(source scores) + 0.5 * mean(source scores)`; ranking makes no LLM
+requests. See [the ranking criterion](docs/stage2_multi_model.md#statistical-modifier-ranking)
+for missing-data, model-quality, and tie rules. It compares ranked modifier prefixes across causal forests, penalized
 interaction outcome models, and DINA for binary outcomes. All architectures are
 scored on held-out squared R-loss on the same eligible patients; DINA's fitted
 log odds ratios are first converted to risk differences. The default budgets are

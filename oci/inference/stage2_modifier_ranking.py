@@ -1,276 +1,216 @@
-"""Clinical modifier ordering with Python-owned ranks, ties, and merge state."""
-from collections import Counter
-from collections.abc import Mapping
+"""Deterministic fusion of training-only marginal and joint modifier evidence.
+
+Ranking never calls an LLM. Scores describe predictive support, not calibrated
+probabilities or independent statistical replications. Numerical caches remain
+owned by stage2_multi_model_selection; legacy LLM rankings are incompatible.
+"""
+from bisect import bisect_left, bisect_right
+from collections import defaultdict
 from hashlib import sha256
 import json
+import logging
+import math
 from pathlib import Path
+from statistics import median
 
-from . import stage2_clinical_prompts as clinical_prompts
-from .stage2_multi_model_adjudication import build_multi_model_role_evidence, _bounded_batches
-from .stage2_prompt_io import request_review, fingerprint as review_fingerprint
 from .stage2_role_adjudication import _fingerprint, _write_json
 
-RANKING_VERSION = "stage2_modifier_ranking_v2_clinical_pairwise"
-SYSTEM_PROMPT = clinical_prompts.SYSTEM_PROMPTS["18_rank_modifiers"]
-# Completed responses from this version have identical clinical inputs and
-# normalized semantics. They must still pass the current validator and hash check.
-COMPATIBLE_SOURCE_HASHES = (
-    "071710f1d30dc5da2402ecee008a8edffc8e44aa61ed8f6913c6ffc152b51f0d",
-)
+LOGGER = logging.getLogger(__name__)
+RANKING_VERSION = "stage2_modifier_ranking_v3_statistical_fusion"
+SOURCES = {
+    "univariable_rlearner": "individual_effect_gain",
+    "dina": "joint_dina_permutation",
+    "causal_forest": "joint_forest_permutation",
+}
+JOINT_SOURCES = {"dina", "causal_forest"}
+SELECTION_FAMILIES = {"orthogonal_linear", "penalized_interactions"}
 
 
-def _card_labels(cards):
-    labels = {clinical_prompts.label(c["definition"]): c["feature_id"] for c in cards}
-    if (len(labels) != len(cards) or any(not label for label in labels)
-            or len(set(labels.values())) != len(cards)):
-        raise ValueError("ranking inputs require distinct nonempty clinical labels and feature identities")
-    return labels
+def _finite(value):
+    return (not isinstance(value, bool) and isinstance(value, (int, float))
+            and math.isfinite(value))
 
 
-def _resolve(value, labels):
-    try:
-        return clinical_prompts.resolve_label(value, labels)
-    except ValueError as exc:
-        raise ValueError(f"{exc}. Copy a complete supplied name, including all colon-separated "
-            "components. Allowed names: " + json.dumps(list(labels), ensure_ascii=False)) from exc
+def _mean(values):
+    return math.fsum(sorted(values)) / len(values)
 
 
-def _response_format(name, properties):
-    return {"type": "json_schema", "json_schema": {"name": name, "strict": True,
-        "schema": {"type": "object", "additionalProperties": False,
-            "required": list(properties), "properties": properties}}}
-
-
-_RATIONALE_SCHEMA = {"type": "string", "minLength": 1, "maxLength": 4000}
-
-
-def _ranking_validator(cards, ordered_lists=()):
-    by_id = {c["feature_id"]: c for c in cards}
-    labels = _card_labels(cards)
-    display = {key: name for name, key in labels.items()}
-    def names(keys):
-        return json.dumps([display.get(key, key) for key in sorted(keys)], ensure_ascii=False)
-    instructions = ('Return {"ordered_groups": [{"features": ["complete variable name"], '
-        '"rationale": "evidence and uncertainty"}]}. Each group must contain exactly '
-        '"features" (an array, even for one name) and "rationale" (nonempty text). '
-        'Order groups from strongest to weakest evidence; names in one group are tied. '
-        'Include each supplied name exactly once, retaining all colon-separated components. '
-        'Required variable names: ' + json.dumps(list(labels), ensure_ascii=False))
-    def validate(response):
-        if not isinstance(response, Mapping):
-            raise ValueError("modifier ranking requires an object containing ordered_groups")
-        if "ordered_groups" in response:
-            if set(response) != {"ordered_groups"} or not isinstance(response["ordered_groups"], list):
-                raise ValueError("return ordered_groups from strongest to weakest modifier evidence")
-            rows = []
-            for index, group in enumerate(response["ordered_groups"], 1):
-                if (not isinstance(group, Mapping) or set(group) != {"features", "rationale"}
-                        or not isinstance(group["features"], list) or not group["features"]):
-                    raise ValueError(f"ordered group {index} must contain exactly features "
-                        "(a nonempty array of complete variable names) and rationale (nonempty text). "
-                        + instructions)
-                keys = [_resolve(x, labels) for x in group["features"]]
-                keys.sort(key=lambda key: (clinical_prompts.label(by_id[key]["definition"]).casefold(), key))
-                rows.extend({"feature_id": key, "rationale": group["rationale"]} for key in keys)
-        else:
-            rows = response.get("ranking")
-        if not isinstance(rows, list) or any(not isinstance(r, dict) for r in rows):
-            raise ValueError("modifier ranking requires an ordered set of clinical variables")
-        ids = [r.get("feature_id") for r in rows]
-        if any(not isinstance(k, str) for k in ids):
-            raise ValueError("ranking entries require clinical variable identities")
-        counts = Counter(ids)
-        missing, unknown = set(by_id) - counts.keys(), counts.keys() - set(by_id)
-        duplicates = {key for key, count in counts.items() if count > 1}
-        if missing or unknown or duplicates:
-            raise ValueError("include every supplied clinical variable exactly once; "
-                f"missing variables: {names(missing)}; repeated variables: {names(duplicates)}; "
-                f"unknown variables: {names(unknown)}. " + instructions)
-        for group in ordered_lists:
-            if [key for key in ids if key in set(group)] != list(group):
-                raise ValueError("internal ranking merge changed the prior order; preserve this sequence: " + names_in_order(group, display))
-        cleaned = []
-        for row in rows:
-            reason, key = row.get("rationale"), row["feature_id"]
-            if not isinstance(reason, str) or not reason.strip() or len(reason) > 4000:
-                raise ValueError(f"rationale for {display[key]!r} must be nonempty text of at most 4000 characters")
-            available = {r["evidence_id"] for r in by_id[key]["modeling_evidence"] if r["role"] == "effect"}
-            if "evidence_ids" in row and (not isinstance(row["evidence_ids"], list)
-                    or any(not isinstance(x, str) for x in row["evidence_ids"])
-                    or not set(row["evidence_ids"]) <= available):
-                raise ValueError("ranking provenance must use its own supplied effect evidence")
-            cleaned.append({"feature_id": key, "rationale": reason.strip(),
-                "evidence_ids": [r["evidence_id"] for r in by_id[key]["modeling_evidence"] if r["role"] == "effect"],
-                "evidence_attachment": "Available effect evidence attached by Python."})
-        return {"ranking": cleaned}
-    validate.repair_instructions = instructions
-    if cards:
-        validate.response_format = _response_format("modifier_ranking", {
-            "ordered_groups": {"type": "array", "minItems": 1, "maxItems": len(cards),
-                "items": {"type": "object", "additionalProperties": False,
-                    "required": ["features", "rationale"], "properties": {
-                        "features": {"type": "array", "minItems": 1, "maxItems": len(cards),
-                            "items": {"type": "string", "enum": list(labels)}},
-                        "rationale": _RATIONALE_SCHEMA}}}})
-    return validate
-
-
-def names_in_order(keys, display):
-    return json.dumps([display.get(key, key) for key in keys], ensure_ascii=False)
-
-
-def _pair_validator(cards):
-    labels = _card_labels(cards)
-    if len(cards) != 2:
-        raise ValueError("a modifier comparison requires exactly two clinical variables")
-    def validate(response):
-        if not isinstance(response, Mapping):
-            raise ValueError("return an object with preferred_feature and rationale")
-        reason = response.get("rationale")
-        if not isinstance(reason, str) or not reason.strip() or len(reason) > 4000:
-            raise ValueError("explain the modifier comparison and uncertainty")
-        if "preferred_feature_id" in response:
-            key = response["preferred_feature_id"]
-        else:
-            if set(response) != {"preferred_feature", "rationale"}:
-                raise ValueError("return preferred_feature and rationale")
-            key = None if response["preferred_feature"] is None else _resolve(response["preferred_feature"], labels)
-        if key is not None and (not isinstance(key, str) or key not in labels.values()):
-            raise ValueError("choose one of the two supplied variables, or null for a tie")
-        return {"preferred_feature_id": key, "rationale": reason.strip()}
-    validate.repair_instructions = ('Return exactly preferred_feature and rationale. '
-        'preferred_feature must be one of these complete names, or null only when the evidence '
-        'supports a tie: ' + json.dumps(list(labels), ensure_ascii=False) + '. '
-        'rationale must explain the comparison and uncertainty in 1 through 4000 characters.')
-    validate.response_format = _response_format("modifier_comparison", {
-        "preferred_feature": {"type": ["string", "null"], "enum": [*labels, None]},
-        "rationale": _RATIONALE_SCHEMA})
-    return validate
-
-
-def rank_modifier_candidates(*, definitions, statistical_report, request_json, output_dir,
-    role_policy, maximum, maximum_chars, model_identity, compatible_output_dirs=()):
-    evidence = build_multi_model_role_evidence(definitions=definitions, statistical_report=statistical_report, policy=role_policy)
-    locked = {str(f["feature_id"]) for f in definitions if f.get("configured_explicit_feature") is True}
-    cards = [c for c in evidence["candidates"] if c["feature_id"] not in locked]
-    by_id = {c["feature_id"]: c for c in cards}
-    directory = Path(output_dir)
-    identity = {"version": RANKING_VERSION, "prompt_version": clinical_prompts.PROMPT_VERSION,
-        "evidence": _fingerprint(evidence), "model": model_identity, "role_policy": role_policy.public_dict(),
-        "source_sha256": sha256(Path(__file__).read_bytes()).hexdigest()}
-    compatible_identities = [{**identity, "source_sha256": value} for value in COMPATIBLE_SOURCE_HASHES]
-    def messages(batch, slug="18_rank_modifiers"):
-        return clinical_prompts.messages(slug, clinical_prompts.evidence_input(evidence, batch))
-    requests, recoveries = 0, {}
-    def request(batch, *, pair=False, allow_split=True):
-        nonlocal requests
-        from .plain_handoff_stage2_analysis import Stage2ResponseValidationError
-        rendered = messages(batch, "19_merge_rankings" if pair else "18_rank_modifiers")
-        if not allow_split:
-            # A distinct prompt/cache key prevents a failed two-item batch from
-            # recursively re-entering itself through its pairwise merge fallback.
-            rendered[-1] = {**rendered[-1], "content": rendered[-1]["content"]
-                + "\n\nCompare these two variables using ordered_groups: one group with both "
-                "names for a supported tie, or two single-name groups in preferred order. "
-                "Each features field must be an array; provide a rationale for each group."}
-        key = _fingerprint({"identity": identity, "messages": rendered})
-        requests += 1
-        destination = directory / "requests" / key[:20]
-        # The parent count directory is source-versioned too. Reuse only exact
-        # prompts/evidence from explicitly compatible predecessors; never scan
-        # arbitrary runs or trust a response solely because its path matches.
-        for root in (directory, *map(Path, compatible_output_dirs)):
-            for previous in (identity, *compatible_identities):
-                old_key = _fingerprint({"identity": previous, "messages": rendered})
-                candidate = root / "requests" / old_key[:20]
-                marker = candidate / "complete.json"
-                if marker.exists() and (candidate / "response.json").exists():
-                    expected = review_fingerprint({"messages": rendered, "identity": previous,
-                        "version": clinical_prompts.PROMPT_VERSION})
-                    if json.loads(marker.read_text()).get("input_fingerprint") == expected:
-                        destination = candidate
-                        break
-            else:
+def _inputs(definitions, report):
+    ids = [f["feature_id"] for f in definitions]
+    if any(not isinstance(k, str) or not k for k in ids) or len(set(ids)) != len(ids):
+        raise ValueError("ranking requires unique nonempty feature identities")
+    cells = report.get("cells")
+    if not isinstance(cells, list) or (ids and not cells):
+        raise ValueError("statistical ranking requires raw numerical cells, not LLM summaries")
+    families = report.get("model_families", sorted({c["family"] for c in cells}))
+    sources = [family for family in SOURCES if family in families]
+    if ids and not sources:
+        raise ValueError("statistical ranking requires a configured predictive effect source")
+    folds = sorted({c["inner_fold"] for c in cells})
+    repeats = report.get("policy", {}).get("multi_model", {}).get("repeats")
+    if repeats is None:
+        repeats = 1 + max((c["repeat"] for c in cells), default=0)
+    if type(repeats) is not int or repeats < 1:
+        raise ValueError("ranking requires a positive planned repeat count")
+    known = set(ids)
+    rows, seen = [], set()
+    for cell in cells:
+        family, fold, repeat = cell["family"], cell["inner_fold"], cell["repeat"]
+        if family not in {*sources, *SELECTION_FAMILIES, "univariable"}:
+            continue
+        if type(repeat) is not int or not 0 <= repeat < repeats:
+            raise ValueError("numerical repeat is outside the planned ranking schedule")
+        for row in cell["records"]:
+            key = row["feature_id"]
+            if key not in known or row["role"] != "effect":
                 continue
-            break
-        recovery_path = directory / "requests" / key[:20] / "recovery.json"
-        saved = json.loads(recovery_path.read_text()) if recovery_path.exists() else {}
-        if saved.get("input_fingerprint") == key:
-            recoveries[key] = saved
-            recoveries.update(saved.get("child_recoveries", {}))
-        used_recovery = False
+            slot = (key, family, fold, repeat)
+            if slot in seen:
+                raise ValueError("duplicate feature exposure in a ranking fold/repeat")
+            seen.add(slot)
+            rows.append({"feature_id": key, "family": family, "fold": fold,
+                "repeat": repeat, **{name: row.get(name) for name in
+                    ("status", "score", "model_gain", "selected", "q_value")}})
+    rows.sort(key=lambda r: (r["feature_id"], r["family"], r["fold"], r["repeat"]))
+    return sources, folds, repeats, rows
 
-        def recover_request(messages, validate, **kwargs):
-            nonlocal used_recovery
-            if not allow_split:
-                return request_json(messages, validate, **kwargs)
-            record = recoveries.get(key)
-            if record is None:
-                try:
-                    return request_json(messages, validate, **kwargs)
-                except Stage2ResponseValidationError as exc:
-                    if not allow_split:
-                        raise
-                    record = {"input_fingerprint": key, "status": "started", "error": str(exc),
-                        "strategy": "alternate_pair_format" if pair else "split_batch",
-                        "candidate_ids": [c["feature_id"] for c in batch]}
-                    _write_json(recovery_path, record)
-            used_recovery = True
-            before = requests
-            if pair:
-                # A second response format still requires an actual clinical
-                # comparison. If it also fails, propagate the error, not a tie.
-                ordered = request(batch, allow_split=False)["ranking"]
-                response = {"preferred_feature_id": ordered[0]["feature_id"],
-                    "rationale": ordered[0]["rationale"]}
-            elif len(batch) == 1:
-                response = {"ranking": [{"feature_id": batch[0]["feature_id"],
-                    "rationale": "Only candidate in this sub-batch; relative placement is determined by subsequent clinical comparisons."}]}
-                record = {**record, "strategy": "single_candidate"}
-            else:
-                middle = len(batch) // 2
-                left = request(batch[:middle])["ranking"]
-                right = request(batch[middle:])["ranking"]
-                response = {"ranking": merge(left, right, limit=len(batch))}
-            response = validate(response)
-            record = {**record, "status": "complete", "additional_requests": requests - before,
-                "child_recoveries": {k: v for k, v in recoveries.items() if k not in before_recoveries}}
-            _write_json(recovery_path, record)
-            recoveries[key] = record
-            return response
 
-        before_recoveries = set(recoveries)
-        response = request_review(destination, rendered,
-            _pair_validator(batch) if pair else _ranking_validator(batch),
-            request_json=recover_request, identity=identity, maximum_chars=maximum_chars,
-            compatible_identities=compatible_identities)
-        if not used_recovery and key in recoveries:
-            requests += recoveries[key].get("additional_requests", 0)
-        return response
-    batches = _bounded_batches(cards, messages, maximum_items=max(2, role_policy.max_candidates_per_request), maximum_chars=maximum_chars)
-    def merge(left, right, *, limit):
-        result, a, b = [], 0, 0
-        while a < len(left) and b < len(right) and len(result) < limit:
-            keys = [left[a]["feature_id"], right[b]["feature_id"]]
-            comparison = request([by_id[key] for key in keys], pair=True)
-            key = comparison["preferred_feature_id"]
-            if key is None:
-                key = min(keys, key=lambda k: (clinical_prompts.label(by_id[k]["definition"]).casefold(), k))
-            if key == keys[0]:
-                result.append(left[a]); a += 1
-            else:
-                result.append(right[b]); b += 1
-        return (result + left[a:] + right[b:])[:limit]
-    lists = [request(batch)["ranking"][:maximum] for batch in batches]
-    while len(lists) > 1:
-        lists = [merge(lists[i], lists[i + 1], limit=maximum) if i + 1 < len(lists) else lists[i] for i in range(0, len(lists), 2)]
-    ranking = lists[0] if lists else []
-    if len(ranking) != min(maximum, len(cards)):
-        raise RuntimeError("ranking merge omitted clinical variables")
-    result = {"schema_version": RANKING_VERSION, "ranking": ranking, "reviewed_candidate_ids": list(by_id),
-              "locked_feature_ids": sorted(locked), "identity": identity, "maximum": maximum,
-              "comparisons_and_batch_requests": requests,
-              **({"validation_recoveries": recoveries} if recoveries else {}),
-              "tie_policy": "clinical_name_then_internal_identity", "merge_policy": "pairwise_leading_candidates"}
-    _write_json(directory / "ranking.json", result)
+def _component(rows, folds, repeats, *, joint):
+    observed, raw, gated = defaultdict(list), defaultdict(list), 0
+    for row in rows:
+        score, model_gain = row["score"], row["model_gain"]
+        if row["status"] != "ok" or not _finite(score) or (joint and not _finite(model_gain)):
+            continue
+        raw[row["fold"]].append(float(score))
+        # A nonpredictive joint model cannot supply positive feature support.
+        # Preserve negative permutation evidence in the fold summary.
+        qualified = float(score)
+        if joint and model_gain <= 0:
+            qualified = min(qualified, 0.0)
+            gated += 1
+        observed[row["fold"]].append(qualified)
+    fold_rows = [{"inner_fold": fold, "planned": repeats,
+        "evaluated": len(observed[fold]),
+        "raw_mean_gain": _mean(raw[fold]) if raw[fold] else None,
+        "qualified_mean_gain": _mean(observed[fold]) if observed[fold] else None}
+        for fold in folds]
+    gains = [r["qualified_mean_gain"] for r in fold_rows if r["evaluated"]]
+    evaluated = sum(r["evaluated"] for r in fold_rows)
+    planned = len(folds) * repeats
+    return {"status": "evaluated" if evaluated else "missing",
+        "median_fold_gain": median(gains) if gains else None,
+        "fold_consistency": sum(g > 0 for g in gains) / len(gains) if gains else 0.0,
+        "evaluation_coverage": evaluated / planned if planned else 0.0,
+        "evaluated": evaluated, "planned": planned,
+        "nonpredictive_joint_model_fits": gated, "folds": fold_rows}
+
+
+def _selection_stability(rows):
+    grouped = defaultdict(lambda: defaultdict(list))
+    for row in rows:
+        if (row["family"] in SELECTION_FAMILIES and row["status"] == "ok"
+                and type(row["selected"]) is bool):
+            grouped[row["family"]][row["fold"]].append(float(row["selected"]))
+    values = [_mean([_mean(repeats) for repeats in folds.values()])
+              for folds in grouped.values()]
+    return _mean(values) if values else 0.0
+
+
+def _compute(definitions, report, maximum, sources, folds, repeats, rows, identity):
+    locked = {f["feature_id"] for f in definitions if f.get("configured_explicit_feature") is True}
+    ids = sorted(f["feature_id"] for f in definitions if f["feature_id"] not in locked)
+    by_key = defaultdict(list)
+    for row in rows:
+        by_key[row["feature_id"]].append(row)
+    candidates = {}
+    for key in ids:
+        component = {family: _component([r for r in by_key[key] if r["family"] == family],
+            folds, repeats, joint=family in JOINT_SOURCES) for family in sources}
+        qs = [r["q_value"] for r in by_key[key] if r["family"] == "univariable"
+              and r["status"] == "ok" and _finite(r["q_value"])]
+        candidates[key] = {"feature_id": key, "components": component,
+            "joint_selection_stability": _selection_stability(by_key[key]),
+            "median_interaction_q": median(qs) if qs else None,
+            "diagnostic_evidence": report.get("multi_model_evidence", {}).get(key, [])}
+    for family in sources:
+        positive = sorted(c["components"][family]["median_fold_gain"] for c in candidates.values()
+            if c["components"][family]["median_fold_gain"] is not None
+            and c["components"][family]["median_fold_gain"] > 0)
+        for candidate in candidates.values():
+            component = candidate["components"][family]
+            gain = component["median_fold_gain"]
+            percentile = ((bisect_left(positive, gain) + bisect_right(positive, gain))
+                          / (2 * len(positive))) if positive and gain is not None and gain > 0 else 0.0
+            component["positive_percentile"] = percentile
+            component["support_score"] = (percentile * component["fold_consistency"]
+                                            * component["evaluation_coverage"])
+    tied = defaultdict(list)
+    for key, candidate in candidates.items():
+        scores = [c["support_score"] for c in candidate["components"].values()]
+        score = 0.5 * max(scores) + 0.5 * _mean(scores)
+        candidate["score"] = score
+        candidate["evidence_ids"] = [f"multi:{key}:{family}:effect" for family in sources
+                                     if candidate["components"][family]["evaluated"]]
+        candidate["rationale"] = (f"Statistical support score {score:.6g}; " + "; ".join(
+            f"{SOURCES[f]}={c['support_score']:.6g} ({c['evaluated']}/{c['planned']} fits)"
+            for f, c in candidate["components"].items())
+            + ". Scores combine within-method percentile, fold consistency, and coverage; they are not significance probabilities.")
+        tied[(score, candidate["joint_selection_stability"])].append(candidate)
+    ordered = []
+    for group_key in sorted(tied, reverse=True):
+        group = tied[group_key]
+        # Applying a q-value only pairwise when both are present could create
+        # nontransitive comparisons. Use it only for a fully comparable tie group.
+        comparable = all(c["median_interaction_q"] is not None for c in group)
+        ordered.extend(sorted(group, key=lambda c:
+            ((c["median_interaction_q"] if comparable else 0.0), c["feature_id"])))
+    for rank, candidate in enumerate(ordered, 1):
+        candidate["rank"] = rank
+    ranking = [{name: c[name] for name in ("feature_id", "rank", "score", "rationale", "evidence_ids")}
+               for c in ordered[:maximum]]
+    return {"schema_version": RANKING_VERSION, "method": "statistical_evidence_fusion",
+        "identity": identity, "ranking": ranking, "candidate_scores": ordered,
+        "reviewed_candidate_ids": ids, "locked_feature_ids": sorted(locked), "maximum": maximum,
+        "comparisons_and_batch_requests": 0,
+        "criterion": {"sources": {f: SOURCES[f] for f in sources},
+            "aggregation": "mean_repeats_within_fold_then_median_folds",
+            "percentile": "midrank_among_strictly_positive_medians_within_source",
+            "component": "positive_percentile * fold_consistency * evaluation_coverage",
+            "combination": "0.5 * max(components) + 0.5 * mean(components)",
+            "joint_model_gate": "positive_support_requires_model_gain_above_zero",
+            "missing": "zero_demonstrated_support_with_explicit_missing_status_no_reweighting",
+            "tie_policy": "joint_selection_stability_then_comparable_interaction_q_then_feature_id",
+            "formal_error_guarantee": False}}
+
+
+def rank_modifier_candidates(*, definitions, statistical_report, output_dir, maximum,
+    request_json=None, role_policy=None, maximum_chars=None, model_identity=None,
+    compatible_output_dirs=()):
+    """Rank numerical cells; LLM arguments are accepted for caller compatibility only."""
+    if type(maximum) is not int or maximum < 0:
+        raise ValueError("ranking maximum must be a nonnegative integer")
+    sources, folds, repeats, rows = _inputs(definitions, statistical_report)
+    identity = {"version": RANKING_VERSION, "maximum": maximum,
+        "numerical_input_fingerprint": statistical_report.get("input_fingerprint"),
+        "definitions": _fingerprint(sorted(definitions, key=lambda f: f["feature_id"])),
+        "evidence": _fingerprint({"sources": sources, "folds": folds, "repeats": repeats,
+            "rows": rows, "diagnostics": statistical_report.get("multi_model_evidence", {})}),
+        "source_sha256": sha256(Path(__file__).read_bytes()).hexdigest()}
+    directory = Path(output_dir)
+    path, marker = directory / "ranking.json", directory / "complete.json"
+    if marker.exists():
+        saved = json.loads(marker.read_text())
+        if saved.get("input_fingerprint") == _fingerprint(identity):
+            if not path.exists():
+                raise ValueError("corrupt statistical ranking checkpoint: missing ranking")
+            cached = json.loads(path.read_text())
+            if (saved.get("result_sha256") != _fingerprint(cached)
+                    or cached.get("identity") != identity):
+                raise ValueError("corrupt statistical ranking checkpoint: hash does not match")
+            return cached
+    result = _compute(definitions, statistical_report, maximum, sources, folds, repeats, rows, identity)
+    _write_json(path, result)
+    _write_json(marker, {"input_fingerprint": _fingerprint(identity), "result_sha256": _fingerprint(result)})
+    LOGGER.info("Stage 2 statistical modifier ranking: %s candidates, %s sources, %s retained; zero LLM requests",
+                len(result["candidate_scores"]), len(sources), len(result["ranking"]))
     return result

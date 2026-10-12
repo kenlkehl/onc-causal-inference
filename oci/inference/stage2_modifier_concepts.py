@@ -92,7 +92,8 @@ def infer_modifier_concepts(*, definitions, statistical_report, request_json, ou
     rankings = []
     for fold in sorted({int(c["inner_fold"]) for c in cells}):
         fold_cells = [c for c in cells if int(c["inner_fold"]) == fold]
-        fold_report = {"policy": statistical_report["policy"],
+        fold_report = {"policy": statistical_report["policy"], "cells": fold_cells,
+            "model_families": statistical_report.get("model_families", sorted({c["family"] for c in cells})),
             "study_context": clinical_prompts.study_context(statistical_report),
             "multi_model_evidence": aggregate_evidence(fold_cells, ids)}
         ranked = rank_modifier_candidates(definitions=definitions, statistical_report=fold_report,
@@ -115,7 +116,8 @@ def infer_modifier_concepts(*, definitions, statistical_report, request_json, ou
     # A concept can propose uncertain representatives for validation. No new
     # measurements or rollups are constructed, and confounder roles are untouched.
     reduced = [f for f in definitions if str(f["feature_id"]) in representatives]
-    reduced_report = {"policy": statistical_report["policy"],
+    reduced_report = {"policy": statistical_report["policy"], "cells": cells,
+        "model_families": statistical_report.get("model_families", sorted({c["family"] for c in cells})),
         "study_context": clinical_prompts.study_context(statistical_report),
         "multi_model_evidence": {key: statistical_report["multi_model_evidence"][key] for key in representatives}}
     ordered = rank_modifier_candidates(definitions=reduced, statistical_report=reduced_report,

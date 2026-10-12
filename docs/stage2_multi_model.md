@@ -222,14 +222,15 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
    varying probability differences through its nuisance offset.
 5. Preserve the original inner folds. **Inside each fold's training portion**,
    create subfolds with `internal_cv_folds`, rerun every enabled evidence family,
-   and obtain a fresh LLM modifier ranking. Every other patient's label is masked
+   and obtain a fresh deterministic statistical modifier ranking. Every other patient's label is masked
    before the nested evidence worker runs. Neither validation outcomes nor a
    global outcome-informed ranking enter these training fits.
-6. The LLM considers every unlocked candidate, even those without a provisional
-   modifier role. Bounded requests sort batches and merge ordered windows using
-   prompt-safe aggregate evidence. Every candidate is accounted for; rankings
-   require candidate-specific effect citations. This remains a heuristic ordering,
-   not an exhaustive subset search or another measurement-consolidation pass.
+6. Statistical ranking considers every unlocked candidate, even those without a
+   provisional modifier role. It combines individual and joint-model evidence
+   using the [criterion below](#statistical-modifier-ranking). Every candidate
+   receives a recorded score and evidence provenance. It makes no LLM requests.
+   This is a heuristic ordering, not an exhaustive subset search or a
+   measurement-consolidation pass.
 7. Reuse the parent numerical pass's **fixed all-candidate elastic-net nuisances**.
    Training residuals are cross-fitted; validation residuals use models fitted
    only on that fold's training patients. Scoring residuals and overlap-eligible
@@ -371,7 +372,7 @@ repetitions, each forest family fits `5 × (1 + 2 × ceil(352/32)) = 115` subset
 forests are separate: 230 predictive forests plus 115 causal forests, alongside
 linear models and univariable tests. With the default three nested evidence
 folds, count selection adds five training-only evidence runs of three folds each,
-their LLM rankings, one final full-training ranking, and up to
+their statistical rankings, one final full-training ranking, and up to
 `5 × 8 budgets × 3 seeds = 120` forest-validation fits (zero-budget constant
 models do not need a forest), plus `5 × 8 = 40` interaction models with nested
 penalty tuning. The nested numerical work is substantially more
@@ -402,3 +403,59 @@ expensive than reusing a global ranking.
 Method references: [EconML causal forest](https://www.pywhy.org/EconML/_autosummary/econml.grf.CausalForest.html)
 and [GRF variable importance](https://grf-labs.github.io/grf/reference/variable_importance.html).
 Count-selection objective: [EconML RScorer](https://www.pywhy.org/EconML/_autosummary/econml.score.RScorer.html).
+
+
+## Statistical modifier ranking
+
+The default ranking uses the saved numerical cells, not aggregate prose or an
+LLM comparator. It replaces both initial LLM batch sorting and pairwise merges.
+The three primary sources for binary outcomes are candidate DINA validation
+likelihood gain, grouped joint DINA permutation likelihood-loss increase, and
+causal-forest permutation R-loss increase. For continuous outcomes, candidate
+R-loss gain and forest permutation R-loss increase supply the two sources; a
+globally disabled source is omitted. A configured but failed source remains in
+the denominator. All encoded levels and missingness indicators stay with their
+feature group.
+
+Within each source, average repeats inside each evidence fold, then take the
+median across folds. Positive medians receive their midrank percentile among
+strictly positive candidate medians in that source; nonpositive medians receive
+zero support. Multiply that percentile by the fraction of evaluable folds with
+positive average evidence and by successful fits / planned fits. The planned
+schedule includes missing cells. Repeated fits are dependent stability checks,
+not independent replications or confidence intervals.
+
+A joint-model fit supplies positive feature support only if its own held-out
+loss improves over its constant-effect baseline. Otherwise cap its feature gain
+at zero before aggregation, retaining any negative gain. Missing model-quality
+information makes that exposure unavailable. Both raw and qualified fold means
+are recorded. A missing source contributes zero demonstrated support with an
+explicit missing status; other weights are not increased to compensate.
+
+The final score is `0.5 * max(source scores) + 0.5 * mean(source scores)`.
+This proposed heuristic gives variables a route through one strong method while
+rewarding agreement, without mixing loss units. It is not a calibrated
+probability or a formal error guarantee. Exact ties prefer average within-fold
+regularized interaction/group selection stability, with equal weight per
+available selection family. Next use median adjusted univariable interaction
+q-value only when every candidate in that tie group has one; otherwise use the
+stable feature ID. Q-values never gate entry. Main-effect prediction, raw
+coefficient magnitudes, and forest split importance remain diagnostic evidence.
+
+`ranking.json` includes all candidate component scores, raw fold summaries,
+evaluation coverage, provenance, missing results, and generated explanations.
+Only its top requested prefix is passed to count/architecture selection. Locks
+remain outside that additional budget. No measurements are merged or deleted.
+Correlation can dilute permutation importance, and a static ranking does not
+estimate incremental value conditional on the chosen prefix. Final count and
+architecture selection still uses the same held-out probability/outcome-scale
+R-loss and includes the zero-additional-modifier option.
+
+Statistical ranking checkpoints are versioned by the numerical evidence,
+definitions, criterion source, and requested maximum. LLM ranking checkpoints
+are incompatible. The parent selection identity also includes the ranking
+source hash, so a completed old selection cannot bypass a changed criterion.
+Changing the ranking leaves the independent numerical-evidence caches reusable.
+When optional clinical concept review is enabled, its per-fold shortlists and
+representative ordering use this statistical ranker; the concept review itself
+remains an LLM task.
