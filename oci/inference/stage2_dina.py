@@ -1,8 +1,20 @@
 """Grouped binary DINA adapters for Stage 2 selection and final estimation."""
 
+import logging
+
 import numpy as np
 
 from ..models import dina
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _not_estimable(reason, diagnostics):
+    from .stage2_multi_model_selection import NotEstimable
+
+    error = NotEstimable(reason)
+    error.diagnostics = diagnostics
+    return error
 
 
 def unpack_nuisances(value):
@@ -80,57 +92,77 @@ def fit_effect(
     )
     ratio = 0.0 if ridge is not None else policy.l1_ratio
     cv_losses = []
+    cv_diagnostics = []
     splits = linear._crossfit_indices(
         treatment, requested_folds=policy.internal_cv_folds, seed=seed
     )
     if ridge is None and not splits:
         raise numerical.NotEstimable("insufficient_rows_for_dina_penalty_cv")
     if ridge is None:
-        for fit_rows, hold_rows in splits:
+        for fold_index, (fit_rows, hold_rows) in enumerate(splits, start=1):
             encoded = encode(train.iloc[fit_rows], train.iloc[hold_rows])
             fold_losses = []
+            initial = None  # Encoding and coefficients belong to this CV partition only.
             for alpha in alphas:
-                model = dina.fit(
-                    encoded.train,
-                    outcome[fit_rows],
-                    treatment[fit_rows],
-                    fit_nu["a"][fit_rows],
-                    fit_nu["nu"][fit_rows],
-                    groups=encoded.column_feature_ids,
-                    regularization=float(alpha),
-                    group_ratio=ratio,
-                    max_iter=policy.max_iter,
-                    tolerance=policy.optimization_tolerance,
-                )
-                fold_losses.append(
-                    float(
-                        dina.loss(
-                            outcome[hold_rows],
-                            treatment[hold_rows],
-                            fit_nu["a"][hold_rows],
-                            fit_nu["nu"][hold_rows],
-                            model.predict(encoded.valid),
-                        ).mean()
+                try:
+                    model = dina.fit(
+                        encoded.train,
+                        outcome[fit_rows],
+                        treatment[fit_rows],
+                        fit_nu["a"][fit_rows],
+                        fit_nu["nu"][fit_rows],
+                        groups=encoded.column_feature_ids,
+                        regularization=float(alpha),
+                        group_ratio=ratio,
+                        max_iter=policy.max_iter,
+                        tolerance=policy.optimization_tolerance,
+                        initial=initial,
                     )
-                )
+                except dina.DinaConvergenceError as exc:
+                    # A failed trial must not abort other penalties, nor become
+                    # a zero loss or a warm start. Invalid input still propagates.
+                    fold_losses.append(np.inf)
+                    cv_diagnostics.append({**exc.diagnostics, "cv_fold": fold_index,
+                                           "regularization": float(alpha), "validation_loss": None})
+                    LOGGER.warning("Stage 2 DINA penalty CV fold=%s: %s", fold_index, exc)
+                    continue
+                initial = model
+                heldout_loss = float(dina.loss(
+                    outcome[hold_rows], treatment[hold_rows], fit_nu["a"][hold_rows],
+                    fit_nu["nu"][hold_rows], model.predict(encoded.valid),
+                ).mean())
+                fold_losses.append(heldout_loss if np.isfinite(heldout_loss) else np.inf)
+                cv_diagnostics.append({**model.diagnostics, "cv_fold": fold_index,
+                    "regularization": float(alpha),
+                    "validation_loss": heldout_loss if np.isfinite(heldout_loss) else None})
             cv_losses.append(fold_losses)
-    best = int(np.argmin(np.mean(cv_losses, axis=0))) if cv_losses else 0
+    cv_means = np.mean(cv_losses, axis=0) if cv_losses else None
+    if cv_means is not None and not np.isfinite(cv_means).any():
+        raise _not_estimable("no_dina_regularization_converged_in_every_cv_fold",
+                             {"cv_fits": cv_diagnostics})
+    best = int(np.argmin(cv_means)) if cv_means is not None else 0
     if cv_losses and policy.modifier_one_standard_error_rule:
         values = np.asarray(cv_losses)
         threshold = values[:, best].mean() + values[:, best].std(ddof=1) / np.sqrt(len(values))
-        best = int(np.flatnonzero(values.mean(axis=0) <= threshold)[0])
-    model = dina.fit(
-        design.train,
-        outcome,
-        treatment,
-        fit_nu["a"],
-        fit_nu["nu"],
-        groups=design.column_feature_ids,
-        regularization=float(alphas[best]),
-        group_ratio=ratio,
-        max_iter=policy.max_iter,
-        tolerance=policy.optimization_tolerance,
-    )
+        best = int(np.flatnonzero(np.isfinite(cv_means) & (cv_means <= threshold))[0])
+    try:
+        # The full-training encoding can differ from every CV encoding. Start
+        # fresh; never copy coefficients across that boundary or tune on validation.
+        model = dina.fit(
+            design.train,
+            outcome,
+            treatment,
+            fit_nu["a"],
+            fit_nu["nu"],
+            groups=design.column_feature_ids,
+            regularization=float(alphas[best]),
+            group_ratio=ratio,
+            max_iter=policy.max_iter,
+            tolerance=policy.optimization_tolerance,
+        )
+    except dina.DinaConvergenceError as exc:
+        raise _not_estimable("final_dina_fit_did_not_converge",
+                             {"cv_fits": cv_diagnostics, "final_fit": exc.diagnostics}) from exc
     delta = model.predict(design.valid)
     mu0, mu1 = dina.counterfactuals(delta, valid_nu["a"], valid_nu["nu"])
     return {
@@ -167,6 +199,8 @@ def fit_effect(
             "validation_row_ids": valid._oci_row_id.astype(int).tolist(),
             "converged": model.converged,
             "iterations": model.iterations,
+            "optimizer": model.diagnostics,
+            "cv_fits": cv_diagnostics,
             "cate_intervals": "not_computed_for_grouped_dina",
         },
     }
@@ -179,20 +213,26 @@ def candidate_evidence(train, valid, definitions, t, y, tv, yv, *, policy, seed,
     constant = dina.constant_effect(y, t, nt["a"], nt["nu"])
     baseline = float(dina.loss(yv, tv, nv["a"], nv["nu"], constant).mean())
     rows = []
+    failed_fits = {}
     for feature in definitions:
         key = numerical._key(feature)
-        result = fit_effect(
-            train=train,
-            valid=valid,
-            definitions=definitions,
-            modifier_ids=[key],
-            treatment=t,
-            outcome=y,
-            policy=policy,
-            seed=seed,
-            nuisance=nuisance,
-            ridge=policy.modifier_ridge_alpha,
-        )
+        try:
+            result = fit_effect(
+                train=train,
+                valid=valid,
+                definitions=definitions,
+                modifier_ids=[key],
+                treatment=t,
+                outcome=y,
+                policy=policy,
+                seed=seed,
+                nuisance=nuisance,
+                ridge=policy.modifier_ridge_alpha,
+            )
+        except numerical.NotEstimable as exc:
+            rows.append(numerical._record(key, "effect", status="not_evaluable"))
+            failed_fits[key] = {"reason": str(exc), "diagnostics": getattr(exc, "diagnostics", {})}
+            continue
         full = float(dina.loss(yv, tv, nv["a"], nv["nu"], result["delta"]).mean())
         rows.append(
             numerical._record(
@@ -209,6 +249,7 @@ def candidate_evidence(train, valid, definitions, t, y, tv, yv, *, policy, seed,
             "objective": dina.SCHEMA_VERSION,
             "baseline_heldout_dina_loss": baseline,
             "constant_log_odds_ratio": constant,
+            "failed_candidate_fits": failed_fits,
         },
     }
 

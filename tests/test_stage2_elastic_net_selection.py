@@ -333,7 +333,7 @@ def test_nominal_factor_is_selected_as_one_group_in_both_nuisance_tasks():
         assert "factor" in fold["outcome"]["feature_group_l2_norms"]
 
 
-def test_categorical_modifier_uses_one_grouped_heldout_r_loss_score():
+def test_categorical_modifier_uses_one_grouped_heldout_dina_loss_score():
     rng = np.random.default_rng(733)
     rows = 900
     levels = np.asarray(["A", "B", "C"])
@@ -385,9 +385,7 @@ def test_categorical_modifier_uses_one_grouped_heldout_r_loss_score():
 
     selected_factor = next(row for row in selected if row["feature_id"] == "factor")
     assert "effect_modifier" in selected_factor["roles"]
-    assert report["effect_modifier_screen"]["model_family"] == (
-        "candidate_augmented_univariable_r_learner"
-    )
+    assert report["effect_modifier_screen"]["model_family"] == "candidate_group_dina"
     for fold in report["effect_modifier_screen"]["folds"]:
         assert fold["selected_feature_ids"] == ["factor"]
         factor_test = next(
@@ -395,13 +393,10 @@ def test_categorical_modifier_uses_one_grouped_heldout_r_loss_score():
         )
         assert factor_test["categorical_interactions_are_grouped"] is True
         assert len(factor_test["tested_interaction_columns"]) == 2
-        assert factor_test["interaction_degrees_of_freedom"] == 2
-        assert factor_test["candidate_augmented_nuisance_models"][
-            "model_family"
-        ] == "group_elastic_net"
-        assert factor_test["candidate_augmented_nuisance_models"][
-            "training_predictions_are_cross_fitted"
-        ] is True
+        assert factor_test["coefficient_feature_ids"] == ["factor"] * 2
+        assert factor_test["effect_objective"] == "bernoulli_dina"
+        assert factor_test["heldout_dina_loss_improvement"] > 0
+        assert factor_test["effect_scale"] == "conditional_log_odds_ratio"
 
 
 def test_modifier_top_n_defaults_to_ten_and_has_no_score_gate():

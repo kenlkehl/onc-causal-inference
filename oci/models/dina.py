@@ -5,7 +5,7 @@ must be obtained through ``counterfactuals`` before evaluating an R-loss.
 Callers own patient splitting, nuisance cross-fitting, and feature encoding.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy import sparse
@@ -67,6 +67,7 @@ class DinaModel:
     converged: bool
     group_ids: tuple
     regularization: float
+    diagnostics: dict = field(default_factory=dict)
 
     @property
     def coef_(self):
@@ -77,6 +78,14 @@ class DinaModel:
 
     def selected_groups(self, tolerance=1e-7):
         return sorted({g for g, b in zip(self.group_ids, self.coefficients) if abs(b) > tolerance})
+
+
+class DinaConvergenceError(ValueError):
+    """A numerical fit failure, distinct from invalid data or configuration."""
+
+    def __init__(self, message, diagnostics=None):
+        super().__init__(message)
+        self.diagnostics = dict(diagnostics or {})
 
 
 def fit(
@@ -91,11 +100,14 @@ def fit(
     group_ratio=0.0,
     max_iter=5000,
     tolerance=1e-7,
+    initial=None,
 ):
     """Convex Bernoulli likelihood plus group lasso/ridge; constant unpenalized.
 
     Each clinical feature must use one group ID across all encoded levels and
     missingness columns. Sparse text columns may each form a singleton group.
+    A warm start must come from the same training rows and column encoding;
+    callers must reset it between CV partitions.
     """
     x = sparse.csr_matrix(x, dtype=float) if sparse.issparse(x) else np.asarray(x, float)
     y, t, a, nu = [np.asarray(v, float).reshape(-1) for v in (y, t, a, nu)]
@@ -106,15 +118,33 @@ def fit(
         raise ValueError("DINA fitting arrays must be finite and row aligned")
     if not np.isin(y, [0, 1]).all() or not np.isin(t, [0, 1]).all():
         raise ValueError("Bernoulli DINA requires binary outcome and treatment")
-    if regularization < 0 or not 0 <= group_ratio <= 1:
+    if not np.isfinite(regularization) or regularization < 0 or not np.isfinite(group_ratio) or not 0 <= group_ratio <= 1:
         raise ValueError("invalid DINA regularization")
+    if isinstance(max_iter, bool) or not isinstance(max_iter, (int, np.integer)) or max_iter < 1:
+        raise ValueError("DINA max_iter must be a positive integer")
+    if not np.isfinite(tolerance) or tolerance <= 0:
+        raise ValueError("DINA tolerance must be finite and positive")
     group_ids = tuple(map(str, range(p))) if groups is None else tuple(map(str, groups))
     if len(group_ids) != p:
         raise ValueError("one DINA group ID is required per encoded column")
-    group_columns = {}
-    for column, group in enumerate(group_ids):
-        group_columns.setdefault(group, []).append(column)
-    indices = [np.asarray(columns, dtype=int) for columns in group_columns.values()]
+    group_index = {group: i for i, group in enumerate(dict.fromkeys(group_ids))}
+    column_groups = np.asarray([group_index[group] for group in group_ids], dtype=int)
+    weights = np.sqrt(np.bincount(column_groups, minlength=len(group_index)))
+    thresholds = regularization * group_ratio * weights
+
+    def group_norms(values):
+        return np.sqrt(np.bincount(column_groups, weights=values**2, minlength=len(weights)))
+
+    def stationarity(b, grad):
+        # Minimum group-wise subgradient norm (KKT residual). Unlike a small
+        # coefficient step, this cannot report convergence just because the
+        # line search chose a very small step size.
+        norms = group_norms(b[1:])
+        active = norms > 0
+        scale = np.divide(thresholds, norms, out=np.zeros_like(norms), where=active)
+        residual = group_norms(grad[1:] + scale[column_groups] * b[1:])
+        residual[~active] = np.maximum(0.0, residual[~active] - thresholds[~active])
+        return max(abs(float(grad[0])), float(np.max(residual, initial=0.0)))
     u = t - a
     design = (
         sparse.hstack([u[:, None], x.multiply(u[:, None])], format="csr")
@@ -122,7 +152,14 @@ def fit(
         else np.column_stack([u, x * u[:, None]])
     )
     theta = np.zeros(p + 1)
-    theta[0] = constant_effect(y, t, a, nu)
+    if initial is None:
+        theta[0] = constant_effect(y, t, a, nu)
+    else:
+        if (not isinstance(initial, DinaModel) or not initial.converged
+                or initial.group_ids != group_ids or initial.coefficients.shape != (p,)
+                or not np.isfinite(initial.coefficients).all() or not np.isfinite(initial.intercept)):
+            raise ValueError("DINA warm start requires a converged model with matching encoded groups")
+        theta[0], theta[1:] = initial.intercept, initial.coefficients
 
     def objective(b):
         eta = nu + np.asarray(design @ b).reshape(-1)
@@ -130,6 +167,27 @@ def fit(
         grad = np.asarray(design.T @ (expit(eta) - y)).reshape(-1) / n
         grad[1:] += ridge * b[1:]
         return float(np.mean(np.logaddexp(0, eta) - y * eta) + 0.5 * ridge * (b[1:] @ b[1:])), grad
+
+    def finish(b, iterations, *, converged, reason, step=None, backtracks=0):
+        value, grad = objective(b)
+        value += float(thresholds @ group_norms(b[1:]))
+        residual = stationarity(b, grad)
+        diagnostics = {
+            "converged": bool(converged), "reason": str(reason), "iterations": int(iterations),
+            "max_iter": int(max_iter), "tolerance": float(tolerance),
+            "regularization": float(regularization), "group_ratio": float(group_ratio),
+            "rows": n, "columns": p, "groups": len(weights), "warm_started": initial is not None,
+            "objective": float(value) if np.isfinite(value) else None,
+            "stationarity_residual": float(residual) if np.isfinite(residual) else None,
+            "step_size": float(step) if step is not None else None, "backtracks": int(backtracks),
+        }
+        if not converged:
+            raise DinaConvergenceError(
+                f"DINA optimizer did not converge ({reason}; iterations={iterations}/{max_iter}, "
+                f"regularization={regularization:g}, group_ratio={group_ratio:g}, "
+                f"stationarity_residual={residual:.6g}, tolerance={tolerance:g})", diagnostics)
+        return DinaModel(b[1:].copy(), float(b[0]), int(iterations), True, group_ids,
+                         regularization, diagnostics)
 
     if group_ratio == 0 or regularization == 0:
         result = minimize(
@@ -139,41 +197,43 @@ def fit(
             method="L-BFGS-B",
             options={"maxiter": max_iter, "ftol": 1e-12, "gtol": tolerance},
         )
-        if not result.success and np.max(np.abs(objective(result.x)[1])) > 10 * tolerance:
-            raise ValueError(f"DINA optimizer failed: {result.message}")
-        return DinaModel(
-            result.x[1:], float(result.x[0]), result.nit, True, group_ids, regularization
-        )
+        return finish(result.x, result.nit,
+            converged=bool(result.success or np.max(np.abs(objective(result.x)[1])) <= 10 * tolerance),
+            reason=result.message)
 
     # Backtracking proximal gradient avoids a dense Gram matrix for text features.
     z, momentum, step = theta.copy(), 1.0, 1.0
-    converged = False
+    backtracks = 0
     for iteration in range(1, max_iter + 1):
         value, grad = objective(z)
+        # Let the step recover after conservative backtracking as curvature
+        # changes, while retaining the same quadratic upper-bound check.
+        if iteration > 1:
+            step *= 1.1
         for _ in range(60):
             candidate = z - step * grad
-            for ix in indices:
-                j = ix + 1
-                norm = np.linalg.norm(candidate[j])
-                threshold = step * regularization * group_ratio * np.sqrt(len(ix))
-                candidate[j] *= max(0.0, 1 - threshold / max(norm, 1e-30))
+            norms = group_norms(candidate[1:])
+            scales = np.maximum(0.0, 1 - step * thresholds / np.maximum(norms, 1e-30))
+            candidate[1:] *= scales[column_groups]
             diff = candidate - z
-            if objective(candidate)[0] <= value + grad @ diff + (diff @ diff) / (2 * step) + 1e-12:
+            candidate_value, candidate_grad = objective(candidate)
+            if candidate_value <= value + grad @ diff + (diff @ diff) / (2 * step) + 1e-12:
                 break
             step *= 0.5
+            backtracks += 1
         else:
-            raise ValueError("DINA line search failed")
-        if np.linalg.norm(candidate - theta) <= tolerance * (1 + np.linalg.norm(theta)):
-            theta, converged = candidate, True
-            break
+            return finish(theta, iteration, converged=False, reason="line_search_failed",
+                          step=step, backtracks=backtracks)
+        if stationarity(candidate, candidate_grad) <= tolerance:
+            return finish(candidate, iteration, converged=True, reason="stationarity_tolerance",
+                          step=step, backtracks=backtracks)
         next_momentum = (1 + np.sqrt(1 + 4 * momentum**2)) / 2
         extrapolated = candidate + (momentum - 1) / next_momentum * (candidate - theta)
         if (z - candidate) @ (candidate - theta) > 0:
             extrapolated, next_momentum = candidate.copy(), 1.0
         theta, z, momentum = candidate, extrapolated, next_momentum
-    if not converged:
-        raise ValueError("group DINA optimizer did not converge")
-    return DinaModel(theta[1:], float(theta[0]), iteration, True, group_ids, regularization)
+    return finish(theta, iteration, converged=False, reason="iteration_limit",
+                  step=step, backtracks=backtracks)
 
 
 def torch_loss(y, t, a, nu, delta, *, reduction="mean"):

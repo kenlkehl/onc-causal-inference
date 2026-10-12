@@ -1143,7 +1143,10 @@ def select_stage2_features_multi_model(
                                         for k in feature_ids
                                         for r in roles
                                     ],
-                                    "audit": {"status": str(exc)},
+                                    "audit": {"status": str(exc), **(
+                                        {"optimizer_diagnostics": exc.diagnostics}
+                                        if hasattr(exc, "diagnostics") else {}
+                                    )},
                                 }
                             return {
                                 "family": family,

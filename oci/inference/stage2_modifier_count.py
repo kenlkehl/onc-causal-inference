@@ -520,6 +520,8 @@ def select_modifier_count(
                                         return {
                                             "status": "not_estimable",
                                             "reason": str(exc),
+                                            **({"optimizer_diagnostics": exc.diagnostics}
+                                               if hasattr(exc, "diagnostics") else {}),
                                             "r_loss": None,
                                             "feature_ids": ids,
                                             "validation_row_ids": fv._oci_row_id.astype(

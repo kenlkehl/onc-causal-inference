@@ -18,6 +18,22 @@ CATE = p1 - p0
 
 `oci/models/dina.py` contains the likelihood, counterfactual conversion, score, neural loss, and convex group elastic-net solver. The constant log odds ratio is unpenalized. Group lasso either retains or drops the clinical variable; every encoded categorical level and missingness column uses that variable's group ID. Ridge-only fits retain all encoded columns.
 
+Grouped fits use adaptive step sizes with backtracking and require the group-wise
+optimality residual to meet `optimization_tolerance`. Step sizes can grow again
+when curvature decreases; a small coefficient update alone is not convergence.
+Group operations are vectorized, including noncontiguous encoded groups.
+
+Stage 2 tunes penalties from strongest to weakest, warm-starting from the last
+converged fit within the same CV partition. Each partition and the final refit
+start with their own encoding and fresh coefficients. A numerical convergence
+failure excludes that penalty from selection unless it converges in every CV
+fold; invalid inputs still raise errors. If no penalty qualifies, or the final
+refit fails, the evidence cell is marked not estimable. Candidate-wise failures
+affect only that candidate's evidence. Audits include each fit's penalty,
+iterations, convergence reason, objective, optimality residual, step size, and
+warm-start status, plus its CV loss when available. Failed fits are never used
+as fitted models or zero-loss evidence.
+
 ## Integration
 
 | Component | Binary behavior |
