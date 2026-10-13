@@ -478,7 +478,9 @@ coefficient magnitudes, and forest split importance remain diagnostic evidence.
 evaluation coverage, provenance, missing results, and generated explanations.
 Only its top requested prefix is passed to count/architecture selection. Locks
 remain outside that additional budget. Measurement grouping requires compatible
-value types/units, name-token similarity of at least 0.8, at least 30 paired
+value types/units, identical terminal measurement names after removing cosmetic
+words such as `value`/`measurement`, contextual name-token similarity of at least
+0.8, at least 30 paired
 training observations, at least 80% overlap, and Spearman correlation (or
 categorical agreement) of at least 0.95. Groups use complete linkage; a chain of
 weakly related measurements cannot merge a broad clinical theme. Negative

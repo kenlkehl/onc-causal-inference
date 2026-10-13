@@ -28,6 +28,10 @@ def test_repeated_partitions_cover_same_pool_without_access_to_other_patients():
             assert set(split['fit_row_ids']).isdisjoint(split['heldout_row_ids'])
             assert set(split['fit_row_ids']) | set(split['heldout_row_ids']) == set(range(96))
     assert splits[0]['heldout_row_ids'] != splits[2]['heldout_row_ids']
+    arbitrary_ids = [{**s, 'inner_fold': 4 + i * 5} for i, s in enumerate(args['inner_splits'])]
+    other = stability.repeated_partitions(arbitrary_ids, labels,
+        treatment_column='treatment', outcome_column='outcome', binary=False, repeats=3, seed=42)
+    assert len({s['inner_fold'] for s in other}) == 6
 
 
 def test_patient_uncertainty_does_not_shrink_when_same_exposures_are_duplicated():
@@ -118,6 +122,14 @@ def test_group_permutation_measures_redundant_signal_before_selecting_representa
     assert [r['feature_id'] for r in result['ranking']] == ['a', 'noise']
     assert result['measurement_representatives'][0]['representative'] == 'a'
     assert result['available_representatives'] == 2
+
+
+def test_shared_parent_names_do_not_merge_distinct_clinical_measurements():
+    names = ['alk_ros1_status__alk_status', 'alk_ros1_status__ros1_status',
+             'kras_g12c_variant_allele_frequency', 'kras_variant_allele_frequency',
+             'lung_mass_size', 'lung_mass']
+    train = pd.DataFrame({name: np.arange(80, dtype=float) for name in names})
+    assert stability.measurement_groups(train, [feature(n) for n in names], EvidenceStabilityConfig()) == []
 
 
 @pytest.mark.parametrize('binary', [False, True])

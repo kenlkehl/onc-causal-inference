@@ -33,10 +33,11 @@ def unpack(value):
 
 def repeated_partitions(splits, labels, *, treatment_column, outcome_column, binary, repeats, seed):
     """Preserve the original partition; generate additional partitions of its pool."""
-    result = [{**s, 'partition_repeat': 0, 'partition_fold': i}
+    result = [{**s, 'inner_fold': int(s.get('inner_fold', i)), 'partition_repeat': 0, 'partition_fold': i}
               for i, s in enumerate(splits, 1)]
     ids = np.asarray(sorted(labels.index), dtype=int)
     nfolds = len(splits)
+    last_original_fold = max(s['inner_fold'] for s in result)
     if nfolds < 2:
         raise ValueError('evidence stability requires at least two folds')
     treatment = labels.loc[ids, treatment_column].astype(str)
@@ -48,16 +49,19 @@ def repeated_partitions(splits, labels, *, treatment_column, outcome_column, bin
         splitter = (StratifiedKFold if stratified else KFold)(
             n_splits=nfolds, shuffle=True, random_state=int(seed) + 1_000_003 * repeat)
         for fold, (train, valid) in enumerate(splitter.split(ids, strata), 1):
-            result.append({'inner_fold': repeat * nfolds + fold, 'partition_repeat': repeat,
+            result.append({'inner_fold': last_original_fold + (repeat - 1) * nfolds + fold, 'partition_repeat': repeat,
                            'partition_fold': fold, 'fit_row_ids': ids[train].tolist(),
                            'heldout_row_ids': ids[valid].tolist()})
     return result
 
 
-def _tokens(feature):
+def _tokens(feature, *, leaf=False):
     # Remove only presentation words; anatomical sites, negation, units and
     # time qualifications remain significant. Broad clinical themes are not groups.
-    words = re.findall(r'[a-z0-9]+', str(feature['name']).lower())
+    name = str(feature['name']).lower()
+    if leaf:
+        name = name.split('__')[-1]
+    words = re.findall(r'[a-z0-9]+', name)
     return frozenset(w for w in words if w not in {'measurement', 'value', 'level'})
 
 
@@ -82,6 +86,10 @@ def measurement_groups(train, definitions, config):
     numeric_types = {'continuous', 'ordinal'}
     for left, right in sorted(possible):
         a, b = by_id[left], by_id[right]
+        # Generated child names include their parent theme (e.g. ALK/ROS1).
+        # Shared parent tokens or correlation cannot equate distinct targets.
+        if _tokens(a, leaf=True) != _tokens(b, leaf=True):
+            continue
         if a.get('value_type') != b.get('value_type') or a.get('value_type') == 'ambiguous':
             continue
         ta, tb = tokens[left], tokens[right]

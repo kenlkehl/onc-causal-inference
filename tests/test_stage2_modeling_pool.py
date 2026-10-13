@@ -73,6 +73,7 @@ def test_real_evidence_and_model_selection_identical_in_parallel(tmp_path, binar
         arguments["outcome_type"] = "binary"
     arguments["policy"] = replace(arguments["policy"], multi_model=replace(
         arguments["policy"].multi_model,
+        stability=replace(arguments["policy"].multi_model.stability, partition_repeats=2, subset_partitions=2),
         modifier_count=ModifierCountConfig(candidate_counts=(0, 1), max_ranked_modifiers=2, forest_seeds=2),
     ))
     selected = [{**f, "roles": ["confounder", "effect_modifier"]} for f in arguments["definitions"]]

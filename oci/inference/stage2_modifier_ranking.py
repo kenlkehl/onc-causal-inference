@@ -194,7 +194,7 @@ def _compute(definitions, report, maximum, sources, folds, repeats, rows, identi
         candidate['individual_measurement_score'] = max(scores) + 0.25 * _mean(scores)
         if key in group_by_key:
             scores += [c['support_score'] for c in candidate['group_components'].values()]
-        score = max(scores) + 0.25 * _mean(scores)
+        score = max(candidate['individual_measurement_score'], max(scores) + 0.25 * _mean(scores))
         candidate["score"] = score
         candidate["evidence_ids"] = [f"multi:{key}:{family}:effect" for family in sources
                                      if candidate["components"][family]["evaluated"]]
@@ -218,7 +218,8 @@ def _compute(definitions, report, maximum, sources, folds, repeats, rows, identi
     coverage = report.get('measurement_observed_fractions', {})
     for group in representative_groups:
         members = [key for key in group['members'] if key in candidates]
-        if len(members) < 2 or any(key in locked for key in group['members']):
+        if (len(members) < 2 or any(key in locked for key in group['members'])
+                or not any(c['evaluated'] for key in members for c in candidates[key]['group_components'].values())):
             continue
         representative = min(members, key=lambda key: (-candidates[key]['individual_measurement_score'], -coverage.get(key, 0), key))
         group_score = max(candidates[key]['score'] for key in members)
