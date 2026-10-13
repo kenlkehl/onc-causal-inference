@@ -766,8 +766,10 @@ multi-model evidence and modifier-count evaluations use a separate global CPU
 process budget, `stage2.modeling_workers` (default `1`). Set
 values above `1` to enable the shared pool; `1` retains serial execution within
 each outer fold. Use
-`STAGE2_MODELING_WORKERS=32` in either synthetic wrapper, including saved-run
-resumes; fresh RTX PRO 6000 × 8 launches default to `32`. All outer folds share
+`STAGE2_MODELING_WORKERS=128` in either synthetic wrapper, including saved-run
+resumes; fresh RTX PRO 6000 × 8 launches default to `128` for both synthetic
+cohorts. Saved runs retain their configured value unless explicitly overridden.
+All outer folds share
 this pool, with one native thread per fit and a bounded queue. Increasing this
 budget preserves compatible checkpoints, model seeds and validation partitions.
 It is independent of the number of GPUs. Allowing

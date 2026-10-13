@@ -279,7 +279,8 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
 ## 6. Routing, checkpoints, and use
 
 `stage2.modeling_workers` controls one CPU process pool shared by all outer
-folds. The default is `1`; fresh RTX PRO 6000 × 8 wrapper runs use `32`.
+folds. The default is `1`; fresh RTX PRO 6000 × 8 wrapper runs use `128` for
+both the one-confounder/one-modifier and five-confounder/five-modifier cohorts.
 The value `1` retains the original serial execution within each outer fold;
 values above `1` enable the shared pool and specify its total process limit.
 `STAGE2_MODELING_WORKERS` overrides this value for fresh or saved synthetic
