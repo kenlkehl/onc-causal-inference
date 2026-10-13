@@ -277,6 +277,28 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
 
 ## 6. Routing, checkpoints, and use
 
+`stage2.modeling_workers` controls one CPU process pool shared by all outer
+folds. The default is `1`; fresh RTX PRO 6000 × 8 wrapper runs use `32`.
+The value `1` retains the original serial execution within each outer fold;
+values above `1` enable the shared pool and specify its total process limit.
+`STAGE2_MODELING_WORKERS` overrides this value for fresh or saved synthetic
+launches. It is operational configuration, separate from LLM request workers,
+GPU count and statistical policy.
+
+Missing nuisance fits, independent family/repetition/subset evidence jobs and
+architecture/count/seed evaluations use this pool. Coordinators remain in the
+parent process, queued jobs are bounded globally to twice the worker count,
+and each fit uses one native thread. Selection splits still advance in order;
+within-fit penalty warm starts stay sequential. Results are collected in the
+original deterministic order with the original seeds and row boundaries.
+Completed checkpoints are read locally without submitting a fit.
+
+The scheduling-only transition includes exact old/new source-hash aliases in
+`stage2_modeling_source_aliases.json`, preserving existing numerical evidence,
+rankings and selection fits. Only the reviewed source bytes match; subsequent
+source edits invalidate the alias automatically. Changes to the worker count
+alone do not change scientific identities.
+
 1. The chosen architecture is passed to the final estimator on fresh and resumed
    selections. Forests use modifiers in X and pure confounders in W. Interaction
    models use retained covariate main effects, a treatment main effect, and

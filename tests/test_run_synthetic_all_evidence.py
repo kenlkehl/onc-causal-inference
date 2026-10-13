@@ -88,6 +88,8 @@ def test_wrappers_select_backend_and_preserve_saved_settings(
         return
 
     assert "oci.inference.research_all_evidence_workflow" in args
+    expected_modeling_workers = overrides.get("STAGE2_MODELING_WORKERS", "32" if "rtxpro6000" in launcher else "1")
+    assert f"stage2.modeling_workers={expected_modeling_workers}" in args
     decision = overrides.get("STAGE2_DECISION_EXTRACTION", "0") == "1"
     rtx = "rtxpro6000" in launcher
     h100 = "h100" in launcher

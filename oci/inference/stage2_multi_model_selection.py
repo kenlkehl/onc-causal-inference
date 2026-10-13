@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import replace
+from functools import partial
 from hashlib import sha256
 import logging
 from pathlib import Path
@@ -28,6 +29,8 @@ from . import stage2_matched_batch as matched_batch
 from .stage2_multi_model_config import FAMILIES, SCHEMA_VERSION
 from .stage2_role_adjudication import _fingerprint, _write_json
 from .stage2_statistical_selection import _modifier_test_chunk
+from . import stage2_modeling_pool as modeling
+from .stage2_modeling_identity import scientific_source_sha256
 
 LOGGER = logging.getLogger(__name__)
 ROLES = ("treatment", "outcome", "effect")
@@ -77,7 +80,7 @@ def numerical_identity(
         "dina_adapter_source_sha256": sha256(
             Path(__file__).with_name("stage2_dina.py").read_bytes()
         ).hexdigest(),
-        "component_source_sha256": sha256(Path(__file__).read_bytes()).hexdigest(),
+        "component_source_sha256": scientific_source_sha256(__file__),
         "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
         **(
             {
@@ -113,6 +116,14 @@ def _checkpoint(
             },
         )
     return result
+
+
+def checkpoint_future(directory, name, fingerprint, compute):
+    """Read completed work locally; submit only missing numerical work."""
+    path = Path(directory) / f"{name}.json" if directory is not None else None
+    if path is not None and path.is_file():
+        return modeling.completed(_checkpoint(directory, name, fingerprint, compute))
+    return modeling.submit(partial(_checkpoint, directory, name, fingerprint, compute))
 
 
 def _validated_inputs(dataset, extracted, definitions, splits, treatment_column, outcome_column):
@@ -933,14 +944,14 @@ def select_stage2_features_multi_model(
             )
             fold_seed = int(seed) + position * 10_000
             LOGGER.info("Stage 2 multi-model fold=%s: nested elastic-net nuisances", fold)
-            nuisance = _checkpoint(
+            nuisance = checkpoint_future(
                 directory,
                 f"fold_{fold:03d}/nuisances",
                 fingerprint,
                 lambda: _nuisances(
                     train, valid, definitions, t, y, binary=binary, policy=policy, seed=fold_seed
                 ),
-            )
+            ).result()
             e, m, ev, mv = [
                 np.asarray(nuisance[key])
                 for key in (
@@ -1171,7 +1182,9 @@ def select_stage2_features_multi_model(
                             }
 
                         LOGGER.info("Stage 2 multi-model %s", leaf)
-                        cells.append(_checkpoint(directory, leaf, fingerprint, compute))
+                        cells.append(checkpoint_future(directory, leaf, fingerprint, compute))
+    # Preserve canonical fold/repeat/family/subset order despite completion order.
+    cells = [future.result() for future in cells]
     summaries = aggregate_evidence(cells, list(by_id))
     availability = {
         family: sum(

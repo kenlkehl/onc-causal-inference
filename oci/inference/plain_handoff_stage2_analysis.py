@@ -10032,6 +10032,14 @@ def _run_stage2_statistical_selection(
     """Run a large fold selector outside the thread-orchestration GIL."""
 
     arguments = dict(selector_arguments)
+    from . import stage2_modeling_pool as modeling
+
+    if modeling.enabled():
+        # The multi-model coordinator submits leaf jobs to the shared run pool.
+        # Putting the coordinator in another process would create nested pools.
+        if arguments["policy"].selection_mode == "multi_model":
+            return select_stage2_features_elastic_net(**arguments)
+        return modeling.call(lambda: select_stage2_features_elastic_net(**arguments))
     candidate_count = len(arguments.get("definitions") or [])
     if candidate_count < STATISTICAL_SELECTION_PROCESS_ISOLATION_MIN_CANDIDATES:
         return select_stage2_features_elastic_net(**arguments)

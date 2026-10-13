@@ -761,7 +761,16 @@ uv run python scripts/run_all_evidence.py \
 Set these thread limits before starting Python directly on high-core-count
 machines. The two synthetic wrapper scripts set all four to `1` by default.
 Stage 2 already controls primary-model request concurrency with `stage2.workers`
-and extraction concurrency with `stage2.extraction_llm.workers`; allowing
+and extraction concurrency with `stage2.extraction_llm.workers`. Numerical
+multi-model evidence and modifier-count evaluations use a separate global CPU
+process budget, `stage2.modeling_workers` (default `1`). Set
+values above `1` to enable the shared pool; `1` retains serial execution within
+each outer fold. Use
+`STAGE2_MODELING_WORKERS=32` in either synthetic wrapper, including saved-run
+resumes; fresh RTX PRO 6000 × 8 launches default to `32`. All outer folds share
+this pool, with one native thread per fit and a bounded queue. Increasing this
+budget preserves compatible checkpoints, model seeds and validation partitions.
+It is independent of the number of GPUs. Allowing
 OpenBLAS, OpenMP, MKL, or NumExpr to create another native thread pool per
 concurrent task can exhaust OpenBLAS's thread metadata or memory regions and
 terminate the process. Every live endpoint is probed through `/models`. An

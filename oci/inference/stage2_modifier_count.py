@@ -6,7 +6,6 @@ This validates Stage 2 conditional on the supplied catalog, not upstream discove
 """
 
 from copy import deepcopy
-from hashlib import sha256
 import logging
 import math
 from pathlib import Path
@@ -18,6 +17,8 @@ from threadpoolctl import threadpool_limits
 from . import stage2_multi_model_selection as numerical
 from . import stage2_modifier_ranking as ranking
 from . import stage2_modifier_concepts as concepts
+from . import stage2_modeling_pool as modeling
+from .stage2_modeling_identity import scientific_source_sha256
 from .stage2_prompt_catalog import PROMPT_VERSION
 from .stage2_effect_estimators import fit_interaction_effect
 from .stage2_dina import fit_effect as fit_dina_effect, unpack_nuisances as unpack_dina_nuisances
@@ -301,7 +302,7 @@ def select_modifier_count(
         "model": model_identity,
         "estimation_trees": estimation_trees,
         "sources": {
-            str(Path(p).name): sha256(Path(p).read_bytes()).hexdigest()
+            str(Path(p).name): scientific_source_sha256(p)
             for p in (
                 __file__,
                 ranking.__file__,
@@ -417,7 +418,7 @@ def select_modifier_count(
                 raise RuntimeError("modifier ranking did not cover the requested budget")
             # These are the already-computed, training-only nuisance models of
             # the parent numerical pass, reused with their original seed/hash.
-            nuisance = numerical._checkpoint(
+            nuisance = numerical.checkpoint_future(
                 base_numerical_dir,
                 f"fold_{number:03d}/nuisances",
                 base_fingerprint,
@@ -431,7 +432,7 @@ def select_modifier_count(
                     policy=policy,
                     seed=fold_seed,
                 ),
-            )
+            ).result()
             e, m, ev, mv = [
                 np.asarray(nuisance[key], float)
                 for key in (
@@ -478,29 +479,37 @@ def select_modifier_count(
                 }
             )
             dina_nuisance_cache = {}
+            scoring_jobs = []
             with threadpool_limits(limits=1):
                 for count in counts:
                     ids = [*locked_modifiers, *keys[:count]]
                     for estimator in estimators:
-                        seed_losses = []
                         repeats = cfg.forest_seeds if estimator == "causal_forest" else 1
                         for repeat in range(repeats):
                             model_seed = fold_seed + 20_000 + repeat * 1_000_000
+                            leaf = f"{estimator}/size_{count}/seed_{model_seed}"
+                            if (
+                                estimator == "dina" and not dina_nuisance_cache
+                                and not (root / f"{leaf}.json").is_file()
+                            ):
+                                # Compute once with the original first-DINA seed;
+                                # every budget then receives the same immutable data.
+                                try:
+                                    dina_nuisance_cache["raw"] = modeling.call(
+                                        lambda: numerical._nuisances(
+                                            ft, fv, definitions, t[keep], y[keep],
+                                            binary=True, policy=policy,
+                                            seed=model_seed + 100_000,
+                                        )
+                                    )
+                                except numerical.NotEstimable as exc:
+                                    dina_nuisance_cache["error"] = exc
 
                             def score():
                                 if estimator == "dina":
                                     try:
-                                        if not dina_nuisance_cache:
-                                            dina_nuisance_cache["raw"] = numerical._nuisances(
-                                                ft,
-                                                fv,
-                                                definitions,
-                                                t[keep],
-                                                y[keep],
-                                                binary=True,
-                                                policy=policy,
-                                                seed=model_seed + 100_000,
-                                            )
+                                        if "error" in dina_nuisance_cache:
+                                            raise dina_nuisance_cache["error"]
                                         shared_nuisance = unpack_dina_nuisances(
                                             dina_nuisance_cache["raw"]
                                         )
@@ -564,25 +573,22 @@ def select_modifier_count(
                                     trees=estimation_trees,
                                 )
 
-                            cell = numerical._checkpoint(
-                                root,
-                                f"{estimator}/size_{count}/seed_{model_seed}",
-                                fingerprint,
-                                score,
-                            )
-                            seed_losses.append(cell["r_loss"])
-                        losses[estimator, count].append(
-                            float(np.mean(seed_losses))
-                            if all(v is not None for v in seed_losses)
-                            else None
-                        )
-                        LOGGER.info(
-                            "Stage 2 effect model fold=%s estimator=%s additional=%s R-loss=%s",
-                            number,
-                            estimator,
-                            count,
-                            losses[estimator, count][-1],
-                        )
+                            scoring_jobs.append((estimator, count, numerical.checkpoint_future(
+                                root, leaf, fingerprint, score,
+                            )))
+            seed_losses = {(e, k): [] for e in estimators for k in counts}
+            for estimator, count, future in scoring_jobs:
+                seed_losses[estimator, count].append(future.result()["r_loss"])
+            for count in counts:
+                for estimator in estimators:
+                    values = seed_losses[estimator, count]
+                    losses[estimator, count].append(
+                        float(np.mean(values)) if all(v is not None for v in values) else None
+                    )
+                    LOGGER.info(
+                        "Stage 2 effect model fold=%s estimator=%s additional=%s R-loss=%s",
+                        number, estimator, count, losses[estimator, count][-1],
+                    )
         unavailable = {
             f"{e}/{k}": values
             for (e, k), values in losses.items()

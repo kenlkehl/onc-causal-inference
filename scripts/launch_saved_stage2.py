@@ -61,6 +61,7 @@ def command(dataset: Path, output: str, env: dict[str, str]) -> list[str]:
             runtime[prefix + suffix] = flag + suffix.lower().replace("_", "-")
     settings = {
         "STAGE2_WORKERS": "stage2.workers",
+        "STAGE2_MODELING_WORKERS": "stage2.modeling_workers",
         "STAGE2_REQUEST_TIMEOUT": "stage2.request_timeout",
         "STAGE2_REQUEST_ATTEMPT_TIMEOUT": "stage2.request_attempt_timeout",
     }

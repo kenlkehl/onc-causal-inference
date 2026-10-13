@@ -960,6 +960,8 @@ class PlainHandoffStage2Config:
     evidence_max_exemplar_chars: int = 2_400
     workers: int = 4
     extraction_llm: Stage2ExtractionLLMConfig | None = None
+    # Global CPU fit budget, independent of LLM request concurrency and GPUs.
+    modeling_workers: int = 1
     # Limits aggregate ontology-supervisor reviews. These reviews cannot add,
     # drop, rename, or assign roles to candidate features.
     max_review_rounds: int = 2
@@ -1299,6 +1301,8 @@ class PlainHandoffStage2Config:
             raise ValueError("stage2.evidence_max_exemplar_chars must be at least 256")
         if self.workers < 1:
             raise ValueError("stage2.workers must be positive")
+        if type(self.modeling_workers) is not int or self.modeling_workers < 1:
+            raise ValueError("stage2.modeling_workers must be a positive integer")
         if self.extraction_llm is not None:
             if not isinstance(self.extraction_llm, Stage2ExtractionLLMConfig):
                 raise ValueError(
@@ -1744,6 +1748,7 @@ def plain_stage2_config_from_mapping(
         evidence_max_exemplars_per_card=int(raw.get("evidence_max_exemplars_per_card", 4)),
         evidence_max_exemplar_chars=int(raw.get("evidence_max_exemplar_chars", 2_400)),
         workers=configured_workers,
+        modeling_workers=raw.get("modeling_workers", 1),
         extraction_llm=extraction_llm,
         max_review_rounds=int(raw.get("max_review_rounds", 2)),
         ontology_refinement_min_failure_patients=int(
@@ -8731,7 +8736,9 @@ class PlainHandoffStage2:
                 fold_workers,
                 self.config.workers,
             )
-            with concurrent.futures.ThreadPoolExecutor(
+            from .stage2_modeling_pool import modeling_session
+
+            with modeling_session(self.config.modeling_workers), concurrent.futures.ThreadPoolExecutor(
                 max_workers=fold_workers,
                 thread_name_prefix="stage2-outer-fold",
             ) as outer_executor:
