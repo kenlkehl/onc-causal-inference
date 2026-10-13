@@ -92,7 +92,7 @@
       "modifier_continuous_winsor_quantile": 0.005,
       "selection_mode": "multi_model",
       "multi_model": {
-        "schema_version": "stage2_multi_model_selection_v3",
+        "schema_version": "stage2_multi_model_selection_v5_stable_joint",
         "repeats": 3,
         "row_fraction": 0.8,
         "l1_ratios": [
@@ -101,10 +101,10 @@
           1.0
         ],
         "regularization_grid_size": 8,
-        "forest_trees": 200,
+        "forest_trees": 800,
         "forest_min_samples_leaf": 10,
         "feature_subset_size": 32,
-        "permutation_repeats": 3,
+        "permutation_repeats": 10,
         "nominal_p_threshold": 0.05,
         "q_threshold": 0.1,
         "max_prompt_chars": 100000,
@@ -114,7 +114,7 @@
           "bins_per_nuisance": 2,
           "min_reference_arm": 8,
           "max_smd": 0.25,
-          "min_delta": 0.10,
+          "min_delta": 0.1,
           "z_threshold": 1.0,
           "filter_training_batches": true,
           "train_passes": 100,
@@ -123,11 +123,28 @@
         },
         "modifier_count": {
           "enabled": true,
-          "candidate_counts": [0, 4, 8, 12, 16, 24, 32],
+          "candidate_counts": [
+            0,
+            4,
+            8,
+            12,
+            16,
+            24,
+            32
+          ],
           "max_ranked_modifiers": 64,
           "selection_rule": "minimum_r_loss",
           "forest_seeds": 3,
-          "estimators": ["causal_forest", "linear_interactions", "dina"]
+          "estimators": [
+            "causal_forest",
+            "linear_interactions",
+            "dina"
+          ]
+        },
+        "stability": {
+          "partition_repeats": 3,
+          "subset_partitions": 4,
+          "group_equivalent_measurements": true
         }
       }
     },

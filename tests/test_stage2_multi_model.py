@@ -19,7 +19,7 @@ from oci.inference.stage2_elastic_net_selection import (
     select_stage2_features_elastic_net,
     statistical_selection_config_from_mapping,
 )
-from oci.inference.stage2_multi_model_config import FAMILIES, MatchedBatchConfig, Stage2MultiModelConfig
+from oci.inference.stage2_multi_model_config import FAMILIES, MatchedBatchConfig, Stage2MultiModelConfig, EvidenceStabilityConfig
 from oci.inference.stage2_multi_model_selection import (
     aggregate_evidence,
     candidate_subsets,
@@ -59,6 +59,7 @@ def small_policy():
         optimization_tolerance=1e-4,
         categorical_min_count=2,
         multi_model=Stage2MultiModelConfig(
+            stability=EvidenceStabilityConfig(partition_repeats=1, subset_partitions=1),
             repeats=2,
             regularization_grid_size=3,
             forest_trees=12,

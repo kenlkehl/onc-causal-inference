@@ -208,6 +208,7 @@ def fit_effect(
 
 def candidate_evidence(train, valid, definitions, t, y, tv, yv, *, policy, seed, nuisance):
     from . import stage2_multi_model_selection as numerical
+    from . import stage2_evidence_stability as stability
 
     nt, nv = nuisance
     constant = dina.constant_effect(y, t, nt["a"], nt["nu"])
@@ -240,6 +241,8 @@ def candidate_evidence(train, valid, definitions, t, y, tv, yv, *, policy, seed,
                 "effect",
                 selected=baseline > full,
                 score=baseline - full,
+                loss_deltas=stability.pack(dina.loss(yv, tv, nv['a'], nv['nu'], constant)
+                                          - dina.loss(yv, tv, nv['a'], nv['nu'], result['delta'])),
                 effect_scale="conditional_log_odds_ratio",
             )
         )
@@ -255,9 +258,11 @@ def candidate_evidence(train, valid, definitions, t, y, tv, yv, *, policy, seed,
 
 
 def joint_evidence(
-    train, valid, definitions, t, y, tv, yv, *, policy, seed, nuisance, permutation=False
+    train, valid, definitions, t, y, tv, yv, *, policy, seed, nuisance, permutation=False,
+    measurement_groups=(),
 ):
     from . import stage2_multi_model_selection as numerical
+    from . import stage2_evidence_stability as stability
 
     result = fit_effect(
         train=train,
@@ -274,18 +279,19 @@ def joint_evidence(
     constant = dina.constant_effect(y, t, nt["a"], nt["nu"])
 
     def score(x):
-        return float(dina.loss(yv, tv, nv["a"], nv["nu"], result["model"].predict(x)).mean())
+        return dina.loss(yv, tv, nv["a"], nv["nu"], result["model"].predict(x))
 
-    baseline = score(result["design"].valid)
+    baseline = float(score(result["design"].valid).mean())
     gain = float(dina.loss(yv, tv, nv["a"], nv["nu"], constant).mean()) - baseline
     gains = {}
     if permutation:
-        _, gains = numerical.grouped_permutation_gain(
+        _, gains = stability.permutation_evidence(
             result["design"].valid,
             result["design"].column_feature_ids,
             score,
             repeats=policy.multi_model.permutation_repeats,
             seed=seed,
+            groups=measurement_groups,
         )
     selected = set(result["model"].selected_groups())
     rows = []
@@ -304,12 +310,16 @@ def joint_evidence(
                 selected=importance > 0 if permutation else key in selected,
                 score=importance,
                 model_gain=gain,
+                **({'loss_deltas': gains[key]['loss_deltas'],
+                    **stability.group_record(key, measurement_groups, gains)} if key in gains else {}),
                 effect_scale="conditional_log_odds_ratio",
             )
         )
     return {
         "records": rows,
-        "audit": {**result["audit"], "heldout_loss": baseline, "heldout_gain_over_constant": gain},
+        "audit": {**result["audit"], "heldout_loss": baseline, "heldout_gain_over_constant": gain,
+                  "model_loss_deltas": stability.pack(dina.loss(yv, tv, nv['a'], nv['nu'], constant)
+                                                       - score(result['design'].valid))},
     }
 
 

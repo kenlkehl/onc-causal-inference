@@ -71,7 +71,9 @@ the corresponding Stage 1 changes.
 
 1. Preserve original inner-fold memberships. Fit on inner-training patients and
    score predictions on untouched inner-validation patients. Splits must partition
-   exactly the supplied outer-training rows; each patient validates once.
+   exactly the supplied outer-training rows. The original partition is retained,
+   with two additional independently seeded partitions by default; each patient
+   validates once per partition. No outer-test rows enter this resampling.
 2. Fit all-candidate treatment and marginal-outcome elastic nets. Cross-fit them
    again inside inner training to obtain training residuals; separate models
    trained on that population predict validation residuals. Encoder and penalty
@@ -80,20 +82,19 @@ the corresponding Stage 1 changes.
 3. Keep nuisances fixed across that fold's perturbations. This assesses evidence
    stability conditional on one honest nuisance construction, not a bootstrap of
    the entire discovery process.
-4. Defaults: three repetitions, using all inner-training patients once and two
-   treatment-stratified 80% subsamples. Linear evidence models cycle through L1
-   ratios 0.2, 0.8, and 1.0. Nuisances use their separately configured ratio.
-5. Forests first see all candidates; later repetitions randomly partition the
-   complete list into subsets of at most 32. Every candidate appears once per
-   repetition. Causal forests retain all-candidate nuisance adjustment even when
-   their effect-input subsets are small.
-6. Default forests: 200 trees, minimum leaf size 10. Causal forests use honesty,
-   45% tree subsampling, all supplied effect columns at each split, and inference
-   disabled. Selection does not request confidence intervals.
-7. Three group permutations score each candidate on validation patients. Causal
-   scores hold nuisance residuals fixed while permuting effect inputs. These are
-   marginal permutation diagnostics, not conditional importance estimates;
-   correlated alternatives can dilute or redistribute their scores.
+4. Individual and diagnostic linear models retain three perturbations, with
+   configured row subsampling and L1 ratios. Joint models use all their available
+   training rows and the configured selection L1 ratio; DINA still tunes alpha
+   internally. This separates model context from changes in rows and penalties.
+5. Each partition fits one full candidate model and four balanced random feature
+   partitions, normally 32 features per subset. Every candidate appears once in
+   each feature partition. Equivalent measurement groups stay together. Full and
+   subset evidence are scored separately, retaining broad nuisance adjustment.
+6. Default forests: 800 trees, minimum leaf size 10. Causal forests retain honesty,
+   45% tree subsampling and inference disabled for evidence fits.
+7. Ten paired group permutations score validation patients. All encoded columns
+   and missingness indicators move together. Conservative equivalent-measurement
+   groups also receive joint permutations. Nuisance predictions stay fixed.
 8. **Every modifier screen uses the same configured overlap restriction**:
    univariable `T:candidate` tests, penalized outcome interactions, orthogonal
    linear models, candidate effect learners, causal forests, DINA, and matched batches. Set
@@ -358,10 +359,12 @@ Configuration block:
         "row_fraction": 0.8,
         "l1_ratios": [0.2, 0.8, 1.0],
         "regularization_grid_size": 8,
-        "forest_trees": 200,
+        "forest_trees": 800,
         "forest_min_samples_leaf": 10,
         "feature_subset_size": 32,
-        "permutation_repeats": 3,
+        "permutation_repeats": 10,
+        "stability": {"partition_repeats": 3, "subset_partitions": 4,
+                      "group_equivalent_measurements": true},
         "nominal_p_threshold": 0.05,
         "q_threshold": 0.1,
         "max_prompt_chars": 100000,
@@ -439,25 +442,32 @@ globally disabled source is omitted. A configured but failed source remains in
 the denominator. All encoded levels and missingness indicators stay with their
 feature group.
 
-Within each source, average repeats inside each evidence fold, then take the
-median across folds. Positive medians receive their midrank percentile among
-strictly positive candidate medians in that source; nonpositive medians receive
-zero support. Multiply that percentile by the fraction of evaluable folds with
-positive average evidence and by successful fits / planned fits. The planned
-schedule includes missing cells. Repeated fits are dependent stability checks,
-not independent replications or confidence intervals.
+Within each source and model context, retain paired validation loss differences.
+Average all appearances of each patient before calculating mean importance and a
+patient-level standard-error diagnostic. Also record mean gains for each complete
+patient partition and their standard deviation. The larger uncertainty measure
+shrinks importance toward zero; repeated partitions are not independent experiments
+and these uncertainty diagnostics carry no formal coverage guarantee.
 
-A joint-model fit supplies positive feature support only if its own held-out
-loss improves over its constant-effect baseline. Otherwise cap its feature gain
-at zero before aggregation, retaining any negative gain. Missing model-quality
-information makes that exposure unavailable. Both raw and qualified fold means
-are recorded. A missing source contributes zero demonstrated support with an
-explicit missing status; other weights are not increased to compensate.
+Joint-model reliability is computed from its pooled paired gain over a constant
+effect, separately for full and subset contexts. The weight is
+`max(mean_gain, 0) / (abs(mean_gain) + noise_scale)` (zero for a zero denominator).
+It applies to the entire context, equally for positive and negative feature
+importance. Individual negative model fits no longer erase positive feature
+importance while preserving negative importance. Raw signs remain in the audit.
 
-The final score is `0.5 * max(source scores) + 0.5 * mean(source scores)`.
-This proposed heuristic gives variables a route through one strong method while
-rewarding agreement, without mixing loss units. It is not a calibrated
-probability or a formal error guarantee. Exact ties prefer average within-fold
+Within a context, positive mean importance receives its within-source percentile,
+multiplied by analogous uncertainty shrinkage and evaluated/planned coverage.
+Joint contexts are combined with reliability weights, then multiplied by their
+maximum reliability. Failed contexts supply no positive support. Individual
+feature evidence remains a separate channel.
+
+The final score is `max(source scores) + 0.25 * mean(source scores)`, protecting
+single-source support while giving a bounded agreement bonus. Equivalent-measurement
+group evidence provides additional channels only for members of accepted groups.
+These are ranking heuristics, not significance probabilities.
+
+Exact ties prefer average within-fold
 regularized interaction/group selection stability, with equal weight per
 available selection family. Next use median adjusted univariable interaction
 q-value only when every candidate in that tie group has one; otherwise use the
@@ -467,8 +477,19 @@ coefficient magnitudes, and forest split importance remain diagnostic evidence.
 `ranking.json` includes all candidate component scores, raw fold summaries,
 evaluation coverage, provenance, missing results, and generated explanations.
 Only its top requested prefix is passed to count/architecture selection. Locks
-remain outside that additional budget. No measurements are merged or deleted.
-Correlation can dilute permutation importance, and a static ranking does not
+remain outside that additional budget. Measurement grouping requires compatible
+value types/units, name-token similarity of at least 0.8, at least 30 paired
+training observations, at least 80% overlap, and Spearman correlation (or
+categorical agreement) of at least 0.95. Groups use complete linkage; a chain of
+weakly related measurements cannot merge a broad clinical theme. Negative
+correlation and ambiguous text values do not qualify. Every scoring fold learns
+its groups solely from its training measurements.
+
+After group contribution is evaluated, one representative is shortlisted using
+individual evidence, observed coverage, then stable ID. Original measurements and
+group decisions remain in the audit; explicit investigator locks are preserved.
+Count selection records the actual count if fewer representatives are available.
+This conservative rule leaves some synonyms ungrouped, and a static ranking does not
 estimate incremental value conditional on the chosen prefix. Final count and
 architecture selection still uses the same held-out probability/outcome-scale
 R-loss and includes the zero-additional-modifier option.
@@ -477,7 +498,9 @@ Statistical ranking checkpoints are versioned by the numerical evidence,
 definitions, criterion source, and requested maximum. LLM ranking checkpoints
 are incompatible. The parent selection identity also includes the ranking
 source hash, so a completed old selection cannot bypass a changed criterion.
-Changing the ranking leaves the independent numerical-evidence caches reusable.
+Changing only the ranking leaves numerical caches reusable. Changing stability
+settings or their implementation invalidates numerical evidence and downstream
+selection; Stage 1 and frozen extracted measurements remain reusable.
 When optional clinical concept review is enabled, its per-fold shortlists and
 representative ordering use this statistical ranker; the concept review itself
 remains an LLM task.

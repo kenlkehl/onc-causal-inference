@@ -25,7 +25,7 @@ from .stage2_dina import fit_effect as fit_dina_effect, unpack_nuisances as unpa
 from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = "stage2_nested_modifier_count_v4_dina"
+SCHEMA_VERSION = "stage2_nested_modifier_count_v5_stable_joint"
 
 
 def choose_modifier_count(fold_losses, *, rule):
@@ -414,7 +414,7 @@ def select_modifier_count(
                 nested_report = {"input_fingerprint": None}
                 ranked = {"ranking": []}
             keys = [r["feature_id"] for r in ranked["ranking"]]
-            if not cfg.concept_review and len(keys) != maximum:
+            if not cfg.concept_review and len(keys) != min(maximum, ranked.get("available_representatives", maximum)):
                 raise RuntimeError("modifier ranking did not cover the requested budget")
             # These are the already-computed, training-only nuisance models of
             # the parent numerical pass, reused with their original seed/hash.

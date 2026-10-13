@@ -30,6 +30,7 @@ from .stage2_multi_model_config import FAMILIES, SCHEMA_VERSION
 from .stage2_role_adjudication import _fingerprint, _write_json
 from .stage2_statistical_selection import _modifier_test_chunk
 from . import stage2_modeling_pool as modeling
+from . import stage2_evidence_stability as stability
 from .stage2_modeling_identity import scientific_source_sha256
 
 LOGGER = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ def numerical_identity(
             Path(__file__).with_name("stage2_dina.py").read_bytes()
         ).hexdigest(),
         "component_source_sha256": scientific_source_sha256(__file__),
+        "stability_source_sha256": sha256(Path(stability.__file__).read_bytes()).hexdigest(),
         "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
         **(
             {
@@ -498,18 +500,7 @@ def candidate_subsets(feature_ids, *, repeat, subset_size, seed):
 
 def grouped_permutation_gain(x, column_ids, score, *, repeats, seed):
     """Permute all encoded columns of a candidate together on validation rows."""
-    baseline = float(score(x))
-    rng = np.random.default_rng(seed)
-    result = {}
-    for feature_id in dict.fromkeys(column_ids):
-        columns = np.flatnonzero(np.asarray(column_ids) == feature_id)
-        gains = []
-        for _ in range(repeats):
-            permuted = x.copy()
-            permuted[:, columns] = x[rng.permutation(len(x))][:, columns]
-            gains.append(float(score(permuted)) - baseline)
-        result[feature_id] = {"gain": float(np.mean(gains)), "sd": float(np.std(gains))}
-    return baseline, result
+    return stability.permutation_evidence(x, column_ids, score, repeats=repeats, seed=seed)
 
 
 def _univariable(train, definitions, t, y, *, binary, policy, effect_keep=None):
@@ -695,14 +686,15 @@ def _univariable_rlearner(train, valid, definitions, tr, yr, tvr, yvr, *, policy
         beta = np.linalg.lstsq(x.T @ x + penalty, x.T @ yr, rcond=None)[0]
         loss = float(np.mean((yvr - xv @ beta) ** 2))
         gain = baseline - loss
-        records.append(_record(_key(f), "effect", selected=gain > 0, score=gain))
+        records.append(_record(_key(f), "effect", selected=gain > 0, score=gain,
+                              loss_deltas=stability.pack((yvr - tvr * constant) ** 2 - (yvr - xv @ beta) ** 2)))
     return {
         "records": records,
         "audit": {"baseline_heldout_r_loss": baseline, "ridge_alpha": policy.modifier_ridge_alpha},
     }
 
 
-def _forests(family, train, valid, definitions, t, y, tv, yv, *, binary, policy, seed, nuisance):
+def _forests(family, train, valid, definitions, t, y, tv, yv, *, binary, policy, seed, nuisance, measurement_groups=()):
     design = linear._encode_design(
         train, valid, definitions, categorical_min_count=policy.categorical_min_count
     )
@@ -732,7 +724,7 @@ def _forests(family, train, valid, definitions, t, y, tv, yv, *, binary, policy,
             model.fit(design.train, tr.reshape(-1, 1), yr)
 
             def score(x):
-                return np.mean((yvr - tvr * model.predict(x).reshape(-1)) ** 2)
+                return (yvr - tvr * model.predict(x).reshape(-1)) ** 2
 
         else:
             is_binary = role == "treatment" or binary
@@ -755,12 +747,13 @@ def _forests(family, train, valid, definitions, t, y, tv, yv, *, binary, policy,
                 prediction = model.predict_proba(x)[:, 1] if is_binary else model.predict(x)
                 return linear._loss(target_valid, prediction, binary=is_binary)
 
-        baseline, gains = grouped_permutation_gain(
+        baseline, gains = stability.permutation_evidence(
             design.valid,
             design.column_feature_ids,
             score,
             repeats=cfg.permutation_repeats,
             seed=seed + 20,
+            groups=measurement_groups if role == 'effect' else (),
         )
         importance = np.asarray(model.feature_importances_)
         if role == "effect":
@@ -786,6 +779,8 @@ def _forests(family, train, valid, definitions, t, y, tv, yv, *, binary, policy,
                     score=gain["gain"] if gain else None,
                     permutation_sd=gain["sd"] if gain else None,
                     model_gain=model_gain,
+                    **({'loss_deltas': gain['loss_deltas'],
+                        **stability.group_record(feature_id, measurement_groups, gains)} if role == 'effect' and gain else {}),
                     split_importance=float(importance[columns].sum()) if len(columns) else None,
                 )
             )
@@ -798,6 +793,7 @@ def _forests(family, train, valid, definitions, t, y, tv, yv, *, binary, policy,
                 "nuisance_model_family": (
                     "elastic_net" if role == "effect" else "not_a_nuisance_model"
                 ),
+                **({'model_loss_deltas': stability.pack((yvr - tvr * constant) ** 2 - score(design.valid))} if role == 'effect' else {}),
             }
         )
     return {"records": records, "audit": audits}
@@ -930,8 +926,14 @@ def select_stage2_features_multi_model(
     cfg = policy.multi_model
     families = cfg.active_families(outcome_type)
     by_id = {_key(f): f for f in definitions}
+    evidence_splits = stability.repeated_partitions(
+        inner_splits, labels, treatment_column=treatment_column, outcome_column=outcome_column,
+        binary=binary, repeats=cfg.stability.partition_repeats, seed=seed)
+    # These full-training groups only choose shortlist representatives. Every
+    # fitted model/permutation below uses groups learned in its own training split.
+    representative_groups = stability.measurement_groups(frame, definitions, cfg.stability)
     with threadpool_limits(limits=1):
-        for position, split in enumerate(inner_splits, 1):
+        for position, split in enumerate(evidence_splits, 1):
             fold = int(split.get("inner_fold", position))
             train_ids, valid_ids = split["fit_row_ids"], split["heldout_row_ids"]
             train, valid = (
@@ -943,6 +945,7 @@ def select_stage2_features_multi_model(
                 labels.loc[valid_ids, [treatment_column, outcome_column]].to_numpy(dtype=float).T
             )
             fold_seed = int(seed) + position * 10_000
+            measurement_groups = stability.measurement_groups(train, definitions, cfg.stability)
             LOGGER.info("Stage 2 multi-model fold=%s: nested elastic-net nuisances", fold)
             nuisance = checkpoint_future(
                 directory,
@@ -975,19 +978,20 @@ def select_stage2_features_multi_model(
                         "effect_eligible": bool(eligible_valid[i]),
                     }
                 )
-            for repeat in range(cfg.repeats):
+            for repeat in range(max(cfg.repeats, cfg.stability.subset_partitions + 1)):
                 cell_seed = fold_seed + repeat * 100
                 rows = (
                     np.arange(len(train))
                     if repeat == 0
                     else _subsample(t, cfg.row_fraction, np.random.default_rng(cell_seed))
                 )
-                sampled = train.iloc[rows].reset_index(drop=True)
                 ratio = float(cfg.l1_ratios[repeat % len(cfg.l1_ratios)])
-                subsets = candidate_subsets(
-                    list(by_id), repeat=repeat, subset_size=cfg.feature_subset_size, seed=cell_seed
-                )
+                subsets = ([list(by_id)] if repeat == 0 else stability.balanced_subsets(
+                    list(by_id), measurement_groups, subset_size=cfg.feature_subset_size, seed=cell_seed))
                 for family in families:
+                    joint_family = family in {'predictive_forest', 'causal_forest', 'dina'}
+                    if repeat >= (cfg.stability.subset_partitions + 1 if joint_family else cfg.repeats):
+                        continue
                     groups = (
                         subsets
                         if family in {"predictive_forest", "causal_forest", "dina"}
@@ -997,8 +1001,14 @@ def select_stage2_features_multi_model(
                         leaf = f"fold_{fold:03d}/repeat_{repeat:03d}/{family}_{subset_index:03d}"
 
                         def compute():
+                            # Joint context changes are isolated from row subsampling
+                            # and penalty changes. DINA tunes alpha in training at a
+                            # fixed configured L1 ratio; patient partitions vary outside.
+                            local_rows = np.arange(len(train)) if joint_family else rows
+                            local_sampled = train.iloc[local_rows].reset_index(drop=True)
+                            local_ratio = policy.l1_ratio if joint_family else ratio
                             selected_definitions = [by_id[k] for k in feature_ids]
-                            nuisance_view = {"e": e[rows], "m": m[rows], "ev": ev, "mv": mv}
+                            nuisance_view = {"e": e[local_rows], "m": m[local_rows], "ev": ev, "mv": mv}
                             effect_family = family in {
                                 "penalized_interactions",
                                 "orthogonal_linear",
@@ -1009,21 +1019,21 @@ def select_stage2_features_multi_model(
                             }
                             keep = (
                                 linear.propensity_eligibility(
-                                    e[rows], policy.min_propensity, policy.max_propensity
+                                    e[local_rows], policy.min_propensity, policy.max_propensity
                                 )
                                 if effect_family
-                                else np.ones(len(rows), dtype=bool)
+                                else np.ones(len(local_rows), dtype=bool)
                             )
                             keepv = (
                                 eligible_valid if effect_family else np.ones(len(valid), dtype=bool)
                             )
                             fit, hold = (
-                                sampled.loc[keep].reset_index(drop=True),
+                                local_sampled.loc[keep].reset_index(drop=True),
                                 valid.loc[keepv].reset_index(drop=True),
                             )
                             tt, yy, ttval, yyval = (
-                                t[rows][keep],
-                                y[rows][keep],
+                                t[local_rows][keep],
+                                y[local_rows][keep],
                                 tv[keepv],
                                 yv[keepv],
                             )
@@ -1059,7 +1069,7 @@ def select_stage2_features_multi_model(
 
                                     nt, nv_dina = stage2_dina.unpack_nuisances(nuisance)
                                     dina_nuisance = (
-                                        {k: v[rows][keep] for k, v in nt.items()},
+                                        {k: v[local_rows][keep] for k, v in nt.items()},
                                         {k: v[keepv] for k, v in nv_dina.items()},
                                     )
                                     fn = (
@@ -1070,7 +1080,7 @@ def select_stage2_features_multi_model(
                                     extra = (
                                         {}
                                         if family == "univariable_rlearner"
-                                        else {"permutation": family == "dina"}
+                                        else {"permutation": family == "dina", "measurement_groups": measurement_groups}
                                     )
                                     result = fn(
                                         fit,
@@ -1080,7 +1090,7 @@ def select_stage2_features_multi_model(
                                         yy,
                                         ttval,
                                         yyval,
-                                        policy=replace(policy, l1_ratio=ratio),
+                                        policy=replace(policy, l1_ratio=local_ratio),
                                         seed=cell_seed,
                                         nuisance=dina_nuisance,
                                         **extra,
@@ -1135,6 +1145,7 @@ def select_stage2_features_multi_model(
                                         policy=policy,
                                         seed=cell_seed + subset_index,
                                         nuisance=nv,
+                                        measurement_groups=measurement_groups,
                                     )
                             except NotEstimable as exc:
                                 roles = (
@@ -1162,6 +1173,9 @@ def select_stage2_features_multi_model(
                             return {
                                 "family": family,
                                 "inner_fold": fold,
+                                "partition_repeat": split['partition_repeat'],
+                                "partition_fold": split['partition_fold'],
+                                "context": ('full' if repeat == 0 else 'subset') if joint_family else 'individual',
                                 "repeat": repeat,
                                 "candidate_ids": feature_ids,
                                 "seed": cell_seed + subset_index,
@@ -1185,6 +1199,12 @@ def select_stage2_features_multi_model(
                         cells.append(checkpoint_future(directory, leaf, fingerprint, compute))
     # Preserve canonical fold/repeat/family/subset order despite completion order.
     cells = [future.result() for future in cells]
+    # Do not present repeated OOF predictions as extra patients downstream.
+    oof_frame = pd.DataFrame(oof)
+    oof = oof_frame.groupby('_oci_row_id', sort=True).agg(
+        treatment=('treatment', 'first'), outcome=('outcome', 'first'),
+        propensity=('propensity', 'mean'), outcome_prediction=('outcome_prediction', 'mean'),
+        effect_eligible=('effect_eligible', 'all')).reset_index().to_dict('records')
     summaries = aggregate_evidence(cells, list(by_id))
     availability = {
         family: sum(
@@ -1213,6 +1233,9 @@ def select_stage2_features_multi_model(
         "policy": policy.public_dict(),
         "input_fingerprint": fingerprint,
         "inner_folds": len(inner_splits),
+        "partition_repeats": cfg.stability.partition_repeats,
+        "measurement_groups": representative_groups,
+        "measurement_observed_fractions": {f['feature_id']: float(frame[f['name']].notna().mean()) for f in definitions},
         "model_families": list(families),
         "evaluable_cells_by_family": availability,
         "multi_model_evidence": summaries,
@@ -1229,6 +1252,8 @@ def select_stage2_features_multi_model(
         "stability_contract": {
             "support_is_conditional_on_evaluation": True,
             "repeats_share_patients_and_are_not_independent_experiments": True,
+            "patient_loss_differences_averaged_before_uncertainty": True,
+            "full_and_subset_contexts_separate": True,
             "nuisances_fixed_across_resamples_within_inner_fold": True,
             "no_hard_p_value_frequency_or_top_n_gate": True,
         },

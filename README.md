@@ -1740,10 +1740,14 @@ Joint modifier-count and final-estimator search is enabled by default in
 rebuilds numerical evidence and deterministic statistical rankings, including
 clinical concept review when enabled. Ranking combines individual effect-model
 validation gain, joint DINA permutation importance for binary outcomes, and
-causal-forest permutation importance. Each source uses a within-method positive
-percentile, fold consistency, and evaluation coverage. The final support score is
-`0.5 * max(source scores) + 0.5 * mean(source scores)`; ranking makes no LLM
-requests. See [the ranking criterion](docs/stage2_multi_model.md#statistical-modifier-ranking)
+causal-forest permutation importance. Evidence averages paired losses per patient across three validation partitions,
+keeps full-model and balanced feature-subset contexts separate, and weights joint
+importance by pooled model reliability. Defaults use 800 trees and ten permutations.
+Conservative groups of equivalent measurements are evaluated jointly before
+choosing a representative. The support score is
+`max(source scores) + 0.25 * mean(source scores)`, preserving individual evidence
+when joint evidence is inconclusive; ranking makes no LLM requests.
+See [the ranking criterion](docs/stage2_multi_model.md#statistical-modifier-ranking)
 for missing-data, model-quality, and tie rules. It compares ranked modifier prefixes across causal forests, penalized
 interaction outcome models, and DINA for binary outcomes. All architectures are
 scored on held-out squared R-loss on the same eligible patients; DINA's fitted

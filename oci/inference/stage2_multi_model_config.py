@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v4_dina"
+SCHEMA_VERSION = "stage2_multi_model_selection_v5_stable_joint"
 from .stage2_prompt_catalog import PROMPT_VERSION
 FAMILIES = (
     "univariable",
@@ -117,15 +117,40 @@ class ModifierCountConfig:
 
 
 @dataclass(frozen=True)
+class EvidenceStabilityConfig:
+    """Training-only resampling and conservative alternate-measurement groups."""
+
+    partition_repeats: int = 3
+    subset_partitions: int = 4
+    group_equivalent_measurements: bool = True
+    group_min_observations: int = 30
+    group_min_overlap: float = 0.8
+    group_min_association: float = 0.95
+    group_min_name_similarity: float = 0.8
+
+    def validate(self):
+        for name in ('partition_repeats', 'subset_partitions', 'group_min_observations'):
+            if type(getattr(self, name)) is not int or getattr(self, name) < 1:
+                raise ValueError(f'multi_model.stability.{name} must be a positive integer')
+        if type(self.group_equivalent_measurements) is not bool:
+            raise ValueError('group_equivalent_measurements must be boolean')
+        for name in ('group_min_overlap', 'group_min_association', 'group_min_name_similarity'):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not 0 < value <= 1:
+                raise ValueError(f'multi_model.stability.{name} must be in (0, 1]')
+
+
+@dataclass(frozen=True)
 class Stage2MultiModelConfig:
     repeats: int = 3
     row_fraction: float = 0.8
     l1_ratios: tuple[float, ...] = (0.2, 0.8, 1.0)
     regularization_grid_size: int = 8
-    forest_trees: int = 200
+    forest_trees: int = 800
     forest_min_samples_leaf: int = 10
     feature_subset_size: int = 32
-    permutation_repeats: int = 3
+    permutation_repeats: int = 10
+    stability: EvidenceStabilityConfig = field(default_factory=EvidenceStabilityConfig)
     nominal_p_threshold: float = 0.05
     q_threshold: float = 0.1
     max_prompt_chars: int = 100_000
@@ -135,6 +160,9 @@ class Stage2MultiModelConfig:
     matched_batch: MatchedBatchConfig = MatchedBatchConfig()
 
     def validate(self) -> None:
+        if not isinstance(self.stability, EvidenceStabilityConfig):
+            raise ValueError('multi_model.stability must be an EvidenceStabilityConfig object')
+        self.stability.validate()
         if not isinstance(self.matched_batch, MatchedBatchConfig):
             raise ValueError("multi_model.matched_batch must be a MatchedBatchConfig object")
         self.matched_batch.validate()
@@ -208,6 +236,7 @@ def multi_model_config_from_mapping(
         "stage2_multi_model_selection_v1",
         "stage2_multi_model_selection_v2",
         "stage2_multi_model_selection_v3",
+        "stage2_multi_model_selection_v4_dina",
     }:
         raise ValueError("unsupported multi_model schema_version")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)
@@ -225,6 +254,11 @@ def multi_model_config_from_mapping(
         if unknown:
             raise ValueError(f"unsupported matched_batch fields: {sorted(unknown)}")
         raw["matched_batch"] = MatchedBatchConfig(**batch)
+    if 'stability' in raw:
+        stability = raw['stability']
+        if not isinstance(stability, Mapping) or set(stability) - set(EvidenceStabilityConfig.__dataclass_fields__):
+            raise ValueError('unsupported multi_model.stability configuration')
+        raw['stability'] = EvidenceStabilityConfig(**stability)
     if "modifier_count" in raw:
         count = raw["modifier_count"]
         if not isinstance(count, Mapping):
