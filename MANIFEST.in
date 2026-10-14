@@ -9,7 +9,6 @@ recursive-include scripts *.py *.sh *.md
 recursive-include experiments/plumb_feasibility *.json
 recursive-include synthetic_data *.py
 include synthetic_data/example_usage.txt
-include synthetic_data/script_creation_prompt.md
 prune synthetic_data/example_synthetic_datasets/*/.oci_cache
 global-exclude __pycache__
 global-exclude *.py[co]

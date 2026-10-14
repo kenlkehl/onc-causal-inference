@@ -10,11 +10,8 @@ __pycache__/
 build/
 dist/
 .test_outputs/
-experiments_*/
-*.cdt_cache*
 *.oci_cache*
 synthetic_output*
-applied_experiments/
 artifacts/
 reports/
 

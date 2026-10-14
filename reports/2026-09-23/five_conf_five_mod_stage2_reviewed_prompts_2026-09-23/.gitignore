@@ -1,8 +1,0 @@
-run.lock
-run.log
-status.json
-preflight.json
-result.json
-launcher.json
-live_report.lock
-live_report_snapshot_*.json

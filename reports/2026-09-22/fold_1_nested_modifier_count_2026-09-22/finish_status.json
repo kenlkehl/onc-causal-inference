@@ -1,7 +1,0 @@
-{
-  "at": "2026-09-22T21:48:41.710708+00:00",
-  "child_pid": 1161593,
-  "phase": "cancelled",
-  "supervisor_pid": 1161519,
-  "reason": "User stopped this attempt and requested propensity-restricted modifier screening plus final architecture selection."
-}
