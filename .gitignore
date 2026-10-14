@@ -19,3 +19,6 @@ artifacts/
 reports/
 
 .oci_cache/
+
+# Large generated synthetic datasets are stored outside Git.
+/synthetic_data/example_synthetic_datasets/*_10000*/
