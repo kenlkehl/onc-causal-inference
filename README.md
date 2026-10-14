@@ -231,7 +231,8 @@ See the [DINA guide](docs/gao_hastie_dina.md) for equations and interpretation.
 | --- | --- |
 | Extraction | Full-record LLM extraction; up to 10 variables from one patient per request; lossless chunks for long records |
 | Extraction reasoning | Initially off; error-directed repairs retain that setting through the configured five-repair threshold, then enable thinking on the same model |
-| Modifier ranking | Programmatic statistical ranking; optional clinical-concept review is a separate LLM step |
+| Modifier ranking | Equal default weight for nuisance-adjusted interaction tests and combined predictive evidence; optional clinical-concept review is separate |
+| Modifier count | Interaction support chooses among budgets within a paired validation R-loss guardrail (`balanced_evidence`) |
 | Nuisance selection | Separate predictive treatment/outcome supports; no LLM retention decisions in `multi_model` |
 | Treatment main effect | Unpenalized in Stage 2 interaction models and continuous R-learners; DINA also leaves its constant treatment effect unpenalized |
 | Selection mode | Fresh synthetic launchers and the multi-model example use `multi_model`; an omitted core setting still means `llm_roles` |

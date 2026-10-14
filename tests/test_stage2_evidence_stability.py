@@ -86,7 +86,8 @@ def test_joint_contexts_remain_separate_and_individual_evidence_is_protected(tmp
     assert forest['contexts']['subset']['model_reliability'] == 1
     assert forest['support_score'] > 0
     individual = result['a']['components']['univariable_rlearner']['support_score']
-    assert result['a']['score'] >= individual
+    # The predictive group now normalizes max + .25 * mean onto [0, 1].
+    assert result['a']['score'] >= individual / 1.25
 
 
 def test_equivalent_measurements_need_names_and_training_agreement_and_stay_together():

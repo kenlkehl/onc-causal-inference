@@ -1,4 +1,4 @@
-"""Nested, training-only R-loss selection of architecture and modifier budget.
+"""Nested predictive/interaction selection of architecture and modifier budget.
 
 The feature catalog/extractions are frozen upstream. Within each count-validation
 split, numerical evidence and statistical ranking use only its training rows. Broad scoring nuisances and eligibility stay fixed across budgets.
@@ -25,7 +25,7 @@ from .stage2_dina import fit_effect as fit_dina_effect, unpack_nuisances as unpa
 from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = "stage2_nested_modifier_count_v6_predictive_nuisances"
+SCHEMA_VERSION = "stage2_nested_modifier_count_v7_balanced_interactions"
 
 
 def choose_modifier_count(fold_losses, *, rule):
@@ -69,16 +69,63 @@ def choose_modifier_count(fold_losses, *, rule):
     }
 
 
-def choose_effect_model(losses, *, rule):
+def choose_effect_model(losses, *, rule, interaction_utilities=None,
+                        relative_r_loss_tolerance=1e-4):
     """Joint architecture/count choice on paired validation folds.
 
-    Equal losses (or the optional one-SE simplification rule) prefer fewer
-    modifiers, then the linear architecture. Forest seeds are already averaged.
+    Balanced evidence selects an interaction-supported budget among pairs within
+    a paired R-loss guardrail. Legacy minimum-loss and one-SE rules remain available.
     """
     architecture_order = {"linear_interactions": 0, "dina": 1, "causal_forest": 2}
     order = sorted(losses, key=lambda pair: (pair[1], architecture_order[pair[0]]))
-    indexed = choose_modifier_count({i: losses[pair] for i, pair in enumerate(order)}, rule=rule)
+    indexed = choose_modifier_count(
+        {i: losses[pair] for i, pair in enumerate(order)},
+        rule="minimum_r_loss" if rule == "balanced_evidence" else rule,
+    )
     best, chosen = order[indexed["best_mean_count"]], order[indexed["chosen_additional_count"]]
+    guardrail = None
+    if rule == "balanced_evidence":
+        if (isinstance(relative_r_loss_tolerance, bool)
+                or not isinstance(relative_r_loss_tolerance, (int, float))
+                or not math.isfinite(relative_r_loss_tolerance)
+                or not 0 <= relative_r_loss_tolerance <= 1):
+            raise ValueError("relative_r_loss_tolerance must be in [0, 1]")
+        best_loss = indexed['options'][str(indexed['best_mean_count'])]['mean_r_loss']
+        tolerance = max(abs(best_loss) * relative_r_loss_tolerance, 1e-12)
+        utilities = {}
+        for k in {pair[1] for pair in order}:
+            values = np.asarray(interaction_utilities[k] if interaction_utilities is not None
+                                else np.zeros(len(losses[best])), dtype=float)
+            if values.shape != (len(losses[best]),) or not np.isfinite(values).all():
+                raise ValueError("interaction utilities must match the paired validation folds")
+            utilities[k] = float(values.mean())
+        eligible = []
+        for i, pair in enumerate(order):
+            option = indexed['options'][str(i)]
+            allowed = option['mean_excess_vs_best'] <= option['paired_standard_error'] + tolerance
+            option.update(within_predictive_guardrail=bool(allowed),
+                          mean_interaction_utility=utilities[pair[1]])
+            if allowed:
+                eligible.append(pair)
+        strongest = max(utilities[k] for _, k in eligible)
+        supported = [pair for pair in eligible if utilities[pair[1]] >= strongest - 1e-12]
+        chosen_count = min(k for _, k in supported)
+        supported = [pair for pair in supported if pair[1] == chosen_count]
+        smallest_loss = min(float(np.mean(losses[pair])) for pair in supported)
+        # At the chosen budget, predictive fit chooses the architecture; only
+        # numerical/practical ties use the deterministic simplicity order.
+        chosen = min((pair for pair in supported
+                      if float(np.mean(losses[pair])) <= smallest_loss + tolerance),
+                     key=lambda pair: architecture_order[pair[0]])
+        guardrail = {
+            'rule': 'paired_excess_r_loss <= paired_fold_se + relative_tolerance',
+            'absolute_tolerance': tolerance,
+            'relative_tolerance': relative_r_loss_tolerance,
+            'interaction_utilities': {str(k): v for k, v in sorted(utilities.items())},
+            'interaction_evidence_supplied': interaction_utilities is not None,
+            'utility_source': 'nested_training_adjusted_interaction_support',
+            'formal_error_guarantee': False,
+        }
     return {
         "best_mean_estimator": best[0],
         "best_mean_count": best[1],
@@ -101,7 +148,10 @@ def choose_effect_model(losses, *, rule):
             }
             for estimator in sorted({e for e, _ in order})
         },
-        "tie_break": "fewer_modifiers_then_linear_interactions_then_dina_then_causal_forest",
+        "tie_break": ("interaction_support_then_fewer_modifiers_then_r_loss_then_architecture"
+                      if rule == "balanced_evidence" else
+                      "fewer_modifiers_then_linear_interactions_then_dina_then_causal_forest"),
+        **({'predictive_guardrail': guardrail} if guardrail is not None else {}),
         "formal_error_guarantee": False,
     }
 
@@ -175,7 +225,8 @@ def _score_prefix(*, train, valid, definitions, feature_ids, tr, yr, tvr, yvr, s
     }
 
 
-def _apply_budget(definitions, selected, role_report, ordered, count, locked_modifiers):
+def _apply_budget(definitions, selected, role_report, ordered, count, locked_modifiers,
+                  *, selection_rule="balanced_evidence"):
     kept_modifiers = set(locked_modifiers) | {r["feature_id"] for r in ordered[:count]}
     previous = {str(f["feature_id"]): f for f in selected}
     decisions = {str(r["feature_id"]): deepcopy(r) for r in role_report["decisions"]}
@@ -207,12 +258,13 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
         decision["modifier_count_selection"] = {
             "rank": rank,
             "chosen_additional_count": count,
+            "selection_rule": selection_rule,
             "investigator_locked": definition.get("configured_explicit_feature") is True,
         }
         if definition.get("configured_explicit_feature") is not True:
             decision["rationale"] = (
                 decision.get("rationale", "")
-                + f" Modifier role set by nested R-loss prefix selection (rank={rank}, additional budget={count}); nuisance task supports preserved."
+                + f" Modifier role set by nested {selection_rule} prefix selection (rank={rank}, additional budget={count}); nuisance task supports preserved."
             )
             if key in kept_modifiers:
                 decision["evidence_ids"] = sorted(
@@ -225,7 +277,7 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
             feature["roles"] = roles
             feature.update(routing)
             if definition.get("configured_explicit_feature") is not True:
-                feature["selection_source"] = "multi_model_predictive_nuisances_nested_r_loss_modifiers"
+                feature["selection_source"] = "multi_model_predictive_nuisances_nested_modifier_selection"
                 feature["selection_authority"] = "multi_model"
                 feature["roles_are_model_routing_not_causal_labels"] = True
                 decision.update({k: feature[k] for k in (
@@ -307,6 +359,7 @@ def select_modifier_count(
         "prompt_version": PROMPT_VERSION,
         "numerical_input_fingerprint": base_fingerprint,
         "count_policy": cfg.public_dict(),
+        "interaction_ranking_weight": policy.multi_model.interaction_ranking_weight,
         "role_policy": role_policy.public_dict(),
         "role_decisions": _fingerprint(role_report),
         "selected_definitions": selected,
@@ -425,6 +478,17 @@ def select_modifier_count(
                 nested_report = {"input_fingerprint": None}
                 ranked = {"ranking": []}
             keys = [r["feature_id"] for r in ranked["ranking"]]
+            interaction_by_id = {
+                c['feature_id']: c.get('interaction_test', {}).get('selection_utility', 0.0)
+                for c in ranked.get('candidate_scores', [])
+            }
+            # Both ordering and this utility use only this split's training
+            # evidence. The final full-training ranking cannot select its own
+            # validation budget. Missing interaction tests contribute zero.
+            interaction_utilities = {
+                str(k): float(sum(interaction_by_id.get(key, 0.0) for key in keys[:k])
+                              / max(len(keys), 1)) for k in counts
+            }
             if not cfg.concept_review and len(keys) != min(maximum, ranked.get("available_representatives", maximum)):
                 raise RuntimeError("modifier ranking did not cover the requested budget")
             # These are the already-computed, training-only nuisance models of
@@ -485,8 +549,10 @@ def select_modifier_count(
                     "ranking": ranked["ranking"],
                     "concept_review": ranked.get("concept_review"),
                     "actual_additional_counts": {str(k): min(k, len(keys)) for k in counts},
+                    "interaction_utilities": interaction_utilities,
                     "nuisance_sha256": _fingerprint(nuisance),
-                    "ranking_path": str(root / "ranking/ranking.json"),
+                    "ranking_path": str(root / ("ranking/concepts/representative_ranking/ranking.json"
+                                                if cfg.concept_review else "ranking/ranking.json")),
                 }
             )
             dina_nuisance_cache = {}
@@ -612,7 +678,14 @@ def select_modifier_count(
             raise ValueError(
                 "no architecture/modifier-count combination is estimable on every validation fold"
             )
-        choice = choose_effect_model(evaluable, rule=cfg.selection_rule)
+        choice = choose_effect_model(
+            evaluable, rule=cfg.selection_rule,
+            interaction_utilities={
+                k: [fold['interaction_utilities'][str(k)] for fold in fold_records]
+                for k in counts
+            },
+            relative_r_loss_tolerance=cfg.relative_r_loss_tolerance,
+        )
         choice["unavailable_models"] = unavailable
         full_rank = (
             get_ranking(statistical_report, directory / "full_training_ranking")
@@ -630,6 +703,7 @@ def select_modifier_count(
             full_rank["ranking"],
             choice["chosen_additional_count"],
             locked_modifiers,
+            selection_rule=cfg.selection_rule,
         )
         report = {
             "schema_version": SCHEMA_VERSION,
@@ -648,7 +722,7 @@ def select_modifier_count(
             "full_training_ranking": full_rank,
             "folds": fold_records,
             "count_policy": cfg.public_dict(),
-            "scoring": "joint architecture/count minimum mean fold R-loss; forest seeds averaged within fold; one deterministic interaction/DINA fit per fold/count; all effects scored as probability differences for binary outcomes",
+            "scoring": f"joint architecture/count rule={cfg.selection_rule}; paired validation R-loss with nested-training interaction evidence for balanced_evidence; forest seeds averaged within fold; all effects scored as probability differences for binary outcomes",
             "validation_estimators": list(estimators),
             "validation_adjustment": "all frozen candidates for scoring nuisances and interaction main effects; selected prefix for effect inputs/interactions",
             "final_refit_adjustment": "retained confounders and modifiers; forest refits DML nuisances, interaction model retunes outcome penalty",

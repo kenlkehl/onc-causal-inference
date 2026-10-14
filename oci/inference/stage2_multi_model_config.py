@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v6_predictive_nuisances"
+SCHEMA_VERSION = "stage2_multi_model_selection_v7_adjusted_interactions"
 from .stage2_prompt_catalog import PROMPT_VERSION
 FAMILIES = (
     "univariable",
@@ -59,12 +59,13 @@ class MatchedBatchConfig:
 
 @dataclass(frozen=True)
 class ModifierCountConfig:
-    """Nested R-loss tuning of additional, nonlocked modifier candidates."""
+    """Nested predictive/interaction selection of nonlocked modifier candidates."""
 
     enabled: bool = True
     candidate_counts: tuple[int, ...] = (0, 4, 8, 12, 16, 24, 32)
     max_ranked_modifiers: int = 64
-    selection_rule: str = "minimum_r_loss"
+    selection_rule: str = "balanced_evidence"
+    relative_r_loss_tolerance: float = 1e-4
     forest_seeds: int = 3
     estimators: tuple[str, ...] = FINAL_ESTIMATORS
     concept_review: bool = False
@@ -103,10 +104,16 @@ class ModifierCountConfig:
         if not isinstance(self.selection_rule, str) or self.selection_rule not in {
             "minimum_r_loss",
             "one_standard_error",
+            "balanced_evidence",
         }:
             raise ValueError(
-                "modifier_count.selection_rule must be minimum_r_loss or one_standard_error"
+                "modifier_count.selection_rule must be minimum_r_loss, one_standard_error, or balanced_evidence"
             )
+        if (isinstance(self.relative_r_loss_tolerance, bool)
+                or not isinstance(self.relative_r_loss_tolerance, (int, float))
+                or not math.isfinite(self.relative_r_loss_tolerance)
+                or not 0 <= self.relative_r_loss_tolerance <= 1):
+            raise ValueError("modifier_count.relative_r_loss_tolerance must be in [0, 1]")
 
     def public_dict(self) -> dict[str, Any]:
         return {
@@ -153,6 +160,7 @@ class Stage2MultiModelConfig:
     stability: EvidenceStabilityConfig = field(default_factory=EvidenceStabilityConfig)
     nominal_p_threshold: float = 0.05
     q_threshold: float = 0.1
+    interaction_ranking_weight: float = 0.5
     max_prompt_chars: int = 100_000
     modifier_count: ModifierCountConfig = field(default_factory=ModifierCountConfig)
     # The immutable class default also supports policy instances unpickled from
@@ -204,6 +212,11 @@ class Stage2MultiModelConfig:
             for v in self.l1_ratios
         ):
             raise ValueError("multi_model.l1_ratios must contain finite values in (0, 1]")
+        if (isinstance(self.interaction_ranking_weight, bool)
+                or not isinstance(self.interaction_ranking_weight, (int, float))
+                or not math.isfinite(self.interaction_ranking_weight)
+                or not 0 <= self.interaction_ranking_weight <= 1):
+            raise ValueError("multi_model.interaction_ranking_weight must be in [0, 1]")
 
     def public_dict(self) -> dict[str, Any]:
         result = {
@@ -238,6 +251,7 @@ def multi_model_config_from_mapping(
         "stage2_multi_model_selection_v3",
         "stage2_multi_model_selection_v4_dina",
         "stage2_multi_model_selection_v5_stable_joint",
+        "stage2_multi_model_selection_v6_predictive_nuisances",
     }:
         raise ValueError("unsupported multi_model schema_version")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)

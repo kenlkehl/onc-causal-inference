@@ -242,6 +242,7 @@ def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(mon
         binary=False,
         policy=arguments["policy"],
         effect_keep=np.zeros(96, bool),
+        nuisance={"e": np.full(96, 0.5), "m": np.zeros(96)},
     )
     assert all(r["status"] == "not_evaluable" for r in empty["records"] if r["role"] == "effect")
 
@@ -316,6 +317,7 @@ def test_missing_fit_is_not_a_negative_stability_vote(monkeypatch):
         (labels.outcome > labels.outcome.median()).to_numpy(dtype=float),
         binary=True,
         policy=arguments["policy"],
+        nuisance={"e": np.full(96, 0.5), "m": np.full(96, 0.5)},
     )
     treatment = next(r for r in result["records"] if r["role"] == "treatment")
     outcome = next(r for r in result["records"] if r["role"] == "outcome")
@@ -477,6 +479,8 @@ def test_new_example_uses_predictive_nuisances_and_freezes_resume_policy(tmp_pat
     config = compile_config(raw, config_dir=path.parent)
     assert config.stage2.statistical_selection.selection_mode == "multi_model"
     assert config.stage2.statistical_selection.multi_model.modifier_count.enabled
+    assert config.stage2.statistical_selection.multi_model.modifier_count.selection_rule == 'balanced_evidence'
+    assert config.stage2.statistical_selection.multi_model.interaction_ranking_weight == .5
     assert (config.stage2.min_propensity, config.stage2.max_propensity) == (0.1, 0.9)
     assert config.stage2.role_adjudication.enabled is False
     # Saved configs with the old flag still parse; multi_model ignores that
@@ -499,7 +503,7 @@ def test_new_example_uses_predictive_nuisances_and_freezes_resume_policy(tmp_pat
     )
     validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
     old = json.loads(json.dumps(saved))
-    for version in ("stage2_multi_model_selection_v1", "stage2_multi_model_selection_v2", "stage2_multi_model_selection_v5_stable_joint"):
+    for version in ("stage2_multi_model_selection_v1", "stage2_multi_model_selection_v2", "stage2_multi_model_selection_v5_stable_joint", "stage2_multi_model_selection_v6_predictive_nuisances"):
         old["statistical_selection"]["multi_model"]["schema_version"] = version
         (root / "config.json").write_text(json.dumps(old))
         with pytest.raises(RuntimeError, match="predictive nuisance selection"):

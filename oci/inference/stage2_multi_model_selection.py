@@ -32,6 +32,7 @@ from .stage2_role_adjudication import _fingerprint, _write_json
 from .stage2_statistical_selection import _modifier_test_chunk
 from . import stage2_modeling_pool as modeling
 from . import stage2_evidence_stability as stability
+from . import stage2_interaction_screen as interaction_screen
 from .stage2_modeling_identity import scientific_source_sha256
 from . import stage2_nuisance_selection as nuisance_selection
 
@@ -68,6 +69,7 @@ def numerical_identity(
     """Count-search settings do not change the underlying numerical evidence."""
     numerical_policy = policy.public_dict()
     numerical_policy["multi_model"].pop("modifier_count", None)
+    numerical_policy["multi_model"].pop("interaction_ranking_weight", None)
     return {
         "schema_version": SCHEMA_VERSION,
         "policy": numerical_policy,
@@ -87,6 +89,8 @@ def numerical_identity(
         "stability_source_sha256": sha256(Path(stability.__file__).read_bytes()).hexdigest(),
         "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
         "nuisance_selection_source_sha256": sha256(Path(nuisance_selection.__file__).read_bytes()).hexdigest(),
+        "interaction_screen_source_sha256": sha256(Path(interaction_screen.__file__).read_bytes()).hexdigest(),
+        "interaction_tests_source_sha256": sha256(Path(__file__).with_name("stage2_statistical_selection.py").read_bytes()).hexdigest(),
         "taskwise_routing_source_sha256": sha256(Path(__file__).with_name("stage2_taskwise_policy.py").read_bytes()).hexdigest(),
         **(
             {
@@ -552,13 +556,21 @@ def grouped_permutation_gain(x, column_ids, score, *, repeats, seed):
     return stability.permutation_evidence(x, column_ids, score, repeats=repeats, seed=seed)
 
 
-def _univariable(train, definitions, t, y, *, binary, policy, effect_keep=None):
+def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_keep=None):
     records = []
     if effect_keep is None:
         effect_keep = np.ones(len(train), dtype=bool)
     effect_train = train.loc[effect_keep].reset_index(drop=True)
     effect_t, effect_y = t[effect_keep], y[effect_keep]
     effect_evaluable = len(effect_t) >= 4 and len(np.unique(effect_t)) == 2
+    e, m = (np.asarray(nuisance[key], dtype=float) for key in ("e", "m"))
+    if e.shape != t.shape or m.shape != t.shape:
+        raise ValueError("interaction-test nuisances must align with training rows")
+    effect_base, adjustment_audit = (None, None)
+    if effect_evaluable:
+        effect_base, adjustment_audit = interaction_screen.adjustment_design(
+            effect_t, e[effect_keep], m[effect_keep], binary=binary
+        )
     intercept = np.ones((len(t), 1))
     adjusted, _ = linear._univariable_rank_safe_columns(intercept, t.reshape(-1, 1))
 
@@ -581,20 +593,20 @@ def _univariable(train, definitions, t, y, *, binary, policy, effect_keep=None):
         outcome_test = (
             linear._binary_nested_p_value if binary else linear._continuous_nested_p_value
         )
+        interaction_result = {}
+
+        def interaction_p():
+            interaction_result.update(_modifier_test_chunk(
+                effect_train, effect_t, effect_y, effect_base, [feature],
+                binary_outcome=binary,
+                p_value_threshold=policy.multi_model.nominal_p_threshold,
+            )[0])
+            return interaction_result["interaction_p_value"]
+
         values = (
             tested_p(lambda: linear._binary_nested_p_value(t, intercept, design.main)[0]),
             tested_p(lambda: outcome_test(y, adjusted, design.main)[0]),
-            tested_p(
-                lambda: _modifier_test_chunk(
-                    effect_train,
-                    effect_t,
-                    effect_y,
-                    np.column_stack((np.ones(len(effect_t)), effect_t)),
-                    [feature],
-                    binary_outcome=binary,
-                    p_value_threshold=policy.multi_model.nominal_p_threshold,
-                )[0]["interaction_p_value"]
-            )
+            tested_p(interaction_p)
             if effect_evaluable
             else None,
         )
@@ -607,6 +619,9 @@ def _univariable(train, definitions, t, y, *, binary, policy, effect_keep=None):
                     selected=p < policy.multi_model.nominal_p_threshold if p is not None else None,
                     score=-float(np.log10(max(p, 1e-300))) if p is not None else None,
                     p_value=p,
+                    **({"interaction_adjusted": True,
+                        "interaction_test": interaction_result.get("interaction_test")}
+                       if role == "effect" else {}),
                 )
             )
     for role in ROLES:
@@ -617,7 +632,8 @@ def _univariable(train, definitions, t, y, *, binary, policy, effect_keep=None):
     return {
         "records": records,
         "audit": {
-            "modifier_model": "Y ~ T + candidate + T:candidate",
+            "modifier_model": "Y ~ T + candidate + T:candidate + f(propensity_oof) + g(outcome_oof)",
+            "interaction_adjustment": adjustment_audit,
             "outcome_association_model": "Y ~ T + candidate",
             "multiplicity": "BH_within_resample_and_endpoint",
             "hard_gate": False,
@@ -1113,6 +1129,7 @@ def select_stage2_features_multi_model(
                                         yy,
                                         binary=binary,
                                         policy=policy,
+                                        nuisance=nv,
                                         effect_keep=linear.propensity_eligibility(
                                             e[rows], policy.min_propensity, policy.max_propensity
                                         ),

@@ -1,7 +1,8 @@
 # Stage 2 selection from multiple models
 
 Implemented September 21, 2026; overlap-restricted modifier screening and joint
-modifier-count/estimator selection updated September 22, 2026. Enable with
+modifier-count/estimator selection updated September 22, 2026; nuisance-adjusted
+interaction tests and balanced selection updated October 14, 2026. Enable with
 `stage2.statistical_selection.selection_mode: "multi_model"`.
 
 On `main`, Bernoulli DINA is used for binary orthogonal/candidate effect fits,
@@ -36,7 +37,7 @@ the corresponding Stage 1 changes.
 
 | Family | Treatment / outcome evidence | Modifier evidence |
 | --- | --- | --- |
-| Univariable models | Candidate association with treatment; outcome association adjusted for treatment | `Y ~ T + Z + T:Z`; logistic for binary outcomes, linear otherwise |
+| Univariable models | Candidate association with treatment; outcome association adjusted for treatment | `Y ~ T + Z + f(e_oof) + g(m_oof) + T:Z`; logistic for binary outcomes, linear otherwise |
 | Penalized main effects | Separate grouped elastic nets for treatment and marginal outcome | None; predictive support alone is not a modifier label |
 | Penalized outcome interactions | Main-effect support in the joint outcome model | Grouped elastic net for `Y ~ T + all Z + all T:Z` |
 | Orthogonal linear model | Cross-fitted grouped nuisances | Joint group elastic-net DINA for binary outcomes; grouped `Y_res ~ T_res * (constant + Z)` for continuous outcomes |
@@ -49,16 +50,29 @@ the corresponding Stage 1 changes.
 1. Categorical columns remain one candidate group. Interaction tests are omnibus;
    permutations move all encoded columns of a candidate together, preserving its
    category/missingness coding.
-2. Univariable modifier models include the candidate main effect and are
-   unadjusted for other covariates. Their confounding sensitivity is explicit to
-   the reports; orthogonal models provide separate adjusted evidence.
+2. Conventional single-candidate modifier tests adjust for cross-fitted propensity
+   `e_oof = P(T=1|X)` and marginal outcome prediction `m_oof = E(Y|X)` from all
+   candidate covariates. Both reduced and full models include intercept, treatment,
+   candidate main effects, and the **same fixed score bases on the same patients**.
+   Only the full model adds `T:candidate`. Adjustment coefficients are refitted
+   in each model; they are not constrained to be equal. Each nonconstant score
+   gets a two-degree-of-freedom natural cubic spline with 10/50/90% quantile knots;
+   tied knots and redundant columns reduce its dimension. Probability scores are
+   clipped to `[1e-6, 1-1e-6]` and transformed to logits first; continuous outcome
+   predictions retain their original scale before standardization. Binary tests
+   use a likelihood-ratio test and continuous tests a nested F test. Scores are
+   cross-fitted inside the evidence training partition; no validation labels enter.
+   These are ordinary adjusted tests, not orthogonal score tests. Their nominal
+   p-values condition on learned scores and do not guarantee post-selection inference.
 3. Logistic interactions and binary DINA fits concern log odds ratios. Causal
    forests concern outcome/probability differences. A constant log odds ratio
    may imply varying risk differences, so the methods can support different
    modifiers. Final DINA CATEs are converted to probability differences.
 4. Nominal p < 0.05 and BH q < 0.10 create separate support flags within each
-   resample and endpoint. Neither is an inclusion gate. These q-values do not
-   correct upstream adaptive discovery.
+   resample and endpoint. Neither is a mandatory per-variable inclusion gate.
+   Q-value strength contributes to ranking and the balanced budget preference
+   below. These q-values do not correct upstream adaptive discovery or guarantee
+   calibrated false-discovery control with learned adjustment scores.
 5. Penalized models choose regularization inside training, with encoders refitted
    inside every tuning partition. Only penalties converging in every tuning fold
    qualify. Nonconverged final fits are unevaluable. Clone audits record selected
@@ -213,12 +227,31 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
    The `estimators` list defaults to
    `["causal_forest", "linear_interactions", "dina"]`; DINA is omitted for
    continuous outcomes. Each architecture is evaluated at every modifier budget.
-2. `minimum_r_loss` chooses the architecture/count pair with the smallest mean
-   validation R-loss. Exact ties prefer fewer modifiers, then
-   `linear_interactions`, `dina`, and `causal_forest` in that order.
-   Optional `one_standard_error` chooses the simplest pair, in that same order,
-   whose paired excess loss over the best is within one paired standard error
-   across folds. This is a simplification heuristic, not a significance test.
+2. The default `balanced_evidence` keeps architecture/count pairs whose mean
+   excess validation R-loss over the best is no larger than one paired fold
+   standard error plus `relative_r_loss_tolerance * abs(best_mean_r_loss)`.
+   That tolerance defaults to `1e-4` (0.01% of the best loss), with an absolute
+   floor of `1e-12`. Among eligible pairs, choose the budget with the highest
+   mean **nested-training interaction utility**, breaking ties toward fewer
+   modifiers. At that budget choose the lowest-loss eligible architecture;
+   architectures within the numerical tolerance prefer `linear_interactions`,
+   then `dina`, then `causal_forest`. This lets adjusted interaction evidence
+   affect retention without overriding a clear predictive disadvantage.
+
+   For each nested training ranking, a candidate's interaction utility is its
+   coverage-weighted strength minus the same coverage-weighted strength at
+   `q_threshold` (default 0.1). Sum utilities over the candidate prefix and divide
+   by that ranking's total length. Average these prefix utilities across the
+   count-validation folds. Repeated strong support favors inclusion; weak support
+   can reduce a prefix's utility; missing tests contribute zero. Validation
+   outcomes never determine these utilities. This is a selection heuristic, not
+   a test, an error-rate guarantee, or a mandatory q-value cutoff.
+
+   Explicit `minimum_r_loss` still chooses the smallest mean validation R-loss,
+   with exact ties preferring fewer modifiers and the architecture order above.
+   Optional `one_standard_error` chooses the simplest pair whose paired excess
+   loss is within one paired standard error. Existing explicitly configured
+   rules are honored; omitted rules use `balanced_evidence`.
 3. Preserve **each statistically selected nuisance task's feature support**.
    This does not force its penalized coefficient to be nonzero. Investigator
    locks remain exact. Locked modifiers are always included outside the additional
@@ -371,8 +404,8 @@ alone do not change scientific identities.
    underlying numerical-evidence fingerprint unchanged. When count selection is
    enabled, `estimation_trees` is also a selection parameter: changing it requires
    guarded reselection and invalidates the prior count-selection result.
-8. This update uses `stage2_multi_model_selection_v6_predictive_nuisances` and
-   `stage2_nested_modifier_count_v6_predictive_nuisances`. Version 1–5 configuration blocks are accepted
+8. This update uses `stage2_multi_model_selection_v7_adjusted_interactions` and
+   `stage2_nested_modifier_count_v7_balanced_interactions`. Version 1–6 configuration blocks are accepted
    as input, but existing runs require guarded reselection before adopting these
    changes. Preflight blocks stale completion shortcuts. Set `estimators` to
    `["causal_forest"]` for forest-only count tuning, or set `modifier_count.enabled`
@@ -402,12 +435,14 @@ Configuration block:
                       "group_equivalent_measurements": true},
         "nominal_p_threshold": 0.05,
         "q_threshold": 0.1,
+        "interaction_ranking_weight": 0.5,
         "max_prompt_chars": 100000,
         "modifier_count": {
           "enabled": true,
           "candidate_counts": [0, 4, 8, 12, 16, 24, 32],
           "max_ranked_modifiers": 64,
-          "selection_rule": "minimum_r_loss",
+          "selection_rule": "balanced_evidence",
+          "relative_r_loss_tolerance": 0.0001,
           "forest_seeds": 3,
           "estimators": ["causal_forest", "linear_interactions", "dina"]
         }
@@ -470,13 +505,15 @@ Count-selection objective: [EconML RScorer](https://www.pywhy.org/EconML/_autosu
 
 The default ranking uses the saved numerical cells, not aggregate prose or an
 LLM comparator. It replaces both initial LLM batch sorting and pairwise merges.
-The three primary sources for binary outcomes are candidate DINA validation
-likelihood gain, grouped joint DINA permutation likelihood-loss increase, and
-causal-forest permutation R-loss increase. For continuous outcomes, candidate
-R-loss gain and forest permutation R-loss increase supply the two sources; a
-globally disabled source is omitted. A configured but failed source remains in
-the denominator. All encoded levels and missingness indicators stay with their
-feature group.
+Two evidence groups receive equal default weight: **adjusted conventional
+interaction tests** and **combined predictive evidence**. Within the predictive
+group, binary outcomes use candidate DINA validation likelihood gain, grouped
+joint DINA permutation likelihood-loss increase, and causal-forest permutation
+R-loss increase. Continuous outcomes use candidate R-loss gain and forest
+permutation R-loss increase. Thus adding predictive sources does not multiply
+their collective weight against the conventional test. Globally disabled sources
+are omitted; configured but failed sources retain their place in the denominator.
+All encoded levels and missingness indicators stay with their feature group.
 
 Within each source and model context, retain paired validation loss differences.
 Average all appearances of each patient before calculating mean importance and a
@@ -498,10 +535,26 @@ Joint contexts are combined with reliability weights, then multiplied by their
 maximum reliability. Failed contexts supply no positive support. Individual
 feature evidence remains a separate channel.
 
-The final score is `max(source scores) + 0.25 * mean(source scores)`, protecting
-single-source support while giving a bounded agreement bonus. Equivalent-measurement
-group evidence provides additional channels only for members of accepted groups.
-These are ranking heuristics, not significance probabilities.
+The predictive score is `(max(source scores) + 0.25 * mean(source scores)) / 1.25`,
+preserving single-source support while giving a bounded agreement bonus and
+putting the score on `[0, 1]`. Equivalent-measurement group evidence provides
+additional channels only for members of accepted groups.
+
+For the interaction group, transform each BH-adjusted q-value using
+`s(q) = -log10(max(q, 1e-300)) / (1 - log10(max(q, 1e-300)))`.
+Average strength across repeats within each fold, take the median across folds,
+and multiply by evaluated/planned coverage. This bounded score rewards repeated
+support without treating overlapping fits as independent experiments. Missing
+or unevaluable tests supply no positive support. Legacy unadjusted tests cannot
+supply this component.
+
+The final score is `(1 - w) * predictive_score + w * interaction_score`, with
+`interaction_ranking_weight = 0.5` by default. Setting it to zero restores
+predictive-only primary ranking. If the conventional test family is globally
+disabled, the predictive group has full weight; if only the conventional family
+is enabled, it has full weight. A configured but failed group does not transfer
+its weight to the other group. These are ranking heuristics, not probabilities
+that variables are modifiers or calibrated significance probabilities.
 
 Exact ties prefer average within-fold
 regularized interaction/group selection stability, with equal weight per
@@ -529,15 +582,18 @@ group decisions remain in the audit; explicit investigator locks are preserved.
 Count selection records the actual count if fewer representatives are available.
 This conservative rule leaves some synonyms ungrouped, and a static ranking does not
 estimate incremental value conditional on the chosen prefix. Final count and
-architecture selection still uses the same held-out probability/outcome-scale
-R-loss and includes the zero-additional-modifier option.
+architecture selection uses the same held-out probability/outcome-scale R-loss
+as a predictive guardrail, with training-only interaction utility choosing among
+eligible budgets under the default `balanced_evidence` rule. It includes the
+zero-additional-modifier option.
 
 Statistical ranking checkpoints are versioned by the numerical evidence,
 definitions, criterion source, and requested maximum. LLM ranking checkpoints
 are incompatible. The parent selection identity also includes the ranking
 source hash, so a completed old selection cannot bypass a changed criterion.
-Changing only the ranking leaves numerical caches reusable. Changing stability
-settings or their implementation invalidates numerical evidence and downstream
+Changing only the ranking weight leaves numerical caches reusable while
+invalidating ranking and count results. Changing adjustment, stability settings,
+or their implementation invalidates numerical evidence and downstream
 selection; Stage 1 and frozen extracted measurements remain reusable.
 When optional clinical concept review is enabled, its per-fold shortlists and
 representative ordering use this statistical ranker; the concept review itself

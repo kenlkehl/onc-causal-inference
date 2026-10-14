@@ -17,7 +17,7 @@ from .stage2_role_adjudication import _fingerprint, _write_json
 from . import stage2_evidence_stability as stability
 
 LOGGER = logging.getLogger(__name__)
-RANKING_VERSION = "stage2_modifier_ranking_v4_stable_joint"
+RANKING_VERSION = "stage2_modifier_ranking_v5_balanced_interactions"
 SOURCES = {
     "univariable_rlearner": "individual_effect_gain",
     "dina": "joint_dina_permutation",
@@ -45,8 +45,8 @@ def _inputs(definitions, report):
         raise ValueError("statistical ranking requires raw numerical cells, not LLM summaries")
     families = report.get("model_families", sorted({c["family"] for c in cells}))
     sources = [family for family in SOURCES if family in families]
-    if ids and not sources:
-        raise ValueError("statistical ranking requires a configured predictive effect source")
+    if ids and not sources and "univariable" not in families:
+        raise ValueError("statistical ranking requires a configured modifier evidence source")
     folds = sorted({c["inner_fold"] for c in cells})
     repeats = report.get("policy", {}).get("multi_model", {}).get("repeats")
     if repeats is None:
@@ -80,7 +80,8 @@ def _inputs(definitions, report):
                 'validation_row_ids': cell.get('validation_row_ids', []),
                 'model_loss_deltas': audit.get('model_loss_deltas'),
                 **{name: row.get(name) for name in
-                    ('status', 'score', 'model_gain', 'selected', 'q_value', 'loss_deltas',
+                    ('status', 'score', 'model_gain', 'selected', 'p_value', 'q_value',
+                     'interaction_adjusted', 'loss_deltas',
                      'measurement_group', 'group_score', 'group_loss_deltas')}})
     rows.sort(key=lambda r: (r["feature_id"], r["family"], r["fold"], r["repeat"]))
     return sources, folds, repeats, rows
@@ -135,12 +136,65 @@ def _selection_stability(rows):
     return _mean(values) if values else 0.0
 
 
+def _q_strength(q):
+    """Bounded evidence strength, not a probability that a modifier is real."""
+    value = -math.log10(max(float(q), 1e-300))
+    return value / (1 + value)
+
+
+def _interaction_component(rows, folds, repeats, q_threshold):
+    observed = defaultdict(list)
+    for row in rows:
+        q = row.get('q_value')
+        if (row['family'] == 'univariable' and row['status'] == 'ok'
+                and row.get('interaction_adjusted') is True
+                and _finite(q) and 0 <= q <= 1):
+            observed[row['fold']].append(float(q))
+    fold_rows = [{'inner_fold': fold, 'planned': repeats,
+                  'evaluated': len(observed[fold]),
+                  'mean_strength': _mean([_q_strength(q) for q in observed[fold]])
+                  if observed[fold] else None,
+                  'supported_fraction': _mean([float(q <= q_threshold) for q in observed[fold]])
+                  if observed[fold] else None} for fold in folds]
+    strengths = [r['mean_strength'] for r in fold_rows if r['evaluated']]
+    evaluated, planned = sum(len(v) for v in observed.values()), len(folds) * repeats
+    coverage = evaluated / planned if planned else 0.0
+    strength = median(strengths) if strengths else 0.0
+    return {'status': 'evaluated' if evaluated else 'missing',
+            'support_score': strength * coverage,
+            'selection_utility': (strength - _q_strength(q_threshold)) * coverage,
+            'reference_q': q_threshold,
+            'median_fold_strength': strength,
+            'evaluation_coverage': coverage, 'evaluated': evaluated, 'planned': planned,
+            'folds': fold_rows,
+            'aggregation': 'mean_repeat_strength_within_fold_then_median_across_folds',
+            'independent_replications_assumed': False,
+            'formal_error_guarantee': False}
+
+
 def _compute(definitions, report, maximum, sources, folds, repeats, rows, identity):
     locked = {f["feature_id"] for f in definitions if f.get("configured_explicit_feature") is True}
     ids = sorted(f["feature_id"] for f in definitions if f["feature_id"] not in locked)
     by_key = defaultdict(list)
     for row in rows:
         by_key[row["feature_id"]].append(row)
+    policy = report.get('policy', {}).get('multi_model', {})
+    families = report.get('model_families', sorted({c['family'] for c in report['cells']}))
+    interaction_active = 'univariable' in families
+    weight = policy.get('interaction_ranking_weight', 0.5) if interaction_active else 0.0
+    if not sources:
+        weight = 1.0
+    if not _finite(weight) or not 0 <= weight <= 1:
+        raise ValueError('interaction_ranking_weight must be in [0, 1]')
+    q_threshold = policy.get('q_threshold', 0.1)
+    if not _finite(q_threshold) or not 0 < q_threshold <= 1:
+        raise ValueError('interaction reference q must be in (0, 1]')
+
+    def combine(predictive_scores, interaction_score):
+        predictive = ((max(predictive_scores) + 0.25 * _mean(predictive_scores)) / 1.25
+                      if predictive_scores else 0.0)
+        return (1 - weight) * predictive + weight * interaction_score, predictive
+
     candidates = {}
     context_repeats = {'full': 1, 'subset': report.get('policy', {}).get('multi_model', {}).get('stability', {}).get('subset_partitions', repeats - 1),
                        'individual': repeats, 'legacy': repeats}
@@ -157,6 +211,7 @@ def _compute(definitions, report, maximum, sources, folds, repeats, rows, identi
         qs = [r['q_value'] for r in by_key[key] if r['family'] == 'univariable'
               and r['status'] == 'ok' and _finite(r['q_value'])]
         candidates[key] = {'feature_id': key, 'components': components, 'group_components': group_components,
+            'interaction_test': _interaction_component(by_key[key], folds, repeats, q_threshold),
             'joint_selection_stability': _selection_stability(by_key[key]),
             'median_interaction_q': median(qs) if qs else None,
             'diagnostic_evidence': report.get('multi_model_evidence', {}).get(key, [])}
@@ -176,9 +231,9 @@ def _compute(definitions, report, maximum, sources, folds, repeats, rows, identi
             for candidate in candidates.values():
                 combined = candidate[channel][family]
                 components = list(combined['contexts'].values())
-                weight = sum(c['model_reliability'] for c in components)
-                score = (sum(c['support_score'] * c['model_reliability'] for c in components) / weight
-                         * max(c['model_reliability'] for c in components)) if weight else 0.0
+                reliability_weight = sum(c['model_reliability'] for c in components)
+                score = (sum(c['support_score'] * c['model_reliability'] for c in components) / reliability_weight
+                         * max(c['model_reliability'] for c in components)) if reliability_weight else 0.0
                 combined.update(status='evaluated' if any(c['evaluated'] for c in components) else 'missing',
                     support_score=score, evaluated=sum(c['evaluated'] for c in components),
                     planned=sum(c['planned'] for c in components),
@@ -191,17 +246,28 @@ def _compute(definitions, report, maximum, sources, folds, repeats, rows, identi
     tied = defaultdict(list)
     for key, candidate in candidates.items():
         scores = [c["support_score"] for c in candidate["components"].values()]
-        candidate['individual_measurement_score'] = max(scores) + 0.25 * _mean(scores)
+        interaction = candidate['interaction_test']
+        candidate['individual_measurement_score'], predictive = combine(scores, interaction['support_score'])
         if key in group_by_key:
             scores += [c['support_score'] for c in candidate['group_components'].values()]
-        score = max(candidate['individual_measurement_score'], max(scores) + 0.25 * _mean(scores))
+        group_score, group_predictive = combine(scores, interaction['support_score'])
+        score = max(candidate['individual_measurement_score'], group_score)
+        candidate['evidence_groups'] = {
+            'predictive': max(predictive, group_predictive),
+            'adjusted_interaction': interaction['support_score'],
+            'interaction_weight': weight,
+        }
         candidate["score"] = score
         candidate["evidence_ids"] = [f"multi:{key}:{family}:effect" for family in sources
                                      if candidate["components"][family]["evaluated"]]
+        if interaction_active and interaction['evaluated']:
+            candidate['evidence_ids'].append(f'multi:{key}:univariable:effect')
         candidate["rationale"] = (f"Statistical support score {score:.6g}; " + "; ".join(
             f"{SOURCES[f]}={c['support_score']:.6g} ({c['evaluated']}/{c['planned']} fits)"
             for f, c in candidate["components"].items())
-            + ". Scores combine patient-averaged gains, uncertainty, model reliability and coverage; they are not significance probabilities.")
+            + f"; adjusted_interaction={interaction['support_score']:.6g} "
+              f"({interaction['evaluated']}/{interaction['planned']} fits; weight={weight:g}). "
+              "Predictive and adjusted-interaction evidence form separate weighted groups; scores are not significance probabilities.")
         tied[(score, candidate["joint_selection_stability"])].append(candidate)
     ordered = []
     for group_key in sorted(tied, reverse=True):
@@ -240,11 +306,14 @@ def _compute(definitions, report, maximum, sources, folds, repeats, rows, identi
         "reviewed_candidate_ids": ids, "locked_feature_ids": sorted(locked), "maximum": maximum,
         "comparisons_and_batch_requests": 0, "measurement_representatives": representatives,
         "available_representatives": len(shortlist),
-        "criterion": {"sources": {f: SOURCES[f] for f in sources},
+        "criterion": {"sources": {**{f: SOURCES[f] for f in sources},
+                                   **({'univariable': 'adjusted_interaction_test'} if interaction_active else {})},
             "aggregation": "average_exposures_per_patient_then_pool; retain_partition_sensitivity",
             "percentile": "midrank_among_strictly_positive_patient_mean_gains_within_source_and_context",
             "component": "positive_percentile * uncertainty_shrinkage * coverage; context_model_reliability",
-            "combination": "max(components) + 0.25 * mean(components); protect_individual_support",
+            "combination": "(1-w) * (max(predictive) + 0.25 * mean(predictive))/1.25 + w * adjusted_interaction",
+            "interaction_ranking_weight": weight,
+            "interaction_component": "coverage * median_fold(mean_repeat(-log10(q)/(1-log10(q)))); adjusted tests only",
             "joint_model_gate": "pooled_model_reliability_weights_both_signs_equally",
             "missing": "zero_demonstrated_support_with_explicit_missing_status_no_reweighting",
             "tie_policy": "joint_selection_stability_then_comparable_interaction_q_then_feature_id",
@@ -266,6 +335,10 @@ def rank_modifier_candidates(*, definitions, statistical_report, output_dir, max
         "measurement_groups": statistical_report.get('measurement_groups', []),
         "measurement_observed_fractions": statistical_report.get('measurement_observed_fractions', {}),
         "stability_policy": statistical_report.get('policy', {}).get('multi_model', {}).get('stability', {}),
+        "interaction_enabled": 'univariable' in statistical_report.get('model_families',
+            sorted({c['family'] for c in statistical_report.get('cells', [])})),
+        "interaction_ranking_weight": statistical_report.get('policy', {}).get('multi_model', {}).get('interaction_ranking_weight', 0.5),
+        "interaction_reference_q": statistical_report.get('policy', {}).get('multi_model', {}).get('q_threshold', 0.1),
         "stability_source_sha256": sha256(Path(stability.__file__).read_bytes()).hexdigest(),
         "source_sha256": sha256(Path(__file__).read_bytes()).hexdigest()}
     directory = Path(output_dir)

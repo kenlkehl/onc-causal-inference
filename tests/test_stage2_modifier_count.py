@@ -1,6 +1,7 @@
 """Nested ranking, fixed scoring populations, role protection, and resume integrity."""
 
 from dataclasses import replace
+from pathlib import Path
 
 import json
 
@@ -73,7 +74,7 @@ def test_count_rule_and_configuration_keep_legacy_policies_separate():
         "linear_interactions",
         "dina",
     )
-    assert config.multi_model.modifier_count.selection_rule == "minimum_r_loss"
+    assert config.multi_model.modifier_count.selection_rule == "balanced_evidence"
     assert statistical_selection_config_from_mapping(config.public_dict()) == config
     disabled = replace(
         config,
@@ -191,7 +192,9 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
                 assert set(cell["validation_row_ids"]) <= expected_rows
             concept_inputs.append(expected_rows)
             assert kwargs["top_n"] == 100
-            return ranking.rank_modifier_candidates(**{k: v for k, v in kwargs.items() if k != "top_n"})
+            ranking_args = {k: v for k, v in kwargs.items() if k != "top_n"}
+            ranking_args['output_dir'] = Path(kwargs['output_dir']) / 'representative_ranking'
+            return ranking.rank_modifier_candidates(**ranking_args)
         monkeypatch.setattr(count.concepts, "infer_modifier_concepts", concept_review)
 
     extras = dict(
@@ -254,15 +257,18 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
             16 if binary else 12
         )  # Four sizes: two forest seeds and one interaction fit; common patients.
     options = audit["choice"]["options"]
-    expected_choice = min(
-        (
-            (details["mean_r_loss"], int(k), e != "linear_interactions", e)
-            for e, sizes in options.items()
-            for k, details in sizes.items()
-        )
-    )
-    assert audit["chosen_estimator"] == expected_choice[3]
-    assert audit["choice"]["chosen_additional_count"] == expected_choice[1]
+    chosen_details = options[audit['chosen_estimator']][str(audit['choice']['chosen_additional_count'])]
+    assert chosen_details['within_predictive_guardrail']
+    eligible_utilities = [o['mean_interaction_utility'] for opts in options.values()
+                          for o in opts.values() if o['within_predictive_guardrail']]
+    assert chosen_details['mean_interaction_utility'] == pytest.approx(max(eligible_utilities))
+    for fold in audit['folds']:
+        ranked = json.loads(Path(fold['ranking_path']).read_text())
+        utilities = {c['feature_id']: c['interaction_test']['selection_utility']
+                     for c in ranked['candidate_scores']}
+        keys = [r['feature_id'] for r in fold['ranking']]
+        for k, actual in fold['interaction_utilities'].items():
+            assert actual == pytest.approx(sum(utilities[key] for key in keys[:int(k)]) / max(len(keys), 1))
     assert set(options) == (
         {"causal_forest", "linear_interactions", "dina"}
         if binary
@@ -287,6 +293,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         multi_model=replace(
             arguments["policy"].multi_model,
             modifier_count=replace(cfg, selection_rule="one_standard_error"),
+            interaction_ranking_weight=.25,
         ),
     )
     monkeypatch.setattr(
@@ -298,6 +305,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         **{**arguments, "policy": alternate}, checkpoint_dir=numerical_root
     )
     assert reused["input_fingerprint"] == report["input_fingerprint"]
+    assert reused['policy']['multi_model']['interaction_ranking_weight'] == .25
     saved = root / "result.json"
     corrupted = json.loads(saved.read_text())
     corrupted["result"]["report"]["chosen_modifier_count"] += 1

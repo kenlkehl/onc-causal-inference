@@ -2,7 +2,7 @@
 
 Stage 2 turns the Stage 1 evidence into **measurable clinical variables, a patient-by-variable dataset, and ultimately held-out treatment-effect estimates**.
 
-This describes our current **`multi_model` pipeline with full-record LLM extraction, predictive nuisance selection, and programmatic modifier ranking**, as of October 14, 2026. The 1,000-patient run supplies the concrete example. The treatment-penalty fix and replacement of LLM retention with statistical nuisance selection apply to future fits; the completed run predates them.
+This describes our current **`multi_model` pipeline with full-record LLM extraction, predictive nuisance selection, and programmatic modifier ranking**, as of October 14, 2026. The 1,000-patient run supplies the concrete example. The treatment-penalty fix, statistical nuisance selection, and balanced adjusted-interaction selection apply to future fits; the completed run predates them.
 
 1. **Set aside the outer held-out patients.**
 
@@ -142,7 +142,20 @@ This describes our current **`multi_model` pipeline with full-record LLM extract
 
    The initial all-800 evidence remains useful for final nuisance-input selection and the eventual final ranking. The nested evidence constructs each ranking without access to its scoring partition's labels.
 
-   For binary outcomes, the current ranker primarily combines:
+   The current ranker gives **equal default weight to two evidence groups**.
+   The first is the conventional candidate-by-treatment interaction test, adjusted
+   for cross-fitted propensity and marginal outcome prediction. Its reduced and
+   full models contain the same treatment, candidate main effects, and flexible
+   score terms. Only the full model adds the candidate-by-treatment interaction;
+   the coefficients are fitted separately in the two models. Binary outcomes use
+   a logistic likelihood-ratio test, and continuous outcomes a nested linear F test.
+
+   BH-adjusted q-values are converted to bounded strengths, averaged within folds,
+   and summarized by their median across folds with a penalty for missing tests.
+   Overlapping repeats do not count as independent experiments. These are useful
+   selection signals, not guaranteed post-selection significance statements.
+
+   The second group combines predictive evidence. For binary outcomes this uses:
 
    - Single-candidate DINA validation gains.
    - Joint DINA permutation importance.
@@ -150,15 +163,15 @@ This describes our current **`multi_model` pipeline with full-record LLM extract
 
    It reduces support for noisy or incompletely evaluated signals and downweights joint evidence from unreliable models. Repeated appearances of the same patient are averaged before calculating uncertainty diagnostics.
 
-   After those adjustments, the source scores combine as:
+   After those adjustments, the predictive source scores combine as:
 
    $$
-   \text{rank score}
-   = \max(\text{source scores})
-   + 0.25\,\operatorname{mean}(\text{source scores}).
+   \text{predictive score}
+   = \frac{\max(\text{source scores})
+   + 0.25\,\operatorname{mean}(\text{source scores})}{1.25}.
    $$
 
-   This preserves strong support from one method while giving a smaller bonus for agreement. Conservative equivalent-measurement grouping helps avoid filling the shortlist with near-duplicate variables.
+   The final rank score is **0.5 × predictive score + 0.5 × adjusted-interaction score**. The weight is configurable. Conservative equivalent-measurement grouping helps avoid filling the shortlist with near-duplicate variables.
 
    **Gemma performs no pairwise ranking or merge-sort comparisons here anymore.** The ranking is deterministic given the saved evidence. [Ranking criterion](docs/stage2_multi_model.md#statistical-modifier-ranking)
 
@@ -216,7 +229,22 @@ This describes our current **`multi_model` pipeline with full-record LLM extract
 
     Thus DINA is fitted using its Bernoulli objective, but its converted probability-difference predictions compete with the other architectures using a common criterion.
 
-    Our configured rule chooses the architecture/count pair with the **smallest average validation R-loss**. It does not optimize oracle-feature recall or oracle ITE correlation.
+    The new default, **`balanced_evidence`**, first keeps pairs within one paired
+    standard error of the best mean R-loss, plus a small tolerance of 0.01% of
+    that loss. Among these pairs, it chooses the budget with the strongest
+    repeated adjusted-interaction support from the nested training rankings.
+    Support above the strength corresponding to q = 0.1 contributes positively;
+    weaker support contributes negatively; missing tests contribute zero. These
+    contributions are summed over each prefix, divided by the full ranking's
+    length, and averaged across folds. A utility tie favors fewer modifiers.
+
+    At that budget, predictive fit chooses the architecture, with numerical ties
+    preferring linear interactions, then DINA, then forest. Thus a tiny R-loss
+    difference cannot automatically erase strong interaction evidence, while
+    clearly worse predictive performance still excludes a model. This remains
+    a heuristic, not an error-rate guarantee. The completed 1,000-patient run
+    used the older `minimum_r_loss` rule, which remains configurable. Neither
+    rule uses oracle-feature recall or oracle ITE correlation for selection.
 
     Zero modifiers remains a valid candidate. With our latest fix, the interaction model’s main treatment coefficient is unpenalized; DINA already protects its constant log odds ratio. Zero modifiers therefore does not force zero treatment effects.
 

@@ -92,7 +92,7 @@
       "modifier_continuous_winsor_quantile": 0.005,
       "selection_mode": "multi_model",
       "multi_model": {
-        "schema_version": "stage2_multi_model_selection_v6_predictive_nuisances",
+        "schema_version": "stage2_multi_model_selection_v7_adjusted_interactions",
         "repeats": 3,
         "row_fraction": 0.8,
         "l1_ratios": [
@@ -107,6 +107,7 @@
         "permutation_repeats": 10,
         "nominal_p_threshold": 0.05,
         "q_threshold": 0.1,
+        "interaction_ranking_weight": 0.5,
         "max_prompt_chars": 100000,
         "matched_batch": {
           "enabled": true,
@@ -133,7 +134,8 @@
             32
           ],
           "max_ranked_modifiers": 64,
-          "selection_rule": "minimum_r_loss",
+          "selection_rule": "balanced_evidence",
+          "relative_r_loss_tolerance": 0.0001,
           "forest_seeds": 3,
           "estimators": [
             "causal_forest",
