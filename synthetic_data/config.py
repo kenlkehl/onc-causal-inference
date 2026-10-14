@@ -42,6 +42,9 @@ class LLMConfig:
     temperature: float = 0.7
     max_tokens: int = 12000
     timeout: float = 300.0  # Request timeout in seconds
+    api_base_urls: List[str] = field(default_factory=list)  # Optional replica pool
+    extra_body: Dict[str, Any] = field(default_factory=dict)
+    reject_incomplete: bool = False
 
 
 @dataclass

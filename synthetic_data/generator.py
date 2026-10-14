@@ -48,6 +48,7 @@ def generate_synthetic_dataset(
     config: SyntheticDataConfig,
     num_workers: int = 4,
     show_progress: bool = True,
+    dgp_metadata_path: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
     """
     Generate a synthetic clinical dataset with known causal structure.
@@ -67,6 +68,10 @@ def generate_synthetic_dataset(
     Returns:
         Tuple of (dataset DataFrame, metadata dictionary)
     """
+    if dgp_metadata_path is not None:
+        from .saved_dgp import generate_from_saved_dgp
+        return generate_from_saved_dgp(config, dgp_metadata_path, num_workers, show_progress)
+
     config.validate()
     
     # Set random seeds
@@ -1113,7 +1118,7 @@ def _get_drug_patterns():
     return patterns
 
 
-def _apply_drug_perturbation(text: str) -> str:
+def _apply_drug_perturbation(text: str, rng=None) -> str:
     """
     Replace some generic drug names with brand names or abbreviations.
 
@@ -1123,7 +1128,7 @@ def _apply_drug_perturbation(text: str) -> str:
     patterns = _get_drug_patterns()
     for pattern, alternatives in patterns:
         if pattern.search(text):
-            replacement = random.choice(alternatives)
+            replacement = (rng or random).choice(alternatives)
             text = pattern.sub(replacement, text)
     return text
 

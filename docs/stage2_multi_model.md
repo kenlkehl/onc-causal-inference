@@ -63,6 +63,14 @@ the corresponding Stage 1 changes.
    inside every tuning partition. Only penalties converging in every tuning fold
    qualify. Nonconverged final fits are unevaluable. Clone audits record selected
    penalties, boundary selections, iteration counts, and convergence.
+   The explicit main treatment coefficient is unpenalized in interaction outcome
+   models and continuous-outcome R-learners, during both tuning and refitting.
+   Covariates and treatment interactions retain their group-lasso/ridge penalties.
+   DINA likewise leaves its constant log odds ratio unpenalized. Fit audits list
+   `unpenalized_groups`; an empty modifier set therefore does not force zero
+   treatment effects through regularization. A data-supported zero estimate is
+   still possible. This change invalidates prior numerical evidence and downstream
+   model caches; existing runs need guarded reselection to adopt it.
 6. Whole-model held-out gains versus constant predictions/effects accompany
    coefficient and forest importance evidence. A nonzero coefficient or positive
    split importance does not establish that the model generalized.

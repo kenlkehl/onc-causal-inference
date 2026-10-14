@@ -525,6 +525,7 @@ class _GroupStructure:
     sizes: np.ndarray
     weights: np.ndarray
     feature_ids: tuple[str, ...]
+    penalty_factors: np.ndarray
 
 
 @dataclass(frozen=True)
@@ -535,13 +536,19 @@ class _SolverState:
     converged: bool
 
 
-def _group_structure(column_feature_ids: Sequence[str]) -> _GroupStructure:
+def _group_structure(
+    column_feature_ids: Sequence[str],
+    *,
+    unpenalized_feature_ids: Sequence[str] = (),
+) -> _GroupStructure:
+    """Build feature groups, explicitly exempting any supplied IDs from both penalties."""
     if not column_feature_ids:
         return _GroupStructure(
             starts=np.asarray([], dtype=int),
             sizes=np.asarray([], dtype=int),
             weights=np.asarray([], dtype=float),
             feature_ids=(),
+            penalty_factors=np.asarray([], dtype=float),
         )
     starts = [0]
     feature_ids = [str(column_feature_ids[0])]
@@ -557,11 +564,13 @@ def _group_structure(column_feature_ids: Sequence[str]) -> _GroupStructure:
         seen.add(feature_id)
     start_values = np.asarray(starts, dtype=int)
     sizes = np.diff(np.append(start_values, len(column_feature_ids))).astype(int)
+    unpenalized = set(unpenalized_feature_ids)
     return _GroupStructure(
         starts=start_values,
         sizes=sizes,
         weights=np.sqrt(sizes.astype(float)),
         feature_ids=tuple(feature_ids),
+        penalty_factors=np.asarray([key not in unpenalized for key in feature_ids], dtype=float),
     )
 
 
@@ -620,10 +629,12 @@ def _group_ridge_prox(
         * float(regularization)
         * float(group_ratio)
         * groups.weights
+        * groups.penalty_factors
     )
     scales = np.maximum(0.0, 1.0 - thresholds / np.maximum(norms, 1e-30))
     scales /= 1.0 + (
         float(step) * float(regularization) * (1.0 - float(group_ratio))
+        * groups.penalty_factors
     )
     return values * np.repeat(scales, groups.sizes)
 

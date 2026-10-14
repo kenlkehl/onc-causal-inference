@@ -40,7 +40,9 @@ def fit_interaction_effect(
     Group elastic-net penalties are tuned by outcome loss inside training only.
     The link is logistic for binary outcomes, identity otherwise. Validation
     labels/treatments are deliberately absent from this API. Main effects remain
-    in the design even when their interaction is not selected.
+    in the design even when their interaction is not selected. The intercept and
+    main treatment coefficient are exempt from both group-lasso and ridge
+    penalties in every tuning fit and the final refit.
     """
     modifier_ids = set(modifier_ids)
     if not modifier_ids.issubset({numerical._key(f) for f in definitions}):

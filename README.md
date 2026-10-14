@@ -2109,6 +2109,31 @@ python -m synthetic_data.cli \
   --output-dir ./my_synthetic_data
 ```
 
+To generate a larger cohort from an existing dataset's **same causal process**,
+use API-server mode with its saved configuration and metadata:
+
+```bash
+python -m synthetic_data.cli \
+  --config /data/original/generation_config.json \
+  --dgp-metadata /data/original/metadata.json \
+  --dataset-size 10000 \
+  --model nvidia/Gemma-4-31B-IT-NVFP4 \
+  --api-url http://localhost:8000/v1 \
+  --num-workers 32 \
+  --output-dir /data/expanded_cohort
+```
+
+This retains the saved feature distributions and calibrated equations, samples
+new patient characteristics and outcomes, and uses the existing timeline and
+note prompts. It does not ask the new model to redesign or recalibrate the causal
+process. Successful timelines, notes, and patients are checkpointed separately;
+empty or truncated responses fail visibly and can be retried on resume. Repeat
+the command to resume. `progress.json` records completion counts. Changes to the
+causal process, generation model, or prompt code require a new output directory.
+In the JSON configuration, `llm.api_base_urls` can list multiple replicas of the
+same model; requests are distributed across them. `llm.extra_body` passes API
+options such as `{"chat_template_kwargs": {"enable_thinking": false}}`.
+
 Oracle truth is never supplied to Stage 1. After a Stage 1 handoff has been
 completed and frozen, evaluate each architecture independently against a
 synthetic dataset's known variables and treatment effects:

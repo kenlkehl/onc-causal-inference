@@ -213,7 +213,7 @@ def _fit_linear(
     modifier_ids=None,
     path_submit=None,
 ):
-    """Tune inside training, refitting encoders in every penalty-CV partition."""
+    """Tune inside training, leaving the explicit treatment main effect unpenalized."""
     y = np.asarray(y, dtype=float)
     treatment = np.asarray(treatment, dtype=float)
     alphas = np.logspace(
@@ -234,6 +234,9 @@ def _fit_linear(
         final_design, valid_treatment, kind, valid=True, modifier_ids=modifier_ids
     )
     intercept = kind != "rlearner"
+    # This is the explicit T (or residual T) column, not a clinical feature
+    # named "treatment" in a nuisance model. Covariates and T:Z stay penalized.
+    unpenalized_groups = ("treatment",) if kind in {"interactions", "rlearner"} else ()
     if (binary and len(np.unique(y)) < 2) or x.shape[1] == 0:
         constant = float(np.clip(np.mean(y), 1e-6, 1 - 1e-6) if binary else np.mean(y))
         return {
@@ -250,6 +253,7 @@ def _fit_linear(
                 "regularization": None,
                 "l1_ratio": ratio,
                 "cv_folds": 0,
+                "unpenalized_groups": list(unpenalized_groups),
             },
         }
     if not splits:
@@ -266,7 +270,9 @@ def _fit_linear(
         hold_x, _, _, _ = _matrix(
             design, treatment[hold], kind, valid=True, modifier_ids=modifier_ids
         )
-        group_structure = linear._group_structure(group_ids)
+        group_structure = linear._group_structure(
+            group_ids, unpenalized_feature_ids=unpenalized_groups
+        )
         initial = None
         iterations = []
         losses = []
@@ -313,7 +319,7 @@ def _fit_linear(
         linear._fit_group_elastic_net,
         x,
         y,
-        groups=linear._group_structure(groups),
+        groups=linear._group_structure(groups, unpenalized_feature_ids=unpenalized_groups),
         regularization=float(alphas[best]),
         group_ratio=ratio,
         binary=binary,
@@ -341,6 +347,7 @@ def _fit_linear(
             "cv_loss": float(means[best]),
             "selected_on_grid_boundary": best in {0, len(alphas) - 1},
             "cv_optimizer_audit": cv_iterations,
+            "unpenalized_groups": list(unpenalized_groups),
         },
     }
 

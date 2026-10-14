@@ -4,6 +4,7 @@
 import logging
 import json
 import re
+import threading
 from typing import Optional, Dict, Any, List
 
 try:
@@ -38,7 +39,34 @@ class LLMClient:
             api_key=config.api_key if config.api_key else "dummy-key",  # Some servers require non-empty
             timeout=config.timeout,
         )
+        self._clients = [self.client]
+        if config.api_base_urls:
+            self.client.close()
+            self._clients = [
+                OpenAI(base_url=url, api_key=config.api_key or "dummy-key", timeout=config.timeout)
+                for url in config.api_base_urls
+            ]
+            self.client = self._clients[0]
+        self._dispatch_lock = threading.Lock()
+        self._next_replica = 0
         logger.info(f"LLM client initialized with base_url={config.api_base_url}, model={config.model_name}")
+
+    def _replica(self):
+        with self._dispatch_lock:
+            client = self._clients[self._next_replica % len(self._clients)]
+            self._next_replica += 1
+            return client
+
+    def close(self):
+        for client in self._clients:
+            client.close()
+
+    def _content(self, response):
+        choice = response.choices[0]
+        if self.config.reject_incomplete:
+            if choice.finish_reason != "stop" or not (choice.message.content or "").strip():
+                raise ValueError(f"Incomplete generation: finish_reason={choice.finish_reason!r}")
+        return choice.message.content
     
     def generate(
         self,
@@ -64,14 +92,14 @@ class LLMClient:
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
         
-        response = self.client.chat.completions.create(
+        response = self._replica().chat.completions.create(
             model=self.config.model_name,
             messages=messages,
             temperature=temperature if temperature is not None else self.config.temperature,
             max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+            **({"extra_body": self.config.extra_body} if self.config.extra_body else {}),
         )
-        
-        return response.choices[0].message.content
+        return self._content(response)
     
     def generate_json(
         self,
@@ -108,29 +136,31 @@ class LLMClient:
 
         last_error = None
         for attempt in range(1, max_retries + 1):
+            client = self._replica()
             try:
                 try:
                     # Try with JSON response format (OpenAI compatible)
-                    response = self.client.chat.completions.create(
+                    response = client.chat.completions.create(
                         model=self.config.model_name,
                         messages=messages,
                         temperature=temperature if temperature is not None else self.config.temperature,
                         max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
                         response_format={"type": "json_object"},
+                        **({"extra_body": self.config.extra_body} if self.config.extra_body else {}),
                     )
-                    text = response.choices[0].message.content
                 except Exception as e:
                     # Fall back to regular generation if JSON mode not supported
                     logger.debug(f"JSON mode not supported, falling back to regular generation: {e}")
-                    response = self.client.chat.completions.create(
+                    response = client.chat.completions.create(
                         model=self.config.model_name,
                         messages=messages,
                         temperature=temperature if temperature is not None else self.config.temperature,
                         max_tokens=max_tokens if max_tokens is not None else self.config.max_tokens,
+                        **({"extra_body": self.config.extra_body} if self.config.extra_body else {}),
                     )
-                    text = response.choices[0].message.content
 
                 # Parse JSON from response
+                text = self._content(response)
                 return self._parse_json(text)
             except (ValueError, json.JSONDecodeError) as e:
                 last_error = e

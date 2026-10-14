@@ -975,7 +975,7 @@ Examples:
         "--dgp-metadata",
         type=str,
         default=None,
-        help="Metadata JSON containing feature definitions, equations, and summary stats for Gemini batch generation",
+        help="Reuse saved feature definitions, calibrated equations, and distributions (API or Gemini batch)",
     )
     parser.add_argument(
         "--gcp-project",
@@ -1121,6 +1121,8 @@ Examples:
 
     if args.use_vllm_batch and args.use_gemini_batch:
         parser.error("--use-vllm-batch and --use-gemini-batch are mutually exclusive")
+    if args.use_vllm_batch and args.dgp_metadata:
+        parser.error("--dgp-metadata requires API-server mode or --use-gemini-batch")
     if args.use_gemini_batch:
         if not args.dgp_metadata:
             parser.error("--use-gemini-batch requires --dgp-metadata")
@@ -1329,6 +1331,7 @@ Examples:
                 config=config,
                 num_workers=args.num_workers,
                 show_progress=True,
+                dgp_metadata_path=args.dgp_metadata,
             )
 
         gemini_batch_metadata = metadata.get("gemini_batch", {})
