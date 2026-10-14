@@ -157,18 +157,11 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
                 train_passes=3, validation_passes=3)),
     )
     numerical_root = tmp_path / "numerical"
-    _, report, _, _ = numerical.select_stage2_features_multi_model(
+    selected, report, _, _ = numerical.select_stage2_features_multi_model(
         **arguments, checkpoint_dir=numerical_root
     )
-    selected = [
-        {
-            **f,
-            "roles": ["confounder", "effect_modifier"] if f["name"] == "c" else ["effect_modifier"],
-        }
-        for f in arguments["definitions"]
-    ]
     role_report = {
-        "decisions": [{"feature_id": f["feature_id"], "roles": f["roles"]} for f in selected]
+        "decisions": report["decisions"]
     }
     nested_calls = []
 
@@ -206,7 +199,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         role_report=role_report,
         statistical_report=report,
         request_json=ranking_request,
-        role_policy=Stage2RoleAdjudicationConfig(max_candidates_per_request=2),
+        role_policy=Stage2RoleAdjudicationConfig(enabled=False, max_candidates_per_request=2),
         output_dir=tmp_path / "count",
         numerical_checkpoint_dir=numerical_root,
         model_identity="controlled-response",
@@ -217,6 +210,9 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
     if cfg.concept_review:
         assert concept_inputs == [*nested_calls, set(range(96))]
     kept, roles, audit = result
+    assert {f["feature_id"]: f["nuisance_model_roles"] for f in kept if "confounder" in f["roles"]} == {
+        f["feature_id"]: f["nuisance_model_roles"] for f in selected if "confounder" in f["roles"]
+    }
     assert (
         len(nested_calls) == 2
         and audit["boundaries"]["ranking_and_numerical_evidence_nested_within_count_training"]

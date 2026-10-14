@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v5_stable_joint"
+SCHEMA_VERSION = "stage2_multi_model_selection_v6_predictive_nuisances"
 from .stage2_prompt_catalog import PROMPT_VERSION
 FAMILIES = (
     "univariable",
@@ -237,6 +237,7 @@ def multi_model_config_from_mapping(
         "stage2_multi_model_selection_v2",
         "stage2_multi_model_selection_v3",
         "stage2_multi_model_selection_v4_dina",
+        "stage2_multi_model_selection_v5_stable_joint",
     }:
         raise ValueError("unsupported multi_model schema_version")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)

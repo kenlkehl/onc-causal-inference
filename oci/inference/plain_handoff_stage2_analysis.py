@@ -8864,6 +8864,7 @@ def _cross_fitted_nuisance(
     seed: int,
     checkpoint_dir: Path | None = None,
     checkpoint_fingerprint: str = "uncached",
+    all_candidates: bool = False,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     from .stage2_final_modeling import prediction_result
 
@@ -8873,8 +8874,8 @@ def _cross_fitted_nuisance(
     mu0 = np.full(len(fit_ids), np.nan)
     mu1 = np.full(len(fit_ids), np.nan)
     extracted_by_id = extracted.set_index("_oci_row_id", drop=False)
-    propensity_defs = _definitions_for_nuisance_role(definitions, "treatment")
-    outcome_defs = _definitions_for_nuisance_role(definitions, "outcome")
+    propensity_defs = list(definitions) if all_candidates else _definitions_for_nuisance_role(definitions, "treatment")
+    outcome_defs = list(definitions) if all_candidates else _definitions_for_nuisance_role(definitions, "outcome")
     pending = []
     for fold_index, fold in enumerate(inner_splits, start=1):
         train_ids = [int(value) for value in fold["fit_row_ids"] if int(value) in position]
@@ -8930,6 +8931,8 @@ def estimate_outer_fold(
     max_propensity: float | None = None,
     estimator: str = "causal_forest",
     statistical_policy: Any = None,
+    nuisance_candidate_definitions: Sequence[Mapping[str, Any]] | None = None,
+    nuisance_candidate_fit: pd.DataFrame | None = None,
 ) -> dict[str, Any]:
     from .stage2_effect_estimators import effect_model_family, fit_interaction_effect
 
@@ -8939,6 +8942,8 @@ def estimate_outer_fold(
             raise ValueError("linear interaction or DINA estimation requires a statistical policy")
         statistical_policy.validate()
     validate_propensity_bounds(min_propensity, max_propensity)
+    if (nuisance_candidate_definitions is None) != (nuisance_candidate_fit is None):
+        raise ValueError("nuisance candidate definitions and training measurements must be supplied together")
     complete_path = output_dir / "complete.json"
     diagnostics_path = output_dir / "diagnostics.json"
     estimation_input_fingerprint = _value_fingerprint(
@@ -8990,6 +8995,11 @@ def estimate_outer_fold(
             ),
             "extracted_fit_fingerprint": _frame_fingerprint(extracted_fit),
             "extracted_heldout_fingerprint": _frame_fingerprint(extracted_heldout),
+            "nuisance_candidates": (
+                {"definitions": list(nuisance_candidate_definitions),
+                 "training_measurements": _frame_fingerprint(nuisance_candidate_fit)}
+                if nuisance_candidate_definitions is not None else None
+            ),
         }
     )
     if complete_path.is_file() and diagnostics_path.is_file():
@@ -9042,8 +9052,8 @@ def estimate_outer_fold(
     )
     fit_propensity, fit_mu0, fit_mu1 = _cross_fitted_nuisance(
         dataset=dataset,
-        extracted=extracted_fit,
-        definitions=definitions,
+        extracted=nuisance_candidate_fit if nuisance_candidate_fit is not None else extracted_fit,
+        definitions=nuisance_candidate_definitions if nuisance_candidate_definitions is not None else definitions,
         fit_ids=fit_ids,
         inner_splits=supplied_inner,
         treatment_column=treatment_column,
@@ -9052,6 +9062,9 @@ def estimate_outer_fold(
         seed=seed + 30_000,
         checkpoint_dir=final_fit_dir,
         checkpoint_fingerprint=final_fit_fingerprint,
+        # The pooled support was learned across all outer-training patients.
+        # It must not screen predictors for their own OOF nuisance predictions.
+        all_candidates=nuisance_candidate_definitions is not None,
     )
     fit_keep = propensity_eligibility(fit_propensity, min_propensity, max_propensity)
     _write_frame(
@@ -9156,6 +9169,7 @@ def estimate_outer_fold(
     elif estimator == "dina":
         from functools import partial
         from .stage2_dina import fit_effect as fit_dina_effect
+        from .stage2_dina import unpack_nuisances
 
         result = modeling.call(partial(
             fit_dina_effect,
@@ -9167,6 +9181,14 @@ def estimate_outer_fold(
             outcome=y_fit[fit_keep],
             policy=statistical_policy,
             seed=seed + 20_000,
+            **({"nuisance": unpack_nuisances({
+                "training_propensity": fit_propensity[fit_keep],
+                "training_mu0": fit_mu0[fit_keep],
+                "training_mu1": fit_mu1[fit_keep],
+                "validation_propensity": propensity[heldout_keep],
+                "validation_mu0": mu0[heldout_keep],
+                "validation_mu1": mu1[heldout_keep],
+            })} if nuisance_candidate_definitions is not None else {}),
         ))
         effect_predictions = {
             "tau_pred": result["tau"],
@@ -9308,6 +9330,18 @@ def estimate_outer_fold(
         "confounders": len(adjustment_defs),
         "treatment_nuisance_features": len(propensity_defs),
         "outcome_nuisance_features": len(outcome_defs),
+        "nuisance_routing": {
+            "treatment_feature_ids": [str(f["feature_id"]) for f in propensity_defs],
+            "outcome_feature_ids": [str(f["feature_id"]) for f in outcome_defs],
+            "training_crossfit_design": (
+                "all_candidates_with_fold_local_regularization"
+                if nuisance_candidate_definitions is not None else "retained_definitions"
+            ),
+            "training_crossfit_candidates": (
+                len(nuisance_candidate_definitions) if nuisance_candidate_definitions is not None else len(definitions)
+            ),
+            "dina_reuses_external_nuisances": estimator == "dina" and nuisance_candidate_definitions is not None,
+        },
         "effect_modifiers": len(effect_defs),
         "ate_aipw": ate,
         "standard_error": standard_error,
@@ -10545,6 +10579,11 @@ def run_fold_analysis(
         "role_adjudication_policy": config.role_adjudication.public_dict(),
         "role_adjudication_llm_model": str(getattr(config, "model", "")),
     }
+    if statistical_policy.selection_mode == "multi_model":
+        selection_input["predictive_nuisance_sources"] = {
+            name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+            for name in ("stage2_nuisance_selection.py", "stage2_taskwise_policy.py", "stage2_multi_model_selection.py")
+        }
     if (
         statistical_policy.selection_mode == "multi_model"
         and statistical_policy.multi_model.modifier_count.enabled
@@ -10566,6 +10605,7 @@ def run_fold_analysis(
     selected_path = selection_dir / "selected_definitions.json"
     dependencies_path = selection_dir / "measurement_definitions.json"
     latent_states_path = selection_dir / "selected_latent_states.json"
+    nuisance_candidates_path = selection_dir / "nuisance_candidates.json"
     selection_complete_path = selection_dir / "complete.json"
     selection_input_path = selection_dir / "input.json"
     selection_report: dict[str, Any] | None = None
@@ -10573,6 +10613,7 @@ def run_fold_analysis(
     measurement_definitions: list[dict[str, Any]] | None = None
     latent_states: list[dict[str, Any]] | None = None
     modeling_fit_frame: pd.DataFrame | None = None
+    nuisance_candidates = None
     if (
         selection_report_path.is_file()
         and selected_path.is_file()
@@ -10580,6 +10621,7 @@ def run_fold_analysis(
         and latent_states_path.is_file()
         and selection_complete_path.is_file()
         and selection_input_path.is_file()
+        and (statistical_policy.selection_mode != "multi_model" or nuisance_candidates_path.is_file())
     ):
         try:
             completion = json.loads(selection_complete_path.read_text(encoding="utf-8"))
@@ -10603,10 +10645,16 @@ def run_fold_analysis(
                     dict(feature) for feature in cached_dependencies["features"]
                 ]
                 latent_states = [dict(item) for item in cached_latent_states["latents"]]
+                if statistical_policy.selection_mode == "multi_model":
+                    nuisance_candidates = json.loads(nuisance_candidates_path.read_text(encoding="utf-8"))
+                    if (nuisance_candidates.get("input_fingerprint") != selection_fingerprint
+                            or not isinstance(nuisance_candidates.get("features"), list)
+                            or not isinstance(nuisance_candidates.get("latents"), list)):
+                        raise ValueError("incompatible nuisance candidate checkpoint")
                 modeling_fit_frame = materialize_selected_latents(
                     frame=final_fit_all,
-                    latent_states=latent_states,
-                    measurement_definitions=measurement_definitions,
+                    latent_states=nuisance_candidates["latents"] if nuisance_candidates is not None else latent_states,
+                    measurement_definitions=current if nuisance_candidates is not None else measurement_definitions,
                 )
                 LOGGER.info(
                     "skip completed Stage 2 all-evidence role selection: %s",
@@ -10663,6 +10711,13 @@ def run_fold_analysis(
                 else None
             ),
         )
+        if statistical_policy.selection_mode == "multi_model":
+            nuisance_candidates = {
+                "input_fingerprint": selection_fingerprint,
+                "features": consolidated_definitions,
+                "latents": all_latent_entries,
+            }
+            _write_json(nuisance_candidates_path, nuisance_candidates)
         (
             statistically_selected,
             elastic_net_report,
@@ -10695,9 +10750,20 @@ def run_fold_analysis(
         )
         if nuisance_rows:
             _write_frame(selection_dir / "nuisance_predictions.csv", pd.DataFrame(nuisance_rows))
-        if consolidated_definitions and config.role_adjudication.enabled:
-            if statistical_policy.selection_mode == "multi_model":
-                elastic_net_report["adjudication_model_identity"] = str(getattr(config, "model", ""))
+        if statistical_policy.selection_mode == "multi_model":
+            # Saved configurations can still have enabled=true. It cannot give
+            # an LLM authority over numerical nuisance retention in this mode.
+            selected = statistically_selected
+            role_adjudication_report = {
+                "schema_version": "stage2_predictive_nuisance_selection_v1",
+                "status": "replaced_by_statistical_nuisance_selection",
+                "selection_authority": "multi_model",
+                "llm_roles_are_binding": False,
+                "llm_requests": 0,
+                "decisions": elastic_net_report.get("decisions", []),
+                "retained_feature_ids": [str(f["feature_id"]) for f in selected],
+            }
+        elif consolidated_definitions and config.role_adjudication.enabled:
             selected, role_adjudication_report, _role_evidence = (
                 adjudicate_stage2_roles(
                     definitions=consolidated_definitions,
@@ -10774,8 +10840,10 @@ def run_fold_analysis(
             ),
             "role_adjudication": role_adjudication_report,
             "final_role_assignment": (
-                "llm_confounders_and_nested_r_loss_modifiers"
+                "predictive_nuisances_and_nested_r_loss_modifiers"
                 if modifier_count_report is not None
+                else "predictive_nuisances_and_joint_orthogonal_modifiers"
+                if statistical_policy.selection_mode == "multi_model"
                 else "llm_all_evidence_adjudication"
                 if consolidated_definitions and config.role_adjudication.enabled
                 else "statistical_provisional_roles"
@@ -10972,7 +11040,7 @@ def run_fold_analysis(
             "candidate_missingness_filter": missingness_report,
             **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),
             "screening_model_family": (
-                "multi_model_evidence_with_llm_theme_adjudication"
+                "multi_model_evidence_with_predictive_nuisance_selection"
                 if statistical_policy.selection_mode == "multi_model" else
                 "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
             ),
@@ -11004,6 +11072,10 @@ def run_fold_analysis(
         estimator=final_estimator,
         statistical_policy=statistical_policy,
         output_dir=output_dir / "estimation",
+        **({
+            "nuisance_candidate_definitions": nuisance_candidates["features"],
+            "nuisance_candidate_fit": modeling_fit_frame,
+        } if nuisance_candidates is not None else {}),
     )
     return {
         "features": selected,
@@ -11013,7 +11085,7 @@ def run_fold_analysis(
         "review_convergence": review_convergence,
         "ontology_refinement_rounds": ontology_refinement_rounds,
         "screening_model_family": (
-            "multi_model_evidence_with_llm_theme_adjudication"
+            "multi_model_evidence_with_predictive_nuisance_selection"
             if statistical_policy.selection_mode == "multi_model" else
             "all_evidence_univariable_and_elastic_net_with_llm_role_adjudication"
         ),

@@ -4,17 +4,17 @@ Implemented September 21, 2026; overlap-restricted modifier screening and joint
 modifier-count/estimator selection updated September 22, 2026. Enable with
 `stage2.statistical_selection.selection_mode: "multi_model"`.
 
-The `gao-hestie-dina` branch uses Bernoulli DINA for binary orthogonal/candidate
-effect fits, adds DINA evidence alongside the forest, and adds DINA to the final
+On `main`, Bernoulli DINA is used for binary orthogonal/candidate effect fits,
+provides evidence alongside the forest, and participates in the final
 architecture search. All five root synthetic shell launchers enable this mode
 for fresh runs. See [DINA integration](gao_hastie_dina.md) for the equations and
 the corresponding Stage 1 changes.
 
 ## 1. Purpose and scope
 
-1. Build a reproducible confounder/modifier list from complementary empirical
-   evidence and LLM interpretation. A candidate discarded by one model remains
-   available to other models and final review.
+1. Build reproducible nuisance-input and modifier lists from predictive models
+   and complementary empirical evidence. Nuisance retention uses task-specific
+   grouped elastic-net supports; modifier ranking/count selection remains separate.
 2. Use existing consolidated, ontology-reviewed, extracted measurements.
    An upstream filter drops candidates more than 95% missing across
    outer-training patients, before any numerical or LLM selection. Exactly
@@ -51,7 +51,7 @@ the corresponding Stage 1 changes.
    category/missingness coding.
 2. Univariable modifier models include the candidate main effect and are
    unadjusted for other covariates. Their confounding sensitivity is explicit to
-   the LLM; orthogonal models provide separate adjusted evidence.
+   the reports; orthogonal models provide separate adjusted evidence.
 3. Logistic interactions and binary DINA fits concern log odds ratios. Causal
    forests concern outcome/probability differences. A constant log odds ratio
    may imply varying risk differences, so the methods can support different
@@ -119,7 +119,7 @@ the corresponding Stage 1 changes.
     predictive forests, and scoring nuisances retain all sampled patients.
     Main-effect evidence from the *joint interaction* model necessarily shares
     its overlap-restricted population. Audits record the relevant row IDs, and
-    LLM prompts describe these population differences without exposing row IDs.
+    Reports describe these population differences explicitly.
 
 ### Matched-batch contrast evidence (September 28, 2026)
 
@@ -174,7 +174,7 @@ This measures within-bin observed contrast variation. Residual confounding and
 prognostic imbalance can remain, and heterogeneity primarily between bins may be
 missed. Validation is conditional on the existing upstream catalog/refinement.
 
-## 4. Stability summaries and LLM interpretation
+## 4. Stability summaries and predictive nuisance selection
 
 1. For each candidate, family, and task, report exposure/evaluable/support counts,
    support fraction, fold counts, score mean/range, p/q summaries when applicable,
@@ -183,27 +183,29 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
 2. Keep families separate. Folds/repetitions share patients, so support fractions
    are not independent replications, causal probabilities, or formal
    error-controlled stability selection. There is no pooled popularity score.
-3. The LLM reviews bounded batches for shared themes, complementary signals,
-   competing proxies, and disagreements. Hierarchical reconciliation exposes
-   themes across batches and preserves every candidate ID, including weak and
-   unevaluable candidates.
-4. Themes organize evidence; they do not merge, broaden, or relabel measurements,
-   nor transfer roles to every member. Themes cite up to 12 representative
-   evidence IDs. Final decisions still receive each candidate's complete
-   aggregate evidence.
-5. A second pass assigns provisional confounder, modifier, both, or neither to
-   every candidate.
-   Nonlocked retained roles require citations: modifiers cite heterogeneity
-   evidence; confounders address both treatment and outcome evidence. No positive
-   p-value or minimum-frequency gate is imposed. Investigator locks are exact.
-   Automatic modifier-count selection subsequently preserves all retained
-   confounders and chooses the modifier inputs as described below.
-6. Decisions describe supporting/contrary evidence, fold consistency, disagreement
-   across methods, rationale, and stability (`consistent`, `mixed`, or
-   `insufficient`). Those labels are interpretations, not calibrated probabilities.
-7. Explicit prompt allowlists exclude cell logs, row values/IDs, predictions,
-   paths, exception messages, and oracle metadata. Oversized prompts split or
-   fail with a budget error; no candidate is silently omitted.
+3. The already-fitted, training-only nuisance models select inputs. A nonzero
+   candidate-group norm above `coefficient_tolerance` in any training fold retains
+   that variable for its task. Penalties use training-only predictive CV loss.
+   Treatment and outcome supports remain separate. Outcome
+   support is the union of marginal, control-arm, and treated-arm model supports.
+4. `nuisance_selection` records supports, coefficient norms, model-fit audits,
+   training/validation row IDs, and fold frequencies. Frequencies across repeated
+   partitions are descriptive. No univariable p-value or LLM decision gates retention.
+5. Investigator locks remain exact. The legacy `confounder` role means a variable
+   is used by at least one nuisance task; `nuisance_model_roles` records which.
+   These are predictive routing decisions, not identified causal roles. A modifier
+   does not automatically enter propensity prediction, but remains an outcome input.
+6. No LLM theme or role-retention requests run in `multi_model`, including when an
+   older configuration has `role_adjudication.enabled=true`. LLM discovery,
+   measurement refinement, extraction, and optional modifier-concept review remain.
+7. The pooled support routes final outer-held-out nuisance prediction.
+   Scoring nuisances and final external training-patient cross-fitting retain the complete
+   frozen candidate catalog and regularize inside each training fold. The pooled
+   shortlist cannot screen its own OOF prediction inputs. Final DINA uses these
+   external cross-fitted training nuisances and task-specific held-out nuisances.
+   The causal forest still fits its internal DML nuisances on retained X/W inputs;
+   its adjustment set and modifier set are learned on outer training. Inner
+   architecture/count validation remains a separate, nested procedure.
 
 ## 5. Joint modifier-count and final-estimator selection
 
@@ -217,7 +219,7 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
    Optional `one_standard_error` chooses the simplest pair, in that same order,
    whose paired excess loss over the best is within one paired standard error
    across folds. This is a simplification heuristic, not a significance test.
-3. Preserve **every confounder retained by full-training role adjudication**.
+3. Preserve **each statistically selected nuisance task's feature support**.
    This does not force its penalized coefficient to be nonzero. Investigator
    locks remain exact. Locked modifiers are always included outside the additional
    candidate budget; locked confounder-only variables cannot acquire interactions.
@@ -277,11 +279,11 @@ missed. Validation is conditional on the existing upstream catalog/refinement.
     role decisions, and source/input fingerprints. Final refitting uses retained
     confounders/modifiers: the DML forest refits nuisances; the interaction outcome
     model retunes its penalty with retained main effects and selected interactions;
-    DINA refits nuisances and the grouped log-odds effect model.
+    DINA reuses the external nuisance predictions and fits the grouped log-odds effect model.
 11. Validation therefore uses broader adjustment than the final retained-role
     refit. It is an architecture/count comparison conditional on that adjustment
     and the **frozen upstream catalog, extractions, ontology, and consolidation**,
-    not a fully nested rerun of discovery or full LLM confounder selection. R-loss
+    not a fully nested rerun of discovery. R-loss
     is noisy and does not optimize oracle recall or Pearson ITE correlation.
 
 ## 6. Routing, checkpoints, and use
@@ -349,32 +351,33 @@ alone do not change scientific identities.
    are omitted from both legacy policy fingerprints.
    Explicit saved-run launches preserve the saved selector and estimator list;
    add `"dina"` to an older explicit list to include it in final-model search.
-3. `role_adjudication.enabled` must be true. Disabled/incomplete LLM review cannot
-   silently fall back to a numerical union.
+3. `role_adjudication.enabled` is not used for retention in `multi_model`.
+   The bundled multi-model example and fresh synthetic launchers set it to false.
 4. Each nuisance fit and family/repetition/subset has an atomic, integrity-checked
    checkpoint under `selection/multi_model/<input-fingerprint>/fold_*/`. Identity
    includes measurements, labels, definitions, splits, policy, seed, and numerical
    source hashes. Completed compatible leaves are reused on restart.
-5. Theme and role requests have separate checkpoints beneath
-   `selection/role_adjudication/`. Evidence, prompt source, model identity, and
-   policy changes invalidate them. Corrupted checkpoints fail visibly.
+5. `selection/nuisance_candidates.json` saves the complete training candidate
+   definitions and latent states for honest final cross-fitting and resume.
+   Prior LLM retention checkpoints cannot supply the new selection.
 6. Standard selection reports, definitions, measurement dependencies, and final
    estimation artifacts remain. Changing the mode or a completed multi-model
    policy requires guarded `--stage2-reselect`.
 7. Count selection stores checkpoints under `selection/modifier_count/` and
    nested numerical evidence under `selection/multi_model/modifier_count_training/`.
    `selection/modifier_count/selection.json` points to the active count result.
-   Each LLM request and each fold/architecture/count/seed fit can resume independently;
+   Each fold/architecture/count/seed fit can resume independently;
    completed result hashes are validated. Count-only policy changes leave the
    underlying numerical-evidence fingerprint unchanged. When count selection is
    enabled, `estimation_trees` is also a selection parameter: changing it requires
    guarded reselection and invalidates the prior count-selection result.
-8. This update uses `stage2_multi_model_selection_v3` and
-   `stage2_nested_modifier_count_v2`. Version 1/2 configuration blocks are accepted
+8. This update uses `stage2_multi_model_selection_v6_predictive_nuisances` and
+   `stage2_nested_modifier_count_v6_predictive_nuisances`. Version 1–5 configuration blocks are accepted
    as input, but existing runs require guarded reselection before adopting these
    changes. Preflight blocks stale completion shortcuts. Set `estimators` to
    `["causal_forest"]` for forest-only count tuning, or set `modifier_count.enabled`
-   to false to retain broad LLM modifiers and the historical forest final model.
+   to false to use any-fold joint orthogonal-model group support for modifiers
+   and the forest final model, without LLM retention.
    Other selector modes retain their selection policies.
 
 Configuration block:
@@ -410,7 +413,7 @@ Configuration block:
         }
       }
     },
-    "role_adjudication": {"enabled": true}
+    "role_adjudication": {"enabled": false}
   }
 }
 ```
@@ -440,19 +443,20 @@ expensive than reusing a global ranking.
 1. Tests exercise real binary/continuous models, categorical encoding, nested
    nuisances, all evidence families, subset coverage, train/validation separation,
    and exact checkpoint reuse after changing outer-test labels and oracle columns.
-2. Controlled-response LLM tests check theme reconciliation, candidate coverage,
-   citations, locks, invalid-response rejection, and cache integrity. They do not
-   establish real-LLM selection quality.
+2. Predictive nuisance tests check separate task supports, arm-outcome unions,
+   exact investigator locks, grouped categorical selection, validation isolation,
+   and zero LLM retention calls even with older enabled flags. Historical LLM
+   adjudication tests remain for the retained legacy implementation.
 3. A production comparison must still measure extraction quality, frozen-selection
    confounder/modifier recovery, held-out effect estimates, and outer-fold
    variability. More evidence families do not establish better sensitivity,
    specificity, or causal identification by themselves.
 4. Selection tests run real binary/continuous numerical models, forests, and
-   penalized interaction outcome models with controlled LLM replies. They check nested row/label isolation, categorical
+   penalized interaction outcome models without LLM retention. They check nested row/label isolation, categorical
    measurements, independently recomputed validation R-loss, common populations,
    confounder/lock preservation, zero-budget behavior, exact resume without
-   refitting, corruption detection, and version 1/2 preflight rejection. They do
-   not measure a live LLM's ranking quality. Additional checks change excluded
+   refitting, corruption detection, and obsolete-schema preflight rejection.
+   Additional checks change excluded
    patients' outcomes while holding nuisances fixed, verify all effect evidence
    is unchanged, check probability-scale counterfactuals, and verify production
    routing plus prediction invariance to changed outer-test outcomes.

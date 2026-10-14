@@ -1,0 +1,1988 @@
+# All-evidence technical reference
+
+Detailed architecture, configuration, serving, and artifact documentation for
+OCI. Start with the [repository README](../README.md) for installation and a
+first run, or [How Stage 2 works](../how_stage2_works.md) for the modeling walkthrough.
+Commands below run from the repository root. Scientific settings in example
+blocks are explicit examples; saved runs preserve their own configuration.
+
+- [Bundled synthetic wrappers](#bundled-synthetic-wrappers)
+- [Stage 1 architectures](#the-ten-stage-1-evidence-architectures)
+- [Configuration and parallel execution](#running-the-all-evidence-workflow)
+- [Managed vLLM servers and GPU presets](#pipeline-managed-vllm-server-pools)
+- [Outputs and recovery](#output-and-interruption-recovery)
+- [Standalone explicit-feature workflows](#standalone-explicit-feature-workflows)
+- [Synthetic generation and evaluation](#synthetic-data-and-stage-1-architecture-evaluation)
+- [Standalone prediction columns](#interpreting-results)
+
+## Bundled synthetic wrappers
+
+`./run_one_conf_one_mod.sh` and `./run_five_conf_five_mod.sh` remain available.
+They run the bundled cohorts, select visible GPUs, and default to external
+endpoints at `http://127.0.0.1:8010/v1` and `http://127.0.0.1:8020/v1`.
+Fresh wrapper runs preset Gemma model IDs; override **both** model IDs when
+using different servers. Fresh wrapper runs default to `multi_model`, including
+DINA alongside causal-forest evidence and final CATE search across causal forests,
+penalized interaction models, and DINA.
+The H100 and RTX PRO 6000 wrappers inherit the same scientific preset through
+`scripts/run_synthetic_all_evidence.sh`. All five root launchers declare binary
+outcomes, so the Stage 1 and Stage 2 DINA paths activate automatically; no DINA
+flag is required. Estimand refinement, concept review, matched-batch contrasts,
+and post-extraction consolidation remain opt-in for these wrappers. Set
+`STAGE2_SELECTION_MODE=llm_roles` or `independent_tasks` to use those selectors;
+they use DINA modifier screens but retain the forest as the final CATE estimator.
+
+```bash
+# Replace both served IDs and endpoint URLs for your deployment.
+STAGE2_ENDPOINT=http://127.0.0.1:8010/v1 \
+STAGE2_MODEL=YOUR_PRIMARY_SERVED_MODEL_ID \
+STAGE2_EXTRACTION_ENDPOINT=http://127.0.0.1:8020/v1 \
+STAGE2_EXTRACTION_MODEL=YOUR_EXTRACTION_SERVED_MODEL_ID \
+STAGE2_WORKERS=4 STAGE2_EXTRACTION_WORKERS=4 \
+./run_five_conf_five_mod.sh /persistent/results/my_five_conf_run
+
+# Stage 1 only; local GPU selection still applies.
+STAGE2_ENDPOINT= ./run_one_conf_one_mod.sh /persistent/results/my_stage1_run
+```
+
+`GPU_COUNT=2` selects two visible GPUs; `PHYSICAL_GPUS=1,3` selects exact host
+GPU IDs. These controls are mutually exclusive. Both wrappers default
+`MIN_FREE_GPU_GB=0` and `OPENBLAS_NUM_THREADS`, `OMP_NUM_THREADS`,
+`MKL_NUM_THREADS`, and `NUMEXPR_NUM_THREADS` to `1`.
+Set `OCI_PYTHON=/path/to/python` to use an existing environment without syncing.
+After a completed handoff, an endpoint-backed automatic Stage 2 resume does
+not inspect or reserve local GPUs.
+
+Fresh one-confounder wrapper runs use four primary and four extraction workers,
+with 1,800-second HTTP attempts and a 6,000-second logical request budget.
+The five-confounder wrapper uses 32 workers per role unless overridden and the
+core 3,600/14,400-second timeouts. Saved-run launches retain their saved settings.
+Use `STAGE2_REQUEST_ATTEMPT_TIMEOUT` and `STAGE2_REQUEST_TIMEOUT` to override
+those runtime budgets.
+
+For the wrappers' explicit saved-run adapter, use
+`OCI_RUN_CONFIG=/path/to/output/run_config.json STAGE2_ONLY=1` and an installed
+`OCI_PYTHON` (or the repository `.venv/bin/python`). This path never synchronizes
+dependencies and preserves the saved selection mode and explicit estimator list.
+`STAGE2_SELECTION_MODE` accepts `llm_roles`, `independent_tasks`, or `multi_model`
+as an explicit override. For an older saved config, enable `multi_model` and add
+`"dina"` to `stage2.statistical_selection.multi_model.modifier_count.estimators`
+if that list explicitly contains only the earlier two estimators. Keep
+`modifier_count.enabled=true` to run the final architecture search. For completed
+Stage 2 runs, use `STAGE2_RESELECT=1` to recompute selection and estimation from
+the preserved upstream artifacts. This does not regenerate old Stage 1 evidence;
+use a new full run to apply DINA throughout both stages. Managed-vLLM GPU layouts
+and their adaptive model switching are described below.
+
+## The ten Stage 1 evidence architectures
+
+The word “architecture” refers here to a distinct way of generating scientific
+evidence from text. Eight architectures are enabled by default. TF-IDF semantic
+retrieval contrasts and orphan n-grams remain available as opt-in lanes.
+The ten supported architectures are stored in three computational
+components: `text_models`, `tfidf`, and `neural_queries`. The shared embedding
+cache is infrastructure, and `handoff` is an aggregation step; neither is an
+eleventh model.
+
+```mermaid
+flowchart TB
+    T["Clinical record"]
+    T --> L["Lexical representation"]
+    T --> H["Hierarchical contextual representation"]
+    T --> E["Frozen embedding representation"]
+    L --> L1["1. Sparse nuisance associations"]
+    L --> L2["2. Sparse residual effects"]
+    L --> L3["8. TF-IDF topics"]
+    L --> L4["9. Residual or orphan n-grams"]
+    H --> H1["4. Hierarchical transformer evidence"]
+    H --> M["3. Matched-patient uplift"]
+    E --> E1["5. Whole-cohort contrasts"]
+    E --> E2["6. Cluster-local contrasts"]
+    E1 --> E3["7. Lexical views of embedding contrasts"]
+    E2 --> E3
+    E --> E4["10. Learned neural queries"]
+    L3 -->|"exclude effect-topic terms"| L4
+    L1 --> Z["Triangulated Stage 1 evidence"]
+    L2 --> Z
+    L3 --> Z
+    L4 --> Z
+    H1 --> Z
+    M --> Z
+    E1 --> Z
+    E2 --> Z
+    E3 --> Z
+    E4 --> Z
+```
+
+Families 1 through 7 write their context-level evidence under
+`components/text_models/`. Families 8 and 9 write under `components/tfidf/`,
+and family 10 writes under `components/neural_queries/`. These locations remain
+available after the combined handoff has been assembled.
+
+The three families with `tfidf` in their names do not form one modeling branch.
+Family 7 belongs to the embedding component: it provides a lexical view of both
+the whole-cohort contrasts in family 5 and the cluster-local contrasts in family
+6. Families 8 and 9 instead belong to an independent fold-local TF-IDF topic
+pipeline that does not consume embeddings. Family 9 uses the effect-associated
+n-gram inventory from that pipeline after removing terms already represented in
+family 8's effect-topic bank. Thus family 7 depends on families 5 and 6, whereas
+family 9 depends on the effect-topic term inventory from family 8.
+
+### 1. Sparse treatment and outcome associations (`bow_nuisance`)
+
+This architecture asks which words and short phrases help predict treatment
+assignment or observed outcome within a training fold. It fits configured
+bag-of-words or TF-IDF views, including linear and tree-based models, and records
+the vocabulary associated with each prediction task. The model is intentionally
+sensitive to explicit chart language such as diagnoses, performance status,
+prior therapies, laboratory abnormalities, and administrative patterns.
+
+The intuition is that a characteristic relevant to both treatment and outcome
+may be important for adjustment. The output remains only a clue: a phrase may be
+a proxy, a documentation habit, or a mixture of several clinical constructs.
+Stage 2 must determine whether the phrase supports a measurable patient variable.
+
+### 2. Sparse residual-effect associations (`bow_r_loss`)
+
+The sparse residual-effect architecture searches for words and phrases related
+to variation in treatment response after treatment and outcome nuisance
+predictions have been accounted for. For binary outcomes it fits DINA using
+cross-fitted propensity and treatment-arm outcome probabilities. The sparse
+ridge coefficients describe variation in log odds ratios; exported effect
+predictions are risk differences. The architecture ID `bow_r_loss` is retained
+for compatibility. For continuous outcomes, it studies the R-learner residual
+relationship
+
+```text
+Y - m(X) approximately equals tau(X) times [T - e(X)],
+```
+
+where `e(X)` is the treatment model and `m(X)` is the outcome model. Terms that
+help explain this residual relation are candidates for treatment-effect
+heterogeneity. They are not proof that the named characteristic modifies the
+treatment effect, but they provide a different signal from ordinary outcome
+prediction.
+
+### 3. Matched-patient uplift evidence (`matched_pair_uplift`)
+
+This architecture constructs local comparisons between treated and untreated
+patients who are similar according to learned nuisance structure. Sparse and
+hierarchical text models then examine which features of a candidate patient and
+the matched comparison are associated with differences in their observed
+outcomes.
+
+The method provides an intuitive counterfactual heuristic: it asks what differs
+in the records of otherwise similar patients receiving different treatments.
+Because matching can only balance measured and modeled information, the result
+is evidence for a candidate characteristic rather than proof of an individual
+treatment effect or its direction.
+
+### 4. Hierarchical transformer evidence (`htr_neural`)
+
+The hierarchical transformer divides a long record into overlapping clinical
+chunks, encodes each chunk, and uses a document-level transformer to combine
+them. Separate nuisance and effect heads learn from the ordered chunk
+representations. Binary staged and joint effect heads optimize DINA with frozen,
+nested text nuisance fits and convert log odds ratios to risk differences.
+Attention and span summaries translate influential parts of the
+record back into readable phrases.
+
+This model is useful when meaning depends on context or on evidence distributed
+across a long history. Unlike a bag-of-words model, it can distinguish some uses
+of the same vocabulary and can combine information across notes. Its attention
+weights should be read as model-use diagnostics, not as causal explanations.
+
+### 5. Whole-cohort embedding contrasts (`embedding_whole_cohort`)
+
+The embedding architecture encodes record chunks with a frozen sentence model
+and averages them into patient-level semantic representations. Within each
+training context, it constructs directions associated with treatment, outcome,
+joint treatment-outcome structure, and residual-effect scores. Binary
+whole-cohort effect directions use DINA scores; native treatment/outcome cell
+and cluster contrasts retain their definitions. It then retrieves
+actual text chunks aligned with the positive and negative ends of those
+directions.
+
+This architecture can recognize semantically similar descriptions that do not
+share exact words. The retrieved chunks are essential: the vector direction is a
+numerical object, whereas the witnesses make it possible for a researcher to
+judge whether the direction represents a coherent patient characteristic.
+
+### 6. Cluster-local embedding contrasts (`embedding_clustered`)
+
+Whole-cohort contrasts can be dominated by common documentation patterns. The
+cluster-local architecture first groups semantically similar patient records and
+then estimates contrast directions within those groups. It is intended to reveal
+signals that are meaningful in a local region of the cohort but weak or
+cancelled in a global average.
+
+A cluster is a computational neighborhood, not an automatically valid disease
+subtype. Stage 2 therefore interprets the retrieved witnesses without treating
+cluster membership itself as a clinical label.
+
+### 7. TF-IDF vocabulary from semantic retrieval (`tfidf_semantic_retrieval_contrasts`)
+
+This optional architecture is disabled by default
+(`embedding_contrast.retrieval_tfidf_enabled=false`).
+
+Both whole-cohort and cluster-local embedding contrasts return records or chunks
+from opposing sides of a semantic direction. This architecture fits lexical
+summaries to those contrasts and reports the terms that distinguish their sides.
+Each result retains the identity of its parent contrast, so evidence derived from
+a whole-cohort direction remains distinguishable from evidence derived from a
+cluster-local direction. Family 7 is therefore a readable projection of families
+5 and 6 rather than a third independent embedding model.
+
+The terms can clarify whether an embedding direction concerns, for example,
+disease burden, functional status, toxicity, or a documentation artifact. When
+the vocabulary is nonspecific, the correct interpretation is to preserve that
+ambiguity rather than force a clinical label.
+
+### 8. Consensus TF-IDF topics (`tfidf_topics`)
+
+This architecture begins independently from the fold's clinical text; it does
+not use the embedding contrasts or their retrieved chunks. A fold-local TF-IDF
+representation is screened separately for treatment, outcome, and
+residual-effect signal. Non-negative matrix factorization is then fit across
+configured random seeds to identify groups of terms that recur together.
+Consensus across fits reduces dependence on a single topic decomposition.
+For binary outcomes, the effect screen uses DINA scores around a training-fitted
+constant log odds ratio and Fisher-information weights, with cross-fitted
+propensity and arm-specific outcome probabilities.
+
+A topic is a co-occurrence pattern, not necessarily one variable. A topic that
+contains terms for frailty, oxygen use, and hospitalization may represent a
+coherent severity construct, or it may combine several measurements that should
+remain separate. Stage 2 reviews every topic member before naming a feature.
+
+### 9. Residual or orphan TF-IDF n-grams (`tfidf_orphan_ngrams`)
+
+This optional architecture is disabled by default
+(`tfidf_topic.orphan_ngram_enabled=false`). Consensus TF-IDF topics remain enabled.
+
+This architecture is also independent of the embedding branch. It begins with
+the effect-associated n-grams produced by the same fold-local TF-IDF screening
+used for family 8 and removes every term already represented in the fitted topic
+inventory for the residual-effect bank. The remaining words and short phrases
+are the “orphans.” They can carry residual-effect signal even though they were
+not represented by a retained topic.
+
+This family is intentionally conservative about aggregation. A rare but precise
+measurement may be scientifically important even when it does not belong to a
+stable broad topic. Each retained n-gram is therefore treated as an independent
+clue until the evidence supports a merge.
+
+### 10. Learned neural-query moments (`neural_query_moments`)
+
+Neural queries are trainable vectors that search the frozen chunk-embedding space
+for recurring semantic patterns. Separate banks are optimized for treatment,
+outcome, and residual-effect objectives, with constraints that encourage useful
+activation and diversity among queries. The saved evidence includes query
+activations, aggregate moments, and readable high-activation witnesses.
+For binary outcomes, the effect bank uses the same DINA score and Fisher weights
+as the TF-IDF effect screens, in both nested discovery and final refitting.
+
+This approach is more flexible than a fixed mean-difference contrast because it
+can learn several distinct semantic detectors for the same objective. Its
+aggregate magnitudes remain numerical signals; the retrieved witnesses are what
+permit a clinical concept to be proposed.
+
+Evidence retrieval ranks patients by their **maximum chunk-to-query cosine**
+and selects the highest-scoring chunks within each patient. The default
+`science.neural_queries.evidence_retrieval_top_k` is one chunk per patient per
+query. Foreground/background contrastive n-grams are computed from those selected
+chunks. This `ranked_query_chunks_v1` policy replaces the old all-history
+aggregation; capacity settings are separate from the scientific retrieval count.
+Older neural-query evidence needs rebuilding from saved query vectors and chunk
+caches before its handoff can enter the current Stage 2 compiler.
+
+### What agreement and disagreement mean
+
+Agreement across architectures increases confidence that a concept is not an
+artifact of one representation. Disagreement is also informative. A lexical
+model may identify an explicit laboratory term that an embedding model smooths
+away, while an embedding model may recognize a concept expressed through many
+paraphrases. The workflow preserves these differences for Stage 2 rather than
+reducing all evidence to a global importance ranking.
+
+## Running the all-evidence workflow
+
+### Dataset requirements
+
+The researcher-facing runner accepts Parquet and CSV files. A cohort should have
+one row per patient or treatment decision and should contain the following
+fields, although their names are configurable.
+
+| Field | Required content |
+|---|---|
+| `patient_id` | This field provides a stable identifier for the unit of analysis. |
+| `clinical_text` | This field contains the pretreatment clinical record used for discovery and modeling. |
+| `treatment_indicator` | This field is binary, with values zero and one. |
+| `outcome_indicator` | This field is binary or continuous, as declared by `outcome_type`. |
+| `split` | This optional field can identify fixed `train`, `val`, and `test` partitions for standalone runs. |
+
+All supplied clinical text is assumed to be pretreatment. Cohort preparation
+establishes that scope; extraction does not add a separate date-based eligibility
+screen. Dates can still resolve repeated observations under a variable's
+measurement rule.
+
+### A configuration file
+
+Copy [`example_configs/research_all_evidence.json`](../example_configs/research_all_evidence.json)
+for a Stage-1-first or `llm_roles` configuration. Use the multi-model example
+in the [README quickstart](../README.md#run-your-own-cohort) for the multi-model selector. The following is a **Stage-1-only**
+configuration; adding endpoints later also requires changing `run.mode` to
+`"full"` or passing `--stage2-only`:
+
+```json
+{
+  "dataset": "/data/cohort.parquet",
+  "output_dir": "/results/nsclc_all_evidence",
+  "columns": {
+    "unit_id": "patient_id",
+    "text": "clinical_text",
+    "treatment": "treatment_indicator",
+    "outcome": "outcome_indicator"
+  },
+  "science": {
+    "clinical_question": "Which pretreatment characteristics confound treatment selection or modify treatment effect?",
+    "outcome_type": "binary",
+    "outer_folds": 5,
+    "inner_folds": 5,
+    "seed": 42,
+    "stage1": {},
+    "neural_queries": {}
+  },
+  "models": {
+    "htr": "prajjwal1/bert-tiny",
+    "embeddings": "Qwen/Qwen3-Embedding-8B"
+  },
+  "stage2": {
+    "endpoint": "",
+    "model": ""
+  },
+  "run": {
+    "mode": "stage1",
+    "devices": ["cuda:0", "cuda:1"],
+    "workers": 16,
+    "components": [
+      "embedding_cache",
+      "tfidf",
+      "text_models",
+      "neural_queries",
+      "handoff"
+    ]
+  }
+}
+```
+
+Paths in a configuration file are resolved relative to that file. JSON and YAML
+are accepted; YAML requires PyYAML. Less common model settings can be placed
+under `science.stage1` or `science.neural_queries`. The resolved settings used by
+the run are written beside the results.
+
+`science.stage1_architectures` is an optional list of architecture names. When
+it is omitted, the workflow runs every architecture enabled by the Stage 1 model
+configuration: eight lanes in the bundled defaults, with TF-IDF retrieval
+contrasts and orphan n-grams disabled. An explicit
+selection runs only the required producer components and private prerequisites,
+and exposes only the selected architecture lanes to Stage 2. For example:
+
+```bash
+uv run python scripts/run_all_evidence.py \
+  --config run.json \
+  --architectures bow_nuisance,tfidf_topics
+```
+
+Architecture selection is part of the scientific run definition. Resume with
+the same selection; use a fresh output directory to change it. `--architectures
+all` explicitly selects all ten lanes, including the two optional lanes.
+Naming either optional lane in an explicit selection opts into it; its private
+prerequisites must still be available. To add a lane to the default mix without
+listing every architecture, set
+`science.stage1.architecture.multi_model_forest.embedding_contrast.retrieval_tfidf_enabled=true`
+or `science.stage1.architecture.multi_model_forest.tfidf_topic.orphan_ngram_enabled=true`.
+Stage 2 uses the resolved Stage 1 selection and does not require disabled lanes.
+Standalone Stage 2 configuration requires the eight default lanes; all ten
+remain supported for explicit selections and saved handoffs.
+
+Chunk-based models fail rather than silently discard the end of an unusually
+long record. If a capacity error reports that a record requires more embedding
+chunks, the limit can be increased without editing the base template. For
+example, `--set science.stage1.architecture.multi_model_forest.embedding_contrast.max_chunks=128`
+sets a nonbinding capacity for records that require no more than 128 chunks.
+
+Start or resume the run with one command:
+
+```bash
+uv run python scripts/run_all_evidence.py --config run.json
+```
+
+`scripts/run_all_evidence.py` orchestrates the complete multi-model Stage 1 and
+Stage 2 workflow. Fold-local BoW, HTR, embedding, matched-pair, and
+structured-effect settings live under
+`science.stage1.architecture.multi_model_forest`.
+
+The same program accepts direct arguments when a separate configuration file is
+not useful. The following command defines an equivalent Stage 1 run explicitly:
+
+```bash
+uv run python scripts/run_all_evidence.py \
+  --dataset /data/cohort.parquet \
+  --output-dir /results/nsclc_all_evidence \
+  --unit-id-column patient_id \
+  --text-column clinical_text \
+  --treatment-column treatment_indicator \
+  --outcome-column outcome_indicator \
+  --outcome-type binary \
+  --clinical-question "Which pretreatment characteristics confound treatment selection or modify treatment effect?" \
+  --outer-folds 5 \
+  --inner-folds 5 \
+  --devices cuda:0,cuda:1 \
+  --workers 16 \
+  --stage1-only
+```
+
+The bundled one-confounder, one-effect-modifier NSCLC example can also write to
+an explicit output directory:
+
+```bash
+./run_one_conf_one_mod.sh /persistent/results/nsclc_example
+```
+
+### Parallel execution
+
+The workflow runs its top-level components in order because later components
+reuse artifacts or split definitions produced by earlier ones. Parallelism is
+applied within the computationally expensive components. The embedding cache
+divides the ordered chunk corpus among the configured GPUs. TF-IDF discovery
+uses separate CPU processes across independent outer/full and exact-inner
+contexts. Each process performs one context's vectorization, screening,
+stability analysis, and topic fitting with one native numerical thread. This
+process boundary is important because several parts of topic discovery are
+Python-heavy and would contend if they shared one interpreter. The number of
+simultaneous context processes is the smaller of the unfinished context count
+and `run.workers`. The text-model and neural-query components also treat each
+outer/full or exact-inner discovery context as an independent job.
+
+Thread pools are retained where they have different semantics: concurrent
+endpoint requests, work assigned to distinct GPU devices, and nested
+scikit-learn fits inside an already isolated text-model process. These tasks
+either wait on I/O, execute outside the Python interpreter, or avoid the memory
+cost and instability of nested process pools. Python-heavy TF-IDF context work
+does not use the thread backend by default.
+
+For CUDA runs, the runner creates one fixed process lane per configured GPU and
+assigns whole contexts to those lanes. A lane remains attached to the same GPU,
+which prevents two contexts from being scheduled onto one device merely because
+another device finished early. The number of active lanes is the smaller of the
+number of configured CUDA devices and the number of unfinished contexts. The
+runner assigns the largest contexts first to the currently least-loaded lane.
+
+During `text_models`, the total CPU budget is divided as evenly as possible
+among the active lanes. If the division has a remainder, the first lanes receive
+one additional worker. Within a lane, independent BoW cross-fitting folds and
+the treatment, outcome, and effect-importance fits use up to that lane's worker
+allocation as threads. The native numerical libraries remain single-threaded
+within each fit, which prevents nested work from exceeding the stated CPU
+budget. A neural-query context uses its assigned GPU for its inner-fold fits,
+final query banks, and evidence retrieval; its parallelism occurs across
+contexts rather than by oversubscribing the device within a context.
+
+The `run.devices` setting determines GPU-lane concurrency. `run.workers` is the
+overall CPU budget used by TF-IDF and divided among the concurrently active
+text-model lanes. If fewer workers than CUDA devices are requested, each active
+device still requires one controller worker. Stage 2 uses its own
+`stage2.workers` setting for primary requests,
+`stage2.extraction_llm.workers` for patient extraction. Numerical multi-model evidence, modifier-count evaluations, and final estimation
+share the global `stage2.modeling_workers` CPU budget. Independent outer folds
+and feature-level LLM requests can run concurrently, with shared request limits
+for interpretation and extraction. Dependent review rounds remain ordered.
+Every Stage 1 context and every expensive Stage 2 batch writes its own
+`complete.json`, so the same scheduling remains resumable after interruption.
+
+### Stage-specific execution
+
+When neither a Stage 2 endpoint nor a managed vLLM pool is configured, the
+workflow stops after Stage 1. This is useful when a researcher wishes to inspect
+the discovery evidence before permitting any variables to enter the causal
+analysis.
+
+```bash
+uv run python scripts/run_all_evidence.py --config run.json --stage1-only
+```
+
+When a Stage 2 endpoint has been configured, the same entry point can run the
+complete second stage against an existing handoff:
+
+```bash
+OPENBLAS_NUM_THREADS=1 \
+OMP_NUM_THREADS=1 \
+MKL_NUM_THREADS=1 \
+NUMEXPR_NUM_THREADS=1 \
+uv run python scripts/run_all_evidence.py \
+  --config run.json \
+  --stage2-only \
+  --stage2-endpoint http://127.0.0.1:8010/v1 \
+  --stage2-extraction-endpoint http://127.0.0.1:8020/v1
+```
+
+Set these thread limits before starting Python directly on high-core-count
+machines. The two synthetic wrapper scripts set all four to `1` by default.
+Stage 2 already controls primary-model request concurrency with `stage2.workers`
+and extraction concurrency with `stage2.extraction_llm.workers`. Numerical
+multi-model evidence, modifier-count evaluations, and final estimation use a global CPU
+process budget, `stage2.modeling_workers` (default `1`). Set
+values above `1` to enable the shared pool; `1` retains serial execution within
+each outer fold. Use
+`STAGE2_MODELING_WORKERS=128` in either synthetic wrapper, including saved-run
+resumes; fresh RTX PRO 6000 × 8 launches default to `128` for both synthetic
+cohorts. Saved runs retain their configured value unless explicitly overridden.
+All outer folds share
+this pool, with one native thread per process fit and a bounded queue. Final
+estimation dispatches independent nuisance fits and interaction-model validation
+paths to this pool, saving each completed result under `estimation/fit_checkpoints`.
+Final forests reserve a share of the same CPU budget for joblib threads, including
+their internal nuisance CV; native BLAS/OpenMP threads remain limited to one.
+Increasing this
+budget preserves compatible checkpoints, model seeds and validation partitions.
+It is independent of the number of GPUs. Allowing
+OpenBLAS, OpenMP, MKL, or NumExpr to create another native thread pool per
+concurrent task can exhaust OpenBLAS's thread metadata or memory regions and
+terminate the process. Every live endpoint is probed through `/models`. An
+omitted model is resolved only when exactly one ID is advertised; an explicit
+model must be among the advertised IDs.
+
+A configured endpoint or managed vLLM pool makes an omitted `run.mode` default to a full
+Stage 1 and Stage 2 run. The API key may be stored in `stage2.api_key` or
+supplied through `OCI_STAGE2_API_KEY`. For example:
+
+```json
+{
+  "stage2": {
+    "endpoint": "http://127.0.0.1:8010/v1",
+    "model": "",
+    "workers": 4,
+    "extraction_llm": {
+      "endpoint": "http://127.0.0.1:8020/v1",
+      "model": "",
+      "api_key": "EMPTY",
+      "workers": 4
+    },
+    "request_timeout": 14400,
+    "request_attempt_timeout": 3600,
+    "transport_max_attempts": 6,
+    "outer_fold_recovery_attempts": 2,
+    "outer_fold_recovery_backoff": 60,
+    "max_tokens": 100000,
+    "extraction_max_tokens": 75000,
+    "extraction_reasoning_max_tokens": 75000,
+    "extraction_stream": true,
+    "max_response_repairs": 15,
+    "thinking_after_response_repairs": 5,
+    "repetition_penalty": null,
+    "interpretation_reasoning_effort": "auto",
+    "extraction_reasoning_effort": "none",
+    "evidence_compiler": "semantic_cluster_cards_v5",
+    "evidence_max_cards_per_fold": 400,
+    "evidence_max_exemplars_per_card": 4,
+    "evidence_max_exemplar_chars": 2400,
+    "operationalization_max_prompt_chars": 640000,
+    "consolidation_batch_size": 20,
+    "consolidation_alphabetical_rounds": 5,
+    "consolidation_max_rounds": 55,
+    "consolidation_policy": {
+      "strategy": "mixed",
+      "semantic_fraction": 0.6,
+      "random_fraction": 0.0,
+      "embedding_model": "Qwen/Qwen3-Embedding-0.6B",
+      "embedding_device": "cpu",
+      "early_stop_min_rounds": 3,
+      "early_stop_patience": 2,
+      "early_stop_min_reduction": 0.005
+    },
+    "extraction_feature_batch_size": 10,
+    "extraction_chunk_size_tokens": 50000,
+    "extraction_context_window_tokens": 131072,
+    "extraction_context_margin_tokens": 1024,
+    "max_review_rounds": 2,
+    "ontology_refinement_min_failure_patients": 3,
+    "max_ontology_refinement_rounds": 2,
+    "input_temporal_scope": "pre_index_treatment",
+    "estimand_ontology": {"enabled": true},
+    "selection_consolidation": {"enabled": true},
+    "min_propensity": 0.1,
+    "max_propensity": 0.9,
+    "statistical_selection": {
+      "selection_mode": "multi_model",
+      "multi_model": {
+        "matched_batch": {"enabled": true},
+        "modifier_count": {
+          "enabled": true,
+          "concept_review": true,
+          "concept_top_n_per_fold": 100,
+          "estimators": ["causal_forest", "linear_interactions", "dina"]
+        }
+      },
+      "l1_ratio": 0.8,
+      "nuisance_selection_rule": "any_inner_fold_union",
+      "modifier_selection_rule": "any_inner_fold_union",
+      "internal_cv_folds": 3,
+      "regularization_grid_size": 16,
+      "optimization_tolerance": 1e-6,
+      "one_standard_error_rule": true,
+      "nuisance_prediction_one_standard_error_rule": false,
+      "modifier_one_standard_error_rule": false,
+      "univariable_confounder_p_value_threshold": 0.05,
+      "univariable_confounder_q_value_threshold": 0.10,
+      "modifier_top_n_per_inner_fold": 10,
+      "modifier_ridge_alpha": 10.0,
+      "modifier_continuous_winsor_quantile": 0.005
+    },
+    "role_adjudication": {
+      "enabled": true,
+      "max_candidates_per_request": 20
+    },
+    "estimation_trees": 200,
+    "explicit_features": []
+  },
+  "run": {
+    "mode": "full"
+  }
+}
+```
+
+`stage2.model` is optional. When it is empty or omitted, Stage 2 queries the
+endpoint's OpenAI-compatible `/models` API and uses the advertised model if
+exactly one model ID is returned. Configure `stage2.model` explicitly when the
+endpoint advertises multiple IDs. Dataset-backed Stage 2 also requires
+`stage2.extraction_llm`. Its endpoint may differ from the primary endpoint or
+may be the same multi-model endpoint. Its `model` is resolved by the same
+one-model rule when omitted.
+
+### Extraction across servers you start yourself
+
+Set `stage2.extraction_llm.endpoints` to distribute extraction across existing
+OpenAI-compatible servers. Each server has its own concurrency cap:
+
+```json
+{
+  "stage2": {
+    "extraction_llm": {
+      "model": "RedHatAI/Gemma-4-26B-A4B-IT-FP8-Dynamic",
+      "workers": 128,
+      "endpoints": [
+        {"endpoint": "http://camus:8002/v1", "max_concurrency": 64},
+        {"endpoint": "http://server-b:8002/v1", "max_concurrency": 64}
+      ]
+    }
+  }
+}
+```
+
+Replace `server-b` with your second server. Supply this extraction block inside
+your run config; omit the extractor's singular `endpoint` and managed `vllm`
+settings. All pool members must serve the same model: Stage 2 verifies each
+server's advertised model identity before extraction. Model autodiscovery works
+when the first server advertises exactly one model. The pool shares the
+extractor's configured API key and model-specific sampling policy.
+
+`workers` caps concurrent logical extraction requests across the entire pool;
+`max_concurrency` caps active requests sent to that server. The effective total
+ceiling is the smaller of `workers` and the sum of server caps. When `workers`
+is omitted, it defaults to that sum. The limits include repair and retry calls.
+
+The scheduler favors available servers with fewer requests relative to their
+capacity and shorter recent response times. When vLLM exposes `/metrics`, it
+also considers other workloads' running/waiting requests and increases the
+load score above 80% KV-cache usage. Metrics refresh asynchronously at most
+every five seconds per server, with a two-second fetch timeout; observations
+expire after fifteen seconds. Missing metrics fall back to local request counts
+and response times. These signals change routing within your caps rather than
+automatically changing the caps.
+
+Retryable server failures temporarily divert traffic to other pool members.
+Cooldown grows from two to thirty seconds with repeated failures, followed by
+one recovery probe. Existing request deadlines and retry budgets still apply.
+The request audit records endpoint selection and observed load. Changing URLs
+or concurrency caps preserves compatible extraction checkpoints.
+
+You can also replace a saved single-server route through the CLI:
+
+```bash
+python -m oci.inference.research_all_evidence_workflow \
+  --config /path/to/run_config.json --stage2-only \
+  --stage2-extraction-endpoints '[{"endpoint":"http://camus:8002/v1","max_concurrency":64},{"endpoint":"http://server-b:8002/v1","max_concurrency":64}]' \
+  --stage2-extraction-workers 128
+```
+
+The synthetic cohort wrappers accept the same JSON array through
+`STAGE2_EXTRACTION_ENDPOINTS`, plus `STAGE2_EXTRACTION_WORKERS` for the global
+ceiling. An explicit singular endpoint and an endpoint list are mutually
+exclusive. A running process keeps its existing server configuration until
+restarted with the new config.
+
+### Pipeline-managed vLLM server pools
+
+The root `run_one_conf*` and `run_five_conf*` single-run launchers and JSON entry points default to full-record LLM extraction, with ten variables per patient request. Long records use lossless ordered chunks. Set `STAGE2_EXTRACTION_FEATURE_BATCH_SIZE` to change the variable count. Explicit saved-run launches preserve their saved backend. [Plumb decision extraction](stage2_decision_extraction.md) is available with `STAGE2_DECISION_EXTRACTION=1`; [ColBERT retrieval](colbert_extraction.md) is available with `STAGE2_EXTRACTION_CONTEXT_STRATEGY=colbert`.
+
+#### Quickstart: eight H100s with managed Gemma 4 servers
+
+On a **Linux VM with 8 × NVIDIA H100 GPUs (80 GB each)**, run the bundled
+one-confounder/one-effect-modifier NSCLC example end to end with
+[`run_one_conf_one_mod_h100x8.sh`](../run_one_conf_one_mod_h100x8.sh). It manages its
+own local vLLM servers and uses these checkpoints:
+
+| Stage 2 role | Model |
+| --- | --- |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 31B IT](https://huggingface.co/RedHatAI/gemma-4-31B-it-FP8-dynamic) |
+| Patient-level extraction | [Gemma 4 26B A4B IT](https://huggingface.co/RedHatAI/gemma-4-26B-A4B-it-FP8-dynamic) |
+
+Start from a GPU VM image with a working NVIDIA driver compatible with the
+locked PyTorch/vLLM CUDA build. The current lockfile includes CUDA 13.0; use an
+R580 or newer NVIDIA driver for this native installation. `nvidia-smi` should
+show all eight H100s; `uv` installs Python packages, while the VM image supplies
+the GPU driver and system
+libraries. On Ubuntu/Debian, install the basic tools and FFmpeg if needed:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl ffmpeg
+nvidia-smi
+
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
+
+# Install uv if it is not already on PATH.
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+
+# uv supplies Python 3.12 if needed and installs the locked vLLM extra.
+uv sync --frozen --python 3.12 --extra local-llm
+.venv/bin/python scripts/configure_local_cuda.py
+
+# Confirm that this environment sees eight H100s before starting the run.
+.venv/bin/python - <<'PY'
+import torch
+names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+assert len(names) == 8 and all("H100" in name for name in names), names
+print(names)
+PY
+
+./run_one_conf_one_mod_h100x8.sh
+```
+
+Allow disk space for the Python/CUDA environment, both LLM checkpoints, the
+Stage 1 embedding model, and run artifacts. Models download into the Hugging
+Face cache on first use; set `HF_HOME` to a persistent volume before launching
+if desired. If a required model asks for authentication, complete its Hugging
+Face access requirements and run `.venv/bin/hf auth login` first. See the
+[uv installer](https://docs.astral.sh/uv/getting-started/installation/) and
+[vLLM GPU installation guide](https://docs.vllm.ai/en/stable/getting_started/installation/gpu/)
+for environment details.
+
+The launcher selects eight visible GPUs and inherits the shared wrapper's
+scientific preset (`multi_model`, including binary DINA). Stage 1 finishes before
+Stage 2 starts its LLM servers. The configured primary and extraction pools each
+contain four single-GPU Gemma replicas, with 32 concurrent requests per role.
+Both use a 128,000-token server window and 90% GPU-memory utilization.
+During phases that use only one model, OCI expands that model over all eight
+GPUs; when folds need both models concurrently, it uses the configured split.
+OCI handles server readiness and shutdown on completion or interruption. Keep
+local HTTP ports 8010–8017 and 8110–8117 available; no separately launched
+inference servers are needed.
+
+Results default to
+`artifacts/research_all_evidence/one_conf_one_mod_nsclc_h100x8_full/`, including
+`progress.json`, `logs/workflow.log`, and `stage2/vllm_servers/`. To choose a
+persistent output location, pass it as the sole argument and repeat the same
+command to resume compatible checkpoints:
+
+```bash
+./run_one_conf_one_mod_h100x8.sh /persistent/results/one_conf_one_mod_h100x8
+```
+
+The launcher synchronizes `--extra local-llm` on ordinary launches, adding
+`--extra decision-extraction` when Plumb is explicitly selected. Set
+`OCI_PYTHON="$PWD/.venv/bin/python"` to reuse the installed environment without
+syncing. Model, worker, and `STAGE2_VLLM_*`/`STAGE2_EXTRACTION_VLLM_*` settings are
+overridable through the environment; keep GPU layouts consistent if changing
+them. Explicit saved Stage 2 launches (`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) inherit
+their saved model and server settings. See the managed-pool documentation below
+for GPU mapping, switching, logs, and cleanup, and the
+[README quickstart](../README.md#run-your-own-cohort) for the scientific workflow.
+
+#### Quickstart: eight RTX PRO 6000 Blackwell GPUs with Gemma 4
+
+On a **Linux machine with 8 × NVIDIA RTX PRO 6000 Blackwell GPUs (96 GB each)**,
+use the root-level launchers below. Both manage their own local vLLM servers
+and use NVIDIA's **NVFP4** Gemma 4 for both interpretation and extraction:
+
+| Stage 2 role | Model |
+| --- | --- |
+| Interpretation, consolidation, feature definition, ontology review, and role selection | [Gemma 4 26B A4B NVFP4](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4) |
+| Patient-level extraction | [Gemma 4 26B A4B NVFP4](https://huggingface.co/nvidia/Gemma-4-26B-A4B-NVFP4) |
+
+NVIDIA's Gemma repository name omits `IT`, but its model card identifies
+the instruction-tuned checkpoint. Use **RTX PRO 6000 Blackwell** hardware for
+this preset, with the CUDA 13.0-compatible R580 or newer driver and Linux system
+libraries described above. From a fresh Ubuntu/Debian machine:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y git curl ffmpeg
+nvidia-smi
+
+git clone https://github.com/kenlkehl/onc-causal-inference.git
+cd onc-causal-inference
+
+if ! command -v uv >/dev/null 2>&1; then
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="$HOME/.local/bin:$PATH"
+fi
+uv sync --frozen --python 3.12 --extra local-llm
+.venv/bin/python scripts/configure_local_cuda.py
+
+# Verify all eight visible GPUs are RTX PRO 6000 Blackwell devices.
+.venv/bin/python - <<'PY'
+import torch
+names = [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())]
+assert len(names) == 8 and all(
+    "RTX PRO 6000" in name and "Blackwell" in name for name in names
+), names
+print(names)
+PY
+
+./run_one_conf_one_mod_rtxpro6000x8.sh
+```
+
+If you already followed the H100 environment setup in this checkout, use the
+RTX launcher after verifying the RTX GPUs. To run the larger bundled cohort,
+use [`run_five_conf_five_mod_rtxpro6000x8.sh`](../run_five_conf_five_mod_rtxpro6000x8.sh)
+instead. Each launcher inherits its cohort wrapper's scientific settings
+(`multi_model`, including binary DINA) and has a separate default output directory:
+
+| Launcher | Default output under `artifacts/research_all_evidence/` |
+| --- | --- |
+| [`run_one_conf_one_mod_rtxpro6000x8.sh`](../run_one_conf_one_mod_rtxpro6000x8.sh) | `one_conf_one_mod_nsclc_rtxpro6000x8_full/` |
+| [`run_five_conf_five_mod_rtxpro6000x8.sh`](../run_five_conf_five_mod_rtxpro6000x8.sh) | `five_conf_five_mod_nsclc_rtxpro6000x8_full/` |
+
+For manual primary-model serving, activate the configured environment and use
+the exact checkpoint name (including `NVFP4`):
+
+```bash
+source .venv/bin/activate
+vllm serve nvidia/Gemma-4-26B-A4B-NVFP4
+```
+
+If you opt into Plumb, it requires a separate server with the
+[next-token readout conversion arguments](stage2_decision_extraction.md#why-vllm-classification-works-here).
+The managed launchers supply those automatically.
+
+FlashInfer builds Blackwell kernels at startup and needs CUDA 12.9 or newer.
+An older `nvcc` on the system PATH can cause `SM 12.x requires CUDA >= 12.9`
+followed by `No supported CUDA architectures found for major versions [12]`,
+even when PyTorch and the driver support the GPU. The `local-llm` extra installs
+the CUDA 13.0 compiler matching the locked runtime; `configure_local_cuda.py`
+exposes its compiler, headers, and runtime library in the venv. Run that setup
+step again after recreating the venv. On glibc 2.42+ (including Ubuntu 26.04),
+it also corrects CUDA 13.0's `rsqrt` exception declarations in the venv headers
+to match glibc. `nvcc --version` inside the activated
+environment should report 13.0. Explicit `CUDA_HOME` or `CUDA_PATH` settings
+take precedence; unset them to use the configured venv toolkit.
+
+Stage 1 completes before the managed vLLM servers start. Stage 2 launches one
+shared Gemma 4 26B server on each of GPUs 0–7. Tensor parallelism defaults to
+**1**. Interpretation and extraction share the same load-aware server router,
+with 32 concurrent requests per role and per-request thinking controls.
+Each server uses a 262,144-token context window and 90% GPU-memory utilization.
+vLLM reads Gemma's ModelOpt/NVFP4 metadata; OCI supplies text-only serving,
+the Gemma 4 reasoning parser, readiness checks, and shutdown. Keep local HTTP
+ports 8110–8117 available. See
+[vLLM's ModelOpt support](https://docs.vllm.ai/en/v0.26.0/features/quantization/modelopt/)
+for checkpoint loading details.
+
+Choose a persistent output location by passing one argument. Repeat the same
+command to resume compatible checkpoints; run these examples separately:
+
+```bash
+./run_one_conf_one_mod_rtxpro6000x8.sh /persistent/results/one_conf_one_mod_rtxpro6000x8
+./run_five_conf_five_mod_rtxpro6000x8.sh /persistent/results/five_conf_five_mod_rtxpro6000x8
+```
+
+The H100 quickstart's cache, authentication, progress, and log instructions also
+apply here. Ordinary launches sync `local-llm`, adding `decision-extraction` only for Plumb; set
+`OCI_PYTHON="$PWD/.venv/bin/python"` to skip synchronization. Model, worker, and
+managed-pool settings remain overridable through the environment. If changing
+the legacy LLM extractor's server window, also adjust
+`STAGE2_EXTRACTION_CONTEXT_WINDOW_TOKENS`; this setting does not control Plumb
+prompts. Explicit saved Stage 2 launches
+(`OCI_RUN_CONFIG`/`STAGE2_ONLY=1`) retain their saved models and serving settings.
+For a generative-extraction run saved with the earlier 128,000-token RTX preset, update
+`stage2.vllm.extra_args` and `stage2.extraction_llm.vllm.extra_args` in its
+`run_config.json` to use `--max-model-len 262144`, and set
+`stage2.extraction_context_window_tokens` to `262144` before resuming.
+The context window includes both input and allowed output: the primary role's
+100,000-token output allowance left only 28,000 input tokens under the old cap.
+
+#### Managed-pool configuration and lifecycle
+
+The pipeline can independently own the orchestrator and extractor vLLM
+lifecycles. For the orchestrator, omit `stage2.endpoint`, provide
+`stage2.model`, and add `stage2.vllm`. For the extractor, omit
+`stage2.extraction_llm.endpoint`, provide its `model`, and add the nested
+`stage2.extraction_llm.vllm`. This example defines an orchestrator allocation on GPUs 0–1 and an extractor
+allocation on GPUs 2–3. When both roles are managed, they initially alternate
+across the GPU union; the separate allocations apply if rapid switching triggers
+the concurrent fallback described below:
+
+```json
+{
+  "stage2": {
+    "model": "Qwen/Qwen3.8-27B",
+    "workers": 32,
+    "vllm_rapid_switch_seconds": 900,
+    "extraction_llm": {
+      "model": "LiquidAI/LFM2.5-2.6B",
+      "workers": 64,
+      "vllm": {
+        "gpus": ["cuda:2", "cuda:3"],
+        "gpus_per_server": 1,
+        "base_port": 8110,
+        "download_dir": "/models/huggingface",
+        "extra_args": ["--gpu-memory-utilization", "0.80"]
+      }
+    },
+    "vllm": {
+      "gpus": ["cuda:0", "cuda:1"],
+      "gpus_per_server": 2,
+      "base_port": 8010,
+      "download_dir": "/models/huggingface",
+      "extra_args": [
+        "--gpu-memory-utilization", "0.90",
+        "--max-model-len", "65536"
+      ]
+    }
+  },
+  "run": {
+    "mode": "stage2"
+  }
+}
+```
+
+Each managed role has its own allowed GPU list and `gpus_per_server`
+tensor-parallel width. The configured replica count is derived as
+`len(gpus) / gpus_per_server`;
+`server_count` may also be supplied, but must agree. GPU indices use the
+pipeline's current logical CUDA namespace. If the parent has
+`CUDA_VISIBLE_DEVICES`, each child assignment is mapped through it. Uneven
+divisions, duplicate GPUs within a pool, inconsistent counts, and more servers
+than GPUs are rejected before any process starts.
+
+When both roles use matching managed models, they share an extractor server
+pool expanded across the configured GPU union, with reasoning controlled per
+request. For different managed models, Stage 2 initially keeps only one model
+resident at a time. It loads the orchestrator across the ordered union of both GPU lists for
+interpretation and feature definition, checkpoints that work, unloads it, and
+loads the extractor across the same union. Later ontology-supervision barriers
+switch the complete union back to the orchestrator; revised ontologies and
+held-out extraction switch it back to the extractor as needed. Each role
+preserves its configured tensor-parallel width and adds replicas when that width
+evenly divides the union; otherwise it uses one tensor-parallel server across
+the complete union. Added replicas receive consecutive ports in that role's
+configured range.
+
+The runner measures each interval between switches. If consecutive switches are
+less than `stage2.vllm_rapid_switch_seconds` apart (900 seconds by default), it
+stops all-GPU alternation and keeps both models resident for the rest of the run.
+In that fallback, each role uses its exact configured `gpus`,
+`gpus_per_server`, replica count, and ports. Set the value to `0` to disable the
+fallback. Feature-definition-only runs never load the extractor. Resumes use
+`stage2/vllm_servers/model_phase.json` plus ordinary scientific checkpoints to
+reload the required role or retain a previously selected concurrent split.
+
+Both nested managed configurations accept `host`, `base_port` (or an exact
+`ports` list), `internal_port_base`, and `gpus_per_server`. The settings
+`startup_timeout`, `startup_poll_interval`, and `shutdown_timeout` control the
+server lifecycle. `download_dir`, `reasoning_parser`, `language_model_only`, and
+`default_chat_template_kwargs` map directly to their vLLM options. Any remaining
+vLLM options can be supplied as individual command tokens in `extra_args`.
+Model, host, port, tensor-parallel size, API key, and the named options above are
+owned by the pipeline and cannot also be overridden in `extra_args`.
+
+Recognized model families get these defaults unless the corresponding setting
+is explicitly overridden:
+
+- Gemma model names: `reasoning_parser: "gemma4"`,
+  `language_model_only: true`, and no server-wide thinking default.
+- Qwen model names: `reasoning_parser: "qwen3"` and
+  `language_model_only: true`.
+
+Reasoning is selected per request. `interpretation_reasoning_effort` defaults to
+`auto`, which selects xhigh for Qwen 3.8 Flash Next and high for other recognized
+families. `extraction_reasoning_effort` defaults to `none`, so initial patient
+extraction requests disable thinking for every model, including Flash Next.
+The existing repair policy can enable reasoning after repeated validation
+failures. Explicit values override these defaults; setting extraction to `auto`
+opts into the model profile, including xhigh for Flash Next.
+
+After querying `/models`, Stage 2 selects a checked-in publisher sampling profile
+for the resolved backing model, including served aliases where the endpoint
+exposes that identity. Omitted/null temperature, top-p, top-k, min-p, and penalty
+settings select that profile; explicit settings override it. See
+[sampling profiles](stage2_sampling.md) for the exact values and fallback
+behavior. Changing a scientific sampling policy can invalidate LLM checkpoints;
+changing only the endpoint address or worker count does not.
+
+Primary requests use `max_tokens` (100,000 by default). Extraction uses
+`extraction_max_tokens` (75,000 when omitted) and, when configured,
+`extraction_reasoning_max_tokens` for reasoning-enabled calls and repairs.
+These limits cover reasoning plus the final response. A small non-thinking
+allowance such as 4,096 therefore needs a separate, larger reasoning allowance.
+The planner reserves output space within the actual server context window and
+reduces chunk sizes or repair output as needed. Streaming can be enabled with
+`extraction_stream: true`; the checked-in examples enable it. Separate reasoning
+fields and inline reasoning delimiters are supported. Streaming extraction aborts
+runs of 256 formatting-whitespace characters outside JSON strings and retries
+with explicit error feedback. Quoted text and separate reasoning are preserved.
+Full-record and serial extraction schemas accept numeric category labels as
+numbers or strings; semantic validation still enforces the declared categories.
+
+A logical request, including transport retries and validator-guided repair
+turns, is bounded by `request_timeout` (14400 seconds by default in the core
+configuration). The clock starts after acquiring a global request slot; time
+waiting locally for that slot is excluded and logged separately. The request
+holds its slot through retries and response repairs, so they do not requeue
+behind other folds. Server-side queueing still consumes the request budget.
+Each HTTP call is bounded by `request_attempt_timeout` (3600 seconds by default), so a
+straggling endpoint can be abandoned and retried. Transport retries include the
+latest error in the model prompt, preserving existing validation feedback. The
+original input is retained losslessly; retries stop if error feedback cannot fit
+the prompt budget. A transport failure receives
+up to `transport_max_attempts` attempts (6 by default). A completed response
+that fails JSON parsing or schema validation receives up to
+`max_response_repairs` validator-guided retries (15 by default), each with the
+concrete validation error. Repair attempts through
+`thinking_after_response_repairs` (5 by default) retain the request's normal
+reasoning policy; later repairs force `reasoning_effort` to at least `high`,
+which enables thinking for the managed vLLM reasoning parsers.
+Structural extraction errors also receive reasoning-enabled repairs. After three
+failed repairs attributable to one particular field, extraction retries the same
+patient/chunk without that field. It preserves the other values and records the
+field failure; the problematic field retains a valid prior serial-chunk value
+when available, otherwise it is null. It does not blank the entire variable
+batch. This request-local recovery does not globally remove the candidate.
+
+Exhausted transport/deadline budgets trigger up to two checkpointed outer-fold
+recovery attempts, controlled by `outer_fold_recovery_attempts`. The default
+`outer_fold_recovery_backoff` of 60 seconds yields waits of 60 and 120 seconds.
+Sibling folds continue; completed work is reused. Validation, configuration,
+and filesystem errors are not automatically retried at this level. Per-fold
+`recovery_status.json` and `recovery_events.jsonl` expose the recovery state and
+history. See [request recovery](all_evidence_workflow.md) for the limits.
+
+For a saved config with external endpoints, explicitly clear both endpoints
+when switching to managed pools. This direct CLI example uses the same GPU
+allocation (replace the model IDs with the checkpoints you intend to serve):
+
+```bash
+uv run python scripts/run_all_evidence.py \
+  --config run.json \
+  --stage2-only \
+  --stage2-endpoint "" \
+  --stage2-extraction-endpoint "" \
+  --stage2-model Qwen/Qwen3.8-27B \
+  --stage2-vllm-gpus cuda:0,cuda:1 \
+  --stage2-vllm-gpus-per-server 2 \
+  --stage2-vllm-rapid-switch-seconds 900 \
+  --stage2-vllm-download-dir /models/huggingface \
+  --stage2-vllm-extra-arg=--gpu-memory-utilization \
+  --stage2-vllm-extra-arg=0.90 \
+  --stage2-extraction-model LiquidAI/LFM2.5-2.6B \
+  --stage2-extraction-workers 64 \
+  --stage2-extraction-vllm-gpus cuda:2,cuda:3 \
+  --stage2-extraction-vllm-gpus-per-server 1 \
+  --stage2-extraction-vllm-download-dir /models/huggingface \
+  --stage2-extraction-vllm-extra-arg=--gpu-memory-utilization \
+  --stage2-extraction-vllm-extra-arg=0.80
+```
+
+The runner waits until every server in the active pool advertises its
+configured model at `/v1/models` before inference. Logs and redacted manifests
+are written under `stage2/vllm_servers/orchestrator_all_gpus/`,
+`stage2/vllm_servers/extractor_all_gpus/`,
+`stage2/vllm_servers/orchestrator/`, and
+`stage2/vllm_servers/extractor/`, as applicable. On normal completion,
+interruption, startup failure, or a Stage 2 error, it terminates every managed
+process group. Either role may instead use an external endpoint, so
+managed/external combinations are supported independently. All-GPU staging
+applies only when both roles are pipeline-managed. Within each role, its
+endpoint and vLLM pool are mutually exclusive.
+
+The synthetic-run shell wrappers expose the same split through
+`STAGE2_VLLM_GPUS` and `STAGE2_VLLM_GPUS_PER_SERVER` for the orchestrator, and
+`STAGE2_EXTRACTION_VLLM_GPUS` plus
+`STAGE2_EXTRACTION_VLLM_GPUS_PER_SERVER` for the extractor. Positive
+`STAGE2_VLLM_SERVERS` and `STAGE2_EXTRACTION_VLLM_SERVERS` values may be used
+instead of deriving replica counts, provided they agree with the selected GPU
+lists and GPUs-per-server settings. `STAGE2_VLLM_RAPID_SWITCH_SECONDS` controls
+the adaptive fallback cutoff. Their default public port ranges begin at 8010
+and 8110, respectively.
+
+To supply an investigator-defined ontology and locked roles, populate
+`stage2.explicit_features` with complete definitions containing `name`,
+`description`, `value_type`, `categories_or_unit`, `measurement_definition`,
+`missing_value_rule`, and causal `roles`. These definitions participate in the
+same per-fold alias consolidation as discovered candidates. A discovered alias
+is merged into the configured feature and contributes provenance, but the
+configured name, roles, and ontology remain authoritative and no ontology-
+definition request is made for that group. Aggregate ontology supervision and
+statistical role screening cannot drop it, change its roles, or revise its ontology.
+The separate >95% missingness filter still applies and records any exclusion.
+See
+[`docs/all_evidence_workflow.md`](all_evidence_workflow.md) for a complete
+example and validation rules.
+
+Stage 2 extraction is permanently isolated to one patient per model prompt. It
+queries at most `stage2.extraction_feature_batch_size` definitions per prompt
+(10 by default), checkpoints each feature slice, and merges the slices before
+review. The default `full_record` path reads the complete prepared record.
+The optional `colbert` path retrieves question-specific evidence; see
+[ColBERT extraction](colbert_extraction.md) for cache, GPU, and launcher settings.
+With full-record extraction, or when retrieved evidence exceeds the prompt envelope, text is processed in
+source order with lossless contiguous chunks capped by
+`stage2.extraction_chunk_size_tokens` (50,000 by default). Each validated
+structured extraction becomes the prior state for the next chunk. The planner
+counts the extraction model's chat tokens and shrinks a chunk when definitions
+or carried state need more room under `extraction_context_window_tokens`
+(131,072) and `extraction_context_margin_tokens` (1,024). Chunk results are
+independently checkpointed, so a restart resumes at the first unfinished chunk.
+The extraction model's tokenizer must therefore be available locally under its
+configured model ID (the managed vLLM download directory or Hugging Face cache).
+The CLI equivalents begin with `--stage2-extraction-*`.
+Concurrency is controlled by `stage2.extraction_llm.workers`; patient batching
+is not configurable. Scalar and mode extraction share this request limit, and
+either branch can use all available slots as the other finishes. Only mode-aggregated
+variables request observation-level supporting quotations. Scalar extraction does
+not require quotations, and quoted
+spans are not required to match the source text exactly. Occurrences and typed
+values still undergo validation. Mode extraction omits null placeholders from
+frequency counts while retaining documented negative categories and repeated
+occurrences. Both branches send structured response schemas to compatible endpoints.
+
+An optional `stage2.extraction_note_search.enabled: true` path uses a persistent,
+isolated Python REPL to search the patient's full record and extract each feature
+batch from selected excerpts. OCI includes its own worker and requires no
+MatchMiner package or checkout. It keeps the endpoint, sampling, concurrency,
+and field-repair handling, and
+checkpoints completed search cells. Excerpts include original character ranges
+from the first search. Per-variable follow-up searches revisit missing values,
+unseen mentions, and conflicts, with two focused passes and a bounded full-record
+fallback by default. A missing value with zero search matches gets one additional
+search using alternative wording before remaining missing. This adds no date
+parsing or chronology inference.
+Mode-based variables retain full-record
+occurrence extraction within the note-search route. When note search is
+disabled, `extraction_context_strategy` selects full-record extraction (the
+default) or explicitly configured ColBERT retrieval.
+Search can miss evidence, and a speed or accuracy advantage has not been
+established. See [note-search extraction](stage2_note_search.md) for setup,
+limits, and how to keep a comparison separate from existing measurements.
+
+Stage 2 preserves the outer-fold boundary throughout variable construction and
+estimation. Before the first LLM request, its default evidence compiler reuses
+the scientific allowlisting in `all_evidence_fusion`, removes exact duplicates
+with provenance retained, and builds a conservative fold-local semantic-card
+atlas. Compatible clinical chunks reuse the existing Stage 1 embedding cache by
+memory map; other evidence uses deterministic lexical projections, so this step
+does not load another embedding model beside the serving process. The raw Stage
+1 evidence remains unchanged, while cards, exact members, lineage, and a
+reduction audit are written under `stage2/evidence_compilation/`. The compiled
+packet plan is cached and input-fingerprinted for fast, safe restarts.
+
+Within each semantic card, Python ranks evidence using its native item score
+(for example, absolute coefficient, attention, or TF-IDF contrast). Scores are
+converted to percentiles within the originating query/model-view list, then
+averaged across the training contexts where the item appeared, taking only the
+best percentile per context. Repeated queries cannot inflate recurrence. Item
+rank is a fallback when a native score is unavailable; query-level fit scores
+and patient-level losses are not item importance. Recurrence and proximity to
+the cluster center break ties. Unscored items use those tie-breakers directly.
+
+Representatives are selected in that order, skipping overlapping text within
+the card. Overlap checks preserve differing numbers, negations, and distinct
+clinical measures such as creatinine versus creatinine clearance. They do not
+merge clinical concepts or fill unused slots with duplicates. Existing
+architecture/axis/polarity strata and the card allocation remain in place.
+
+For selected phrases and topic terms, up to two matching clinical sentences are
+attached from the supplied evidence in the same outer fold and training
+context. Neural-query phrases use their own queries' chunks; embedding terms
+use their own contrasts' chunks. Other terms can use the supplied clinical
+chunks from that training context. If no match exists, the original phrase is
+retained. Long fragments are clipped around the match, with source offsets and
+references in the lineage file. No patient files are searched during this step.
+Neural word n-grams also match using their Stage 1 tokenization and stop-word
+rules, so `brain metastases remained` can locate “brain metastases have
+remained.” The returned sentences preserve the original wording, including
+negation. New neural-query evidence records these normalization settings;
+older evidence uses the historical English-stop-word defaults, explicitly
+marked in the match audit. Shared sentences are displayed once per card, while
+each selected phrase retains its matching sentences in the audit.
+The discovery model receives readable excerpts only; numeric ranking and
+redundancy metadata stay in member/lineage audits. All original members remain
+in lineage, including those not chosen for display. This is a selection policy,
+not a claim that source strength identifies a causal variable.
+
+Version 5 invalidates earlier compiled-card caches, including version 4 cards
+that missed sentences containing removed stop words. Configurations explicitly
+pinning `semantic_cluster_cards_v3` or `semantic_cluster_cards_v4` must be updated to
+`semantic_cluster_cards_v5`; omitting the compiler setting uses the current
+version. Previously lossy canonical handoffs cannot recover discarded source
+scores; rebuild them from raw Stage 1 evidence to benefit from contrast ranking.
+
+Stage 2 sends every compiled semantic evidence card to exhaustive feature
+discovery. The primary model must list every pretreatment patient-level clinical
+feature mentioned or implied by the supplied cards, and one evidence item may
+support many candidates. There is no ColBERT candidate routing, evidence-community graph,
+candidate retrieval, candidate-count cap, or causal-role filter. All discovered
+candidates enter merge-only consolidation; oracle metadata never participates.
+
+`semantic_cluster_cards_v5` is the only supported Stage 2 evidence compiler.
+Before any interpretation request, it compares the architectures present in
+each outer fold with the run's frozen Stage 1 selection: either the explicit
+selector or, for legacy runs, the resolved enable flags. A missing selected
+architecture stops with a direct instruction to rerun its Stage 1 component and
+rebuild the handoff. This is a local
+scientific completeness check; it does not introduce artifact authentication,
+bundle attestation, checkpoint adoption, or deployment gates. The former
+`raw_packets_v1` option was retired because it merged distinct architectures
+into broad prompt buckets.
+
+Stage 2 then consolidates the candidates discovered from compiled packets into
+operational patient-level definitions. After exact-name
+coalescing, each consolidation round reviews every candidate once in batches
+of up to 20. By default approximately 60% of batches retrieve semantic neighbors,
+40% use alphabetical neighborhoods. The
+Qwen3-Embedding-0.6B model embeds candidate names and a bounded sample of their
+descriptions; vectors are cached and only new or changed text is re-embedded.
+Pivots and alphabetical boundaries rotate between rounds. Embeddings arrange
+reviews; the LLM still decides whether candidates are equivalent.
+After at least three mixed rounds, consolidation stops when two consecutive
+successful rounds each reduce the candidate count by less than 0.5%. A round
+with a failed review does not count toward this low-yield streak. The hard cap
+remains 55 rounds. A single batch covering the full pool can stop after a
+successful no-merge review. The LLM merges only exact duplicates differing in
+spelling, wording, or abbreviation, and chooses an existing member name as the
+canonical label. Creatinine-clearance aliases can merge; creatinine clearance
+and estimated GFR remain separate. Differences in measurement, scale, method,
+timing, or specificity remain separate, including numerical measurements versus
+threshold categories and named scores versus general functional assessments.
+The batches cannot exclude any
+candidate: every unmerged feature passes through unchanged. Explicit
+investigator-configured features are hard invariants in every round: they
+cannot be renamed, distinct configured features cannot be merged, and their
+supplied ontology and roles remain authoritative. Python deterministically carries supporting packets,
+architectures, evidence axes, descriptions, and original-candidate dispositions
+through the rounds. Discovered features have no causal role at this point;
+model roles are assigned after extraction by the configured selection mode.
+Finally, independent one-feature requests receive only the
+canonical feature name and a deduplicated flat list of readable supporting-text
+strings. The model decides the value type, units or allowed categories,
+measurement rule, and missingness handling from that evidence; packet structure,
+evidence kind, detail objects, truncation flags, fold metadata, internal IDs,
+causal axes, semantic grouping, architecture names, scores, support counts,
+candidate summaries, and earlier proposed value types stay outside the prompt.
+Operationalization has an independent 640,000-character prompt allowance. If a
+large merged alias family has more readable evidence than fits with repair
+headroom, Python deterministically packs whole excerpts under the limit and
+records the available, included, omitted, and truncated evidence counts plus a
+fingerprint of all available evidence. A malformed ontology still receives the
+bounded repair attempts; if it remains invalid, Python records an explicit
+fallback artifact and uses a conservative `ambiguous` ontology for training-fold
+extraction and aggregate supervision instead of aborting the outer fold.
+Every consolidation round/batch and one-group operationalization request is
+input-fingerprinted separately, so a retry skips successful leaves instead of
+repeating the whole fan-out. Batch size and maximum rounds are configurable as
+`stage2.consolidation_batch_size` and `stage2.consolidation_max_rounds`.
+`stage2.consolidation_policy` controls the grouping fractions, embedding model,
+and stopping rule. Set its `strategy` to `legacy` to reproduce the former
+alphabetical-then-shuffled schedule; `consolidation_alphabetical_rounds` applies
+only to that legacy strategy. Mixed checkpoints use
+`consolidation/candidate_pool_consolidation_mixed/`, keeping earlier legacy
+consolidation results separate. When a
+model copies a uniquely supplied candidate description where an exact name was
+requested, Python maps that description back to its name; it also restores a
+reused output omitted from its own merge inputs. Degenerate one-feature merges
+are ignored. If one batch remains structurally invalid after bounded repairs,
+that batch is recorded as a conservative passthrough and all its candidates are
+retained, so a malformed optional consolidation response cannot discard an
+explicit feature or abort the fold.
+
+The extraction endpoint then extracts every consolidated candidate on the
+outer-training records, one patient per prompt. A
+feature defined as continuous may preserve a documented category or threshold
+when the record has no exact number. When both numeric and categorical values
+appear, a primary-model harmonization step sees only outer-training values and
+chooses one common continuous or categorical ontology. The validated plan is
+then frozen and applied deterministically to training and held-out rows;
+categorical ranges are not silently coerced to invented numeric midpoints.
+When later training rounds expose new text tokens, Stage 2 keeps the frozen
+ontology and requests mappings only for those new tokens. Empty, extra, missing,
+or duplicate mapping rows are normalized conservatively and audited; ambiguous
+or conflicting mappings become null. If bounded validation repairs still cannot
+produce a safe plan, `fallback.json` records the failure and the fold continues:
+a valid prior plan is retained with unresolved new tokens mapped to null, while
+a feature without a prior plan retains its raw mixed values under
+`continuous_with_categorical_fallback` modeling. Final fold definitions and the
+run summary retain these fallback records for audit.
+
+The primary model then reviews each candidate's aggregate extracted values and
+validation failures. It receives no patient text, treatment or outcome values,
+causal-role evidence, performance metric, or p-value. It may keep or revise the
+same candidate's description, value type, categories or unit, measurement rule,
+and missingness rule, but cannot add, drop, split, merge, rename, or role-label a
+feature. Any revision triggers re-extraction. This bounded
+supervision runs for at most `max_review_rounds` (two by default), and explicit
+investigator ontologies are locked.
+
+Re-extraction is incremental: only candidates whose prompt-facing extraction
+definition changed are sent back through the extraction model. Their columns are
+merged into the cached raw training matrix, while unchanged candidate columns
+are reused. Prompts still contain exactly one patient; feature batching within
+that patient is unchanged.
+
+### Post-extraction coverage and estimand-informed refinement
+
+After training extraction, repairs, harmonization, and aggregate ontology review,
+Stage 2 drops measurements with **more than 95% missing values** in that outer
+fold's training patients. Exactly 95% missing is retained; zero, false, and valid
+negative/category values count as observed. The filter applies to confounders,
+modifiers, and explicit investigator variables. It uses no outcomes or held-out
+patients, preserves source measurements, and writes
+`extraction/candidate_missingness_filter.json` plus a versioned filtered matrix.
+If every candidate is removed, the fold fails visibly.
+
+Enable `stage2.estimand_ontology.enabled=true` to compare alternative definitions
+for both confounding adjustment and effect modification. Training-only numerical
+priorities nominate up to eight original variables per role by default. An LLM
+proposes up to two measurement alternatives per variable from its definition and
+aggregate values. New alternatives are extracted on training patients and tested
+inside inner folds: nuisance outcome loss with propensity/overlap safeguards for
+confounder uses, and held-out DINA likelihood loss for binary modifier uses
+(R-loss for continuous outcomes). Stable improvements are
+added alongside the original measurements. New alternatives also pass the 95%
+missingness filter. This is separate from outcome-blind extraction repair and
+aggregate review; see [estimand refinement](stage2_estimand_ontology.md).
+
+### Empirical consolidation and role selection
+
+Stage 2 can perform a second, sequential consolidation after the extracted
+candidate ontology is frozen, including any estimand-refinement alternatives,
+and before final role selection. It is **off when
+`stage2.selection_consolidation.enabled` is omitted**, including fresh runs
+through the standard synthetic shell launchers. The checked-in
+[`research_all_evidence.json`](../example_configs/research_all_evidence.json)
+explicitly enables it; saved-run launches preserve their supplied policy.
+This switch does not disable the earlier discovery-time alias merge. For each
+still-active candidate, a local embedding model retrieves the ten nearest
+currently active candidates by default. Mixed-type pairwise association evidence
+is calculated from outer-training rows only, and the primary model either leaves
+the cluster unchanged or defines a canonical representation of truly equivalent
+measurement aliases. Every source pair must have association of at least 0.85 by
+default, but association is only a necessary condition. Broader/narrower
+concepts, components and totals, and merely related variables cannot be merged.
+An accepted alias must preserve value type, category granularity, units, and
+missingness; it is populated immediately from a validated coalesce or lossless
+category-recode rule. A nominal categorical recode may use the union of
+source vocabularies, and continuous coalescing skips malformed nonnumeric source
+values in favor of the next valid alias. On every row where multiple valid
+sources are nonmissing, their numeric values or canonical recoded categories
+must agree; a conflict rejects the replacement instead of silently letting the
+first source win. The canonical measurement replaces its
+sources in the active pool and can be
+retrieved by later candidates. Original columns and recursive lineage remain
+available for audit and held-out reconstruction. Configured explicit features
+are protected from replacement.
+
+Stage 2 then builds statistical evidence within the outer-training partition.
+The following paragraphs describe `llm_roles` and `independent_tasks`;
+`multi_model` builds the broader evidence collection described afterward.
+In every inner fold, a logistic group elastic net predicts treatment
+and a separate group elastic net predicts the marginal outcome. Continuous and
+ordered measurements are standardized single-score groups, while every nominal
+factor's standardized contrasts and missingness indicator form one all-in/all-out
+group. Any feature group selected in at least one inner fold for either task
+enters a provisional confounder union. Candidate-wise omnibus screens also test
+treatment, outcome, and treatment-adjusted outcome associations, retaining raw
+p-values, within-fold Benjamini-Hochberg q-values, and fold support. The
+`univariable_confounder_p_value_threshold` and
+`univariable_confounder_q_value_threshold` settings create evidence flags;
+they are not hard inclusion gates. For continuous-outcome modifier evidence,
+`llm_roles` fits nuisances on the provisional union, while `independent_tasks`
+independently regularizes over all candidates within each inner fold. Binary
+DINA nuisances use the full candidate catalog in both modes. Reports include
+inner-heldout and pooled out-of-fold AUROC as well as log loss for binary tasks.
+
+For binary outcomes, inner-fold grouped models provide cross-fitted propensity
+and treatment-arm outcome probabilities for DINA. A ridge-stabilized candidate
+fit compares a constant log odds ratio with one that varies over all estimable
+contrasts of that candidate, using the same frozen nuisance offset. The ten
+largest held-out Bernoulli likelihood gains enter each inner fold's evidence set
+by default, without a sign or p-value gate. A joint group elastic-net DINA fit
+records coefficient support and held-out whole-model gain. All categorical
+levels and missingness columns of a feature share one selection group.
+
+Continuous outcomes retain the candidate-wise and joint R-loss models, with
+cross-fitted propensity and marginal-outcome predictions and candidate-specific
+nuisance calibration. The nuisance screens continue to use the
+one-standard-error rule, while nuisance prediction defaults to the
+minimum-CV-loss elastic net. Binary selection reports retain legacy `r_loss`
+compatibility keys, accompanied by `dina_loss` aliases and objective/scale
+metadata; those screening keys represent likelihood loss. Final architecture
+search and probability-scale diagnostics still use actual squared R-loss.
+
+In `stage2.statistical_selection.selection_mode: "llm_roles"` (the core config
+default; the synthetic wrappers explicitly select `multi_model`),
+final primary-model adjudication receives only allowlisted definitions and these
+aggregate statistics. Large candidate sets are sliced into bounded requests of
+`stage2.role_adjudication.max_candidates_per_request` candidates (20 by
+default); each slice retains the global fold votes, ranks, and method evidence
+for its candidates. The adjudicator reconciles all methods and fold consistency,
+assigning both roles or neither when warranted. The prompt interface excludes
+dataset rows, identifiers, outer-heldout information, oracle fields, paths or
+names, and generation metadata; failure does not silently fall back to
+provisional statistical unions. If `stage2.role_adjudication.enabled` is
+explicitly false, the provisional nuisance union and candidate-wise top-N
+modifier union supply the final roles.
+
+In `selection_mode: "independent_tasks"`, treatment, outcome, and effect
+supports are selected separately by nonzero groups in any inner fold. Effect
+support comes from the joint grouped DINA model for binary outcomes or the joint
+R-loss model for continuous outcomes; it does not require a nuisance vote
+or candidate-wise top-N rank. P/q values and candidate-wise rankings remain
+diagnostics. LLM annotations, when enabled, cannot change inclusion or routing,
+and annotation failures do not veto estimation. See
+[independent task selection](stage2_independent_tasks.md) for the full
+procedure and artifact fields.
+
+In `selection_mode: "multi_model"`, eight standard evidence families inform
+statistical modifier ranking for binary outcomes (seven for continuous outcomes);
+optional matched-batch contrasts add one more:
+
+| Evidence family | Main contribution |
+| --- | --- |
+| Univariable models | Treatment/outcome associations and treatment-by-candidate interaction tests |
+| Penalized main effects | Group elastic-net treatment and marginal-outcome support |
+| Penalized outcome interactions | Candidate main effects and joint treatment interactions |
+| Orthogonal linear models | Joint grouped DINA selection for binary outcomes; grouped treatment-residual interactions for continuous outcomes |
+| Candidate effect learners (`univariable_rlearner`) | Held-out candidate-group DINA likelihood gain for binary outcomes; R-loss gain for continuous outcomes |
+| Predictive forests | Held-out group-permutation importance for treatment and outcome |
+| Causal forests | Residual-effect prediction, group permutations, and split importance |
+| DINA (`dina`, binary only) | Additional held-out likelihood evidence from jointly permuting every encoded column of a clinical feature |
+| Matched-batch contrasts, when enabled | Candidate prediction of within-bin observed treatment-contrast deviations |
+
+Joint-model evidence uses three patient partitions by default: the original
+inner folds and two additional seeded partitions. Within each partition, joint
+models use the available training rows, the full feature pool, and four balanced
+random feature partitions with subsets generally containing 32 candidates.
+Equivalent measurement groups stay together. Diagnostic linear/univariable
+perturbations retain their separate row-subsampling and penalty settings.
+Shared cross-fitted nuisance predictions keep the comparisons consistent.
+Aggregate support, held-out performance, and uncertainty feed the programmatic
+ranker. Treatment/outcome nuisance inputs use separate nonzero group supports
+from training-only predictive models, retained if selected in any training fold.
+Outcome support includes both arm-specific models and the
+marginal model. Investigator locks are preserved; the legacy confounder label
+is a routing alias, not a causal identification claim. No LLM retention requests
+run in this mode. Scoring and final external training-patient cross-fitting use the full
+candidate catalog with fold-local regularization, preventing the pooled shortlist
+from screening its own OOF predictions.
+
+Every modifier screen honors configured propensity bounds; the multi-model
+example uses inclusive 0.1–0.9 eligibility. Treatment/outcome association screens
+and nuisance models use the broader training population. This eligibility filter
+is separate from numerical propensity clipping.
+
+`multi_model.matched_batch.enabled=true` adds balanced random patient batches
+within bins of predicted treatment probability **and marginal outcome**. A batch's
+observed treatment contrast is compared with the contrast in its training bin.
+Candidate-wise ridge models predict these deviations from batch-average
+measurements; held-out improvement over bin-only predictions and stability
+across folds supply modifier evidence. Extreme training contrasts and an
+unfiltered sensitivity fit are compared; validation does not select extreme
+outcomes. Repeated batches are dependent draws, not additional independent
+patients. This component adds evidence using existing measurements; it does not
+revise measurement definitions.
+
+With `multi_model.modifier_count.concept_review=true`, the LLM reviews the union
+of the top candidates from each inner fold (100 per fold by default), describes
+shared clinical concepts, and nominates existing representative measurements.
+It does not invent extracted composite variables. Python assembles provenance,
+recurrence counts, and ordering.
+
+Joint modifier-count and final-estimator search is enabled by default in
+`multi_model`. Inside each count-validation training partition, the pipeline
+rebuilds numerical evidence and deterministic statistical rankings, including
+clinical concept review when enabled. Ranking combines individual effect-model
+validation gain, joint DINA permutation importance for binary outcomes, and
+causal-forest permutation importance. Evidence averages paired losses per patient across three validation partitions,
+keeps full-model and balanced feature-subset contexts separate, and weights joint
+importance by pooled model reliability. Defaults use 800 trees and ten permutations.
+Conservative groups of equivalent measurements are evaluated jointly before
+choosing a representative. The support score is
+`max(source scores) + 0.25 * mean(source scores)`, preserving individual evidence
+when joint evidence is inconclusive; ranking makes no LLM requests.
+See [the ranking criterion](stage2_multi_model.md#statistical-modifier-ranking)
+for missing-data, model-quality, and tie rules. It compares ranked modifier prefixes across causal forests, penalized
+interaction outcome models, and DINA for binary outcomes. All architectures are
+scored on held-out squared R-loss on the same eligible patients; DINA's fitted
+log odds ratios are first converted to risk differences. The default budgets are
+0, 4, 8, 12, 16, 24, and 32 modifiers, plus the complete ranked shortlist capped
+at 64 unlocked candidates. Locked modifiers are additional to those budgets;
+the actual representatives can be fewer than the budget. Minimum mean R-loss selects the
+count and estimator; a paired one-standard-error rule is optional. Ties favor
+fewer modifiers, then `linear_interactions`, `dina`, and `causal_forest` in that
+order. Confounders and retained investigator-locked roles are preserved.
+DINA is omitted for continuous outcomes. An unsupported DINA evidence cell is
+marked not estimable; each architecture/count combination must be estimable on
+every scoring fold to compete.
+
+The outer-training catalog, extraction definitions, coverage filter, and upstream
+ontology/consolidation remain fixed during this nested search. Its inner scores
+are conditional on that upstream adaptation. Outer-held-out evaluation assesses
+the entire fitted workflow. Disable `modifier_count.enabled` to use any-fold
+joint orthogonal-model modifier support with the forest estimator, or set
+`modifier_count.estimators=["causal_forest"]` for forest-only count tuning.
+See [multi-model selection](stage2_multi_model.md) for numerical details and
+checkpoint boundaries.
+
+In all modes, inner-fold p/q values describe
+adaptively discovered candidates; they do not establish causal identification
+or confirmatory significance for the entire pipeline.
+
+The consolidation agent never receives treatment, outcome, or outer-heldout
+rows; pairwise associations are used only for this unsupervised replacement
+decision and never as a causal-role screen. Investigator-configured roles remain
+locked for features that pass coverage. All supplied measurements must satisfy the persisted
+`pre_index_treatment` invariant, and outer-heldout rows remain unavailable until
+the selected definitions and model roles are frozen.
+
+All-evidence selection writes its own input fingerprint and completion
+marker, so an interrupted run resumes independently. Endpoint URLs are transport
+details and may change between resumes. The root `model_identity.json` records
+the model IDs used for upstream interpretation and extraction. Completed
+interpretation, consolidation, and operationalized feature definitions remain
+reusable because statistical-selection settings do not participate in their
+fingerprints.
+
+Each patient extraction also records feature-attributable validation failures.
+After the training patients finish, Stage 2 aggregates repeated failures across
+distinct patients. By default, three patients with the same feature-level
+failure trigger a bounded ontology-refinement request followed by re-extraction;
+up to two such refinement rounds are allowed. The request sees the current
+definition, aggregate failure counts, and failed model outputs, but no patient
+text or held-out data. It can refine only the same feature's description, value
+type, categories or unit, measurement rule, and missingness rule. Malformed JSON
+or response-envelope failures are reported separately and never treated as
+ontology evidence. Explicit investigator-supplied ontologies remain immutable
+and are only audited when they repeatedly fail.
+
+Each refinement pass re-extracts only the features whose extraction definitions
+changed, then merges those refreshed columns with the unchanged cached columns.
+Failure summaries are merged on the same boundary: refreshed features replace
+their old patterns, while unchanged-feature and structural failures remain
+available to later supervision.
+
+### Final estimation
+
+Only after selection and model search finish are frozen retained definitions and
+measurement dependencies applied to outer-held-out records. The selected model
+may be an honest `CausalForestDML`, a penalized outcome model with the treatment
+main effect and treatment-by-modifier interactions, or binary DINA. The
+interaction model uses logistic regression for binary outcomes and a linear
+model for continuous outcomes. The treatment main coefficient is unpenalized
+in interaction fits and continuous R-learners, during tuning and final refitting;
+DINA also leaves its constant treatment effect unpenalized. Covariates and
+modifier interactions retain their configured penalties. Binary DINA exports its native
+`dina_log_odds_ratio` and fitted counterfactual probabilities `dina_mu0` and
+`dina_mu1`, with `estimated_cate = dina_mu1 - dina_mu0`. Both binary parametric
+architectures therefore report CATE as a probability difference. CATE confidence
+intervals are unavailable for the interaction and DINA estimators; DINA interval
+columns remain missing.
+
+For the forest, modifiers form `X` and pure confounders form `W`; dual-role
+variables appear in `X` once. A constant effect design is used when no modifiers
+remain. Cross-validated elastic-net nuisances fitted on outer-training patients
+produce held-out propensities, potential-outcome predictions, and AIPW scores.
+In `independent_tasks`, external propensity inputs use treatment-selected features;
+external outcome models use outcome-selected features plus all selected modifiers.
+The forest internally cross-fits its nuisances over `X + W`.
+
+Combining held-out AIPW scores across outer folds supplies the reported ATE and
+its confidence interval. CATE predictions come from each fold's frozen chosen
+model, and the selected architecture may differ across folds. Diagnostics include
+nuisance fit quality, overlap, regularization, and optimization status. Oracle
+comparisons are a separate posthoc audit and never guide selection.
+The AIPW nuisance probabilities are independent of DINA's fitted counterfactual
+columns; the AIPW ATE interval remains available when DINA supplies the CATE.
+
+```mermaid
+flowchart LR
+    A["Frozen outer-training measurements"] --> B["Coverage filter"]
+    B --> C["Optional estimand refinement"]
+    C --> D["Optional measured-alias consolidation"]
+    D --> E["Repeated model evidence and predictive nuisance selection"]
+    E --> F["Concepts, modifier count, and architecture search"]
+    F --> G["Frozen held-out extraction"]
+    G --> H["Selected CATE model and held-out AIPW scores"]
+    H --> I["Cross-fitted estimates and diagnostics"]
+```
+
+### Output and interruption recovery
+
+The output directory is both the result location and the resumable checkpoint.
+There is no separate run registry or resume token.
+
+```text
+nsclc_all_evidence/
+  run_config.json
+  resolved_stage1_model_config.json
+  resolved_neural_query_config.json
+  progress.json
+  logs/
+    workflow.log
+  components/
+    embedding_cache/
+      cache/...
+      complete.json
+    tfidf/
+      predictions.parquet
+      split_provenance.jsonl
+      evidence.jsonl
+      stage1_tfidf_topics/contexts/...
+      complete.json
+    text_models/
+      outer_001_full/...
+      outer_001_inner_001/...
+      evidence.jsonl
+      complete.json
+    neural_queries/
+      outer_001_full/...
+      outer_001_inner_001/...
+      evidence.jsonl
+      complete.json
+  stage1_architectures/              # explicit --architectures runs only
+    manifest.json
+    bow_nuisance/evidence.jsonl
+    ...
+  handoff/
+    evidence.jsonl
+    index.json
+    complete.json
+  evaluations/
+    stage1/
+      evaluation_manifest.json
+      metrics.jsonl
+      comparison.csv
+      summary.json
+      architectures/.../metrics.jsonl
+  stage2/
+    config.json
+    evidence_compilation/
+      packets.jsonl
+      outer_001/{cards,members,lineage}.jsonl
+    outer_001/
+      input_packets.jsonl
+      interpretations/...
+      consolidation/...
+      feature_definitions.json
+      ontology_supervision/
+        supervisor_cache/<fingerprint-prefix>/<fingerprint>/...
+        round_001/
+          extraction/...
+          aggregate_extraction_summary.json
+          supervisor/...
+          complete.json
+        convergence.json
+      preselection/                 # present after guarded reselection
+        input.json
+        complete.json
+      estimand_ontology/...          # optional definition search
+      selection/
+        input.json                  # includes filtered preselection-matrix path
+        multi_model/...             # per-fold/repetition numerical evidence
+        modifier_count/...          # concept/ranking and architecture/count search
+        candidate_consolidation/
+          input.json
+          steps/...
+          registry.json
+          report.json
+          complete.json
+        statistical_evidence.json
+        role_adjudication/
+          evidence.json
+          prompt.json
+          batches/batch_NNN/{prompt.json,response.json,complete.json}
+          response.json
+          complete.json
+        elastic_net_selection.json
+        selected_definitions.json
+        measurement_definitions.json
+        selected_latent_states.json       # selected latents and recursive ancestors
+      final_definitions.json
+      extraction/
+        candidate_missingness_filter.json
+        estimand_candidate_missingness_filter.json  # when refinement runs
+        all_candidates_fit/extracted.csv
+        coverage_filtered_fit/<fingerprint>/extracted.csv
+        estimand_candidates_fit/<fingerprint>/extracted.csv  # when refinement runs
+        fit/extracted.csv
+        heldout/harmonized.csv
+        extracted_features.csv
+      estimation/
+        predictions.csv
+        diagnostics.json
+        complete.json
+      complete.json
+    features_by_outer_fold.jsonl
+    cross_fitted_predictions.csv
+    posthoc_predictions_with_oracle_ite.csv
+    posthoc_oracle_ite_metrics.json
+    causal_estimate.json
+    summary.json
+    reselection_state.json          # present after guarded reselection
+    reselection_archives/...
+    complete.json
+```
+
+`progress.json` provides the current component and status. The workflow log is
+written to `logs/workflow.log`, and model-specific intermediate results are kept
+under `components/<name>/`. Stage 2's intermediate scientific results are under
+the current `stage2/outer_NNN/` directory: this is the direct place to inspect
+the candidates, aggregate ontology reviews, elastic-net stability diagnostics,
+selected roles, extractions, and the chosen estimator's predictions. If a process is
+interrupted, rerunning the same command skips each completed interpretation,
+consolidation, extraction, ontology-supervision, and estimation leaf, then
+re-enters the first incomplete directory. Across ontology rounds, aggregate
+supervisor decisions are reused only when the feature definition, extraction
+summary, failure pattern, and request identity have the same fingerprint.
+Checkpoints produced by the former request-exhaustion-as-null behavior are
+retained under `superseded_infrastructure_*` names and only those affected
+leaves are requested again.
+
+To replace role selection on a completed run without repeating interpretation,
+ontology supervision, or all-candidate outer-training extraction, use the saved
+configuration with guarded reselection:
+
+```bash
+uv run python scripts/run_all_evidence.py \
+  --config /path/to/completed_run/run_config.json \
+  --stage2-only \
+  --stage2-reselect
+```
+
+All outer folds are verified before anything is moved. The prior selector,
+held-out extraction, estimates, and aggregate results are retained under
+`stage2/reselection_archives/`; validated post-ontology definitions and training
+matrices are frozen under each fold's `preselection/` directory together with a
+fingerprinted manifest of archived raw held-out measurements. A cache mismatch
+aborts instead of repeating initial work, and an interrupted migration resumes
+from `stage2/reselection_state.json`. Use the same primary and extraction model
+IDs as the completed run; endpoint URLs and worker counts may change. Matching
+held-out component columns are reused, and only missing or
+definition-incompatible components are re-extracted before estimation is rerun.
+
+When the input dataset contains `true_ite_prob`, Stage 2 evaluates its frozen
+cross-fitted `estimated_cate` values against that oracle only after all modeling
+is complete. `causal_estimate.json` reports the overall Pearson and Spearman ITE
+correlations, while `posthoc_oracle_ite_metrics.json` adds error, dispersion,
+ATE-bias, and per-fold diagnostics. The frozen prediction file remains
+oracle-free; the joined audit data is written separately to
+`posthoc_predictions_with_oracle_ite.csv`. For real datasets without an oracle,
+the metrics file records that the evaluation is unavailable.
+
+The stable boundary between the stages is `handoff/evidence.jsonl`.
+`handoff/index.json` references the contributing component files in place, so
+the handoff retains only that combined boundary instead of adding three more
+full-size per-component copies. Python consumers can stream the combined
+handoff without loading it into memory:
+
+```python
+from oci.inference.research_all_evidence_workflow import iter_stage1_handoff
+
+for evidence_context in iter_stage1_handoff("/results/nsclc_all_evidence"):
+    process(evidence_context)
+```
+
+For an explicit `--architectures` selection, `stage1_architectures/` is the
+architecture-oriented view of the same frozen evidence. Its manifest records
+the selected lanes, private support services, producer artifacts, hashes, and
+row-score sidecars, and its compact canonical envelopes become the handoff.
+Legacy enable-flag runs stream the component evidence directly and skip this
+redundant materialization.
+
+To inspect status without starting work, use `--status`. To intentionally rerun
+a component, use `--rerun COMPONENT`. This removes completion markers but leaves
+the model files in place. A scientifically different configuration should use a
+new output directory. Stage 1 component completion is not a general mechanism
+for detecting every changed scientific setting; Stage 2 separately checks its
+model identities and semantic checkpoint fingerprints.
+
+When a Stage 1 text producer changes, rerun both `text_models` and `handoff`;
+the existing TF-IDF and neural-query components can remain complete. Before
+starting Stage 2 from that changed handoff, move the old `stage2/` directory to
+an audit backup (or choose a new output directory). Stage 2 intentionally rejects
+old feature-definition checkpoints whose evidence fingerprint no longer matches.
+
+To start a fresh Stage 2 output from preserved Stage 1 artifacts, the separate
+`scripts/run_stage2_from_artifacts.py` launcher accepts a raw handoff and split
+provenance, with optional live request limits. It uses a different configuration
+schema from `run_all_evidence.py`; see the
+[artifact launcher instructions](all_evidence_workflow.md#saved-artifact-launcher-and-live-request-limits).
+
+The complete operational reference is
+[`docs/all_evidence_workflow.md`](all_evidence_workflow.md),
+and the abbreviated command reference is
+[`docs/all_evidence_quickstart.md`](all_evidence_quickstart.md).
+
+## Standalone explicit-feature workflows
+
+Explicit-feature functionality remains available for investigator-specified
+measurements and adaptive feature discovery. These workflows share the same
+role-aware feature contracts used by the all-evidence pipeline.
+
+| Model type | Purpose |
+|---|---|
+| `explicit_feature_forest` | Extract a fixed set of investigator-defined variables, route confounders to `W` and effect modifiers to `X`, and fit the retained causal-forest estimator. |
+| `agentic_explicit_feature_forest` | Propose and evaluate explicit variables within nested cross-validation. |
+| `agentic_attention_variable_forest` | Use retained HTR evidence to support explicit-variable discovery and adequacy review. |
+| `multi_model_agentic_forest` | Combine sparse, HTR, and embedding evidence before explicit-variable extraction. |
+
+A standalone explicit-feature configuration can be initialized and run with:
+
+```bash
+oci init --output config.json
+oci run --config config.json --device cuda:0 --workers 4
+```
+
+See
+[`example_configs/agentic_explicit_feature_forest_config.json`](../example_configs/agentic_explicit_feature_forest_config.json)
+for the complete role-aware extraction contract. The retired DragonNet,
+single-representation neural heads, experimental CNN/GRU/slot extractors, and
+standalone TF-IDF wrapper are no longer shipped; their scientific counterparts
+are represented by the ten independently evaluable Stage 1 architectures.
+
+## Synthetic data and Stage 1 architecture evaluation
+
+The `synthetic_data/` package creates clinical narratives with known confounders,
+effect modifiers, treatment equations, outcome equations, and ground-truth
+treatment effects. It can also generate encounters, diagnosis and procedure
+codes, laboratory results, hospitalizations, and patient-reported outcomes,
+rendered into a chronological text record. These datasets support recovery and
+calibration studies that would not be possible with unidentified real-world
+ground truth.
+
+```bash
+python -m synthetic_data.cli \
+  --use-vllm-batch \
+  --dataset-size 500 \
+  --structured-data \
+  --output-dir ./my_synthetic_data
+```
+
+To generate a larger cohort from an existing dataset's **same causal process**,
+use API-server mode with its saved configuration and metadata:
+
+```bash
+python -m synthetic_data.cli \
+  --config /data/original/generation_config.json \
+  --dgp-metadata /data/original/metadata.json \
+  --dataset-size 10000 \
+  --model nvidia/Gemma-4-31B-IT-NVFP4 \
+  --api-url http://localhost:8000/v1 \
+  --num-workers 32 \
+  --output-dir /data/expanded_cohort
+```
+
+This retains the saved feature distributions and calibrated equations, samples
+new patient characteristics and outcomes, and uses the existing timeline and
+note prompts. It does not ask the new model to redesign or recalibrate the causal
+process. Successful timelines, notes, and patients are checkpointed separately;
+empty or truncated responses fail visibly and can be retried on resume. Repeat
+the command to resume. `progress.json` records completion counts. Changes to the
+causal process, generation model, or prompt code require a new output directory.
+In the JSON configuration, `llm.api_base_urls` can list multiple replicas of the
+same model; requests are distributed across them. `llm.extra_body` passes API
+options such as `{"chat_template_kwargs": {"enable_thinking": false}}`.
+
+Oracle truth is never supplied to Stage 1. After a Stage 1 handoff has been
+completed and frozen, evaluate each architecture independently against a
+synthetic dataset's known variables and treatment effects:
+
+```bash
+uv run oci-evaluate-stage1 \
+  --run-dir /results/nsclc_all_evidence \
+  --metadata /data/synthetic/metadata.json \
+  --architectures all
+```
+
+The evaluator reads saved per-architecture evidence and held-out row-score
+sidecars; it never refits or selects a Stage 1 model. It hashes those artifacts
+before loading oracle-bearing columns, then writes common recovery metrics and
+architecture-native metrics under `evaluations/stage1/`. Each architecture has
+its own metrics file, while `comparison.csv` provides a common cross-lane view.
+Use a comma-separated subset to evaluate only lanes present in the run:
+
+| Architecture | Native evaluation emphasis |
+|---|---|
+| `bow_nuisance` | Held-out treatment/outcome nuisance performance and treatment/outcome evidence balance |
+| `bow_r_loss` | Normalized held-out R-loss gain and residual-effect evidence coverage |
+| `matched_pair_uplift` | Positive-match coverage, pair-side representation, and uplift association |
+| `htr_neural` | Held-out nuisance/R-loss behavior, represented HTR stages, and witness-patient coverage |
+| `embedding_whole_cohort` | Contrast and polarity coverage, semantic witnesses, and oracle-feature association |
+| `embedding_clustered` | Cluster-local contrast coverage and cluster representation |
+| `tfidf_semantic_retrieval_contrasts` | Parent-contrast coverage and recovered lexical evidence |
+| `tfidf_topics` | Topic count, treatment/outcome/effect bank coverage, and inner-fold stability |
+| `tfidf_orphan_ngrams` | Orphan-cluster coverage, lexical recovery, and inner-fold stability |
+| `neural_query_moments` | Query and bank coverage, witness-patient coverage, activation association, and stability |
+
+```bash
+uv run oci-evaluate-stage1 \
+  --run-dir /results/nsclc_all_evidence \
+  --architectures htr_neural,neural_query_moments
+```
+
+Older runs with only `handoff/evidence.jsonl` can be backfilled into the same
+architecture artifact contract without refitting Stage 1, provided the evidence
+satisfies the current source contracts. Legacy all-history neural-query witnesses
+must first be regenerated with the query-ranked retrieval policy. The reusable
+semi-synthetic data-generating process lives in
+`synthetic_data/semisynthetic_dgp.py`; one-off architecture-specific oracle
+launchers have been retired.
+
+## Interpreting results
+
+Standalone runs ordinarily write `predictions.parquet` under
+`output_dir/applied_inference/`. Depending on the estimator, it may contain
+predicted potential outcomes, propensity scores, treatment-effect estimates,
+and confidence limits.
+
+| Column | Meaning |
+|---|---|
+| `pred_y0_prob` | This is the predicted outcome probability under control. |
+| `pred_y1_prob` | This is the predicted outcome probability under treatment. |
+| `pred_ite_prob` | This is the difference between the two predicted outcome probabilities. |
+| `pred_propensity_prob` | This is the estimated probability of receiving treatment. |
+| `pred_ite_lower` | This is the lower interval bound when the estimator provides forest inference. |
+| `pred_ite_upper` | This is the corresponding upper interval bound. |
+
+Predictive accuracy, nuisance-model discrimination, R-loss, overlap, calibration,
+and stability across folds should be examined together. A narrow interval around
+a biased estimand is not evidence of causal validity. Investigators should also
+inspect whether discovered variables are well measured, clinically coherent,
+and supported in both treatment groups. The supplied text's pretreatment scope
+is a cohort-preparation assumption.
+

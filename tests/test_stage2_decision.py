@@ -494,7 +494,8 @@ def test_numeric_verification_respects_confidence_threshold():
 
 
 @pytest.mark.parametrize("categorical", [True, False])
-def test_whole_fold_uses_decisions_and_freezes_measurements(tmp_path, monkeypatch, retrieval, categorical):
+@pytest.mark.parametrize("multi_model", [False, True])
+def test_whole_fold_uses_decisions_and_freezes_measurements(tmp_path, monkeypatch, retrieval, categorical, multi_model):
     from oci.inference.plain_handoff_stage2 import PlainHandoffStage2Config, Stage2ExtractionLLMConfig
     from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
 
@@ -507,12 +508,27 @@ def test_whole_fold_uses_decisions_and_freezes_measurements(tmp_path, monkeypatc
         decision_extraction=client.policy, colbert=ColBERTConfig(devices=("cpu",)),
         extraction_context_strategy="colbert",
         role_adjudication=Stage2RoleAdjudicationConfig(enabled=False), estimation_trees=10)
+    if multi_model:
+        config = replace(config,
+            # Even an older enabled flag must not invoke LLM retention.
+            role_adjudication=Stage2RoleAdjudicationConfig(enabled=True),
+            statistical_selection=replace(config.statistical_selection,
+                selection_mode="multi_model", multi_model=replace(
+                    config.statistical_selection.multi_model,
+                    modifier_count=replace(config.statistical_selection.multi_model.modifier_count, enabled=False))))
+    monkeypatch.setattr(analysis, "adjudicate_stage2_roles",
+                        lambda **kw: pytest.fail("LLM role retention attempted"))
     monkeypatch.setattr(analysis, "_request_aggregate_ontology_supervisor",
                         lambda **kw: pytest.fail("unconditional ontology LLM review attempted"))
     monkeypatch.setattr(analysis, "select_stage2_features_elastic_net", lambda **kw: (
         [{**f, "roles": ["confounder"], "nuisance_model_roles": ["treatment", "outcome"]} for f in kw["definitions"]],
         {"schema_version": analysis.STAGE2_ROLE_SELECTION_SCHEMA_VERSION, "status": "complete"}, kw["definitions"], []))
-    monkeypatch.setattr(analysis, "estimate_outer_fold", lambda **kw: {"status": "tested", "estimator": kw["estimator"]})
+    def estimate(**kw):
+        if multi_model:
+            assert kw["nuisance_candidate_definitions"]
+            assert len(kw["nuisance_candidate_fit"]) == 3
+        return {"status": "tested", "estimator": kw["estimator"]}
+    monkeypatch.setattr(analysis, "estimate_outer_fold", estimate)
     args = dict(dataset=dataset, definitions=[feature("color", categorical=categorical)],
         split={"outer_fold": 1, "fit_row_ids": [0, 1, 2], "heldout_row_ids": [3],
                "inner_splits": [{"inner_fold": 1, "fit_row_ids": [0, 1], "heldout_row_ids": [2]},
@@ -529,6 +545,9 @@ def test_whole_fold_uses_decisions_and_freezes_measurements(tmp_path, monkeypatc
         output_dir=round_dir / "failure_ontology_refinement", request_json=args["request_json"])
     result = analysis.run_fold_analysis(**args)
     assert result["estimation"]["status"] == "tested"
+    if multi_model:
+        assert result["selection"]["role_adjudication"]["llm_requests"] == 0
+        assert result["selection"]["final_role_assignment"] == "predictive_nuisances_and_joint_orthogonal_modifiers"
     assert len(client.calls) == (4 if categorical else 16)
     assert retrieval[-1][0] == "HELDOUT_ONLY"
     analysis.run_fold_analysis(**args)

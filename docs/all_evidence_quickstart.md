@@ -243,7 +243,7 @@ Managed vLLM needs the `local-llm` extra, model IDs, and per-role `vllm`
 configurations in place of external endpoints. When both roles are managed,
 they initially alternate over the union of their GPU allocations. Rapid
 switching can trigger concurrent operation on the separate allocations. See
-the [README's managed-server instructions](../README.md#pipeline-managed-vllm-server-pools).
+the [managed-server reference](all_evidence_reference.md#pipeline-managed-vllm-server-pools).
 
 Final outputs from the main runner include:
 

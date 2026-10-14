@@ -204,6 +204,7 @@ def test_all_modifier_evidence_uses_overlap_while_associations_keep_all_rows(mon
             "validation_outcome": np.zeros(len(valid)).tolist(),
             "crossfit_audit": [],
             "validation_fit_audits": [],
+                "predictive_support": {"task_feature_ids": {"treatment": [], "outcome": []}},
         },
     )
     _, original, _, _ = select_stage2_features_elastic_net(**arguments)
@@ -461,7 +462,7 @@ def test_mode_is_explicit_and_legacy_checkpoint_policies_are_unchanged():
         replace(new, multi_model=replace(new.multi_model, row_fraction=float("nan"))).validate()
 
 
-def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
+def test_new_example_uses_predictive_nuisances_and_freezes_resume_policy(tmp_path):
     from oci.inference.research_all_evidence_workflow import (
         _stage2_reselection_policy_fingerprint,
         compile_config,
@@ -477,9 +478,11 @@ def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
     assert config.stage2.statistical_selection.selection_mode == "multi_model"
     assert config.stage2.statistical_selection.multi_model.modifier_count.enabled
     assert (config.stage2.min_propensity, config.stage2.max_propensity) == (0.1, 0.9)
-    raw["stage2"]["role_adjudication"]["enabled"] = False
-    with pytest.raises(ValueError, match="requires role_adjudication"):
-        compile_config(raw, config_dir=path.parent)
+    assert config.stage2.role_adjudication.enabled is False
+    # Saved configs with the old flag still parse; multi_model ignores that
+    # flag for retention. Explicit disabled configurations are also valid.
+    raw["stage2"]["role_adjudication"]["enabled"] = True
+    compile_config(raw, config_dir=path.parent)
     root = tmp_path / "stage2"
     root.mkdir()
     saved = {
@@ -496,10 +499,10 @@ def test_new_example_is_active_requires_llm_and_freezes_resume_policy(tmp_path):
     )
     validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
     old = json.loads(json.dumps(saved))
-    for version in ("stage2_multi_model_selection_v1", "stage2_multi_model_selection_v2"):
+    for version in ("stage2_multi_model_selection_v1", "stage2_multi_model_selection_v2", "stage2_multi_model_selection_v5_stable_joint"):
         old["statistical_selection"]["multi_model"]["schema_version"] = version
         (root / "config.json").write_text(json.dumps(old))
-        with pytest.raises(RuntimeError, match="automatic modifier count"):
+        with pytest.raises(RuntimeError, match="predictive nuisance selection"):
             validate_selection_resume(SimpleNamespace(stage2=config.stage2, output_dir=tmp_path))
     (root / "config.json").write_text(json.dumps(saved))
     changed_trees = replace(config.stage2, estimation_trees=config.stage2.estimation_trees * 2)

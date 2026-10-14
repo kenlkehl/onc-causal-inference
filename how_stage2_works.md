@@ -2,7 +2,7 @@
 
 Stage 2 turns the Stage 1 evidence into **measurable clinical variables, a patient-by-variable dataset, and ultimately held-out treatment-effect estimates**.
 
-This describes our current **`multi_model` pipeline with full-record LLM extraction and programmatic modifier ranking**, as of October 14, 2026. The 1,000-patient run supplies the concrete example. The treatment-penalty fix made on October 14 applies to future fits; the completed run predates it.
+This describes our current **`multi_model` pipeline with full-record LLM extraction, predictive nuisance selection, and programmatic modifier ranking**, as of October 14, 2026. The 1,000-patient run supplies the concrete example. The treatment-penalty fix and replacement of LLM retention with statistical nuisance selection apply to future fits; the completed run predates them.
 
 1. **Set aside the outer held-out patients.**
 
@@ -120,17 +120,17 @@ This describes our current **`multi_model` pipeline with full-record LLM extract
 
    We also retain whether the **whole effect model generalizes better than a constant-effect model**. A variable’s apparent importance is less persuasive when the model generating that importance performs poorly. [Statistical evidence procedure](docs/stage2_multi_model.md)
 
-8. **Have Gemma interpret the statistical evidence and assign provisional roles.**
+8. **Select nuisance-model inputs statistically, without Gemma retention decisions.**
 
-   Gemma receives clinical definitions and bounded summaries of the statistical evidence. It reviews related themes, competing proxies, disagreements between methods, and consistency across folds.
+   The numerical pass fits grouped elastic nets to predict treatment and outcome, tuning regularization within each training partition. It also fits separate control-arm and treated-arm outcome models.
 
-   It then assigns provisional roles: confounder, modifier, both, or neither, with supporting and contrary evidence.
+   For each nuisance task, retain a candidate if its encoded group has a nonzero coefficient norm in any training fold. Outcome inputs use the union of support from the marginal and arm-specific outcome models. Treatment-only and outcome-only inputs remain distinct; categorical levels and missingness indicators stay grouped with their parent measurement.
 
-   These are modeling decisions informed by clinical interpretation; they do not establish causal truth. A variable that predicts treatment is not automatically a confounder, and a strong prognostic variable is not automatically an effect modifier.
+   These are predictive routing decisions, not declarations that a variable is causally a confounder. The legacy `confounder` role records membership in either nuisance task. Investigator-specified roles remain locked.
 
-   This LLM step remains consequential for **confounder retention**. The later modifier-selection procedure preserves the confounders retained here.
+   The later modifier search preserves each nuisance task's support. It can add modifier roles without forcing those variables into the propensity model; retained modifiers remain available to outcome models.
 
-   However, Gemma’s provisional modifier labels are **not a gate on the final modifier search**. The statistical ranker considers all unlocked candidates, including ones Gemma did not label as modifiers.
+   Gemma makes no role-retention requests in this mode, even if an older configuration enables role adjudication. The modifier ranker still considers all unlocked candidates. Scoring nuisances and final external training-patient cross-fitting use all candidates with fold-local regularization, not the pooled shortlist that has already seen those patients' labels. The final forest's internal DML nuisances still use its retained X/W inputs.
 
 9. **Rebuild evidence within each inner training partition and rank modifiers programmatically.**
 
@@ -140,7 +140,7 @@ This describes our current **`multi_model` pipeline with full-record LLM extract
 
    **Why rebuild it?** A ranking constructed from all 800 patients would have already used the outcomes of those 160 validation patients. Evaluating models built from that ranking on those same patients would favor a ranking that had already seen their labels.
 
-   The initial all-800 evidence remains useful for full-training role adjudication and the eventual final ranking. The nested evidence serves a different purpose: constructing each ranking without access to its scoring partition’s labels.
+   The initial all-800 evidence remains useful for final nuisance-input selection and the eventual final ranking. The nested evidence constructs each ranking without access to its scoring partition's labels.
 
    For binary outcomes, the current ranker primarily combines:
 
@@ -224,7 +224,7 @@ This describes our current **`multi_model` pipeline with full-record LLM extract
 
 11. **Freeze the selected features and extract them from the outer held-out patients.**
 
-    Once the winning architecture and modifier count are chosen, the pipeline constructs the final ranking from all 800 training patients and takes its selected prefix, preserving retained confounders.
+    Once the winning architecture and modifier count are chosen, the pipeline constructs the final ranking from all 800 training patients and takes its selected prefix, preserving separate treatment/outcome nuisance supports.
 
     It then measures the required variables in the 200 outer held-out patients, applying the frozen definitions and training-derived harmonization rules. Compatible previously extracted measurements can be reused.
 
@@ -238,7 +238,7 @@ This describes our current **`multi_model` pipeline with full-record LLM extract
 
     - The causal forest uses modifiers as its heterogeneity inputs and pure confounders as adjustment inputs, fitting fresh DML nuisances.
     - The interaction model uses retained covariate main effects and selected treatment interactions, retuning its penalty.
-    - DINA refits its nuisance models and grouped log-odds-ratio effect model.
+    - DINA uses the external cross-fitted training nuisances and task-specific held-out nuisances, then fits its grouped log-odds-ratio effect model.
 
     This produces one held-out `estimated_cate` per patient. That is the model’s estimated conditional treatment effect given the extracted measurements—the quantity we have been calling its estimated ITE.
 

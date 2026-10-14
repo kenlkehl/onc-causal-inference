@@ -12,8 +12,8 @@ Stage 2 transport configured it runs Stage 1 through the plain handoff. With an
 external endpoint or a pipeline-managed vLLM pool it continues through
 fold-scoped feature definitions, patient extraction and ontology
 supervision, fold-local statistical selection, and held-out causal estimation.
-The `multi_model` selector can choose a causal forest or a penalized interaction
-outcome model. See the [quickstart](all_evidence_quickstart.md) to enable the
+The `multi_model` selector can choose a causal forest, a penalized interaction
+outcome model, or binary DINA. See the [quickstart](all_evidence_quickstart.md) to enable the
 current multi-model path and optional refinement steps. Interruption and resume
 are automatic: run the same command again.
 
@@ -162,9 +162,10 @@ extracted measurements. Inner-fold grouped elastic nets, candidate-wise tests,
 and R-loss models then produce selection evidence. The default `llm_roles`
 mode uses primary-model adjudication; the opt-in `independent_tasks` mode uses
 separate numerical treatment, outcome, and effect selections with optional
-advisory annotations. The opt-in `multi_model` mode combines several model
-families, clinical theme review, and nested selection of modifier count and
-final estimator. P/q values contribute evidence.
+advisory annotations. The `multi_model` mode, enabled by fresh synthetic
+launchers, combines several model families, predictive treatment/outcome nuisance
+selection, and nested selection of modifier count and final estimator. It makes
+no LLM retention requests. P/q values contribute descriptive evidence.
 Explicit investigator variables that pass the missingness filter retain their configured ontologies and roles
 regardless of selection evidence. Only the retained variables are
 extracted from outer-held-out text. The final heterogeneous-effect model is an
@@ -950,9 +951,8 @@ budget; the audit records the actual counts. Investigator-locked roles remain
 fixed. No oracle values enter these steps.
 
 Concept review is disabled when omitted. It adds repeated numerical fits and
-LLM reviews; each is checkpointed. Rankings are constructed from clinical
-ordered groups and pairwise comparisons of leading candidates. Python owns
-positions, deterministic ties, and list merging. The candidate definitions and
+LLM reviews; each is checkpointed. Rankings use programmatic statistical evidence
+fusion, including within the optional concept review. The candidate definitions and
 measurement ontology are still learned on the outer-training set, so the inner
 R-loss comparison is conditional on that upstream adaptation. Outer-held-out
 evaluation remains the final test of the whole workflow.
@@ -1363,8 +1363,9 @@ consolidation request.
 
 For the opt-in `multi_model` mode, see [Stage 2 selection from multiple
 models](stage2_multi_model.md). It combines repeated penalized models,
-univariable screens, R-learners, and predictive/causal forests with cross-candidate
-LLM theme review and final role adjudication. The following describes the
+univariable screens, R-learners, and predictive/causal forests with separate
+predictive nuisance selection and numerical modifier ranking/count selection.
+LLM role-retention decisions are disabled in this mode. The following describes the
 existing `llm_roles` and `independent_tasks` numerical components.
 
 Final selection is written to the historically named
@@ -1416,7 +1417,7 @@ minimum-CV-loss choices.
 | --- | --- | --- |
 | `llm_roles` (default when omitted) | Final adjudicated roles; if adjudication is disabled, the provisional nuisance union and candidate-wise top-N modifier union | Reconciles all aggregate evidence and assigns confounder, effect modifier, both, or neither |
 | `independent_tasks` | Separate treatment, outcome, and joint-R-loss effect supports; a nonzero group in any inner fold suffices for its task | Optional advisory annotations cannot add, remove, or reroute features |
-| `multi_model` | Final roles from seven evidence families plus optional matched-batch contrast evidence across training resamples and forest feature subsets; no individual screen is binding | Required theme reconciliation across candidates, then evidence-cited role decisions |
+| `multi_model` | Separate any-training-fold grouped predictive supports for treatment/outcome; programmatic modifier ranking and nested count/architecture selection | No role-retention requests; optional modifier-concept review is separate |
 
 In `llm_roles`, the primary LLM receives bounded slices of one allowlisted
 aggregate role-evidence artifact and assigns final roles. A slice contains at most

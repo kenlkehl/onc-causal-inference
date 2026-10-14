@@ -1,10 +1,11 @@
-"""Resampled, fold-honest modeling evidence; numerical results never gate roles.
+"""Resampled, fold-honest evidence and predictive nuisance selection.
 
 Every candidate is exposed to every family. Forest feature subsets partition a
 fresh shuffled candidate list, so absence from a model is not a negative vote.
 Nuisances are elastic nets, cross-fitted inside each inner training partition;
 they stay fixed across its stability perturbations. Outer-test data and oracle
-columns are never inspected. Only aggregate summaries enter adjudication.
+columns are never inspected. Nuisance supports come from training-only fits;
+modifier selection uses the separate nested ranking/count search.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ from .stage2_statistical_selection import _modifier_test_chunk
 from . import stage2_modeling_pool as modeling
 from . import stage2_evidence_stability as stability
 from .stage2_modeling_identity import scientific_source_sha256
+from . import stage2_nuisance_selection as nuisance_selection
 
 LOGGER = logging.getLogger(__name__)
 ROLES = ("treatment", "outcome", "effect")
@@ -84,6 +86,8 @@ def numerical_identity(
         "component_source_sha256": scientific_source_sha256(__file__),
         "stability_source_sha256": sha256(Path(stability.__file__).read_bytes()).hexdigest(),
         "linear_component_source_sha256": sha256(Path(linear.__file__).read_bytes()).hexdigest(),
+        "nuisance_selection_source_sha256": sha256(Path(nuisance_selection.__file__).read_bytes()).hexdigest(),
+        "taskwise_routing_source_sha256": sha256(Path(__file__).with_name("stage2_taskwise_policy.py").read_bytes()).hexdigest(),
         **(
             {
                 "matched_batch_source_sha256": sha256(
@@ -405,7 +409,8 @@ def _nuisances(train, valid, definitions, t, y, *, binary, policy, seed):
     if not np.isfinite(e).all() or not np.isfinite(m).all():
         raise RuntimeError("nuisance cross-fitting did not predict every training row")
     arm_predictions = {}
-    if binary:
+    support_models = {"treatment": full[0], "outcome": full[1]}
+    if binary or policy.selection_mode == "multi_model":
         try:
             for arm in (0, 1):
                 oof = np.full(len(y), np.nan)
@@ -418,7 +423,7 @@ def _nuisances(train, valid, definitions, t, y, *, binary, policy, seed):
                         train.iloc[hold],
                         definitions,
                         y[rows],
-                        binary=True,
+                        binary=binary,
                         kind="main",
                         treatment=t[rows],
                         valid_treatment=t[hold],
@@ -441,7 +446,7 @@ def _nuisances(train, valid, definitions, t, y, *, binary, policy, seed):
                     valid,
                     definitions,
                     y[rows],
-                    binary=True,
+                    binary=binary,
                     kind="main",
                     treatment=t[rows],
                     valid_treatment=np.zeros(len(valid)),
@@ -455,11 +460,20 @@ def _nuisances(train, valid, definitions, t, y, *, binary, policy, seed):
                     )
                 arm_predictions[f"training_mu{arm}"] = oof.tolist()
                 arm_predictions[f"validation_mu{arm}"] = fitted["prediction"].tolist()
+                support_models[f"mu{arm}"] = fitted
         except NotEstimable as exc:
             arm_predictions = {
                 "dina_nuisance_status": "not_estimable",
                 "dina_nuisance_reason": str(exc),
             }
+    support_records = {
+        role: _coefficient_records(model, definitions, block="main", role=role, policy=policy)
+        for role, model in support_models.items()
+    }
+    supports = {
+        role: {r["feature_id"] for r in records if r["selected"] is True}
+        for role, records in support_records.items()
+    }
     return {
         **arm_predictions,
         "training_propensity": e.tolist(),
@@ -468,6 +482,16 @@ def _nuisances(train, valid, definitions, t, y, *, binary, policy, seed):
         "validation_outcome": full[1]["prediction"].tolist(),
         "crossfit_audit": audits,
         "validation_fit_audits": [x["audit"] for x in full],
+        "predictive_support": {
+            "task_feature_ids": {
+                "treatment": sorted(supports["treatment"]),
+                "outcome": sorted(set().union(*(v for k, v in supports.items() if k != "treatment"))),
+            },
+            "model_group_evidence": support_records,
+            "model_fit_audits": {k: v["audit"] for k, v in support_models.items()},
+            "coefficient_tolerance": policy.coefficient_tolerance,
+            "selection_uses_validation_labels": False,
+        },
     }
 
 
@@ -947,7 +971,7 @@ def select_stage2_features_multi_model(
     directory = Path(checkpoint_dir) / fingerprint[:20] if checkpoint_dir is not None else None
     if directory is not None:
         _write_json(directory / "input.json", {**identity, "input_fingerprint": fingerprint})
-    cells, oof = [], []
+    cells, oof, nuisance_folds = [], [], []
     cfg = policy.multi_model
     families = cfg.active_families(outcome_type)
     by_id = {_key(f): f for f in definitions}
@@ -980,6 +1004,14 @@ def select_stage2_features_multi_model(
                     train, valid, definitions, t, y, binary=binary, policy=policy, seed=fold_seed
                 ),
             ).result()
+            nuisance_folds.append({
+                "inner_fold": fold,
+                "partition_repeat": split["partition_repeat"],
+                "partition_fold": split["partition_fold"],
+                "fit_row_ids": list(map(int, train_ids)),
+                "heldout_row_ids": list(map(int, valid_ids)),
+                **nuisance["predictive_support"],
+            })
             e, m, ev, mv = [
                 np.asarray(nuisance[key])
                 for key in (
@@ -1239,18 +1271,23 @@ def select_stage2_features_multi_model(
     }
     if not any(availability.values()):
         raise NotEstimable("all_model_families_were_unevaluable")
-    # Roles are assigned only after the LLM themes and reconciliation passes.
-    decisions = [
-        {
-            "feature_id": _key(f),
-            "roles": (
-                list(f.get("roles", [])) if f.get("configured_explicit_feature") is True else []
-            ),
-            "selection_source": "awaiting_multi_model_adjudication",
-        }
-        for f in definitions
-    ]
-    locked = [dict(f) for f in definitions if f.get("configured_explicit_feature") is True]
+    # With count search disabled, use joint orthogonal-model group support for
+    # modifiers. The default path leaves all unlocked modifier choices to the
+    # existing nested ranking/count/architecture search.
+    effect_votes = None
+    if not cfg.modifier_count.enabled:
+        effect_votes = dict.fromkeys(by_id, 0)
+        for fold in nuisance_folds:
+            supported = {
+                r["feature_id"] for cell in cells
+                if cell["inner_fold"] == fold["inner_fold"] and cell["family"] == "orthogonal_linear"
+                for r in cell["records"] if r["role"] == "effect" and r["selected"] is True
+            }
+            for key in supported:
+                effect_votes[key] += 1
+    selected, decisions, nuisance_report = nuisance_selection.select_predictive_nuisances(
+        definitions, nuisance_folds, effect_votes=effect_votes,
+    )
     report = {
         "schema_version": SCHEMA_VERSION,
         "status": "complete",
@@ -1269,9 +1306,12 @@ def select_stage2_features_multi_model(
             "model_family": "group_elastic_net",
             "predictions": sorted(oof, key=lambda r: r["_oci_row_id"]),
             "predictions_are_inner_fold_out_of_fold": True,
+            "design_policy": "all_candidates_then_independent_fold_local_regularization",
+            "cross_fold_screen_union_is_used": False,
         },
+        "nuisance_selection": nuisance_report,
         "decisions": decisions,
-        "retained_feature_ids": [_key(f) for f in locked],
+        "retained_feature_ids": [_key(f) for f in selected],
         "selection_authority": "multi_model",
         "latent_construction": "disabled",
         "stability_contract": {
@@ -1288,4 +1328,4 @@ def select_stage2_features_multi_model(
             directory / "summary.json",
             {k: v for k, v in report.items() if k not in {"cells", "cross_fitted_nuisance_models"}},
         )
-    return locked, report, definitions, []
+    return selected, report, definitions, []

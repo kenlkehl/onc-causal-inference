@@ -7610,17 +7610,16 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     if multi_model:
         from oci.inference import stage2_modifier_count
 
-        monkeypatch.setattr(stage2_analysis, "adjudicate_stage2_roles", lambda **kw: (
-            [{**f, "roles": ["effect_modifier"]} for f in kw["definitions"]],
-            {"decisions": [{"feature_id": f["feature_id"], "roles": ["effect_modifier"]}
-                           for f in kw["definitions"]]}, {}))
+        monkeypatch.setattr(stage2_analysis, "adjudicate_stage2_roles",
+                            lambda **kw: pytest.fail("multi_model must skip LLM retention"))
 
         def choose_constant(**kw):
             assert kw["run_numerical"] is stage2_analysis._run_stage2_statistical_selection
             assert kw["extracted_fit"]._oci_row_id.tolist() == [0, 1, 2]
             assert kw["inner_splits"] == split["inner_splits"]
             assert kw["role_policy"].enabled
-            assert kw["selected"][0]["roles"] == ["effect_modifier"]
+            assert kw["selected"] == []
+            assert kw["role_report"]["llm_requests"] == 0
             assert kw["estimation_trees"] in {10, 20}
             count_calls.append(kw["estimation_trees"])
             report = {"status": "complete", "chosen_modifier_count": 0, "chosen_estimator": "linear_interactions"}
@@ -7655,7 +7654,7 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     assert result["review_rounds"] == 1
     assert len(count_calls) == int(multi_model)
     if multi_model:
-        assert result["selection"]["final_role_assignment"] == "llm_confounders_and_nested_r_loss_modifiers"
+        assert result["selection"]["final_role_assignment"] == "predictive_nuisances_and_nested_r_loss_modifiers"
         assert result["selection"]["modifier_count_selection"]["chosen_modifier_count"] == 0
         resumed = run_fold_analysis(**arguments)
         assert resumed["estimation"]["estimator"] == "linear_interactions"

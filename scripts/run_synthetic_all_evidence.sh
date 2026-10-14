@@ -307,6 +307,9 @@ fi
 # Explicit saved-run launches return above and retain their recorded policy.
 stage2_selection_mode="${STAGE2_SELECTION_MODE:-multi_model}"
 stage2_policy_args+=(--set "stage2.statistical_selection.selection_mode=${stage2_selection_mode}")
+if [[ "${stage2_selection_mode}" == "multi_model" ]]; then
+    stage2_policy_args+=(--set stage2.role_adjudication.enabled=false)
+fi
 stage2_policy_args+=(--set "stage2.modeling_workers=${STAGE2_MODELING_WORKERS:-1}")
 if (( stage2_managed_extractor )); then
     stage2_policy_args+=(

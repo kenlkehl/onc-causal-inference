@@ -25,7 +25,7 @@ from .stage2_dina import fit_effect as fit_dina_effect, unpack_nuisances as unpa
 from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = "stage2_nested_modifier_count_v5_stable_joint"
+SCHEMA_VERSION = "stage2_nested_modifier_count_v6_predictive_nuisances"
 
 
 def choose_modifier_count(fold_losses, *, rule):
@@ -193,6 +193,16 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
         decision = decisions[key]
         decision["pre_modifier_count_roles"] = decision["roles"]
         decision["roles"] = roles
+        nuisance_roles = list(previous.get(key, {}).get(
+            "nuisance_model_roles", ["treatment", "outcome"] if "confounder" in roles else []
+        ))
+        tasks = nuisance_roles + (["effect"] if "effect_modifier" in roles else [])
+        routing = {
+            "nuisance_model_roles": nuisance_roles,
+            "modeling_tasks": tasks,
+            "forest_role": "X" if "effect_modifier" in roles else "W" if nuisance_roles else "excluded",
+        }
+        decision.update(routing, retained=bool(roles))
         rank, evidence = rank_by_id.get(key, (None, {}))
         decision["modifier_count_selection"] = {
             "rank": rank,
@@ -202,7 +212,7 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
         if definition.get("configured_explicit_feature") is not True:
             decision["rationale"] = (
                 decision.get("rationale", "")
-                + f" Modifier role set by nested R-loss prefix selection (rank={rank}, additional budget={count}); confounder role preserved."
+                + f" Modifier role set by nested R-loss prefix selection (rank={rank}, additional budget={count}); nuisance task supports preserved."
             )
             if key in kept_modifiers:
                 decision["evidence_ids"] = sorted(
@@ -213,11 +223,14 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
         if roles:
             feature = deepcopy(previous.get(key, definition))
             feature["roles"] = roles
+            feature.update(routing)
             if definition.get("configured_explicit_feature") is not True:
-                feature["nuisance_model_roles"] = (
-                    ["treatment", "outcome"] if "confounder" in roles else []
-                )
-                feature["selection_source"] = "multi_model_llm_confounders_nested_r_loss_modifiers"
+                feature["selection_source"] = "multi_model_predictive_nuisances_nested_r_loss_modifiers"
+                feature["selection_authority"] = "multi_model"
+                feature["roles_are_model_routing_not_causal_labels"] = True
+                decision.update({k: feature[k] for k in (
+                    "selection_source", "selection_authority", "roles_are_model_routing_not_causal_labels"
+                )})
             retained.append(feature)
     assert {f["feature_id"] for f in retained if "confounder" in f["roles"]} == {
         f["feature_id"] for f in selected if "confounder" in f["roles"]
@@ -251,7 +264,7 @@ def select_modifier_count(
     estimation_trees,
     run_numerical=None,
 ):
-    """Jointly select count/architecture, preserving all retained confounders."""
+    """Jointly select count/architecture, preserving each nuisance task's support."""
     policy.validate()
     cfg = policy.multi_model.modifier_count
     if not cfg.enabled or not definitions:
@@ -260,8 +273,6 @@ def select_modifier_count(
             role_report,
             {"status": "disabled" if not cfg.enabled else "no_candidates"},
         )
-    if not role_policy.enabled:
-        raise ValueError("modifier count selection requires LLM role adjudication")
     if (
         isinstance(estimation_trees, bool)
         or not isinstance(estimation_trees, int)
@@ -642,7 +653,7 @@ def select_modifier_count(
             "validation_adjustment": "all frozen candidates for scoring nuisances and interaction main effects; selected prefix for effect inputs/interactions",
             "final_refit_adjustment": "retained confounders and modifiers; forest refits DML nuisances, interaction model retunes outcome penalty",
             "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
-            "confounder_policy": "preserve every confounder retained by the full-training role adjudication",
+            "confounder_policy": "preserve separate statistically selected nuisance task supports and investigator locks",
             "boundaries": {
                 "ranking_and_numerical_evidence_nested_within_count_training": True,
                 "concept_review_nested_within_count_training": cfg.concept_review,

@@ -188,9 +188,11 @@ def test_failed_dina_cell_keeps_diagnostics_and_other_model_evidence(monkeypatch
                         lambda self, outcome: ("univariable", "orthogonal_linear"))
 
     def nuisance(train, valid, *args, **kwargs):
-        return {f"{partition}_{name}": [value] * len(frame)
+        result = {f"{partition}_{name}": [value] * len(frame)
                 for partition, frame in [("training", train), ("validation", valid)]
                 for name, value in [("propensity", 0.5), ("outcome", 0.4), ("mu0", 0.3), ("mu1", 0.5)]}
+        result["predictive_support"] = {"task_feature_ids": {"treatment": [], "outcome": []}}
+        return result
 
     def other_model(train, definitions, *args, **kwargs):
         return {"records": [numerical._record(d["feature_id"], "outcome", selected=True, score=0.1)

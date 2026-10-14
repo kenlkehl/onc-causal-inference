@@ -92,7 +92,7 @@
       "modifier_continuous_winsor_quantile": 0.005,
       "selection_mode": "multi_model",
       "multi_model": {
-        "schema_version": "stage2_multi_model_selection_v5_stable_joint",
+        "schema_version": "stage2_multi_model_selection_v6_predictive_nuisances",
         "repeats": 3,
         "row_fraction": 0.8,
         "l1_ratios": [
@@ -149,7 +149,7 @@
       }
     },
     "role_adjudication": {
-      "enabled": true,
+      "enabled": false,
       "max_description_chars": 1200,
       "max_measurement_definition_chars": 1600,
       "max_categories_per_feature": 40,
