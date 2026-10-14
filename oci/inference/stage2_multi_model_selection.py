@@ -211,6 +211,7 @@ def _fit_linear(
     seed,
     ratio,
     modifier_ids=None,
+    path_submit=None,
 ):
     """Tune inside training, refitting encoders in every penalty-CV partition."""
     y = np.asarray(y, dtype=float)
@@ -253,9 +254,8 @@ def _fit_linear(
         }
     if not splits:
         raise NotEstimable("insufficient_rows_for_penalty_cv")
-    losses = np.full((len(splits), len(alphas)), np.inf)
-    cv_iterations = []
-    for fit, hold in splits:
+
+    def compute_path(fit, hold):
         design = linear._encode_design(
             train.iloc[fit],
             train.iloc[hold],
@@ -268,9 +268,9 @@ def _fit_linear(
         )
         group_structure = linear._group_structure(group_ids)
         initial = None
-        fold_index = len(cv_iterations)
         iterations = []
-        for a, alpha in enumerate(alphas):
+        losses = []
+        for alpha in alphas:
             state = linear._fit_group_elastic_net(
                 fit_x,
                 y[fit],
@@ -287,13 +287,30 @@ def _fit_linear(
             iterations.append({"iterations": state.iterations, "converged": state.converged})
             if state.converged:
                 prediction = linear._state_prediction(state, hold_x, binary=binary)
-                losses[fold_index, a] = linear._loss(y[hold], prediction, binary=binary)
-        cv_iterations.append(iterations)
+                loss = linear._loss(y[hold], prediction, binary=binary)
+                losses.append(float(loss) if np.isfinite(loss) else str(float(loss)))
+            else:
+                losses.append(None)
+        return {"losses": losses, "iterations": iterations}
+
+    paths = []
+    for index, (fit, hold) in enumerate(splits):
+        compute = partial(compute_path, fit, hold)
+        paths.append(
+            path_submit(index, compute) if path_submit is not None else modeling.completed(compute())
+        )
+    results = [path.result() for path in paths]
+    losses = np.asarray([
+        [np.inf if loss is None else float(loss) for loss in result["losses"]]
+        for result in results
+    ])
+    cv_iterations = [result["iterations"] for result in results]
     means = losses.mean(axis=0)
     if not np.isfinite(means).any():
         raise NotEstimable("no_regularization_value_converged_in_every_cv_fold")
     best = int(np.argmin(means))  # Descending alpha breaks ties toward stronger regularization.
-    state = linear._fit_group_elastic_net(
+    refit = partial(
+        linear._fit_group_elastic_net,
         x,
         y,
         groups=linear._group_structure(groups),
@@ -304,6 +321,7 @@ def _fit_linear(
         max_iter=policy.max_iter,
         tolerance=policy.optimization_tolerance,
     )
+    state = modeling.call(refit) if path_submit is not None else refit()
     if not state.converged:
         raise NotEstimable("final_penalized_fit_did_not_converge")
     return {

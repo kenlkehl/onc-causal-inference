@@ -762,7 +762,7 @@ Set these thread limits before starting Python directly on high-core-count
 machines. The two synthetic wrapper scripts set all four to `1` by default.
 Stage 2 already controls primary-model request concurrency with `stage2.workers`
 and extraction concurrency with `stage2.extraction_llm.workers`. Numerical
-multi-model evidence and modifier-count evaluations use a separate global CPU
+multi-model evidence, modifier-count evaluations, and final estimation use a global CPU
 process budget, `stage2.modeling_workers` (default `1`). Set
 values above `1` to enable the shared pool; `1` retains serial execution within
 each outer fold. Use
@@ -770,7 +770,12 @@ each outer fold. Use
 resumes; fresh RTX PRO 6000 × 8 launches default to `128` for both synthetic
 cohorts. Saved runs retain their configured value unless explicitly overridden.
 All outer folds share
-this pool, with one native thread per fit and a bounded queue. Increasing this
+this pool, with one native thread per process fit and a bounded queue. Final
+estimation dispatches independent nuisance fits and interaction-model validation
+paths to this pool, saving each completed result under `estimation/fit_checkpoints`.
+Final forests reserve a share of the same CPU budget for joblib threads, including
+their internal nuisance CV; native BLAS/OpenMP threads remain limited to one.
+Increasing this
 budget preserves compatible checkpoints, model seeds and validation partitions.
 It is independent of the number of GPUs. Allowing
 OpenBLAS, OpenMP, MKL, or NumExpr to create another native thread pool per

@@ -289,11 +289,34 @@ GPU count and statistical policy.
 
 Missing nuisance fits, independent family/repetition/subset evidence jobs and
 architecture/count/seed evaluations use this pool. Coordinators remain in the
-parent process, queued jobs are bounded globally to twice the worker count,
+parent process, outstanding process jobs are bounded globally by the worker count,
 and each fit uses one native thread. Selection splits still advance in order;
 within-fit penalty warm starts stay sequential. Results are collected in the
 original deterministic order with the original seeds and row boundaries.
 Completed checkpoints are read locally without submitting a fit.
+
+Final estimation uses the same budget. Its cross-fitting splits dispatch the
+treatment, control-outcome, and treated-outcome nuisance fits independently;
+the three full-training nuisance fits also run independently. With five inner
+splits, this provides 15 cross-fitting jobs per outer fold. Each job saves its
+validated predictions in `estimation/fit_checkpoints/<input-and-source-identity>/`.
+The cache checks input identity, result checksum, row count, and finite values.
+An interrupted run reuses completed jobs even when resumed with a different
+worker count. Changed inputs or implementation use a separate cache directory.
+
+For final interaction models, independent regularization-CV partitions run in
+the pool and are checkpointed individually. Penalty warm starts within each
+partition stay sequential, and the full-training refit uses the same selected
+penalty. This optional dispatch does not change selection-stage fitting.
+
+Final forests reserve joblib thread capacity from the same global budget. Their
+per-fit share is `max(1, modeling_workers // concurrent_outer_folds)`; a fit waits
+for that capacity when other modeling jobs are active. FIFO reservations prevent
+a stream of single-fit jobs from starving a forest reservation. It covers fitting,
+internal nuisance CV, and prediction, and is released on success or failure.
+It cannot oversubscribe the process pool; individual native matrix operations
+still use one thread. One-worker and direct-call execution remain serial within
+each outer fold. The worker budget is independent of dataset and GPU count.
 
 The scheduling-only transition includes exact old/new source-hash aliases in
 `stage2_modeling_source_aliases.json`, preserving existing numerical evidence,

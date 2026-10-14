@@ -8738,7 +8738,9 @@ class PlainHandoffStage2:
             )
             from .stage2_modeling_pool import modeling_session
 
-            with modeling_session(self.config.modeling_workers), concurrent.futures.ThreadPoolExecutor(
+            with modeling_session(
+                self.config.modeling_workers, parallel_fits=fold_workers
+            ), concurrent.futures.ThreadPoolExecutor(
                 max_workers=fold_workers,
                 thread_name_prefix="stage2-outer-fold",
             ) as outer_executor:

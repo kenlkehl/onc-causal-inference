@@ -166,11 +166,15 @@ def final_fixture(monkeypatch, tmp_path):
 
     def classifier(x, y, **kw):
         calls.append(("nuisance", len(y)))
-        return object()
+        return {"rows": len(y), "seed": kw["seed"]}
 
     monkeypatch.setattr(analysis, "_fit_classifier", classifier)
     monkeypatch.setattr(analysis, "_fit_outcome_models", lambda *a, **kw: object())
-    monkeypatch.setattr(analysis, "_predict_probability", lambda model, x: heldp.copy())
+    monkeypatch.setattr(
+        analysis, "_predict_probability",
+        lambda model, x: heldp.copy() if model["rows"] == 18
+        else np.full(len(x), 0.2 if model["seed"] == 10003 else 0.8),
+    )
     monkeypatch.setattr(
         analysis, "_predict_outcomes", lambda model, x: (np.full(len(x), 0.2), np.full(len(x), 0.8))
     )

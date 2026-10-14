@@ -23,7 +23,17 @@ def effect_model_family(estimator, outcome_type):
 
 
 def fit_interaction_effect(
-    *, train, valid, definitions, modifier_ids, treatment, outcome, binary, policy, seed
+    *,
+    train,
+    valid,
+    definitions,
+    modifier_ids,
+    treatment,
+    outcome,
+    binary,
+    policy,
+    seed,
+    path_submit=None,
 ):
     """Fit g(E[Y]) = intercept + T + main effects + T:selected modifiers.
 
@@ -54,6 +64,7 @@ def fit_interaction_effect(
             policy=policy,
             seed=seed,
             ratio=policy.l1_ratio,
+            path_submit=path_submit,
         )
     mu = []
     for arm in (0, 1):
@@ -78,9 +89,9 @@ def fit_interaction_effect(
         "mu1": mu[1],
         "audit": {
             **model["audit"],
-            "model_family": "penalized_logistic_interactions"
-            if binary
-            else "penalized_linear_interactions",
+            "model_family": (
+                "penalized_logistic_interactions" if binary else "penalized_linear_interactions"
+            ),
             "outcome_model_contract": {
                 "link": "logit" if binary else "identity",
                 "effect_scale": "probability_difference" if binary else "outcome_difference",

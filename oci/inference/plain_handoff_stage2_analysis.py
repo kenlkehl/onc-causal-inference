@@ -40,6 +40,7 @@ from . import stage2_note_search as note_search_extraction
 from .stage2_note_search import NoteSearchConfig
 from ..colbert_config import ColBERTConfig
 from . import stage2_colbert
+from . import stage2_modeling_pool as modeling
 
 from ..models.causal_forest_head import CausalForestHead
 from ..models.elastic_net_nuisance import (
@@ -8820,6 +8821,36 @@ def _extract_training_with_ontology_feedback(
     return extracted, current, len(rounds)
 
 
+def _fit_nuisance_prediction(x, y, valid, *, binary, seed):
+    model = _fit_classifier(x, y, seed=seed) if binary else _fit_regressor(x, y, seed=seed)
+    return _predict_probability(model, valid) if binary else np.asarray(model.predict(valid), float)
+
+
+def _nuisance_prediction_futures(
+    x_t, x_y, treatment, outcome, valid_t, valid_y, *, binary, seed,
+    checkpoint_dir=None, checkpoint_fingerprint="uncached", name="full_training",
+):
+    from functools import partial
+    from .stage2_final_modeling import prediction_future
+
+    pending = [prediction_future(
+        checkpoint_dir, f"{name}/propensity", checkpoint_fingerprint,
+        partial(_fit_nuisance_prediction, x_t, treatment, valid_t, binary=True, seed=seed),
+        len(valid_t),
+    )]
+    for arm in (0, 1):
+        mask = treatment.astype(int) == arm
+        if not mask.any():
+            mask = np.ones(len(treatment), dtype=bool)
+        pending.append(prediction_future(
+            checkpoint_dir, f"{name}/mu{arm}", checkpoint_fingerprint,
+            partial(_fit_nuisance_prediction, x_y[mask], outcome[mask], valid_y,
+                    binary=binary, seed=seed + arm),
+            len(valid_y),
+        ))
+    return pending
+
+
 def _cross_fitted_nuisance(
     *,
     dataset: pd.DataFrame,
@@ -8831,7 +8862,11 @@ def _cross_fitted_nuisance(
     outcome_column: str,
     binary: bool,
     seed: int,
+    checkpoint_dir: Path | None = None,
+    checkpoint_fingerprint: str = "uncached",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    from .stage2_final_modeling import prediction_result
+
     fit_ids = [int(value) for value in fit_ids]
     position = {row_id: index for index, row_id in enumerate(fit_ids)}
     e = np.full(len(fit_ids), np.nan)
@@ -8840,6 +8875,7 @@ def _cross_fitted_nuisance(
     extracted_by_id = extracted.set_index("_oci_row_id", drop=False)
     propensity_defs = _definitions_for_nuisance_role(definitions, "treatment")
     outcome_defs = _definitions_for_nuisance_role(definitions, "outcome")
+    pending = []
     for fold_index, fold in enumerate(inner_splits, start=1):
         train_ids = [int(value) for value in fold["fit_row_ids"] if int(value) in position]
         valid_ids = [int(value) for value in fold["heldout_row_ids"] if int(value) in position]
@@ -8856,23 +8892,17 @@ def _cross_fitted_nuisance(
         x_t_valid = t_encoder.transform(valid_features)
         x_y_train = y_encoder.transform(train_features)
         x_y_valid = y_encoder.transform(valid_features)
-        treatment_model = _fit_classifier(
-            x_t_train,
-            t_train,
-            seed=seed + fold_index,
-        )
-        outcome_models = _fit_outcome_models(
-            x_y_train,
-            t_train,
-            y_train,
-            binary=binary,
-            seed=seed + fold_index,
-        )
-        fold_mu0, fold_mu1 = _predict_outcomes(outcome_models, x_y_valid)
         valid_positions = [position[row_id] for row_id in valid_ids]
-        e[valid_positions] = _predict_probability(treatment_model, x_t_valid)
-        mu0[valid_positions] = fold_mu0
-        mu1[valid_positions] = fold_mu1
+        jobs = _nuisance_prediction_futures(
+            x_t_train, x_y_train, t_train, y_train, x_t_valid, x_y_valid,
+            binary=binary, seed=seed + fold_index,
+            checkpoint_dir=checkpoint_dir, checkpoint_fingerprint=checkpoint_fingerprint,
+            name=f"cross_fit/fold_{fold_index:03d}",
+        )
+        pending.append((valid_positions, jobs))
+    for valid_positions, jobs in pending:
+        for target, job in zip((e, mu0, mu1), jobs):
+            target[valid_positions] = prediction_result(job, len(valid_positions))
     if np.isnan(e).any() or np.isnan(mu0).any() or np.isnan(mu1).any():
         raise ValueError(
             "inner splits do not provide one nuisance prediction for every outer-fit row"
@@ -8927,6 +8957,13 @@ def estimate_outer_fold(
             "propensity_clip": propensity_clip,
             "estimation_trees": estimation_trees,
             "estimator": estimator,
+            "final_fit_sources": {
+                name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+                for name in (
+                    "plain_handoff_stage2_analysis.py", "stage2_final_modeling.py",
+                    "../models/elastic_net_nuisance.py", "../models/causal_forest_head.py",
+                )
+            },
             "interaction_policy": (
                 statistical_policy.public_dict()
                 if estimator in {"linear_interactions", "dina"}
@@ -8973,6 +9010,14 @@ def estimate_outer_fold(
             pass
         LOGGER.info("rerun incompatible Stage 2 outer-fold estimation: %s", output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    from . import stage2_final_modeling as final_modeling
+
+    # Worker counts are operational: changing them can reuse these predictions.
+    # New source/input identities use separate directories, preserving prior fits.
+    final_fit_fingerprint = estimation_input_fingerprint
+    final_fit_dir = output_dir / "fit_checkpoints" / final_fit_fingerprint
+    LOGGER.info("Stage 2 final estimation started output=%s shared_modeling_pool=%s",
+                output_dir, modeling.enabled())
     fit_ids = [int(value) for value in split["fit_row_ids"]]
     heldout_ids = [int(value) for value in split["heldout_row_ids"]]
     binary = str(outcome_type) == "binary"
@@ -9005,6 +9050,8 @@ def estimate_outer_fold(
         outcome_column=outcome_column,
         binary=binary,
         seed=seed + 30_000,
+        checkpoint_dir=final_fit_dir,
+        checkpoint_fingerprint=final_fit_fingerprint,
     )
     fit_keep = propensity_eligibility(fit_propensity, min_propensity, max_propensity)
     _write_frame(
@@ -9034,20 +9081,15 @@ def estimate_outer_fold(
     x_t_heldout = t_encoder.transform(extracted_heldout)
     x_y_fit = y_encoder.transform(extracted_fit)
     x_y_heldout = y_encoder.transform(extracted_heldout)
-    treatment_model = _fit_classifier(
-        x_t_fit,
-        t_fit,
-        seed=seed + 10_000,
+    nuisance_jobs = _nuisance_prediction_futures(
+        x_t_fit, x_y_fit, t_fit, y_fit, x_t_heldout, x_y_heldout,
+        binary=binary, seed=seed + 10_000, checkpoint_dir=final_fit_dir,
+        checkpoint_fingerprint=final_fit_fingerprint,
     )
-    outcome_models = _fit_outcome_models(
-        x_y_fit,
-        t_fit,
-        y_fit,
-        binary=binary,
-        seed=seed + 10_000,
+    propensity, mu0, mu1 = (
+        final_modeling.prediction_result(job, len(heldout_ids)) for job in nuisance_jobs
     )
-    propensity = _predict_probability(treatment_model, x_t_heldout)
-    mu0, mu1 = _predict_outcomes(outcome_models, x_y_heldout)
+    LOGGER.info("Stage 2 final nuisances completed output=%s", output_dir)
     heldout_keep = propensity_eligibility(propensity, min_propensity, max_propensity)
     overlap = {
         "fit": fit_overlap,
@@ -9073,31 +9115,32 @@ def estimate_outer_fold(
         else:
             constant_effect_design = False
         controls_fit = w_fit[fit_keep] if w_fit.shape[1] else None
-        causal_forest = CausalForestHead(
-            n_estimators=int(estimation_trees),
-            max_depth=None,
-            min_samples_leaf=10,
-            max_features="sqrt",
-            honest=True,
-            inference=True,
-            random_state=seed + 20_000,
-            tune_model=False,
-            subforest_size=next(size for size in (4, 3, 2, 1) if int(estimation_trees) % size == 0),
-            n_jobs=1,
-            outcome_type=outcome_type,
-        )
-        causal_forest.fit(
-            x_effect_fit[fit_keep],
-            t_fit[fit_keep],
-            y_fit[fit_keep],
-            W=controls_fit,
-        )
-        effect_predictions = causal_forest.predict(
-            x_effect_heldout[heldout_keep],
-            return_ci=True,
-        )
+        with modeling.threaded_fit() as forest_jobs:
+            causal_forest = CausalForestHead(
+                n_estimators=int(estimation_trees),
+                max_depth=None,
+                min_samples_leaf=10,
+                max_features="sqrt",
+                honest=True,
+                inference=True,
+                random_state=seed + 20_000,
+                tune_model=False,
+                subforest_size=next(size for size in (4, 3, 2, 1) if int(estimation_trees) % size == 0),
+                n_jobs=forest_jobs,
+                outcome_type=outcome_type,
+            )
+            causal_forest.fit(
+                x_effect_fit[fit_keep],
+                t_fit[fit_keep],
+                y_fit[fit_keep],
+                W=controls_fit,
+            )
+            effect_predictions = causal_forest.predict(
+                x_effect_heldout[heldout_keep],
+                return_ci=True,
+            )
 
-        fit_audit = causal_forest.fit_audit()
+            fit_audit = causal_forest.fit_audit()
         architecture_diagnostics = {
             "causal_forest_trees": int(estimation_trees),
             "causal_forest_honest": True,
@@ -9111,9 +9154,11 @@ def estimate_outer_fold(
             "constant_effect_design": constant_effect_design,
         }
     elif estimator == "dina":
+        from functools import partial
         from .stage2_dina import fit_effect as fit_dina_effect
 
-        result = fit_dina_effect(
+        result = modeling.call(partial(
+            fit_dina_effect,
             train=eligible_fit,
             valid=extracted_heldout.iloc[np.flatnonzero(heldout_keep)],
             definitions=definitions,
@@ -9122,7 +9167,7 @@ def estimate_outer_fold(
             outcome=y_fit[fit_keep],
             policy=statistical_policy,
             seed=seed + 20_000,
-        )
+        ))
         effect_predictions = {
             "tau_pred": result["tau"],
             "log_odds_ratio": result["delta"],
@@ -9146,6 +9191,9 @@ def estimate_outer_fold(
             binary=binary,
             policy=statistical_policy,
             seed=seed + 20_000,
+            path_submit=final_modeling.penalty_path_submitter(
+                final_fit_dir, final_fit_fingerprint
+            ),
         )
         effect_predictions = {"tau_pred": result["tau"]}
         fit_audit = result["audit"]
