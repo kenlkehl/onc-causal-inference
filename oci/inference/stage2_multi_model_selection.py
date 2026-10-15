@@ -288,6 +288,8 @@ def _fit_linear(
     modifier_ids=None,
     path_submit=None,
     adjustment=None,
+    unpenalized_modifier_ids=None,
+    modifier_ridge=None,
 ):
     """Tune inside training, leaving the explicit treatment main effect unpenalized.
 
@@ -295,11 +297,38 @@ def _fit_linear(
     (m, p), "names": [...]}``: per-row covariates that enter as unpenalized main
     effects, never interacted with T. They are standardized on the training rows
     of each fit (CV partition or final refit).
+
+    ``unpenalized_modifier_ids`` (interaction models only) exempts those
+    modifiers' main-effect and interaction groups from the tuned penalty in
+    every CV fit and the refit; the tuning then applies to the remaining
+    groups. ``modifier_ridge`` instead gives those groups the fixed ridge
+    ``0.5 * modifier_ridge * ||b||^2`` (mean-loss scale), whatever the tuned
+    regularization.
     """
     y = np.asarray(y, dtype=float)
     treatment = np.asarray(treatment, dtype=float)
     if adjustment is not None and kind != "interactions":
         raise ValueError("nuisance adjustment covariates apply only to interaction models")
+    exempt_modifiers = sorted(set(map(str, unpenalized_modifier_ids or ())))
+    if exempt_modifiers and kind != "interactions":
+        raise ValueError("unpenalized modifier groups apply only to interaction models")
+    if modifier_ids is not None and not set(exempt_modifiers).issubset(modifier_ids):
+        raise ValueError("unpenalized modifiers must be interaction modifiers")
+    if modifier_ridge is not None and (
+        not exempt_modifiers
+        or isinstance(modifier_ridge, bool)
+        or not np.isfinite(float(modifier_ridge))
+        or float(modifier_ridge) <= 0
+    ):
+        raise ValueError("a fixed modifier ridge must be positive and needs exempt modifiers")
+    modifier_groups = tuple(
+        group for key in exempt_modifiers for group in (f"main:{key}", f"effect:{key}")
+    )
+    modifier_ridge_map = (
+        {group: float(modifier_ridge) for group in modifier_groups}
+        if modifier_ridge is not None
+        else None
+    )
     if adjustment is not None:
         adjustment_train = np.asarray(adjustment["train"], dtype=float)
         adjustment_valid = np.asarray(adjustment["valid"], dtype=float)
@@ -388,7 +417,9 @@ def _fit_linear(
         if fold_adjustment is not None:
             fold_unpenalized = (*fold_unpenalized, *fold_adjustment.groups)
         group_structure = linear._group_structure(
-            group_ids, unpenalized_feature_ids=fold_unpenalized
+            group_ids,
+            unpenalized_feature_ids=(*fold_unpenalized, *modifier_groups),
+            fixed_ridge=modifier_ridge_map,
         )
         initial = None
         iterations = []
@@ -436,7 +467,11 @@ def _fit_linear(
         linear._fit_group_elastic_net,
         x,
         y,
-        groups=linear._group_structure(groups, unpenalized_feature_ids=unpenalized_groups),
+        groups=linear._group_structure(
+            groups,
+            unpenalized_feature_ids=(*unpenalized_groups, *modifier_groups),
+            fixed_ridge=modifier_ridge_map,
+        ),
         regularization=float(alphas[best]),
         group_ratio=ratio,
         binary=binary,
@@ -447,6 +482,7 @@ def _fit_linear(
     state = modeling.call(refit) if path_submit is not None else refit()
     if not state.converged:
         raise NotEstimable("final_penalized_fit_did_not_converge")
+    present_modifier_groups = [group for group in modifier_groups if group in set(groups)]
     return {
         "prediction": linear._state_prediction(state, xv, binary=binary),
         "coefficients": state.coefficients,
@@ -464,7 +500,23 @@ def _fit_linear(
             "cv_loss": float(means[best]),
             "selected_on_grid_boundary": best in {0, len(alphas) - 1},
             "cv_optimizer_audit": cv_iterations,
-            "unpenalized_groups": list(unpenalized_groups),
+            "unpenalized_groups": [
+                *unpenalized_groups,
+                *(present_modifier_groups if modifier_ridge is None else []),
+            ],
+            **(
+                {
+                    "selected_modifier_groups": {
+                        "groups": present_modifier_groups,
+                        "penalty": "none" if modifier_ridge is None else "fixed_ridge",
+                        "fixed_ridge": (
+                            None if modifier_ridge is None else float(modifier_ridge)
+                        ),
+                    }
+                }
+                if modifier_groups
+                else {}
+            ),
         },
         "adjustment": final_adjustment,
     }
@@ -1065,7 +1117,7 @@ def select_stage2_features_multi_model(
             [],
             {
                 "schema_version": SCHEMA_VERSION,
-                "policy": policy.public_dict(),
+                "policy": policy.selection_dict(),
                 "status": "complete_no_candidates",
                 "decisions": [],
             },
@@ -1401,7 +1453,7 @@ def select_stage2_features_multi_model(
         "schema_version": SCHEMA_VERSION,
         "status": "complete",
         "temporal_scope": "pre_index_treatment",
-        "policy": policy.public_dict(),
+        "policy": policy.selection_dict(),
         "input_fingerprint": fingerprint,
         "inner_folds": len(inner_splits),
         "partition_repeats": cfg.stability.partition_repeats,

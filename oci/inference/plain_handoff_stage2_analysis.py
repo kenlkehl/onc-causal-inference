@@ -73,7 +73,7 @@ PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v7_r
 EXTRACTION_ROUTING_SCHEMA_VERSION = 'stage2_extraction_mode_split_v1'
 REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v2_scalar_contract_20261010'
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
-ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v10_unified_recalibrated_nuisances"
+ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v11_unpenalized_selected_interactions"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
 PRESELECTION_SNAPSHOT_SCHEMA_VERSION = "stage2_frozen_preselection_snapshot_v1"
 HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION = (
@@ -7533,11 +7533,14 @@ def estimate_outer_fold(
     from .stage2_effect_estimators import (
         NUISANCE_ADJUSTMENT_DESCRIPTION,
         PROGNOSTIC_FOREST_DESCRIPTION,
+        SELECTED_MODIFIER_PENALTY_DESCRIPTION,
         effect_model_family,
         ensemble_estimators,
         fit_interaction_effect,
         nuisance_adjustment,
         prognostic_score,
+        selected_modifier_penalty,
+        selected_modifier_penalty_summary,
     )
 
     model_family = effect_model_family(estimator, outcome_type)
@@ -7547,6 +7550,17 @@ def estimate_outer_fold(
                 "linear interaction, DINA or ensemble estimation requires a statistical policy"
             )
         statistical_policy.validate()
+    # Under orthogonal_tests the interaction model does not shrink the
+    # test-selected modifiers again (guarded; see fit_interaction_effect).
+    orthogonal_interactions = (
+        estimator in {"linear_interactions", "ensemble"}
+        and statistical_policy.multi_model.modifier_selection.rule == "orthogonal_tests"
+    )
+    modifier_penalty = (
+        selected_modifier_penalty(statistical_policy, outcome_type)
+        if orthogonal_interactions
+        else None
+    )
     validate_propensity_bounds(min_propensity, max_propensity)
     complete_path = output_dir / "complete.json"
     diagnostics_path = output_dir / "diagnostics.json"
@@ -7582,6 +7596,9 @@ def estimate_outer_fold(
                 statistical_policy.public_dict()
                 if estimator in {"linear_interactions", "dina", "ensemble"}
                 else None
+            ),
+            "selected_modifier_penalty": (
+                modifier_penalty.public_dict() if modifier_penalty is not None else None
             ),
             "interaction_source_fingerprint": (
                 _value_fingerprint(
@@ -7889,6 +7906,7 @@ def estimate_outer_fold(
                     valid_mu0=mu0[heldout_keep],
                     binary=binary,
                 ),
+                unpenalized_selected=modifier_penalty,
             )
             effect_predictions = {"tau_pred": result["tau"]}
             fit_audit = result["audit"]
@@ -7896,6 +7914,11 @@ def estimate_outer_fold(
                 "interaction_fit_audit": fit_audit,
                 "cate_confidence_intervals": "not_computed_for_penalized_interaction_model",
                 "no_selected_interactions": not effect_ids,
+                **(
+                    {"selected_modifier_penalty": selected_modifier_penalty_summary(fit_audit)}
+                    if orthogonal_interactions
+                    else {}
+                ),
             }
         return effect_predictions, fit_audit, architecture_diagnostics
 
@@ -8160,6 +8183,17 @@ def estimate_outer_fold(
             {"interaction_model_nuisance_adjustment": NUISANCE_ADJUSTMENT_DESCRIPTION}
             if estimator == "linear_interactions"
             or (ensemble is not None and "linear_interactions" in ensemble["fitted_estimators"])
+            else {}
+        ),
+        **(
+            {"interaction_model_selected_modifier_penalty": SELECTED_MODIFIER_PENALTY_DESCRIPTION}
+            if modifier_penalty is not None and (
+                estimator == "linear_interactions"
+                or (
+                    ensemble is not None
+                    and "linear_interactions" in ensemble["fitted_estimators"]
+                )
+            )
             else {}
         ),
         **(
@@ -9065,7 +9099,9 @@ def run_fold_analysis(
         "statistical_component_schema_version": (
             statistical_policy.multi_model.public_dict()["schema_version"]
         ),
-        "statistical_selection_policy": statistical_policy.public_dict(),
+        # Final-estimation-only keys (the selected-modifier penalty) are omitted:
+        # changing them refits the estimation and reuses this selection.
+        "statistical_selection_policy": statistical_policy.selection_dict(),
         "role_adjudication_policy": config.role_adjudication.public_dict(),
         "role_adjudication_llm_model": str(getattr(config, "model", "")),
         "predictive_nuisance_sources": {

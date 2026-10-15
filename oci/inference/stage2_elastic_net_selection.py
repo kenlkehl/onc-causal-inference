@@ -132,6 +132,10 @@ class Stage2ElasticNetSelectionConfig:
         result["multi_model"] = self.multi_model.public_dict()
         return result
 
+    def selection_dict(self) -> dict[str, Any]:
+        """``public_dict`` for selection identities: omits final-estimation-only keys."""
+        return {**self.public_dict(), "multi_model": self.multi_model.selection_dict()}
+
 
 def statistical_selection_config_from_mapping(
     value: Mapping[str, Any] | None,
@@ -450,6 +454,9 @@ class _GroupStructure:
     weights: np.ndarray
     feature_ids: tuple[str, ...]
     penalty_factors: np.ndarray
+    # Per-group ridge that does not scale with the tuned regularization; None
+    # when no group has one. Used for groups exempt from the tuned penalty.
+    fixed_ridge: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -464,8 +471,13 @@ def _group_structure(
     column_feature_ids: Sequence[str],
     *,
     unpenalized_feature_ids: Sequence[str] = (),
+    fixed_ridge: Mapping[str, float] | None = None,
 ) -> _GroupStructure:
-    """Build feature groups, explicitly exempting any supplied IDs from both penalties."""
+    """Build feature groups, explicitly exempting any supplied IDs from both penalties.
+
+    ``fixed_ridge`` maps feature IDs to a ridge penalty ``0.5 * value * ||b||^2``
+    (on the mean-loss scale) that is applied whatever the tuned regularization.
+    """
     if not column_feature_ids:
         return _GroupStructure(
             starts=np.asarray([], dtype=int),
@@ -495,6 +507,11 @@ def _group_structure(
         weights=np.sqrt(sizes.astype(float)),
         feature_ids=tuple(feature_ids),
         penalty_factors=np.asarray([key not in unpenalized for key in feature_ids], dtype=float),
+        fixed_ridge=(
+            np.asarray([float(fixed_ridge.get(key, 0.0)) for key in feature_ids], dtype=float)
+            if fixed_ridge
+            else None
+        ),
     )
 
 
@@ -556,10 +573,13 @@ def _group_ridge_prox(
         * groups.penalty_factors
     )
     scales = np.maximum(0.0, 1.0 - thresholds / np.maximum(norms, 1e-30))
-    scales /= 1.0 + (
+    ridge = (
         float(step) * float(regularization) * (1.0 - float(group_ratio))
         * groups.penalty_factors
     )
+    if groups.fixed_ridge is not None:
+        ridge = ridge + float(step) * groups.fixed_ridge
+    scales /= 1.0 + ridge
     return values * np.repeat(scales, groups.sizes)
 
 

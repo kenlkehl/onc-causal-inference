@@ -1941,7 +1941,8 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
             "role_selection_schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
             "input_temporal_scope": STAGE2_INPUT_TEMPORAL_SCOPE,
             "selection_consolidation": (config.stage2.selection_consolidation.scientific_dict()),
-            "statistical_selection": (config.stage2.statistical_selection.public_dict()),
+            # Final-estimation-only keys never require reselection.
+            "statistical_selection": (config.stage2.statistical_selection.selection_dict()),
             # orthogonal_tests selection depends on the AIPW clip; the
             # balanced_evidence count search scores forests of estimation_trees.
             **(

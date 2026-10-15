@@ -358,7 +358,11 @@ with the retained confounders and modifiers:
   own cross-fitted nuisances.
 - **Penalized interaction model:** all retained variables as main effects,
   treatment interactions with the selected modifiers, and unpenalized
-  `logit ê` and prognostic-score covariates.
+  `logit ê` and prognostic-score covariates. The confounder main effects are
+  penalized; the selected modifiers' interactions and main effects are not,
+  because the tests already chose them, unless an events-per-parameter guard
+  or a separation check calls for the penalty
+  ([Selected-modifier penalty](stage2_selection.md#selected-modifier-penalty)).
 - **DINA:** a grouped log-odds-ratio model over the selected modifiers, using
   the step 11 nuisances as offsets.
 

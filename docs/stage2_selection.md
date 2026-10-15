@@ -20,14 +20,15 @@ Two modifier rules are available (`multi_model.modifier_selection.rule`):
 - **`orthogonal_tests`** (default) selects modifiers with three pre-specified
   component tests per candidate, combined by a Cauchy combination and
   Benjamini–Hochberg, and averages every final effect model (the estimator
-  ensemble). Held-out patients then confirm the selected modifiers, for
-  reporting only.
+  ensemble), whose interaction model leaves the selected modifiers unpenalized.
+  Held-out patients then confirm the selected modifiers, for reporting only.
 - **`balanced_evidence`** ranks candidates by a fixed formula and chooses the
   number of modifiers and one effect model jointly by nested validation.
 
 Both rules share the evidence families, the predictive nuisance selection, the
-final refit of each effect model, the nuisance construction, and the
-diagnostics.
+final refit of each effect model (apart from the interaction model's
+[selected-modifier penalty](#selected-modifier-penalty)), the nuisance
+construction, and the diagnostics.
 
 ## Contents
 
@@ -621,9 +622,14 @@ rule); a variable can be both.
 
   where `Z` holds all retained variables, `Z_mod` the modifiers, and `prog` the
   prognostic score (`logit μ̂0` for binary outcomes, `μ̂0` for continuous). The
-  intercept, `β_T`, and the two adjustment covariates are unpenalized; the main
-  effects and interactions carry a grouped elastic-net penalty (mixing ratio
-  `l1_ratio`, default 0.8) tuned by training-only cross-validated outcome loss.
+  intercept, `β_T`, and the two adjustment covariates are unpenalized; the
+  confounder main effects carry a grouped elastic-net penalty (mixing ratio
+  `l1_ratio`, default 0.8) tuned by training-only cross-validated outcome loss
+  (log loss for binary outcomes, squared error for continuous outcomes). Under
+  `orthogonal_tests` the modifiers' interactions and main effects are left out
+  of that penalty, subject to a guard (see
+  [Selected-modifier penalty](#selected-modifier-penalty)); otherwise every
+  main effect and interaction shares it.
   The unpenalized adjustment covariates guard against regularization-induced
   confounding (Hahn et al., *Bayesian Analysis* 2018): when many confounder main
   effects are shrunk toward zero but `β_T` is not, the confounding they should
@@ -642,6 +648,66 @@ differences that vary with baseline risk.
 
 The effect predictions are frozen before the held-out treatment and outcome
 labels are read.
+
+### Selected-modifier penalty
+
+One penalty shared by the main effects and the interactions is tuned for
+outcome prediction, to which the interactions contribute little. When many of
+the main effects do not predict the outcome (for example confounders that only
+predict treatment), cross-validation chooses a strong penalty, which also
+shrinks the interactions and compresses the estimated heterogeneity. Under
+`orthogonal_tests` the modifiers were already chosen by calibrated tests, and
+the final interaction model does not shrink them a second time: the interaction columns `T·Z_mod` of every selected modifier (including
+investigator-specified modifiers) and that modifier's main-effect columns
+(strong hierarchy) are exempt from the tuned penalty in every cross-validation
+fit and in the refit. The penalty, still tuned by cross-validated outcome loss,
+applies to the remaining main effects. The exemption removes the second
+shrinkage at the price of variance: a falsely selected modifier enters at full
+strength. `modifier_selection.unpenalized_selected_interactions: false` keeps
+the single shared penalty.
+
+- **Guard.** The exemption adds `2c` unpenalized parameters, where `c` is the
+  number of encoded design columns of the selected modifiers (values, category
+  contrasts, and missingness and extraction-failure indicators). It is used
+  only when `2c` is at most a limit computed on the effect-eligible training
+  patients: `min(events, non-events) / r` for binary outcomes and
+  `rows / r` for continuous outcomes, where `r` is
+  `modifier_selection.unpenalized_events_per_parameter` (default 10 for binary
+  and 15 for continuous outcomes). Otherwise the shared-penalty model is
+  fitted.
+- **Separation fallback.** An unpenalized logistic term diverges under complete
+  or quasi-complete separation, for example when every treated patient in a
+  rare category has the outcome. The exempt fit is accepted when the penalty
+  cross-validation and the refit converge and no selected-modifier interaction
+  column changes the linear predictor by more than 10 across its observed
+  training range (in log odds for binary outcomes, in training-outcome standard
+  deviations for continuous outcomes). A failed fit is refitted with a fixed
+  ridge penalty `0.5 · 0.01 · ‖b‖²` (on the mean-loss scale and the
+  standardized columns; for binary outcomes a `N(0, 1/(0.01 n))` prior on each
+  coefficient, with `n` training patients) on the selected-modifier columns
+  only; they stay outside the tuned penalty, and the same checks apply. If that
+  fit also fails, the shared-penalty model is fitted. Separation that moves the
+  CATE always moves an interaction coefficient. The main-effect columns' range
+  effects are reported but not checked, because their size also reflects
+  collinearity with the prognostic adjustment covariate, with or without a
+  penalty.
+- **Zero modifiers.** With no selected modifier (or no encoded modifier
+  column) the model is exactly the shared-penalty model.
+- **Audit.** `interaction_fit_audit.selected_modifier_penalty` in
+  `estimation/diagnostics.json` records the settings, the guard (encoded
+  columns per modifier, events and non-events or rows, the limit, and the
+  decision), each attempted fit with its convergence and range-effect
+  diagnostics, and the path used: `unpenalized`, `separation_ridge`, or
+  `fully_penalized` with its reason (`no_selected_modifiers`,
+  `selected_modifiers_have_no_encoded_columns`, `events_per_parameter_guard`,
+  or `separation_or_nonconvergence`). The architecture diagnostics, including
+  each ensemble component's audit, repeat a compact `selected_modifier_penalty`
+  summary, which reads `disabled_by_configuration` when the setting is false.
+
+These settings do not affect selection, so changing them refits only the
+final estimation. Under `balanced_evidence`, its nested validation fits, the
+`penalized_interactions` evidence family, and the final interaction model all
+use the single shared penalty.
 
 ## Nuisance construction
 

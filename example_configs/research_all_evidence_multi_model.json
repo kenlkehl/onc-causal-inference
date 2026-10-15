@@ -113,7 +113,9 @@
           "q": 0.1,
           "weights": null,
           "max_modifiers": 64,
-          "estimator_policy": null
+          "estimator_policy": null,
+          "unpenalized_selected_interactions": null,
+          "unpenalized_events_per_parameter": null
         },
         "modifier_count": {
           "candidate_counts": [

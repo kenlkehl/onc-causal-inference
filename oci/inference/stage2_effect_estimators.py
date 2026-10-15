@@ -1,8 +1,12 @@
 """Shared train-only interaction outcome model for validation and final refits."""
 
+from dataclasses import dataclass
+from functools import partial
+
 import numpy as np
 from threadpoolctl import threadpool_limits
 
+from . import stage2_elastic_net_selection as linear
 from . import stage2_multi_model_selection as numerical
 
 # Probabilities are bounded away from 0/1 before taking logits so one extreme
@@ -27,6 +31,239 @@ PROGNOSTIC_FOREST_DESCRIPTION = (
     "restricted to selected modifiers cannot represent. Training rows use out-of-fold "
     "mu0_hat; held-out/validation rows use mu0_hat fitted on the training rows only."
 )
+
+
+# Separation fallback for the selected modifiers' unpenalized columns: the fixed
+# ridge 0.5 * value * ||b||^2 on the mean-loss scale (standardized columns); for
+# binary outcomes a N(0, 1 / (value * n)) prior on each coefficient. Not tuned.
+SELECTED_MODIFIER_SEPARATION_RIDGE = 0.01
+# An accepted unpenalized fit changes the linear predictor by at most this much
+# across any selected-modifier interaction column's observed training range: log
+# odds for binary outcomes, training-outcome standard deviations for continuous
+# ones. Separation that moves the CATE always moves an interaction coefficient;
+# main-effect columns are reported only, because their size also reflects
+# collinearity with the prognostic adjustment covariate, penalized or not.
+SELECTED_MODIFIER_MAX_RANGE_EFFECT = 10.0
+
+SELECTED_MODIFIER_PENALTY_DESCRIPTION = (
+    "Under modifier_selection.rule orthogonal_tests the modifiers were already chosen by "
+    "calibrated tests, so the final interaction model does not shrink them again: their "
+    "treatment-interaction columns and their main-effect columns (strong hierarchy) are "
+    "exempt from the tuned group elastic net, which still penalizes the other main "
+    "effects and is tuned by cross-validated outcome loss over those groups only. The "
+    "exemption is used only when 2 x (encoded modifier columns) is at most the guard "
+    "limit: min(events, non-events) / events_per_parameter among the effect-eligible "
+    "training rows for binary outcomes, rows / events_per_parameter for continuous "
+    "outcomes. A fit that does not converge or whose selected-modifier interaction "
+    "columns change the linear predictor by more than max_range_effect across their "
+    "training range (separation) is refitted with the fixed separation ridge on the "
+    "selected-modifier columns; if that also fails, or the guard fails, the fully "
+    "penalized model is used."
+)
+
+
+@dataclass(frozen=True)
+class UnpenalizedSelectedModifiers:
+    """Exempt the selected modifiers' main effects and interactions from the tuned penalty."""
+
+    events_per_parameter: float
+    separation_ridge: float = SELECTED_MODIFIER_SEPARATION_RIDGE
+    max_range_effect: float = SELECTED_MODIFIER_MAX_RANGE_EFFECT
+
+    def public_dict(self):
+        return {
+            "events_per_parameter": float(self.events_per_parameter),
+            "separation_ridge": float(self.separation_ridge),
+            "max_range_effect": float(self.max_range_effect),
+        }
+
+
+def selected_modifier_penalty(statistical_policy, outcome_type):
+    """The final interaction model's selected-modifier policy; None keeps one penalty."""
+    chosen = statistical_policy.multi_model.modifier_selection
+    if not chosen.resolved_unpenalized_selected_interactions:
+        return None
+    return UnpenalizedSelectedModifiers(
+        events_per_parameter=chosen.resolved_unpenalized_events_per_parameter(outcome_type)
+    )
+
+
+def selected_modifier_penalty_summary(audit):
+    """Compact architecture-diagnostics view of a fit's selected-modifier penalty."""
+    record = audit.get("selected_modifier_penalty")
+    if record is None:
+        return {
+            "enabled": False,
+            "path": "fully_penalized",
+            "reason": "disabled_by_configuration",
+        }
+    guard = record["guard"]
+    return {
+        "enabled": True,
+        "path": record["path"],
+        "reason": record["reason"],
+        "unpenalized_groups": list(record["unpenalized_groups"]),
+        "fixed_ridge_groups": list(record["fixed_ridge_groups"]),
+        "fixed_ridge": record["fixed_ridge"],
+        "unpenalized_parameters": guard["unpenalized_parameters"],
+        "parameter_limit": guard["parameter_limit"],
+        "guard_passed": guard["passed"],
+        "attempted_paths": [attempt["path"] for attempt in record["attempts"]],
+    }
+
+
+def _parameter_guard(outcome, *, binary, modifier_columns, events_per_parameter):
+    rows = len(outcome)
+    parameters = 2 * int(sum(modifier_columns.values()))
+    if binary:
+        events = int(np.sum(np.asarray(outcome) == 1))
+        counts = {"events": events, "non_events": rows - events}
+        information = min(counts.values())
+        basis = "min_events_non_events"
+    else:
+        counts = {}
+        information = rows
+        basis = "eligible_rows"
+    limit = information / float(events_per_parameter)
+    return {
+        "unpenalized_parameters": parameters,
+        "parameter_count_rule": "2 x encoded columns of the selected modifiers",
+        "modifier_encoded_columns": dict(sorted(modifier_columns.items())),
+        "eligible_rows": rows,
+        **counts,
+        "information_basis": basis,
+        "information": int(information),
+        "events_per_parameter": float(events_per_parameter),
+        "parameter_limit": float(limit),
+        "passed": parameters <= limit,
+    }
+
+
+def _separation_check(model, treatment, modifier_ids, *, binary, outcome, settings):
+    """Accept an exempt-modifier fit only when its selected-modifier terms stay bounded."""
+    if model["state"] is None:
+        return {"passed": True, "reason": "constant_target_or_empty_design"}
+    design = model["design"]
+    x, _, _, groups = numerical._matrix(
+        design, treatment, "interactions", modifier_ids=modifier_ids,
+        adjustment=model.get("adjustment"),
+    )
+    names = [
+        "__treatment__",
+        *(f"__{name}__" for name in (model["adjustment"].names if model.get("adjustment") else ())),
+        *design.column_names,
+        *(
+            f"treatment:{name}"
+            for name, key in zip(design.column_names, design.column_feature_ids)
+            if key in modifier_ids
+        ),
+    ]
+    coefficients = np.asarray(model["coefficients"], dtype=float)
+    if not np.isfinite(coefficients).all() or not np.isfinite(model["state"].intercept):
+        return {"passed": False, "reason": "nonfinite_coefficients"}
+    scale = 1.0 if binary else float(np.std(np.asarray(outcome, dtype=float)))
+    scale = scale if np.isfinite(scale) and scale > 1e-12 else 1.0
+
+    def largest(block):
+        selected = {f"{block}:{key}" for key in modifier_ids}
+        columns = [index for index, group in enumerate(groups) if group in selected]
+        if not columns:
+            return 0.0, None
+        effects = np.abs(coefficients[columns]) * np.ptp(x[:, columns], axis=0) / scale
+        worst = int(np.argmax(effects))
+        return float(effects[worst]), names[columns[worst]]
+
+    interaction, interaction_column = largest("effect")
+    main, main_column = largest("main")
+    linear_predictor = x @ coefficients + model["state"].intercept
+    passed = interaction <= float(settings.max_range_effect)
+    return {
+        "passed": bool(passed),
+        "reason": None if passed else "selected_modifier_range_effect_exceeds_limit",
+        "max_range_effect": interaction,
+        "max_range_effect_column": interaction_column,
+        "range_effect_scale": "log_odds" if binary else "training_outcome_sd",
+        "max_range_effect_limit": float(settings.max_range_effect),
+        "max_main_effect_range_effect": main,
+        "max_main_effect_range_effect_column": main_column,
+        "max_abs_training_linear_predictor": float(np.max(np.abs(linear_predictor))),
+        "cv_nonconverged_fits": int(sum(
+            not fit["converged"]
+            for path in model["audit"].get("cv_optimizer_audit", [])
+            for fit in path
+        )),
+    }
+
+
+def _fit_selected_modifier_penalty(
+    fit, *, train, valid, definitions, modifier_ids, treatment, outcome, binary, policy,
+    path_submit, settings,
+):
+    """Exempt the selected modifiers if the guard allows; fall back on separation."""
+    design = linear._encode_design(
+        train, valid, definitions, categorical_min_count=policy.categorical_min_count
+    )
+    encoded = {
+        key: int(sum(feature == key for feature in design.column_feature_ids))
+        for key in modifier_ids
+    }
+    guard = _parameter_guard(
+        outcome, binary=binary, modifier_columns=encoded,
+        events_per_parameter=settings.events_per_parameter,
+    )
+    record = {
+        "rule": "orthogonal_tests",
+        "settings": settings.public_dict(),
+        "guard": guard,
+        "attempts": [],
+        "description": SELECTED_MODIFIER_PENALTY_DESCRIPTION,
+    }
+
+    def penalized(reason):
+        model = fit(path_submit=path_submit)
+        record.update(
+            path="fully_penalized", reason=reason, unpenalized_groups=[],
+            fixed_ridge_groups=[], fixed_ridge=None,
+        )
+        return model, record
+
+    if not modifier_ids:
+        return penalized("no_selected_modifiers")
+    if guard["unpenalized_parameters"] == 0:
+        return penalized("selected_modifiers_have_no_encoded_columns")
+    if not guard["passed"]:
+        return penalized("events_per_parameter_guard")
+    for path, ridge in (("unpenalized", None), ("separation_ridge", settings.separation_ridge)):
+        try:
+            model = fit(
+                path_submit=(
+                    partial(path_submit, variant=f"selected_{path}")
+                    if path_submit is not None
+                    else None
+                ),
+                unpenalized_modifier_ids=modifier_ids,
+                modifier_ridge=ridge,
+            )
+        except numerical.NotEstimable as exc:
+            record["attempts"].append({"path": path, "accepted": False, "reason": str(exc)})
+            continue
+        check = _separation_check(
+            model, treatment, modifier_ids, binary=binary, outcome=outcome, settings=settings
+        )
+        accepted = check.pop("passed")
+        record["attempts"].append({"path": path, "accepted": accepted, **check})
+        if accepted:
+            # A constant-target model (no solver state) has no modifier groups.
+            groups = list(model["audit"].get("selected_modifier_groups", {}).get("groups", []))
+            record.update(
+                path=path,
+                reason=None if ridge is None else "unpenalized_fit_separated_or_did_not_converge",
+                unpenalized_groups=groups if ridge is None else [],
+                fixed_ridge_groups=[] if ridge is None else groups,
+                fixed_ridge=None if ridge is None else float(ridge),
+            )
+            return model, record
+    return penalized("separation_or_nonconvergence")
 
 
 def bounded_logit(probability):
@@ -103,6 +340,7 @@ def fit_interaction_effect(
     seed,
     path_submit=None,
     adjustment=None,
+    unpenalized_selected=None,
 ):
     """Fit g(E[Y]) = intercept + T + A + main effects + T:selected modifiers.
 
@@ -121,6 +359,13 @@ def fit_interaction_effect(
     unpenalized T coefficient and the T:modifier terms, biasing the ATE and
     CATEs. An unpenalized propensity (and prognostic) covariate carries that
     confounding instead, whatever the penalty does to the individual columns.
+
+    ``unpenalized_selected`` (``UnpenalizedSelectedModifiers``; final estimation
+    under the orthogonal_tests rule only) exempts the modifiers' main-effect and
+    interaction columns from the tuned penalty, subject to the events-per-
+    parameter guard and the separation fallback; the audit then records
+    ``selected_modifier_penalty``. None keeps one tuned penalty for every main
+    effect and interaction, as in every validation fit.
     """
     modifier_ids = set(modifier_ids)
     if not modifier_ids.issubset({numerical._key(f) for f in definitions}):
@@ -131,22 +376,53 @@ def fit_interaction_effect(
     # These small, repeated matrix fits are slower with large BLAS thread pools;
     # the production adapter can also run several outer folds concurrently.
     with threadpool_limits(limits=1):
-        model = numerical._fit_linear(
-            train,
-            valid,
-            definitions,
-            outcome,
-            binary=binary,
-            kind="interactions",
-            treatment=treatment,
-            valid_treatment=np.zeros(len(valid)),
-            modifier_ids=modifier_ids,
-            policy=policy,
-            seed=seed,
-            ratio=policy.l1_ratio,
-            path_submit=path_submit,
-            adjustment=adjustment,
-        )
+        if unpenalized_selected is None:
+            model = numerical._fit_linear(
+                train,
+                valid,
+                definitions,
+                outcome,
+                binary=binary,
+                kind="interactions",
+                treatment=treatment,
+                valid_treatment=np.zeros(len(valid)),
+                modifier_ids=modifier_ids,
+                policy=policy,
+                seed=seed,
+                ratio=policy.l1_ratio,
+                path_submit=path_submit,
+                adjustment=adjustment,
+            )
+            penalty_record = None
+        else:
+            model, penalty_record = _fit_selected_modifier_penalty(
+                partial(
+                    numerical._fit_linear,
+                    train,
+                    valid,
+                    definitions,
+                    outcome,
+                    binary=binary,
+                    kind="interactions",
+                    treatment=treatment,
+                    valid_treatment=np.zeros(len(valid)),
+                    modifier_ids=modifier_ids,
+                    policy=policy,
+                    seed=seed,
+                    ratio=policy.l1_ratio,
+                    adjustment=adjustment,
+                ),
+                train=train,
+                valid=valid,
+                definitions=definitions,
+                modifier_ids=modifier_ids,
+                treatment=treatment,
+                outcome=outcome,
+                binary=binary,
+                policy=policy,
+                path_submit=path_submit,
+                settings=unpenalized_selected,
+            )
     mu = []
     for arm in (0, 1):
         if model["state"] is None:
@@ -199,6 +475,11 @@ def fit_interaction_effect(
                 }
                 if adjustment is not None
                 else {"columns": [], "description": "no nuisance adjustment covariates supplied"}
+            ),
+            **(
+                {"selected_modifier_penalty": penalty_record}
+                if penalty_record is not None
+                else {}
             ),
         },
     }

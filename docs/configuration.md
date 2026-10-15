@@ -310,12 +310,16 @@ These settings control the deterministic selection procedure described in
 | `weights` | null | Component weights for the Cauchy combination: null, or an object with exactly the keys `r_projection`, `aipw_projection`, and `outcome_interaction`, each finite and nonnegative, with a positive sum. Null uses 0.25, 0.25, 0.5 for binary outcomes and 1/3 each for continuous outcomes. Also used by the confirmation |
 | `max_modifiers` | 64 | Maximum number of discovered modifiers; null for no cap. Investigator-specified modifiers are added on top |
 | `estimator_policy` | null | `orthogonal_tests` only: null or `ensemble` averages every final estimator for the outcome type; `causal_forest`, `linear_interactions`, or `dina` (binary outcomes only) fits one estimator. Must be null under `balanced_evidence`, which chooses its estimator by nested validation |
+| `unpenalized_selected_interactions` | null | `orthogonal_tests` only: null or `true` exempts the selected modifiers' interaction and main-effect columns from the final interaction model's tuned penalty, subject to the events-per-parameter guard and the separation fallback ([Selected-modifier penalty](stage2_selection.md#selected-modifier-penalty)); `false` keeps one penalty for every main effect and interaction. Must be null or `false` under `balanced_evidence` |
+| `unpenalized_events_per_parameter` | null | Guard ratio for the exemption, a positive number: it is used only when 2 × (encoded columns of the selected modifiers) is at most min(events, non-events) / ratio for binary outcomes, or effect-eligible training rows / ratio for continuous outcomes. Null uses 10 for binary and 15 for continuous outcomes. Must be null unless the exemption applies |
 
 Unknown keys are errors. `modifier_count.concept_review: true` requires
 `rule: "balanced_evidence"`. The rule and its settings are part of the
 selection identity, so changing them after selection has run requires
 [guarded reselection](#guarded-reselection); the multi-model evidence itself is
-reused.
+reused. The exceptions are `unpenalized_selected_interactions` and
+`unpenalized_events_per_parameter`, which only the final interaction model
+reads: changing them refits the final estimation and reuses the selection.
 
 `multi_model.modifier_count` (used only when `modifier_selection.rule` is
 `balanced_evidence`):
@@ -779,7 +783,14 @@ unweighted mean of the fitted components, and `estimated_cate_lower_95`,
 `estimated_cate_upper_95`, and `estimated_cate_standard_error` are empty.
 `estimation/diagnostics.json` records `estimator_policy`, an `ensemble` section
 (component and fitted estimators, unavailable components with reasons, and each
-component's audit), and `mean_estimated_cate_by_estimator`.
+component's audit), and `mean_estimated_cate_by_estimator`. Under
+`orthogonal_tests` the interaction model's audit
+(`interaction_fit_audit.selected_modifier_penalty`) records the
+selected-modifier penalty: the settings, the guard computation and decision,
+each attempted fit, and the path used (`unpenalized`, `separation_ridge`, or
+`fully_penalized` with its reason); its architecture diagnostics, and so each
+ensemble component's audit, repeat a compact `selected_modifier_penalty`
+summary.
 
 `stage2/heterogeneity_diagnostics.json` contains `modifier_confirmation`: the
 confirmation policy, per-fold results for each selected modifier (`confirmed`,
@@ -819,9 +830,10 @@ Stage 2 checks its saved state on every start:
 | Endpoint URLs, ports, worker counts, timeouts | Allowed |
 | Interpretation sampling, reasoning, or `max_tokens` | Completed feature definitions do not match the requested policy; the run stops |
 | Extraction context window, margin, chunk size, or output ceilings | Affected extraction chunks are extracted again |
-| `min_propensity`, `max_propensity`, `statistical_selection`, or, after selection has run, `propensity_clip`, `nuisance_learner`, or `super_learner` (under `orthogonal_tests`) or `estimation_trees` (under `balanced_evidence`) | Refused; use [guarded reselection](#guarded-reselection) |
+| `min_propensity`, `max_propensity`, `statistical_selection` (other than the two selected-modifier penalty keys), or, after selection has run, `propensity_clip`, `nuisance_learner`, or `super_learner` (under `orthogonal_tests`) or `estimation_trees` (under `balanced_evidence`) | Refused; use [guarded reselection](#guarded-reselection) |
 | `nuisance_learner` or `super_learner` under `balanced_evidence` | Allowed; only the final estimation is refitted |
 | `estimation_trees` under `orthogonal_tests` | Allowed; selection and its stored nuisance models are reused and only the final estimation is refitted |
+| `modifier_selection.unpenalized_selected_interactions` or `unpenalized_events_per_parameter` | Allowed; selection and its stored nuisance models are reused and only the final estimation is refitted |
 
 `run_config.json` stores every API key as `<redacted>`. When relaunching from it
 against servers that require a key, set the `OCI_STAGE2_*_API_KEY` environment

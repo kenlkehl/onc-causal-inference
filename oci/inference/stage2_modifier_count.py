@@ -386,7 +386,8 @@ def _select_by_orthogonal_tests(
         "tests_schema_version": modifier_tests.SCHEMA_VERSION,
         "rule": "orthogonal_tests",
         "numerical_input_fingerprint": base_fingerprint,
-        "modifier_selection": chosen.public_dict(),
+        # The final-estimation keys do not change selection (selection_dict).
+        "modifier_selection": chosen.selection_dict(),
         "resolved_weights": weights,
         "resolved_estimator_policy": estimator_policy,
         "propensity_clip": float(propensity_clip),
@@ -596,7 +597,7 @@ def _select_by_orthogonal_tests(
             "selected_modifier_ids": selected_ids,
             "discovered_feature_ids": discovered,
             "locked_modifier_ids": locked_modifiers,
-            "modifier_selection_policy": chosen.public_dict(),
+            "modifier_selection_policy": chosen.selection_dict(),
             "resolved_weights": weights,
             "modifier_tests_path": str(tests_path),
             "tests_summary": summary,

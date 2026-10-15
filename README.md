@@ -42,7 +42,8 @@ Other terms are defined in the [glossary](docs/glossary.md).
    candidate gets an R-learner projection test and an AIPW projection test of
    the risk-difference effect and an adjusted interaction test on the
    odds-ratio scale, combined by a Cauchy combination, with Benjamini–Hochberg
-   control across candidates. A causal forest, a penalized interaction model,
+   control across candidates. A causal forest, a penalized interaction model
+   (which penalizes the confounders but not the selected modifiers' terms),
    and a DINA model (Gao and Hastie's difference-in-natural-parameters model,
    which for binary outcomes estimates a conditional log odds ratio) are all
    fitted, and their average predicts effects for held-out patients. A doubly
@@ -177,9 +178,11 @@ uv run python scripts/run_all_evidence.py --config /path/to/output/run_config.js
 Reselection archives the previous selection and estimates under
 `stage2/reselection_archives/` and reuses the frozen definitions and extracted
 measurements; it repeats no Stage 1 modeling. Under the default
-`orthogonal_tests` modifier rule, changing `stage2.estimation_trees` needs no
-reselection: the selection and its stored nuisance models are reused and only
-the final estimation is refitted. For the synthetic launcher, use
+`orthogonal_tests` modifier rule, changing `stage2.estimation_trees` or the
+interaction model's selected-modifier penalty settings
+(`modifier_selection.unpenalized_selected_interactions` and
+`unpenalized_events_per_parameter`) needs no reselection: the selection and its
+stored nuisance models are reused and only the final estimation is refitted. For the synthetic launcher, use
 `STAGE2_ONLY=1` (with `STAGE2_RESELECT=1` or `OCI_PREFLIGHT_ONLY=1` as needed).
 Changing data, definitions, or scientific settings can invalidate checkpoints;
 use a separate output directory for a different study. Details are in

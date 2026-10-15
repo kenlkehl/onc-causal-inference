@@ -62,6 +62,13 @@ FINAL_ESTIMATORS = ("causal_forest", "linear_interactions", "dina")
 MODIFIER_SELECTION_RULES = ("orthogonal_tests", "balanced_evidence")
 TEST_COMPONENTS = ("r_projection", "aipw_projection", "outcome_interaction")
 ESTIMATOR_POLICIES = ("ensemble", *FINAL_ESTIMATORS)
+# modifier_selection keys read only by the final interaction model. Selection
+# never depends on them, so selection identities omit them (selection_dict),
+# and public_dict omits them while null so saved policies keep their identity.
+FINAL_ESTIMATION_KEYS = ("unpenalized_selected_interactions", "unpenalized_events_per_parameter")
+# Minimum outcome information per unpenalized selected-modifier parameter:
+# binary outcomes count the rarer outcome class, continuous outcomes the rows.
+DEFAULT_UNPENALIZED_EVENTS_PER_PARAMETER = {"binary": 10.0, "continuous": 15.0}
 
 
 @dataclass(frozen=True)
@@ -109,6 +116,11 @@ class ModifierSelectionConfig:
     combined component tests and, by default, averages every final estimator.
     ``balanced_evidence`` runs the nested ranking/count search configured by
     ``modifier_count`` and chooses its estimator there.
+
+    The two ``FINAL_ESTIMATION_KEYS`` apply to the final interaction model under
+    ``orthogonal_tests`` only: the selected modifiers' main-effect and
+    interaction columns are left out of its tuned penalty unless the
+    events-per-parameter guard fails.
     """
 
     rule: str = "orthogonal_tests"
@@ -119,6 +131,11 @@ class ModifierSelectionConfig:
     # None means "ensemble" under orthogonal_tests and the nested choice under
     # balanced_evidence.
     estimator_policy: str | None = None
+    # None means true under orthogonal_tests; balanced_evidence allows only
+    # None or false (its interaction model stays fully penalized).
+    unpenalized_selected_interactions: bool | None = None
+    # None uses DEFAULT_UNPENALIZED_EVENTS_PER_PARAMETER for the outcome type.
+    unpenalized_events_per_parameter: float | None = None
 
     def validate(self) -> None:
         if self.rule not in MODIFIER_SELECTION_RULES:
@@ -159,6 +176,32 @@ class ModifierSelectionConfig:
                     "multi_model.modifier_selection.estimator_policy must be null or one of "
                     f"{list(ESTIMATOR_POLICIES)}"
                 )
+        unpenalized = self.unpenalized_selected_interactions
+        if unpenalized is not None and not isinstance(unpenalized, bool):
+            raise ValueError(
+                "multi_model.modifier_selection.unpenalized_selected_interactions must be "
+                "null or boolean"
+            )
+        if self.rule == "balanced_evidence" and unpenalized is True:
+            raise ValueError(
+                "multi_model.modifier_selection.unpenalized_selected_interactions must be "
+                "null or false under balanced_evidence, whose interaction model keeps one "
+                "tuned penalty for every main effect and interaction"
+            )
+        ratio = self.unpenalized_events_per_parameter
+        if ratio is not None:
+            if (isinstance(ratio, bool) or not isinstance(ratio, (int, float))
+                    or not math.isfinite(ratio) or ratio <= 0):
+                raise ValueError(
+                    "multi_model.modifier_selection.unpenalized_events_per_parameter must be "
+                    "null or a positive finite number"
+                )
+            if not self.resolved_unpenalized_selected_interactions:
+                raise ValueError(
+                    "multi_model.modifier_selection.unpenalized_events_per_parameter must be "
+                    "null unless the selected modifiers' interactions are unpenalized "
+                    "(rule orthogonal_tests and unpenalized_selected_interactions not false)"
+                )
 
     @property
     def resolved_estimator_policy(self) -> str:
@@ -166,13 +209,45 @@ class ModifierSelectionConfig:
             return "nested_selection"
         return self.estimator_policy or "ensemble"
 
+    @property
+    def resolved_unpenalized_selected_interactions(self) -> bool:
+        """Whether the final interaction model exempts the selected modifiers' columns."""
+        return (
+            self.rule == "orthogonal_tests"
+            and self.unpenalized_selected_interactions is not False
+        )
+
+    def resolved_unpenalized_events_per_parameter(self, outcome_type: str) -> float | None:
+        """The guard's events (binary) or rows (continuous) per unpenalized parameter."""
+        if not self.resolved_unpenalized_selected_interactions:
+            return None
+        if self.unpenalized_events_per_parameter is not None:
+            return float(self.unpenalized_events_per_parameter)
+        if outcome_type not in DEFAULT_UNPENALIZED_EVENTS_PER_PARAMETER:
+            raise ValueError(
+                "the events-per-parameter guard requires a binary or continuous outcome"
+            )
+        return DEFAULT_UNPENALIZED_EVENTS_PER_PARAMETER[outcome_type]
+
     def public_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             **asdict(self),
             "weights": None if self.weights is None else {
                 name: float(self.weights[name]) for name in TEST_COMPONENTS
             },
         }
+        # Null final-estimation keys are omitted so saved policies are unchanged.
+        for name in FINAL_ESTIMATION_KEYS:
+            if result[name] is None:
+                result.pop(name)
+        return result
+
+    def selection_dict(self) -> dict[str, Any]:
+        """``public_dict`` without the final-estimation keys, for selection identities."""
+        result = self.public_dict()
+        for name in FINAL_ESTIMATION_KEYS:
+            result.pop(name, None)
+        return result
 
 
 @dataclass(frozen=True)
@@ -365,6 +440,13 @@ class Stage2MultiModelConfig:
         if self.matched_batch == MatchedBatchConfig():
             result.pop("matched_batch")
         return result
+
+    def selection_dict(self) -> dict[str, Any]:
+        """``public_dict`` without the settings that only the final estimation reads."""
+        return {
+            **self.public_dict(),
+            "modifier_selection": self.modifier_selection.selection_dict(),
+        }
 
     @property
     def computes_effect_evidence(self) -> bool:

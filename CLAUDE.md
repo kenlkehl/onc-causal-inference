@@ -148,7 +148,9 @@ nuisance-candidate catalog → final refit with recalibrated nuisances from the
 configured nuisance learner (super learner by default; the stored inner-fold
 models score the held-out rows when their fingerprint verifies) of the
 estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
-and `dina` for binary outcomes) → cross-fitted predictions, AIPW ATE, and
+and `dina` for binary outcomes; the interaction model leaves the selected
+modifiers' interactions and main effects unpenalized, guarded by events per
+parameter with a separation fallback) → cross-fitted predictions, AIPW ATE, and
 `heterogeneity_diagnostics.json`, including the reporting-only outer-fold
 confirmation of the selected modifiers. `modifier_selection.rule:
 "balanced_evidence"` instead runs the nested modifier ranking and
@@ -165,7 +167,9 @@ Configuration rules:
   estimation policy changes on a completed run go through
   `--stage2-only --stage2-reselect`; under `orthogonal_tests`,
   `estimation_trees` is not part of the selection identity, so changing it
-  refits only the final estimation.
+  refits only the final estimation. The same holds for
+  `modifier_selection.unpenalized_selected_interactions` and
+  `unpenalized_events_per_parameter` (`selection_dict()` omits them).
 - Diagnostic evidence families (`multi_model.diagnostic_families`) and
   matched-batch evidence are opt-in and do not drive selection.
 - Outer-fold confirmation (`modifier_confirmation` in

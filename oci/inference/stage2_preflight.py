@@ -45,7 +45,9 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
             "Stage 2 multi-model selection schema changed; use guarded --stage2-reselect"
         )
     saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))
-    if saved_policy.public_dict() != config.stage2.statistical_selection.public_dict():
+    # The selected-modifier penalty keys affect only final estimation, which
+    # has its own identity and refits on resume.
+    if saved_policy.selection_dict() != config.stage2.statistical_selection.selection_dict():
         raise RuntimeError("Stage 2 multi-model policy changed; use guarded --stage2-reselect")
     orthogonal = (
         config.stage2.statistical_selection.multi_model.modifier_selection.rule
