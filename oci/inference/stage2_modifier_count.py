@@ -48,7 +48,8 @@ DEFAULT_PROPENSITY_CLIP = 0.02
 TESTING_NUISANCE_SOURCE = "outer_training_inner_out_of_fold_all_candidate_recalibrated"
 TESTING_NUISANCE_DESCRIPTION = (
     "Testing nuisances are the final-estimation construction restricted to the "
-    "outer-training rows: elastic nets on the complete nuisance-candidate catalog, "
+    "outer-training rows: the configured nuisance learner on the complete "
+    "nuisance-candidate catalog, "
     "fitted in the inner cross-fitting folds with the final-estimation seeds and "
     "standardization, then cross-fitted Platt recalibration. Each training row gets "
     "the prediction of the fold model that did not see it; m_hat = e_hat * mu1_hat + "
@@ -347,6 +348,7 @@ def _select_by_orthogonal_tests(
     propensity_clip,
     tests_path,
     nuisance_model_store=None,
+    nuisance_learner=None,
 ):
     """BH selection on Cauchy-combined orthogonal tests; no nested count search.
 
@@ -390,6 +392,9 @@ def _select_by_orthogonal_tests(
         "propensity_clip": float(propensity_clip),
         "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
         "categorical_min_count": policy.categorical_min_count,
+        "nuisance_learner": (
+            dict(nuisance_learner) if nuisance_learner is not None else {"name": "elastic_net"}
+        ),
         "fit_row_ids": fit_ids,
         "role_decisions": _fingerprint(role_report),
         "selected_definitions": selected,
@@ -403,6 +408,7 @@ def _select_by_orthogonal_tests(
                 Path(__file__).with_name("stage2_interaction_screen.py"),
                 Path(__file__).parent.parent / "utils" / "calibration.py",
                 Path(__file__).parent.parent / "models" / "elastic_net_nuisance.py",
+                Path(__file__).parent.parent / "models" / "super_learner_nuisance.py",
             )
         },
     }
@@ -437,6 +443,7 @@ def _select_by_orthogonal_tests(
             # The final estimation reuses these inner-fold models for held-out rows.
             model_store_root=nuisance_model_store,
             model_store_mode="save",
+            learner=nuisance_learner,
         )
         e, mu0, mu1 = nuisances["recalibrated"]["fit"]
         t, y = nuisances["treatment"], nuisances["outcome"]
@@ -539,6 +546,10 @@ def _select_by_orthogonal_tests(
             "eligible_rows": int(keep.sum()),
             "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
             "seed_offset": analysis.FINAL_NUISANCE_SEED_OFFSET,
+            "nuisance_learner": (
+                dict(nuisance_learner) if nuisance_learner is not None
+                else {"name": "elastic_net"}
+            ),
             "predictions_path": str(nuisance_path),
             "model_store": nuisances["model_store"],
             "recalibration": nuisances["recalibrated"]["audit"],
@@ -650,6 +661,7 @@ def select_modifier_count(
     propensity_clip=DEFAULT_PROPENSITY_CLIP,
     tests_path=None,
     nuisance_model_store=None,
+    nuisance_learner=None,
 ):
     """Select modifiers (and the final estimator), preserving each nuisance task's support.
 
@@ -711,6 +723,7 @@ def select_modifier_count(
             propensity_clip=propensity_clip,
             tests_path=tests_path,
             nuisance_model_store=nuisance_model_store,
+            nuisance_learner=nuisance_learner,
         )
 
     identity = {

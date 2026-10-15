@@ -66,6 +66,18 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
             "Stage 2 propensity_clip changed and the orthogonal_tests modifier rule uses it; "
             "use guarded --stage2-reselect"
         )
+    # The modifier tests use the final nuisance learner.
+    if orthogonal and "nuisance_learner" in saved:
+        from ..models.super_learner_nuisance import learner_spec, super_learner_config_from_mapping
+
+        saved_learner = learner_spec(
+            saved["nuisance_learner"], super_learner_config_from_mapping(saved.get("super_learner"))
+        )
+        if saved_learner != config.stage2.nuisance_learner_spec():
+            raise RuntimeError(
+                "Stage 2 nuisance_learner or super_learner changed and the orthogonal_tests "
+                "modifier rule uses it; use guarded --stage2-reselect"
+            )
 
 
 def _validate_partition(fit: list[int], heldout: list[int], universe: set[int]) -> None:

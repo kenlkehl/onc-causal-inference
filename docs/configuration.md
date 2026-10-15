@@ -222,6 +222,8 @@ defaults the input budget per extraction request is
 | `max_extraction_failure_fraction` | 0.10 | Candidates whose training [extraction failures](glossary.md#extraction-failure) exceed this fraction of patients are dropped |
 | `min_propensity`, `max_propensity` | null | Inclusive [propensity eligibility bounds](glossary.md#propensity-eligibility-and-clipping) for effect estimation; either may be set alone. Set them here, not under `statistical_selection` |
 | `propensity_clip` | 0.02 | Clipping of AIPW denominators to `[c, 1 − c]`; excludes no one. Under the `orthogonal_tests` modifier rule it also clips the AIPW projection test, so it is part of the selection identity |
+| `nuisance_learner` | `"super_learner"` | Learner for the final-estimation nuisances `e`, `μ0`, `μ1` (shared with the modifier tests): `"super_learner"` or `"elastic_net"` ([Nuisance learner](stage2_selection.md#nuisance-learner)). The selection-stage role models and the causal forest's internal nuisances are elastic nets either way. Part of the estimation identity and, under `orthogonal_tests`, of the selection identity |
+| `super_learner` | see below | Super-learner settings, used when `nuisance_learner` is `"super_learner"` |
 | `estimation_trees` | 200 | Trees in the final causal forest and, under `balanced_evidence`, in the forests used for modifier-budget selection (minimum 10). Under `orthogonal_tests` selection does not depend on it, so a change refits only the final estimation |
 | `modeling_workers` | 1 | CPU processes shared by numerical selection, modifier testing, and final estimation across all outer folds (see [Parallelism](#parallelism)) |
 | `estimand_ontology` | disabled | Outcome-informed search over alternative definitions ([Optional extensions](optional_extensions.md#estimand-informed-ontology-search)) |
@@ -234,6 +236,19 @@ defaults the input budget per extraction request is
 | Key | Default | Meaning |
 |---|---|---|
 | `temperature`, `top_p`, `top_k`, `min_p`, `presence_penalty`, `frequency_penalty`, `repetition_penalty` | null | Null uses the model's sampling profile. A number overrides the profile for both LLM roles |
+
+### `stage2.super_learner`
+
+| Key | Default | Meaning |
+|---|---|---|
+| `cv_folds` | 5 | Internal cross-validation folds that set the stack weights (at least 2; reduced automatically for a small arm or rare class) |
+| `learners` | `["elastic_net", "gradient_boosting", "random_forest"]` | Base learners, any nonempty subset in this order; a single learner is used alone |
+
+Unknown keys are errors. The learner settings are fixed (see
+[Nuisance learner](stage2_selection.md#nuisance-learner)). Each nuisance fit's
+audit in `estimation/nuisance_fit_audits/` holds its stack weights, per-learner
+and stack internal-CV losses, and the base learners' audits, and
+`estimation/diagnostics.json` summarizes them under `nuisance_learner`.
 
 ### `stage2.statistical_selection`
 
@@ -804,7 +819,8 @@ Stage 2 checks its saved state on every start:
 | Endpoint URLs, ports, worker counts, timeouts | Allowed |
 | Interpretation sampling, reasoning, or `max_tokens` | Completed feature definitions do not match the requested policy; the run stops |
 | Extraction context window, margin, chunk size, or output ceilings | Affected extraction chunks are extracted again |
-| `min_propensity`, `max_propensity`, `statistical_selection`, or, after selection has run, `propensity_clip` (under `orthogonal_tests`) or `estimation_trees` (under `balanced_evidence`) | Refused; use [guarded reselection](#guarded-reselection) |
+| `min_propensity`, `max_propensity`, `statistical_selection`, or, after selection has run, `propensity_clip`, `nuisance_learner`, or `super_learner` (under `orthogonal_tests`) or `estimation_trees` (under `balanced_evidence`) | Refused; use [guarded reselection](#guarded-reselection) |
+| `nuisance_learner` or `super_learner` under `balanced_evidence` | Allowed; only the final estimation is refitted |
 | `estimation_trees` under `orthogonal_tests` | Allowed; selection and its stored nuisance models are reused and only the final estimation is refitted |
 
 `run_config.json` stores every API key as `<redacted>`. When relaunching from it

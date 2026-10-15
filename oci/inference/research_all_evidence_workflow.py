@@ -1945,7 +1945,10 @@ def _stage2_reselection_policy_fingerprint(config: ResearchStage1Config) -> str:
             # orthogonal_tests selection depends on the AIPW clip; the
             # balanced_evidence count search scores forests of estimation_trees.
             **(
-                {"modifier_test_propensity_clip": config.stage2.propensity_clip}
+                {
+                    "modifier_test_propensity_clip": config.stage2.propensity_clip,
+                    "modifier_test_nuisance_learner": config.stage2.nuisance_learner_spec(),
+                }
                 if config.stage2.statistical_selection.multi_model.modifier_selection.rule
                 == "orthogonal_tests"
                 else {"modifier_count_estimation_trees": config.stage2.estimation_trees}

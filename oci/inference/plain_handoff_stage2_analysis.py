@@ -39,6 +39,7 @@ from . import stage2_clinical_prompts as clinical_prompts
 from . import stage2_modeling_pool as modeling
 
 from ..models.causal_forest_head import CausalForestHead
+from ..models.super_learner_nuisance import SuperLearnerClassifier, SuperLearnerRegressor
 from ..models.elastic_net_nuisance import (
     ElasticNetLogisticClassifier,
     ElasticNetRegressor,
@@ -5604,15 +5605,34 @@ class _ConstantRegressor:
         return np.full(len(x), self.mean, dtype=float)
 
 
+def _is_super_learner(learner: Mapping[str, Any] | None) -> bool:
+    if learner is None or learner.get("name") == "elastic_net":
+        return False
+    if learner.get("name") != "super_learner":
+        raise ValueError(f"unsupported nuisance learner: {learner.get('name')!r}")
+    return True
+
+
 def _fit_classifier(
     x: np.ndarray,
     y: np.ndarray,
     *,
     seed: int,
+    learner: Mapping[str, Any] | None = None,
 ) -> Any:
+    """Final nuisance classifier: elastic net (``learner`` None) or the configured stack.
+
+    Every model is fitted inside a modeling-pool job limited to one thread.
+    """
     if len(np.unique(y)) < 2 or x.shape[1] == 0:
         return _ConstantClassifier(float(np.mean(y)))
-    model: Any = ElasticNetLogisticClassifier(random_state=seed, n_jobs=1)
+    if _is_super_learner(learner):
+        model: Any = SuperLearnerClassifier(
+            learners=tuple(learner["learners"]), cv_folds=int(learner["cv_folds"]),
+            random_state=seed, n_jobs=1,
+        )
+    else:
+        model = ElasticNetLogisticClassifier(random_state=seed, n_jobs=1)
     model.fit(x, y.astype(int))
     return model
 
@@ -5630,10 +5650,17 @@ def _fit_regressor(
     y: np.ndarray,
     *,
     seed: int,
+    learner: Mapping[str, Any] | None = None,
 ) -> Any:
     if x.shape[1] == 0:
         return _ConstantRegressor(float(np.mean(y)))
-    model: Any = ElasticNetRegressor(random_state=seed, n_jobs=1)
+    if _is_super_learner(learner):
+        model: Any = SuperLearnerRegressor(
+            learners=tuple(learner["learners"]), cv_folds=int(learner["cv_folds"]),
+            random_state=seed, n_jobs=1,
+        )
+    else:
+        model = ElasticNetRegressor(random_state=seed, n_jobs=1)
     model.fit(x, y)
     return model
 
@@ -6793,11 +6820,24 @@ def _extract_training_with_ontology_feedback(
     return extracted, current, len(rounds)
 
 
+SUPER_LEARNER_DESCRIPTION = (
+    "Each nuisance model (e, mu0 on comparator rows, mu1 on treated rows) is a stacked "
+    "super learner: the elastic net, histogram gradient boosting and a random forest "
+    "(or the configured subset) are fitted in V-fold internal cross-validation inside "
+    "the model's training rows (stratified for binary targets; fewer folds when a class "
+    "or arm is small); non-negative weights summing to one minimize the internal-CV log "
+    "loss (binary) or squared error (continuous, normalized NNLS); learners with "
+    "positive weight are refitted on all training rows. The fit audits record the "
+    "weights, per-learner and stack CV losses, and each learner's own audit. Platt "
+    "recalibration then applies to the stacked predictions as to any learner."
+)
 NUISANCE_MODEL_STORE_SCHEMA_VERSION = "stage2_nuisance_model_store_v1"
 NUISANCE_MODEL_MANIFEST = "manifest.json"
 _STORABLE_NUISANCE_MODELS = (
     ElasticNetLogisticClassifier,
     ElasticNetRegressor,
+    SuperLearnerClassifier,
+    SuperLearnerRegressor,
     _ConstantClassifier,
     _ConstantRegressor,
 )
@@ -6831,11 +6871,13 @@ def _nuisance_model_identity(
     outcome_column: str,
     binary: bool,
     seed: int,
+    learner: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Everything the inner-fold nuisance models depend on, plus code and library versions."""
 
     fit_ids = [int(value) for value in fit_ids]
     return {
+        "nuisance_learner": dict(learner) if learner is not None else {"name": "elastic_net"},
         "schema_version": NUISANCE_MODEL_STORE_SCHEMA_VERSION,
         "definitions": list(candidate_definitions),
         "training_measurements": _frame_fingerprint(candidate_fit),
@@ -6848,7 +6890,11 @@ def _nuisance_model_identity(
         "seed": int(seed) + FINAL_NUISANCE_SEED_OFFSET,
         "sources": {
             name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
-            for name in ("plain_handoff_stage2_analysis.py", "../models/elastic_net_nuisance.py")
+            for name in (
+                "plain_handoff_stage2_analysis.py",
+                "../models/elastic_net_nuisance.py",
+                "../models/super_learner_nuisance.py",
+            )
         },
         "libraries": _nuisance_library_versions(),
     }
@@ -6919,6 +6965,7 @@ def _write_nuisance_model_manifest(root: Path, identity: Mapping[str, Any], fing
 
 def _fit_nuisance_prediction(
     x, y, valid, *, binary, seed, audit_path=None, split_at=None, model_store=None,
+    learner=None,
 ):
     """Fit one nuisance model (or load it from a model store) and predict ``valid``.
 
@@ -6934,7 +6981,10 @@ def _fit_nuisance_prediction(
         if model is not None:
             source = "reused_stored_model"
     if model is None:
-        model = _fit_classifier(x, y, seed=seed) if binary else _fit_regressor(x, y, seed=seed)
+        model = (
+            _fit_classifier(x, y, seed=seed, learner=learner) if binary
+            else _fit_regressor(x, y, seed=seed, learner=learner)
+        )
         if model_store is not None and model_store.get("mode") == "save":
             _store_nuisance_model(model_store, model)
     if audit_path is not None:
@@ -6963,7 +7013,7 @@ def _fit_nuisance_prediction(
 def _nuisance_prediction_futures(
     x_t, x_y, treatment, outcome, valid_t, valid_y, *, binary, seed,
     checkpoint_dir=None, checkpoint_fingerprint="uncached", name="full_training",
-    audit_dir=None, split_at=None, model_store=None,
+    audit_dir=None, split_at=None, model_store=None, learner=None,
 ):
     from functools import partial
     from .stage2_final_modeling import prediction_future
@@ -6986,7 +7036,7 @@ def _nuisance_prediction_futures(
         checkpoint_dir, f"{name}/propensity", checkpoint_fingerprint,
         partial(_fit_nuisance_prediction, x_t, treatment, valid_t, binary=True, seed=seed,
                 audit_path=audit_path("propensity"), split_at=split_at,
-                model_store=store("propensity")),
+                model_store=store("propensity"), learner=learner),
         len(valid_t),
     )]
     for arm in (0, 1):
@@ -6997,14 +7047,18 @@ def _nuisance_prediction_futures(
             checkpoint_dir, f"{name}/mu{arm}", checkpoint_fingerprint,
             partial(_fit_nuisance_prediction, x_y[mask], outcome[mask], valid_y,
                     binary=binary, seed=seed + arm, audit_path=audit_path(f"mu{arm}"),
-                    split_at=split_at, model_store=store(f"mu{arm}")),
+                    split_at=split_at, model_store=store(f"mu{arm}"), learner=learner),
             len(valid_y),
         ))
     return pending
 
 
 def _nuisance_fit_audit_summary(audit_dir: Path) -> dict[str, Any]:
-    """Summarize persisted elastic-net nuisance fit audits (iteration limits etc.)."""
+    """Summarize persisted nuisance fit audits (elastic-net iteration limits, stacks).
+
+    For a super learner the elastic-net fields come from its refitted elastic
+    net, and the internal-CV elastic-net fits count toward the CV limit flag.
+    """
 
     records = []
     for path in sorted(Path(audit_dir).rglob("*.json")):
@@ -7015,18 +7069,36 @@ def _nuisance_fit_audit_summary(audit_dir: Path) -> dict[str, Any]:
         audit = value.get("fit_audit") if isinstance(value, Mapping) else None
         if not isinstance(audit, Mapping):
             continue
-        optimization = audit.get("optimization") or {}
-        standardization = audit.get("standardization") or {}
+        stacked = "stack_weights" in audit
+        elastic = (audit.get("base_learners") or {}).get("elastic_net") or {} if stacked else audit
+        optimization = elastic.get("optimization") or {}
+        standardization = elastic.get("standardization") or {}
+        internal_limit = stacked and any(
+            fold.get("iteration_limit_reached")
+            for fold in (audit.get("internal_cv") or {}).get("elastic_net", [])
+        )
         records.append({
             "fit": str(path.relative_to(audit_dir).with_suffix("")),
             "fit_mode": audit.get("fit_mode"),
-            "selected_regularization": audit.get("selected_regularization"),
+            "selected_regularization": elastic.get("selected_regularization"),
             "standardized": standardization.get("applied"),
             "refit_iterations": optimization.get("refit_iterations"),
             "refit_iteration_limit_reached": bool(optimization.get("refit_iteration_limit_reached")),
-            "cv_iteration_limit_reached": bool(optimization.get("cv_iteration_limit_reached")),
+            "cv_iteration_limit_reached": bool(
+                optimization.get("cv_iteration_limit_reached") or internal_limit
+            ),
             "configured_max_iter": optimization.get("configured_max_iter"),
             **({"model_source": value["model_source"]} if "model_source" in value else {}),
+            **(
+                {
+                    "stack_weights": audit.get("stack_weights"),
+                    "learner_cv_loss": audit.get("learner_cv_loss"),
+                    "stack_cv_loss": audit.get("stack_cv_loss"),
+                    "effective_cv_folds": audit.get("effective_cv_folds"),
+                }
+                if stacked
+                else {}
+            ),
         })
     sources = Counter(r["model_source"] for r in records if "model_source" in r)
     return {
@@ -7038,6 +7110,48 @@ def _nuisance_fit_audit_summary(audit_dir: Path) -> dict[str, Any]:
         "standardized_fits": sum(r["standardized"] is True for r in records),
         "fits": records,
     }
+
+
+def _nuisance_learner_summary(
+    learner: Mapping[str, Any] | None, audit_summary: Mapping[str, Any]
+) -> dict[str, Any]:
+    """The learner and, for a super learner, mean stack weights and CV losses per nuisance."""
+
+    learner = dict(learner) if learner is not None else {"name": "elastic_net"}
+    summary: dict[str, Any] = {"learner": learner["name"], "configuration": learner}
+    if learner["name"] != "super_learner":
+        return summary
+    by_target: dict[str, list[Mapping[str, Any]]] = {}
+    for record in audit_summary.get("fits") or []:
+        if "stack_weights" in record:
+            by_target.setdefault(str(record["fit"]).rsplit("/", 1)[-1], []).append(record)
+
+    def mean_by_learner(records, key):
+        values: dict[str, list[float]] = {}
+        for record in records:
+            for name, value in (record.get(key) or {}).items():
+                if value is not None:
+                    values.setdefault(name, []).append(float(value))
+        return {name: float(np.mean(items)) for name, items in values.items()}
+
+    summary["nuisances"] = {
+        target: {
+            "fits": len(records),
+            "fit_modes": dict(Counter(str(r.get("fit_mode")) for r in records)),
+            "mean_stack_weights": mean_by_learner(records, "stack_weights"),
+            "mean_learner_cv_loss": mean_by_learner(records, "learner_cv_loss"),
+            "mean_stack_cv_loss": (
+                float(np.mean([r["stack_cv_loss"] for r in records
+                               if r.get("stack_cv_loss") is not None]))
+                if any(r.get("stack_cv_loss") is not None for r in records) else None
+            ),
+        }
+        for target, records in sorted(by_target.items())
+    }
+    summary["fits_without_stack"] = int(audit_summary.get("fits_audited", 0)) - sum(
+        len(records) for records in by_target.values()
+    )
+    return summary
 
 
 def _cross_fitted_nuisance(
@@ -7057,6 +7171,7 @@ def _cross_fitted_nuisance(
     audit_dir: Path | None = None,
     heldout_extracted: pd.DataFrame | None = None,
     model_store: Mapping[str, Any] | None = None,
+    learner: Mapping[str, Any] | None = None,
 ) -> tuple[np.ndarray, ...]:
     """Inner cross-fitted e/mu0/mu1 for the outer-training rows.
 
@@ -7110,6 +7225,7 @@ def _cross_fitted_nuisance(
             name=f"cross_fit/fold_{fold_index:03d}", audit_dir=audit_dir,
             split_at=len(valid_ids) if heldout_extracted is not None else None,
             model_store=model_store,
+            learner=learner,
         )
         pending.append((valid_positions, jobs))
     heldout_rows = 0 if heldout_extracted is None else len(heldout_extracted)
@@ -7269,8 +7385,12 @@ def _outer_training_nuisances(
     candidate_heldout: pd.DataFrame | None = None,
     model_store_root: Path | None = None,
     model_store_mode: str | None = None,
+    learner: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """All-candidate, inner-cross-fitted, Platt-recalibrated e/mu0/mu1.
+
+    ``learner`` is the nuisance learner (``learner_spec``); None is the elastic
+    net.
 
     The final estimation (with ``candidate_heldout``) and the modifier tests
     (training rows only, before held-out measurements exist) share this
@@ -7305,6 +7425,7 @@ def _outer_training_nuisances(
             outcome_column=outcome_column,
             binary=binary,
             seed=seed,
+            learner=learner,
         )
         store_fingerprint = _value_fingerprint(identity)
         store_root = Path(model_store_root) / store_fingerprint[:20]
@@ -7340,6 +7461,7 @@ def _outer_training_nuisances(
         # No separate full-data fit.
         heldout_extracted=candidate_heldout,
         model_store=store,
+        learner=learner,
     )
     if store is not None and model_store_mode == "save":
         _write_nuisance_model_manifest(Path(store["root"]), identity, store["fingerprint"])
@@ -7388,8 +7510,12 @@ def estimate_outer_fold(
     nuisance_candidate_fit: pd.DataFrame,
     nuisance_candidate_heldout: pd.DataFrame,
     nuisance_model_store: Path | None = None,
+    nuisance_learner: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Estimate one outer fold with one honest nuisance construction everywhere.
+
+    ``nuisance_learner`` (``learner_spec``; None is the elastic net) fits e,
+    mu0 and mu1.
 
     ``nuisance_model_store`` is the root where the modifier tests stored their
     inner-fold nuisance models; verified models are reused to score the
@@ -7440,12 +7566,16 @@ def estimate_outer_fold(
             "propensity_clip": propensity_clip,
             "estimation_trees": estimation_trees,
             "estimator": estimator,
+            "nuisance_learner": (
+                dict(nuisance_learner) if nuisance_learner is not None else {"name": "elastic_net"}
+            ),
             "final_fit_sources": {
                 name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
                 for name in (
                     "plain_handoff_stage2_analysis.py", "stage2_final_modeling.py",
                     "stage2_effect_estimators.py", "../utils/calibration.py",
                     "../models/elastic_net_nuisance.py", "../models/causal_forest_head.py",
+                    "../models/super_learner_nuisance.py",
                 )
             },
             "interaction_policy": (
@@ -7566,6 +7696,7 @@ def estimate_outer_fold(
         candidate_heldout=candidate_heldout,
         model_store_root=nuisance_model_store,
         model_store_mode="load" if nuisance_model_store is not None else None,
+        learner=nuisance_learner,
     )
     inner_fold_ids = nuisances["inner_fold_ids"]
     raw_fit_propensity, raw_fit_mu0, raw_fit_mu1 = nuisances["raw_fit"]
@@ -7995,10 +8126,19 @@ def estimate_outer_fold(
             "heldout_outcome_factual",
         )
     }
+    super_learner_nuisances = _is_super_learner(nuisance_learner)
+    nuisance_audit_summary = _nuisance_fit_audit_summary(nuisance_audit_dir)
     methodology_notes = {
         "unified_nuisances": (
             "Training out-of-fold and outer-held-out nuisances use one construction: "
-            "elastic nets on the complete nuisance-candidate catalog with fold-local "
+            + (
+                "super-learner stacks (" + ", ".join(nuisance_learner["learners"])
+                + "; non-negative weights summing to one, learned by internal "
+                "cross-validation inside each fit's training rows) "
+                if super_learner_nuisances
+                else "elastic nets "
+            )
+            + "on the complete nuisance-candidate catalog with fold-local "
             "regularization, fitted in the K inner cross-fitting folds. Training rows get "
             "the prediction of the fold model that did not see them; held-out rows (whose "
             "patients were measured on the full catalog) get the average of the same K "
@@ -8010,6 +8150,11 @@ def estimate_outer_fold(
         "elastic_net_standardization": (
             "Elastic-net nuisance wrappers standardize their design with a StandardScaler "
             "fit on each fit's own rows; refit iteration counts are in the fit audits."
+        ),
+        **(
+            {"super_learner_nuisances": SUPER_LEARNER_DESCRIPTION}
+            if super_learner_nuisances
+            else {}
         ),
         **(
             {"interaction_model_nuisance_adjustment": NUISANCE_ADJUSTMENT_DESCRIPTION}
@@ -8043,9 +8188,25 @@ def estimate_outer_fold(
         **architecture_diagnostics,
         "methodology_notes": methodology_notes,
         "primary_ate_estimator": "outer_cross_fitted_aipw",
-        "nuisance_model_family": "elastic_net",
-        "binary_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier"),
-        "continuous_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetRegressor"),
+        **(
+            {
+                "nuisance_model_family": "super_learner",
+                "binary_nuisance_model": (
+                    "oci.models.super_learner_nuisance.SuperLearnerClassifier"
+                ),
+                "continuous_nuisance_model": (
+                    "oci.models.super_learner_nuisance.SuperLearnerRegressor"
+                ),
+            }
+            if super_learner_nuisances
+            else {
+                "nuisance_model_family": "elastic_net",
+                "binary_nuisance_model": (
+                    "oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier"
+                ),
+                "continuous_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetRegressor"),
+            }
+        ),
         "rows": len(heldout_ids),
         "fit_rows": len(fit_ids),
         "effect_fit_rows": int(fit_keep.sum()),
@@ -8074,7 +8235,8 @@ def estimate_outer_fold(
             "dina_reuses_external_nuisances": estimator == "dina"
             or (ensemble is not None and "dina" in ensemble["fitted_estimators"]),
         },
-        "nuisance_fit_audit_summary": _nuisance_fit_audit_summary(nuisance_audit_dir),
+        "nuisance_fit_audit_summary": nuisance_audit_summary,
+        "nuisance_learner": _nuisance_learner_summary(nuisance_learner, nuisance_audit_summary),
         **(
             {"nuisance_model_store": nuisances["model_store"]}
             if nuisance_model_store is not None
@@ -8466,6 +8628,12 @@ def _run_stage2_statistical_selection(
             select_stage2_features_multi_model,
             **arguments,
         ).result()
+
+
+def _config_nuisance_learner(config: Any) -> dict[str, Any]:
+    """The configured final nuisance learner (elastic net for configs without the key)."""
+    spec = getattr(config, "nuisance_learner_spec", None)
+    return spec() if callable(spec) else {"name": "elastic_net"}
 
 
 def initial_feature_modeling_definitions(definitions):
@@ -8914,6 +9082,8 @@ def run_fold_analysis(
         # The AIPW projection test clips propensities exactly as the AIPW ATE does.
         # The trees matter only to final estimation, which has its own identity.
         selection_input["modifier_test_propensity_clip"] = float(config.propensity_clip)
+        # The testing nuisances use the final-estimation nuisance learner.
+        selection_input["modifier_test_nuisance_learner"] = _config_nuisance_learner(config)
         selection_input["modifier_tests_source_sha256"] = hashlib.sha256(
             Path(__file__).with_name("stage2_modifier_tests.py").read_bytes()
         ).hexdigest()
@@ -9114,6 +9284,7 @@ def run_fold_analysis(
                 propensity_clip=float(config.propensity_clip),
                 tests_path=selection_dir / "modifier_tests.json",
                 nuisance_model_store=selection_dir / "nuisance_models",
+                nuisance_learner=_config_nuisance_learner(config),
             )
         measurement_definitions = measurement_definitions_for_selected(
             selected,
@@ -9427,6 +9598,7 @@ def run_fold_analysis(
         nuisance_candidate_heldout=heldout_candidates,
         # Inner-fold nuisance models stored by the modifier tests, if any.
         nuisance_model_store=selection_dir / "nuisance_models",
+        nuisance_learner=_config_nuisance_learner(config),
     )
     # Held-out treatment labels are used here only for a descriptive
     # differential-measurement report, after effect predictions are frozen.

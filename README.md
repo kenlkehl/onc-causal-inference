@@ -215,8 +215,9 @@ use a separate output directory for a different study. Details are in
   the final model, the forest fills the three main interval columns.
 - `propensity`, `mu0`, and `mu1` are the nuisance predictions: the probability of
   treatment and the expected outcome under comparator and under treatment, from
-  separate cross-fitted elastic-net models (recalibrated for the propensity and,
-  for binary outcomes, for `mu0` and `mu1`). They are not the effect
+  separate cross-fitted nuisance models, by default super learners that stack an
+  elastic net, gradient boosting, and a random forest (recalibrated for the
+  propensity and, for binary outcomes, for `mu0` and `mu1`). They are not the effect
   model's predictions, so `mu1 − mu0` need not equal `estimated_cate`.
 - `aipw_score` is the patient's augmented inverse-probability-weighted score,
   built from the observed outcome and the nuisance predictions.

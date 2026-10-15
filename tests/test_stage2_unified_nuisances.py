@@ -147,7 +147,7 @@ def test_cross_fitted_platt_recalibration_improves_an_overfit_propensity(
     definitions = [{**feature(f"x{j}"), "roles": ["confounder"],
                     "nuisance_model_roles": ["treatment", "outcome"]} for j in range(p)]
 
-    def overfit_classifier(design, target, *, seed):
+    def overfit_classifier(design, target, *, seed, learner=None):
         # Nearly unpenalized logistic regression: OOF slopes well below one.
         return LogisticRegression(C=1e4, max_iter=5000).fit(design, target.astype(int))
 

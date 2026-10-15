@@ -86,6 +86,11 @@ from .stage2_estimand_ontology_config import (
     EstimandOntologyConfig,
     estimand_ontology_config_from_mapping,
 )
+from ..models.super_learner_nuisance import (
+    SuperLearnerConfig,
+    learner_spec,
+    super_learner_config_from_mapping,
+)
 from .vllm_server_pool import (
     ManagedVLLMConfig,
     launch_managed_vllm_servers,
@@ -860,6 +865,11 @@ class PlainHandoffStage2Config:
         default_factory=Stage2RoleAdjudicationConfig
     )
     estimation_trees: int = 200
+    # Learner for the final-estimation and modifier-test nuisances e, mu0, mu1.
+    # The selection-stage role models and the causal forest's internal
+    # nuisances stay elastic nets.
+    nuisance_learner: str = "super_learner"
+    super_learner: SuperLearnerConfig = field(default_factory=SuperLearnerConfig)
     min_propensity: float | None = None
     max_propensity: float | None = None
     propensity_clip: float = 0.02
@@ -1185,6 +1195,11 @@ class PlainHandoffStage2Config:
         self.role_adjudication.validate()
         if self.estimation_trees < 10:
             raise ValueError("stage2.estimation_trees must be at least 10")
+        if self.nuisance_learner not in {"super_learner", "elastic_net"}:
+            raise ValueError("stage2.nuisance_learner must be super_learner or elastic_net")
+        if not isinstance(self.super_learner, SuperLearnerConfig):
+            raise ValueError("stage2.super_learner must be a SuperLearnerConfig")
+        self.super_learner.validate()
         validate_propensity_bounds(self.min_propensity, self.max_propensity)
         if (
             self.statistical_selection.min_propensity is not None
@@ -1272,7 +1287,12 @@ class PlainHandoffStage2Config:
         values["estimand_ontology"] = self.estimand_ontology.public_dict()
         values["statistical_selection"] = self.statistical_selection.public_dict()
         values["role_adjudication"] = self.role_adjudication.public_dict()
+        values["super_learner"] = self.super_learner.public_dict()
         return values
+
+    def nuisance_learner_spec(self) -> dict[str, Any]:
+        """The nuisance learner passed to the final-estimation and modifier-test fits."""
+        return learner_spec(self.nuisance_learner, self.super_learner)
 
 
 def _reject_unknown_stage2_keys(
@@ -1540,6 +1560,9 @@ def plain_stage2_config_from_mapping(
         ),
         role_adjudication=role_adjudication_config_from_mapping(raw.get("role_adjudication")),
         estimation_trees=int(raw.get("estimation_trees", 200)),
+        # Validated (not coerced) by PlainHandoffStage2Config.validate().
+        nuisance_learner=raw.get("nuisance_learner", "super_learner"),
+        super_learner=super_learner_config_from_mapping(raw.get("super_learner")),
         min_propensity=raw.get("min_propensity"),
         max_propensity=raw.get("max_propensity"),
         propensity_clip=float(raw.get("propensity_clip", 0.02)),

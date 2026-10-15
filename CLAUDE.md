@@ -49,6 +49,7 @@ oci/
 ├── models/
 │   ├── causal_forest_head.py         # CausalForestDML wrapper with elastic-net nuisances
 │   ├── elastic_net_nuisance.py       # Clone-safe elastic-net nuisance estimators and fit audits
+│   ├── super_learner_nuisance.py     # Stacked nuisance learner (elastic net, boosting, forest)
 │   ├── dina.py                       # Gao–Hastie Bernoulli DINA objectives
 │   ├── hierarchical_transformer_extractor.py   # HTR model
 │   ├── concept_embedding_cache.py    # Chunk embedding cache (Stage 1)
@@ -143,9 +144,10 @@ default: training-row final-estimation nuisances, whose inner-fold models are
 stored in `selection/nuisance_models/` for reuse; `r_projection`,
 `aipw_projection`, and `outcome_interaction` tests per candidate; Cauchy
 combination; BH at `modifier_selection.q`) → held-out extraction of the full
-nuisance-candidate catalog → final refit with recalibrated nuisances (the
-stored inner-fold models score the held-out rows when their fingerprint
-verifies) of the estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
+nuisance-candidate catalog → final refit with recalibrated nuisances from the
+configured nuisance learner (super learner by default; the stored inner-fold
+models score the held-out rows when their fingerprint verifies) of the
+estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
 and `dina` for binary outcomes) → cross-fitted predictions, AIPW ATE, and
 `heterogeneity_diagnostics.json`, including the reporting-only outer-fold
 confirmation of the selected modifiers. `modifier_selection.rule:
@@ -185,9 +187,12 @@ Configuration rules:
 - Preserve exact row, split, component, architecture, and configuration
   provenance in sidecars.
 - Fail closed when text capacity would truncate semantic content.
-- Keep causal-forest nuisance models and the final Stage 2 nuisance models
-  elastic-net-only, and keep the fitted-clone audit records of the selected
-  regularization and optimizer iteration limits.
+- The causal forest's internal nuisances and the selection-stage role models
+  are elastic nets. Final Stage 2 nuisances (shared with the modifier tests) use
+  the configured `stage2.nuisance_learner`: the super learner by default
+  (elastic net, histogram gradient boosting, random forest), or `elastic_net`.
+  Keep the fitted audit records: stack weights, per-learner and stack CV loss,
+  and the elastic-net selected regularization and iteration limits.
 - Estimand-informed definition search uses outcome information to choose
   definitions; keep it opt-in and training-only.
 

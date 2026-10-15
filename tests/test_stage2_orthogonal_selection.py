@@ -118,7 +118,7 @@ def _request_json(messages, validate, *, request_kind="interpretation", **_kwarg
     return validate({"action": "keep", "reason": "Consistent aggregate extraction."})
 
 
-def _run_fold(output, *, estimation_trees=12):
+def _run_fold(output, *, estimation_trees=12, nuisance_learner="super_learner"):
     dataset, definitions, split = _fold_inputs()
     return analysis.run_fold_analysis(
         dataset=dataset,
@@ -144,6 +144,7 @@ def _run_fold(output, *, estimation_trees=12):
             extraction_max_prompt_chars=20_000,
             max_review_rounds=1,
             estimation_trees=estimation_trees,
+            nuisance_learner=nuisance_learner,
             min_informative_patients=2,
             min_propensity=0.05,
             max_propensity=0.95,
@@ -249,6 +250,24 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
         assert estimation_audits[name]["model_source"] == "reused_stored_model"
         for key in ("rows", "columns", "fit_audit"):
             assert estimation_audits[name][key] == audit[key], (name, key)
+    # The default nuisance learner is the super learner; its stacks are audited.
+    learner = result["estimation"]["nuisance_learner"]
+    assert learner["learner"] == "super_learner"
+    assert learner["configuration"]["learners"] == [
+        "elastic_net", "gradient_boosting", "random_forest"]
+    assert set(learner["nuisances"]) == {"propensity", "mu0", "mu1"}
+    for summary in learner["nuisances"].values():
+        assert summary["fits"] == 2
+        assert sum(summary["mean_stack_weights"].values()) == pytest.approx(1.0)
+        assert set(summary["mean_learner_cv_loss"]) == {
+            "elastic_net", "gradient_boosting", "random_forest"}
+    assert result["estimation"]["nuisance_model_family"] == "super_learner"
+    stack = next(iter(estimation_audits.values()))["fit_audit"]
+    assert stack["estimator"].endswith("SuperLearnerClassifier")
+    assert sum(stack["stack_weights"].values()) == pytest.approx(1.0)
+    assert {"learner_cv_loss", "stack_cv_loss", "base_learners", "internal_cv",
+            "seeds"} <= set(stack)
+    assert report["testing_nuisances"]["nuisance_learner"]["name"] == "super_learner"
 
     # The ensemble: per-estimator columns, their unweighted mean, empty intervals.
     diagnostics = result["estimation"]
@@ -526,7 +545,8 @@ def test_orthogonal_rule_skips_unread_effect_evidence_and_keeps_roles(
 def test_changing_estimation_trees_reuses_orthogonal_selection(tmp_path, monkeypatch):
     install(monkeypatch)
     output = tmp_path / "stage2" / "outer_001"
-    first = _run_fold(output, estimation_trees=12)
+    # Selection reuse does not depend on the learner; the elastic net keeps this fast.
+    first = _run_fold(output, estimation_trees=12, nuisance_learner="elastic_net")
     selection_files = {
         path: path.read_bytes()
         for path in (output / "selection").rglob("*") if path.is_file()
@@ -537,7 +557,7 @@ def test_changing_estimation_trees_reuses_orthogonal_selection(tmp_path, monkeyp
 
     monkeypatch.setattr(count, "select_modifier_count", forbidden)
     monkeypatch.setattr(analysis, "select_stage2_features_multi_model", forbidden)
-    second = _run_fold(output, estimation_trees=16)
+    second = _run_fold(output, estimation_trees=16, nuisance_learner="elastic_net")
     assert {path: path.read_bytes() for path in selection_files} == selection_files
     forests = [
         result["estimation"]["ensemble"]["component_audits"]["causal_forest"]

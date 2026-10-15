@@ -330,8 +330,12 @@ text is used.
 ### 11. Build the final nuisance predictions
 
 One nuisance construction is used for every downstream quantity. Within the
-outer-training patients, elastic nets on the complete catalog are fitted in the
-five inner folds; each training patient gets the prediction of the model that
+outer-training patients, nuisance models on the complete catalog are fitted in
+the five inner folds. By default each is a super learner: an elastic net,
+histogram gradient boosting, and a random forest, combined with non-negative
+weights chosen by internal cross-validation (`stage2.nuisance_learner:
+"elastic_net"` uses the elastic net alone). Each training patient gets the
+prediction of the model that
 did not see it, and each held-out patient gets the average of the five models'
 predictions. The propensity and, for binary outcomes, both arm-specific outcome
 predictions are then Platt-recalibrated using calibrators learned from training

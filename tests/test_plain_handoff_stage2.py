@@ -5859,6 +5859,10 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
         # Tiny synthetic cohorts: count-based informativeness rule with K=2.
         min_informative_patients=2,
         required_architectures=(),
+        # The default super learner is exercised end to end by
+        # tests/test_stage2_orthogonal_selection.py; this pipeline test keeps
+        # the faster elastic-net nuisances.
+        nuisance_learner="elastic_net",
     )
 
     first = run_plain_handoff_stage2(

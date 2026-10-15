@@ -51,8 +51,11 @@ quantity of interest:
 | `μ0(X)`, `μ1(X)` | Arm-specific outcome models: expected outcome under comparator and under treatment, `E[Y | T = t, X]` |
 | `m(X)` | Marginal outcome model: expected outcome ignoring treatment, `E[Y | X]` |
 
-OCI fits all Stage 2 nuisance models as cross-validated elastic-net regressions
-(logistic for binary targets). Estimates carry a hat, for example `ê(X)`.
+The final Stage 2 nuisance models are [super learners](#super-learner) by
+default (`stage2.nuisance_learner`), or cross-validated elastic-net regressions
+(logistic for binary targets). The models that assign nuisance roles during
+selection and the causal forest's internal nuisances are elastic nets.
+Estimates carry a hat, for example `ê(X)`.
 
 ### Cross-fitting
 
@@ -230,6 +233,17 @@ that variable.
 A two-parameter logistic regression of a binary label on
 `[1, logit(prediction)]`. OCI applies it to its final nuisance predictions,
 learned from out-of-fold training predictions only (see
+[Stage 2 selection](stage2_selection.md#nuisance-construction)).
+
+### Super learner
+
+A stacked ensemble (van der Laan, Polley and Hubbard 2007). Several base
+learners are fitted in internal cross-validation; non-negative weights that sum
+to one are chosen to minimize the cross-validated loss of their combined
+prediction, and the learners are then refitted on all training rows. OCI's
+default final nuisance learner stacks an elastic net, histogram gradient
+boosting, and a random forest, so it can follow thresholds, curvature, and
+interactions while keeping the elastic net available when it fits best (see
 [Stage 2 selection](stage2_selection.md#nuisance-construction)).
 
 ### HTR

@@ -652,15 +652,16 @@ the diagnostics. Its training half, computed earlier and identically, also
 supplies the [testing nuisances](#testing-nuisances) of the orthogonal tests.
 
 1. **Models.** Within the outer-training patients, the five inner folds are
-   used for cross-fitting. In each inner fold, elastic nets are fitted on the
-   other four folds: a logistic model for treatment and, separately in each
-   treatment arm, a model for the outcome (logistic for binary outcomes). Every
-   model uses the **complete catalog** of candidates, with categorical encoders,
-   standardization, and the penalty (3-fold cross-validation, mixing ratio 0.8)
-   fitted on that model's training rows. The selected nuisance supports are
-   recorded for transparency but do not restrict these models: a support chosen
-   using all outer-training patients would otherwise screen the inputs of their
-   own out-of-fold predictions.
+   used for cross-fitting. In each inner fold, three nuisance models are fitted
+   on the other four folds: one for treatment and, separately in each treatment
+   arm, one for the outcome. Every model uses the **complete catalog** of
+   candidates, with categorical encoders fitted on that model's training rows.
+   The selected nuisance supports are recorded for transparency but do not
+   restrict these models: a support chosen using all outer-training patients
+   would otherwise screen the inputs of their own out-of-fold predictions. The
+   learner is `stage2.nuisance_learner` (see [Nuisance learner](#nuisance-learner)):
+   by default a super learner, otherwise a standardized elastic net (logistic
+   for binary targets; penalty by 3-fold cross-validation, mixing ratio 0.8).
 2. **Training patients** receive the prediction of the one inner-fold model that
    did not see them.
 3. **Held-out patients**, measured on the same complete catalog, receive the
@@ -671,8 +672,8 @@ supplies the [testing nuisances](#testing-nuisances) of the orthogonal tests.
    inner-fold models before selection and store them with joblib in
    `selection/nuisance_models/<id>/`, together with a `manifest.json` holding
    each file's SHA-256 and a fingerprint of the training measurements and
-   labels, candidate definitions, folds, seed, source code, and library
-   versions (Python, NumPy, pandas, SciPy, scikit-learn, joblib). The final
+   labels, candidate definitions, folds, seed, nuisance learner, source code,
+   and library versions (Python, NumPy, pandas, SciPy, scikit-learn, joblib). The final
    estimation recomputes that fingerprint from its own inputs and loads a model
    only when the fingerprint and file hash match and the model's input width
    agrees; otherwise, or on any load error, it refits that model. Reused and
@@ -695,14 +696,64 @@ The recalibrated predictions are written as `propensity`, `mu0`, and `mu1`; the
 raw predictions are kept as `propensity_uncalibrated`, `mu0_uncalibrated`, and
 `mu1_uncalibrated`. Each fold's `estimation/diagnostics.json` reports
 calibration before and after recalibration (`nuisance_calibration`, including a
-`calibration_slope_summary`), elastic-net fit audits, including any fit that
-reached its iteration limit (with `model_sources` counts when a model store was
+`calibration_slope_summary`), nuisance fit audits, including any elastic-net
+fit that reached its iteration limit (with `model_sources` counts when a model store was
 consulted), and, under `orthogonal_tests`, `nuisance_model_store` (`available`
 or `absent`, with the store fingerprint). The held-out calibrator is learned from
 single-model out-of-fold predictions but applied to an average of five models,
 which is slightly less dispersed; held-out calibration slopes after
 recalibration can therefore sit modestly above 1 (see
 [Limitations](#limitations)).
+
+### Nuisance learner
+
+The default `stage2.nuisance_learner`, `super_learner`, stacks three base
+learners (`stage2.super_learner.learners`, any nonempty subset):
+
+| Learner | Settings |
+|---|---|
+| `elastic_net` | The standardized elastic net above, with its own penalty cross-validation |
+| `gradient_boosting` | scikit-learn histogram gradient boosting: depth 3, learning rate 0.05, at most 300 iterations, L2 regularization 1.0, at least 20 rows per leaf; early stopping on a 15% validation fraction (20 iterations without improvement) when the training rows number at least 100 and, for binary targets, the smaller class has at least 10 rows |
+| `random_forest` | scikit-learn random forest: 500 trees, at least 5 rows per leaf, square-root feature sampling |
+
+Each nuisance model is stacked inside its own training rows:
+
+1. **Internal cross-validation.** `stage2.super_learner.cv_folds` folds (default
+   5; stratified on the label for binary targets) give out-of-fold predictions
+   of every base learner. A small arm or rare class reduces the number of folds
+   (to the smaller class count, or half the rows for continuous targets), and
+   the reduction is recorded; with fewer than two possible folds the elastic net
+   alone is used.
+2. **Weights.** Non-negative weights that sum to one minimize the internal-CV
+   log loss of the combined probability (binary targets, probabilities clipped
+   to `[10⁻⁶, 1 − 10⁻⁶]`, SLSQP on the simplex) or the squared error
+   (continuous targets, non-negative least squares normalized to sum to one;
+   the best single learner if every weight is zero).
+3. **Refit.** Learners with positive weight are refitted on all training rows,
+   and the model predicts the weighted combination. A learner with zero weight
+   does not affect predictions and is not refitted.
+
+Seeds derive from the inner-fold seed (elastic net, boosting, forest, and the
+internal folds each have a fixed offset), so fits are deterministic. Each fit
+runs in one modeling-pool job with one thread (the forest uses `n_jobs=1`;
+boosting's OpenMP threads follow the job's thread limit), so the learners stay
+within `stage2.modeling_workers`. Platt recalibration (step 5 above) applies
+to the stacked predictions exactly as to the elastic net.
+
+Every model's fit audit in `estimation/nuisance_fit_audits/` records the stack
+weights, each learner's internal-CV loss, the stack's internal-CV loss (with
+the weights refitted on the other internal folds, so it is not optimistic),
+the requested and effective internal folds, the seeds and settings, each
+refitted learner's audit (the elastic net's selected regularization and
+iteration-limit flags; boosting's iteration count), and the elastic net's
+per-fold regularization and iteration-limit flags in the internal folds.
+`estimation/diagnostics.json` summarizes them under `nuisance_learner`: mean
+stack weights, mean learner and stack CV losses, and fit modes for `propensity`,
+`mu0`, and `mu1`.
+
+With `nuisance_learner: "elastic_net"`, every nuisance model is the elastic net
+alone. The models that assign nuisance roles during selection and the causal
+forest's internal nuisances are elastic nets under either setting.
 
 ## Propensity eligibility and calibration
 
@@ -907,6 +958,14 @@ data, `posthoc_oracle_ite_metrics.json` and
   flagged rather than treated as "not documented", and failure rates by arm are
   reported, but extraction accuracy is not otherwise validated against a
   reference standard.
+- **Nuisance models.** The default super learner can follow thresholds,
+  curvature, and interactions that a linear elastic net misses, and the stack
+  falls back toward the elastic net when the flexible learners do not improve
+  the internal-CV loss. Its library is fixed, its tree learners are noisy in
+  small arms (which reduce the internal folds or use the elastic net alone),
+  and when both the propensity and outcome models are misspecified, AIPW is
+  biased roughly in proportion to the product of their errors, whichever
+  learner is used.
 - **Pretreatment text.** The analysis assumes that every supplied note was
   written before treatment assignment. OCI does not verify this. Post-treatment
   text, such as documentation of early response or toxicity, can act as a
@@ -971,6 +1030,8 @@ data, `posthoc_oracle_ite_metrics.json` and
 - Stouffer SA, Suchman EA, DeVinney LC, Star SA, Williams RM. *The American
   Soldier, Vol. 1: Adjustment During Army Life.* Princeton University Press,
   1949.
+- van der Laan MJ, Polley EC, Hubbard AE. Super learner. *Statistical
+  Applications in Genetics and Molecular Biology* 2007;6(1):Article 25.
 - Yadlowsky S, Fleming S, Shah N, Brunskill E, Wager S. Evaluating treatment
   prioritization rules via rank-weighted average treatment effects. *Journal of
   the American Statistical Association* 2025;120(549):38–51.
