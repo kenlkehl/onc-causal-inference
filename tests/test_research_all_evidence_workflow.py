@@ -1107,6 +1107,149 @@ def test_stage2_reselection_fails_before_moving_incompatible_definitions(tmp_pat
     assert not (stage2_dir / "reselection_state.json").exists()
 
 
+def test_stage2_reselection_plan_does_not_archive_retired_review_directories(tmp_path):
+    config = _completed_stage2_reselection_fixture(tmp_path)
+    stage2_dir = config.output_dir / "stage2"
+    (stage2_dir / "outer_001" / "review").mkdir()
+
+    plan = all_evidence_workflow.prepare_stage2_reselection(config=config, dry_run=True)
+
+    assert "outer_001/selection" in plan["planned_artifacts"]
+    assert not any(path.endswith("/review") for path in plan["planned_artifacts"])
+
+
+_SENTINEL_KEYS = {
+    "stage2": "sk-sentinel-stage2-primary",
+    "extraction": "sk-sentinel-stage2-extraction",
+    "extraction_runtime": "sk-sentinel-stage2-extraction-runtime",
+    "consolidation_runtime": "sk-sentinel-stage2-consolidation-runtime",
+    "stage1_vllm": "sk-sentinel-stage1-vllm",
+    "stage1_agent": "sk-sentinel-stage1-agent",
+}
+
+
+def _api_key_values(value):
+    from oci.extraction.llm_routing import is_api_key_field
+
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if is_api_key_field(key):
+                yield child
+            else:
+                yield from _api_key_values(child)
+    elif isinstance(value, (list, tuple)):
+        for child in value:
+            yield from _api_key_values(child)
+
+
+def _run_with_sentinel_keys(tmp_path):
+    raw, _config = _inputs(tmp_path)
+    raw["science"]["stage1"] = {
+        "training": {"epochs": 3},
+        "explicit_features": {"vllm_api_key": _SENTINEL_KEYS["stage1_vllm"]},
+        "architecture": {
+            "agentic_feature_search": {"agent_api_key": _SENTINEL_KEYS["stage1_agent"]}
+        },
+    }
+    raw["stage2"] = {
+        "endpoint": "http://stage2.test/v1",
+        "model": "primary-model",
+        "api_key": _SENTINEL_KEYS["stage2"],
+        "extraction_llm": {
+            "endpoint": "http://extract.test/v1",
+            "model": "extractor-model",
+            "api_key": _SENTINEL_KEYS["extraction"],
+            "runtime_endpoint": "http://extract-runtime.test/v1",
+            "runtime_model": "replacement-extractor",
+            "runtime_api_key": _SENTINEL_KEYS["extraction_runtime"],
+        },
+        "selection_consolidation": {
+            "runtime_llm_endpoint": "http://consolidate.test/v1",
+            "runtime_llm_model": "replacement-primary",
+            "runtime_llm_api_key": _SENTINEL_KEYS["consolidation_runtime"],
+        },
+    }
+    config = compile_config(raw, config_dir=tmp_path)
+    ResearchAllEvidenceWorkflow(config)._resolved_context()
+    return config
+
+
+def test_persisted_configs_never_contain_api_keys(tmp_path):
+    from oci.config import ExperimentConfig
+    from oci.experiments.runner import ExperimentRunner
+
+    config = _run_with_sentinel_keys(tmp_path)
+    sentinels = set(_SENTINEL_KEYS.values())
+    # Every key field of the Stage 2 tree (and the Stage 1 overrides) and of the
+    # Stage 1 model configuration carries a sentinel, so a new key field would
+    # be caught below.
+    assert sorted(_api_key_values(config.as_dict())) == sorted(sentinels)
+    applied = all_evidence_workflow._load_stage1_template(config)
+    experiment = ExperimentConfig.from_dict(
+        {"output_dir": str(config.output_dir / "oci_run"), "device": "cpu",
+         "applied_inference": applied}
+    )
+    assert sorted(_api_key_values(experiment.to_dict())) == sorted(
+        [_SENTINEL_KEYS["stage1_vllm"], _SENTINEL_KEYS["stage1_agent"]]
+    )
+    # The other persisted copies: Stage 2's config.json and `oci run`'s config.json.
+    all_evidence_workflow._write_json(
+        config.output_dir / "stage2" / "config.json", config.stage2.public_dict()
+    )
+    ExperimentRunner(experiment)._save_config()
+
+    written = sorted(path for path in config.output_dir.rglob("*") if path.is_file())
+    names = {path.relative_to(config.output_dir).as_posix() for path in written}
+    assert {
+        "run_config.json",
+        "resolved_stage1_model_config.json",
+        "resolved_neural_query_config.json",
+        "stage2/config.json",
+        "oci_run/config.json",
+    } <= names
+    for path in written:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        leaked = sorted(sentinel for sentinel in sentinels if sentinel in text)
+        assert not leaked, f"{path} contains {leaked}"
+    saved = json.loads((config.output_dir / "run_config.json").read_text(encoding="utf-8"))
+    assert set(_api_key_values(saved)) == {"<redacted>"}
+
+
+@pytest.mark.parametrize("environment", [True, False])
+def test_saved_run_config_relaunch_reads_keys_from_environment(
+    tmp_path, monkeypatch, environment
+):
+    from oci.extraction.llm_routing import resolve_openai_api_key
+
+    config = _run_with_sentinel_keys(tmp_path)
+    variables = {
+        "OCI_STAGE2_API_KEY": "env-primary",
+        "OCI_STAGE2_EXTRACTION_API_KEY": "env-extraction",
+        "OCI_STAGE2_EXTRACTION_RUNTIME_API_KEY": "env-extraction-runtime",
+    }
+    for name, value in variables.items():
+        if environment:
+            monkeypatch.setenv(name, value)
+        else:
+            monkeypatch.delenv(name, raising=False)
+    args = build_parser().parse_args(
+        ["--config", str(config.output_dir / "run_config.json"), "--stage2-only"]
+    )
+    raw, config_dir = _raw_config_from_args(args)
+
+    resumed = compile_config(raw, config_dir=config_dir).stage2
+
+    expected = variables if environment else dict.fromkeys(variables, "EMPTY")
+    assert resumed.api_key == expected["OCI_STAGE2_API_KEY"]
+    assert resumed.extraction_llm.api_key == expected["OCI_STAGE2_EXTRACTION_API_KEY"]
+    assert resumed.extraction_llm.runtime_api_key == (
+        expected["OCI_STAGE2_EXTRACTION_RUNTIME_API_KEY"]
+    )
+    assert resumed.selection_consolidation.runtime_llm_api_key == "EMPTY"
+    # Stage 1 OpenAI clients built from a redacted snapshot send no placeholder.
+    assert resolve_openai_api_key("<redacted>") == "EMPTY"
+
+
 def test_stage2_only_runs_from_saved_handoff_and_resumes(tmp_path, monkeypatch):
     raw, _config = _inputs(tmp_path, components=())
     raw["run"]["mode"] = "stage2"

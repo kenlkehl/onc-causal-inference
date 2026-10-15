@@ -1,12 +1,11 @@
-"""Plain, resumable Stage 2 analysis of the researcher Stage 1 handoff.
+"""Stage 2 of the all-evidence workflow: from Stage 1 evidence to effect estimates.
 
-This module intentionally treats a directory as the checkpoint.  It reads the
-ordinary JSONL handoff, defines and extracts patient-level variables, reviews
-small-model extraction aggregates with a separate primary model, selects roles
-with fold-local group elastic nets and an R-learner, and produces causal-forest
-estimates. It
-has no bundle format, artifact authentication, immutable
-request, content hashes, or checkpoint adoption.
+Reads the JSONL handoff, compiles evidence cards, asks an interpretation LLM to
+name and define candidate variables, consolidates them, and runs each outer
+fold's extraction, selection, and estimation (plain_handoff_stage2_analysis).
+It also owns the Stage 2 configuration, the OpenAI-compatible LLM transport,
+managed vLLM pools, and the pooled cross-fitted outputs. Every step writes its
+results under the output directory, which serves as the resume checkpoint.
 """
 
 from __future__ import annotations
@@ -32,6 +31,7 @@ from urllib.parse import urlparse
 import numpy as np
 import pandas as pd
 
+from ..extraction.llm_routing import configured_api_key
 from .nuisance_diagnostics import (
     calibration_diagnostics,
     overlap_diagnostics,
@@ -1315,7 +1315,9 @@ def plain_stage2_config_from_mapping(
         raise ValueError("stage2.model is required when stage2.vllm is configured")
     if not endpoint and managed_vllm is None:
         raise ValueError("stage2.endpoint is required when stage2.model is specified")
-    api_key = str(raw.get("api_key") or os.environ.get("OCI_STAGE2_API_KEY") or "EMPTY")
+    # A saved run_config.json stores "<redacted>"; it counts as unset so the
+    # environment variable supplies the key on a relaunch.
+    api_key = configured_api_key(raw.get("api_key"), "OCI_STAGE2_API_KEY")
 
     def architecture_names(value: Any) -> tuple[str, ...]:
         if isinstance(value, str):
@@ -1386,10 +1388,8 @@ def plain_stage2_config_from_mapping(
         extraction_llm = Stage2ExtractionLLMConfig(
             endpoint=extraction_endpoint,
             model=extraction_model,
-            api_key=str(
-                raw_extraction_llm.get("api_key")
-                or os.environ.get("OCI_STAGE2_EXTRACTION_API_KEY")
-                or "EMPTY"
+            api_key=configured_api_key(
+                raw_extraction_llm.get("api_key"), "OCI_STAGE2_EXTRACTION_API_KEY"
             ),
             workers=extraction_workers,
             vllm=extraction_vllm,
@@ -1400,10 +1400,9 @@ def plain_stage2_config_from_mapping(
             runtime_model=str(
                 raw_extraction_llm.get("runtime_model") or ""
             ).strip(),
-            runtime_api_key=str(
-                raw_extraction_llm.get("runtime_api_key")
-                or os.environ.get("OCI_STAGE2_EXTRACTION_RUNTIME_API_KEY")
-                or "EMPTY"
+            runtime_api_key=configured_api_key(
+                raw_extraction_llm.get("runtime_api_key"),
+                "OCI_STAGE2_EXTRACTION_RUNTIME_API_KEY",
             ),
         )
         extraction_llm.validate(require_model=False)

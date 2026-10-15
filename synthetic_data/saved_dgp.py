@@ -169,6 +169,9 @@ def _generate_locked(config, metadata_path, num_workers, output):
     source = json.loads(metadata_path.read_text())
     public_config = asdict(config)
     public_config["llm"]["api_key"] = ""
+    # Source configs saved before continuous_covariate_distribution existed
+    # were generated with Normal draws, so an absent value means "normal".
+    source_config = {"continuous_covariate_distribution": "normal", **source_config}
     # These are the intended changes when expanding a saved dataset.
     for field, value in source_config.items():
         if field not in {"dataset_size", "output_dir", "llm", "seed"} and public_config.get(field) != value:

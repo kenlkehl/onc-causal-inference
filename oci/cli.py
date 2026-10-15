@@ -60,7 +60,7 @@ Examples:
     run_parser.add_argument(
         '--workers',
         type=int,
-        help='Override number of workers from config'
+        help='Override number of workers from config (positive integer)'
     )
     run_parser.add_argument(
         '--gpu-ids',
@@ -189,7 +189,10 @@ Examples:
         
         if args.device:
             config.device = args.device
-        if args.workers:
+        if args.workers is not None:
+            if args.workers < 1:
+                print(f"--workers must be a positive integer (got {args.workers})")
+                return 1
             config.num_workers = args.workers
         if args.gpu_ids is not None:
             config.gpu_ids = args.gpu_ids

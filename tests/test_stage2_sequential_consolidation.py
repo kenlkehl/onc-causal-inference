@@ -1277,3 +1277,20 @@ def test_declarative_latent_rule_has_no_executable_escape_hatch():
     ):
         with pytest.raises(ValueError):
             _validate_rule_expression(invalid, allowed_feature_ids=allowed)
+
+
+def test_decision_prompt_names_protected_clinical_variables():
+    from oci.inference.stage2_sequential_consolidation import _decision_messages
+
+    features = [
+        {**_continuous("a", "first_burden"), "protected_explicit_feature": True},
+        {**_continuous("b", "second_burden"), "protected_explicit_feature": False},
+    ]
+    messages = _decision_messages(
+        {"features": features, "pairwise_associations": []},
+        max_latents_per_cluster=2,
+    )
+
+    content = messages[1]["content"]
+    assert "Protected clinical variables: first burden" in content
+    assert "second burden" not in content.split("Protected clinical variables:")[1]

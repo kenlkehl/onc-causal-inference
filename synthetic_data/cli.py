@@ -801,12 +801,6 @@ Examples:
         help="Model name to use (default: 'openai/gpt-oss-120b')",
     )
     parser.add_argument(
-        "--temperature",
-        type=float,
-        default=0.7,
-        help="LLM temperature (default: 0.7)",
-    )
-    parser.add_argument(
         "--max-tokens",
         type=int,
         default=50000,
@@ -826,7 +820,11 @@ Examples:
         "--seed",
         type=int,
         default=42,
-        help="Random seed for reproducibility (default: 42)",
+        help=(
+            "Random seed (default: 42). For a given DGP it fixes every patient's sampled "
+            "covariates, treatment, and outcome, whatever --num-workers is; the "
+            "LLM-designed DGP of a fresh run and all generated text are not seeded"
+        ),
     )
     parser.add_argument(
         "--num-workers",
@@ -979,8 +977,6 @@ Examples:
             config.llm.api_key = args.api_key
         if args.model != "openai/gpt-oss-120b":
             config.llm.model_name = args.model
-        if args.temperature != 0.7:
-            config.llm.temperature = args.temperature
         if args.max_tokens != 50000:
             config.llm.max_tokens = args.max_tokens
     else:
@@ -1024,7 +1020,6 @@ Examples:
                 api_base_url=args.api_url,
                 api_key=args.api_key,
                 model_name=args.model,
-                temperature=args.temperature,
                 max_tokens=args.max_tokens,
             ),
         )

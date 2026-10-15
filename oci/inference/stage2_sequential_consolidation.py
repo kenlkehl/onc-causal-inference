@@ -34,6 +34,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from ..extraction.llm_routing import configured_api_key
 from .stage2_statistical_selection import _feature_strategy
 
 SCHEMA_VERSION = "stage2_sequential_equivalent_measurement_consolidation_v5_clinical_prompts"
@@ -186,6 +187,9 @@ def sequential_consolidation_config_from_mapping(
         raise ValueError(
             "stage2.selection_consolidation contains unsupported fields: " f"{unknown}"
         )
+    if "runtime_llm_api_key" in raw:
+        # A saved run_config.json stores "<redacted>", which means no key.
+        raw["runtime_llm_api_key"] = configured_api_key(raw["runtime_llm_api_key"])
     config = Stage2SequentialConsolidationConfig(**raw)
     config.validate()
     return config
@@ -1575,7 +1579,9 @@ def _decision_messages(step_input: Mapping[str, Any], *, max_latents_per_cluster
     features = step_input["features"]
     by_id = {str(f["feature_id"]): f for f in features}
     text = clinical_prompts.definitions_text(features)
-    protected = [clinical_prompts.label(f) for f in features if f.get("protected")]
+    protected = [
+        clinical_prompts.label(f) for f in features if f.get("protected_explicit_feature")
+    ]
     if protected:
         text += "\n\nProtected clinical variables: " + "; ".join(protected)
     text += "\n\nPaired measurements\n"

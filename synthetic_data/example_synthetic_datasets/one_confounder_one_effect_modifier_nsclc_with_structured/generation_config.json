@@ -10,6 +10,7 @@
   "main_coefficient_scale": 0.3,
   "interaction_coefficient_scale": 0.1,
   "target_logit_std": 2.0,
+  "continuous_covariate_distribution": "normal",
   "num_features": 2,
   "num_confounders": 1,
   "num_effect_modifiers": 1,

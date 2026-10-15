@@ -131,7 +131,7 @@ def test_preflight_allows_extractor_change_only_after_measurement_cleanup(tmp_pa
     root = config.output_dir / "stage2"
     write(root / "model_identity.json", {
         "primary": {"selected_model": config.stage2.model},
-        "extraction": {"selected_model": "previous-plumb"},
+        "extraction": {"selected_model": "previous-extractor"},
     })
     write(root / "outer_001/feature_definitions.json", {"features": []})
     if dependent_path:

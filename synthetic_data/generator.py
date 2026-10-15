@@ -9,7 +9,6 @@ import re
 import unicodedata
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
-from dataclasses import asdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import numpy as np
@@ -35,6 +34,15 @@ from .structured_data import convert_structured_event_to_text
 logger = logging.getLogger(__name__)
 
 CONTINUOUS_COVARIATE_DISTRIBUTIONS = ("positive_lognormal", "normal")
+
+# A fresh generation saves its LLM-designed DGP here and its completed patients
+# in the checkpoint; rerunning with the same output directory resumes from both.
+DGP_DESIGN_FILENAME = "dgp_design.json"
+CHECKPOINT_FILENAME = "checkpoint.json"
+# Settings that only route requests; they may change when a run is resumed.
+_RESUMABLE_LLM_TRANSPORT_FIELDS = {
+    "api_key", "api_base_url", "api_base_urls", "timeout", "reject_incomplete",
+}
 
 # Oracle columns written for every patient. A feature whose ``true_<name>``
 # column would collide with one of these is rejected.
@@ -83,6 +91,9 @@ def generate_synthetic_dataset(
     3. Uses LLM to generate summary statistics for confounders
     4. For each patient: samples characteristics, computes logits, generates clinical history
     5. Saves dataset and metadata
+
+    Rerunning with the same output directory resumes: the DGP saved in
+    ``dgp_design.json`` is reused and patients in ``checkpoint.json`` are kept.
     
     Args:
         config: Configuration for generation
@@ -99,18 +110,30 @@ def generate_synthetic_dataset(
         return generate_from_saved_dgp(config, dgp_metadata_path, num_workers, show_progress)
 
     config.validate()
-    
+
     # Set random seeds
     random.seed(config.seed)
     np.random.seed(config.seed)
-    
-    # Initialize LLM client
-    client = LLMClient(config.llm)
-    
+
     # Create output directory
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
+    # A resumed run must reuse the DGP its checkpointed patients came from;
+    # designing a new one would silently mix two causal processes.
+    design_path = output_dir / DGP_DESIGN_FILENAME
+    design = _load_dgp_design(design_path, config)
+    if design is None and (output_dir / CHECKPOINT_FILENAME).exists():
+        raise ValueError(
+            f"{output_dir / CHECKPOINT_FILENAME} holds patients from an earlier run whose "
+            f"DGP was not saved ({DGP_DESIGN_FILENAME} is missing), so they cannot be "
+            "resumed consistently. Use a new --output-dir, or delete the checkpoint to "
+            "start over."
+        )
+
+    # Initialize LLM client
+    client = LLMClient(config.llm)
+
     logger.info(f"Starting synthetic data generation for: {config.clinical_question[:80]}...")
 
     # Log positivity enforcement settings
@@ -118,6 +141,122 @@ def generate_synthetic_dataset(
         logger.info(f"Positivity enforcement ENABLED: treatment rate per stratum bounded to [{config.min_treatment_rate_per_stratum:.2f}, {config.max_treatment_rate_per_stratum:.2f}]")
     else:
         logger.info("Positivity enforcement disabled (realistic observational data)")
+
+    if design is None:
+        design = _design_dgp(client, config)
+        _write_dgp_design(design_path, config, design)
+        # Continue from the saved copy so a resumed run samples patients from
+        # exactly the same (JSON round-tripped) DGP as this one.
+        design = _load_dgp_design(design_path, config)
+    else:
+        logger.info(f"Resuming with the DGP saved in {design_path}; steps 1-5 skipped")
+    confounders = design["features"]
+    treatment_eq = design["treatment_equation"]
+    outcome_eq = design["outcome_equation"]
+    summary_stats = design["summary_statistics"]
+
+    # Step 6: Generate patient data
+    logger.info(f"Step 6/7: Generating {config.dataset_size} patients...")
+    patient_data = _generate_all_patients(
+        client=client,
+        config=config,
+        confounders=confounders,
+        summary_stats=summary_stats,
+        treatment_eq=treatment_eq,
+        outcome_eq=outcome_eq,
+        num_workers=num_workers,
+        show_progress=show_progress,
+    )
+
+    # Step 6: Assemble dataset
+    logger.info("Step 7/7: Assembling dataset...")
+    df = pd.DataFrame(patient_data)
+
+    # Compile metadata
+    metadata = {
+        "config": config.to_public_dict(),
+        "features": confounders,
+        "confounders": _filter_features_by_role(confounders, "confounder"),
+        "effect_modifiers": _filter_features_by_role(confounders, "effect_modifier"),
+        "treatment_equation": treatment_eq,
+        "outcome_equation": outcome_eq,
+        "summary_statistics": summary_stats,
+        "dataset_statistics": oracle_dataset_statistics(df),
+    }
+
+    # Save outputs
+    dataset_path = output_dir / "dataset.parquet"
+    metadata_path = output_dir / "metadata.json"
+
+    df.to_parquet(dataset_path, index=False)
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2, default=str)
+
+    logger.info(f"Dataset saved to {dataset_path}")
+    logger.info(f"Metadata saved to {metadata_path}")
+
+    return df, metadata
+
+
+def _dgp_design_settings(config: SyntheticDataConfig) -> Dict[str, Any]:
+    """Settings a resumed run must share with the run that designed its DGP.
+
+    Like saved-DGP generation, everything but the output directory and LLM
+    transport counts; ``dataset_size`` may also change because patients are
+    sampled in ID order, so a larger cohort keeps the existing patients.
+    """
+
+    values = config.to_public_dict()
+    values.pop("output_dir")
+    values.pop("dataset_size")
+    values["llm"] = {
+        key: value for key, value in values["llm"].items()
+        if key not in _RESUMABLE_LLM_TRANSPORT_FIELDS
+    }
+    return json.loads(json.dumps(values))
+
+
+def _load_dgp_design(path: Path, config: SyntheticDataConfig) -> Optional[Dict[str, Any]]:
+    """Return the DGP saved by an earlier run in this directory, if any."""
+
+    if not path.exists():
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        design = json.load(f)
+    saved_settings = design.get("settings", {})
+    current_settings = _dgp_design_settings(config)
+    if saved_settings != current_settings:
+        changed = sorted(
+            key for key in set(saved_settings) | set(current_settings)
+            if saved_settings.get(key) != current_settings.get(key)
+        )
+        raise ValueError(
+            f"{path.parent} holds a generation whose DGP was designed with different "
+            f"settings (changed: {changed}). Resume with the original settings, or use "
+            "a new --output-dir."
+        )
+    return design
+
+
+def _write_dgp_design(path: Path, config: SyntheticDataConfig, design: Dict[str, Any]) -> None:
+    def numpy_scalar(value: Any) -> Any:
+        if isinstance(value, np.generic):
+            return value.item()
+        raise TypeError(f"cannot save {type(value).__name__} in the DGP design")
+
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    with open(temporary, "w", encoding="utf-8") as f:
+        json.dump(
+            {"settings": _dgp_design_settings(config), **design},
+            f,
+            indent=2,
+            default=numpy_scalar,
+        )
+    temporary.replace(path)
+
+
+def _design_dgp(client: LLMClient, config: SyntheticDataConfig) -> Dict[str, Any]:
+    """Steps 1-5: LLM-designed features, equations and distributions, then calibration."""
 
     # Step 1: Generate role-tagged features
     logger.info("Step 1/5: Generating role-tagged features...")
@@ -168,47 +307,12 @@ def generate_synthetic_dataset(
         continuous_distribution=config.continuous_covariate_distribution,
     )
 
-    # Step 6: Generate patient data
-    logger.info(f"Step 6/7: Generating {config.dataset_size} patients...")
-    patient_data = _generate_all_patients(
-        client=client,
-        config=config,
-        confounders=confounders,
-        summary_stats=summary_stats,
-        treatment_eq=treatment_eq,
-        outcome_eq=outcome_eq,
-        num_workers=num_workers,
-        show_progress=show_progress,
-    )
-    
-    # Step 6: Assemble dataset
-    logger.info("Step 7/7: Assembling dataset...")
-    df = pd.DataFrame(patient_data)
-    
-    # Compile metadata
-    metadata = {
-        "config": asdict(config),
+    return {
         "features": confounders,
-        "confounders": _filter_features_by_role(confounders, "confounder"),
-        "effect_modifiers": _filter_features_by_role(confounders, "effect_modifier"),
         "treatment_equation": treatment_eq,
         "outcome_equation": outcome_eq,
         "summary_statistics": summary_stats,
-        "dataset_statistics": oracle_dataset_statistics(df),
     }
-    
-    # Save outputs
-    dataset_path = output_dir / "dataset.parquet"
-    metadata_path = output_dir / "metadata.json"
-    
-    df.to_parquet(dataset_path, index=False)
-    with open(metadata_path, "w") as f:
-        json.dump(metadata, f, indent=2, default=str)
-    
-    logger.info(f"Dataset saved to {dataset_path}")
-    logger.info(f"Metadata saved to {metadata_path}")
-    
-    return df, metadata
 
 
 def oracle_dataset_statistics(df: pd.DataFrame) -> Dict[str, Any]:
@@ -1294,22 +1398,16 @@ def _build_patient_scaffold_record(
 
 
 def _generate_single_patient(
-    patient_idx: int,
+    record: Dict[str, Any],
     client: LLMClient,
     config: SyntheticDataConfig,
-    confounders: List[Dict[str, Any]],
-    summary_stats: Dict[str, Any],
-    treatment_eq: Dict[str, Any],
-    outcome_eq: Dict[str, Any],
 ) -> Dict[str, Any]:
-    """Sample one patient's causal scaffold, then generate its clinical text.
+    """Generate the clinical text for one patient's sampled causal scaffold.
 
     Text generation is two-stage: an event timeline, then expansion of each
     narrative event into a note (structured events are templated to text).
     """
-    record = _build_patient_scaffold_record(
-        patient_idx, config, confounders, summary_stats, treatment_eq, outcome_eq
-    )
+    patient_idx = record["patient_id"]
 
     # Reserve tokens for prompt
     history_max_tokens = max(1000, config.llm.max_tokens - 2000)
@@ -1384,9 +1482,11 @@ def _generate_single_patient(
                 logger.error(f"Patient {patient_idx}, event {event_idx}: Failed to expand note: {e}")
                 continue
 
-            # Apply drug perturbation
-            if drug_prob > 0 and random.random() < drug_prob:
-                note_text = _apply_drug_perturbation(note_text)
+            # Apply drug perturbation. A per-note RNG (as in saved-DGP
+            # generation) keeps this independent of worker scheduling.
+            rng = random.Random(f"{config.seed}:{patient_idx}:{event_idx}")
+            if drug_prob > 0 and rng.random() < drug_prob:
+                note_text = _apply_drug_perturbation(note_text, rng=rng)
 
             text_blocks.append((event_idx, note_text))
 
@@ -1426,8 +1526,22 @@ def _generate_all_patients(
 ) -> List[Dict[str, Any]]:
     """Generate data for all patients with parallel LLM calls and checkpoint support."""
     output_dir = Path(config.output_dir)
-    checkpoint_path = output_dir / "checkpoint.json"
-    
+    checkpoint_path = output_dir / CHECKPOINT_FILENAME
+
+    # Sample every scaffold (covariates, treatment, outcome) here, in patient
+    # order, from a freshly seeded global RNG -- exactly as saved-DGP generation
+    # does. A seed therefore reproduces each patient's scaffold for a given DGP
+    # regardless of worker count, completion order, or resumption. The DGP
+    # itself and the clinical text come from the LLM and are not seeded.
+    random.seed(config.seed)
+    np.random.seed(config.seed)
+    scaffolds = [
+        _build_patient_scaffold_record(
+            i, config, confounders, summary_stats, treatment_eq, outcome_eq
+        )
+        for i in range(config.dataset_size)
+    ]
+
     # Load existing checkpoint if present
     completed_patients = {}
     if checkpoint_path.exists():
@@ -1439,7 +1553,19 @@ def _generate_all_patients(
         except (json.JSONDecodeError, KeyError) as e:
             logger.warning(f"Could not load checkpoint, starting fresh: {e}")
             completed_patients = {}
-    
+
+    def as_saved(value: Any) -> Any:
+        return json.loads(json.dumps(value, default=str))
+
+    for patient_id, patient in completed_patients.items():
+        if 0 <= patient_id < config.dataset_size:
+            scaffold = scaffolds[patient_id]
+            if as_saved({key: patient.get(key) for key in scaffold}) != as_saved(scaffold):
+                raise ValueError(
+                    f"Checkpointed patient {patient_id} in {checkpoint_path} was not sampled "
+                    "from this DGP and seed; use a new --output-dir."
+                )
+
     # Determine which patients still need to be generated
     remaining_indices = [i for i in range(config.dataset_size) if i not in completed_patients]
     logger.info(f"Need to generate {len(remaining_indices)} patients (checkpoint has {len(completed_patients)})")
@@ -1472,9 +1598,7 @@ def _generate_all_patients(
             iterator = tqdm(iterator, desc="Generating patients", initial=len(completed_patients), total=config.dataset_size)
         
         for i in iterator:
-            data = _generate_single_patient(
-                i, client, config, confounders, summary_stats, treatment_eq, outcome_eq
-            )
+            data = _generate_single_patient(scaffolds[i], client, config)
             patient_data.append(data)
             patients_since_checkpoint += 1
             
@@ -1485,10 +1609,7 @@ def _generate_all_patients(
         # Parallel generation
         with ThreadPoolExecutor(max_workers=num_workers) as executor:
             futures = {
-                executor.submit(
-                    _generate_single_patient,
-                    i, client, config, confounders, summary_stats, treatment_eq, outcome_eq
-                ): i
+                executor.submit(_generate_single_patient, scaffolds[i], client, config): i
                 for i in remaining_indices
             }
             

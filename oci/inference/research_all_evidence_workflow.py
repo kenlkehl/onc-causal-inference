@@ -39,6 +39,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import ExperimentConfig
+from ..extraction.llm_routing import redact_api_keys
 from .plain_handoff_stage2 import (
     PlainHandoffStage2Config,
     _feature_definition_input_value,
@@ -312,20 +313,13 @@ def _resolve_model_locator(value: Any, *, base: Path) -> str:
 
 
 def _redact_credentials(value: Any) -> Any:
-    """Keep endpoint secrets out of the readable copies written to disk."""
+    """Keep endpoint secrets out of the readable copies written to disk.
 
-    if isinstance(value, Mapping):
-        return {
-            str(key): (
-                "<redacted>"
-                if str(key).lower() in {"api_key", "agent_api_key", "vllm_api_key"}
-                else _redact_credentials(child)
-            )
-            for key, child in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_credentials(child) for child in value]
-    return copy.deepcopy(value)
+    Every ``api_key``/``*_api_key`` field at any depth becomes ``<redacted>``,
+    which Stage 2 key resolution treats as unset on a relaunch.
+    """
+
+    return redact_api_keys(value)
 
 
 @dataclass(frozen=True)
@@ -2505,7 +2499,6 @@ def prepare_stage2_reselection(
         "extraction/fit_health.json",
         "extraction/heldout_health.json",
         "ontology_supervision/convergence.json",
-        "review",
     )
     for outer_dir in outer_dirs:
         for name in outer_candidates:

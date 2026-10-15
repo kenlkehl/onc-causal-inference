@@ -10,6 +10,7 @@ import pytest
 from synthetic_data.config import SyntheticDataConfig, LLMConfig
 from synthetic_data.generator import generate_synthetic_dataset, _compute_logit
 from synthetic_data import saved_dgp, llm_client
+from synthetic_data import generator as g
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "synthetic_data/example_synthetic_datasets/five_confounders_five_effect_modifiers_nsclc_with_structured/metadata.json"
@@ -149,3 +150,30 @@ def test_replica_dispatch_kwargs_and_truncation(monkeypatch):
     with pytest.raises(ValueError):
         client.generate_json("json please", max_retries=1)
     client.close()
+
+
+def test_expansion_of_a_legacy_saved_dgp_uses_normal_covariate_draws(setup):
+    # The bundled metadata config has no continuous_covariate_distribution.
+    assert "continuous_covariate_distribution" not in json.loads(SOURCE.read_text())["config"]
+    assert setup.continuous_covariate_distribution == "normal"
+    lognormal = replace(setup, continuous_covariate_distribution="positive_lognormal")
+    with pytest.raises(ValueError, match="continuous_covariate_distribution"):
+        generate_synthetic_dataset(lognormal, 1, False, str(SOURCE))
+    assert not FakeClient.calls
+
+    df, metadata = generate_synthetic_dataset(setup, 2, False, str(SOURCE))
+    normal_config = replace(setup, continuous_covariate_distribution="normal")
+    np.random.seed(setup.seed)
+    expected = [
+        g._build_patient_scaffold_record(
+            i, normal_config, metadata["features"], metadata["summary_statistics"],
+            metadata["treatment_equation"], metadata["outcome_equation"],
+        )
+        for i in range(setup.dataset_size)
+    ]
+    normal = [
+        {f"true_{f['name']}": row[f"true_{f['name']}"] for f in metadata["features"]}
+        for row in expected
+    ]
+    observed = df[list(normal[0])].to_dict("records")
+    assert observed == normal

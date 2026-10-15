@@ -8,6 +8,7 @@ from typing import Dict, Any
 import json
 
 from ..config import ExperimentConfig
+from ..extraction.llm_routing import redact_api_keys
 from ..utils import set_seed, ensure_dir, get_device
 from ..data import load_dataset, validate_dataset
 
@@ -72,9 +73,10 @@ class ExperimentRunner:
         return results
 
     def _save_config(self) -> None:
-        """Save configuration to output directory."""
+        """Save configuration to output directory, with API keys redacted."""
         config_path = self.output_dir / "config.json"
-        self.config.to_json(str(config_path))
+        with open(config_path, "w") as f:
+            json.dump(redact_api_keys(self.config.to_dict()), f, indent=2)
         logger.info(f"Configuration saved to: {config_path}")
 
     def _run_applied_inference(self) -> str:

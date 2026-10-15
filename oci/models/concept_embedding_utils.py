@@ -74,8 +74,8 @@ def split_text_to_token_chunks(
     In particular, a WordPiece slice that begins with a continuation token can
     decode to text beginning with ``##`` and then consume additional tokens when
     encoded again.  ``encoding_prefix`` represents framing added by the caller
-    before model tokenization (for example, ColBERT's document marker).  Every
-    returned chunk is checked with that prefix and special tokens included.
+    before model tokenization (for example, a model-specific document marker).
+    Every returned chunk is checked with that prefix and special tokens included.
     """
     if max_seq_length < 1:
         raise ValueError("max_seq_length must be >= 1")

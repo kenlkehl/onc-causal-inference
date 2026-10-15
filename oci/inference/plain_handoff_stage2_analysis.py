@@ -7015,8 +7015,9 @@ NUISANCE_RECALIBRATION_DESCRIPTION = (
     "Calibrators are fit on training out-of-fold predictions only: each inner fold's "
     "training predictions use a calibrator fit on the other inner folds; held-out "
     "predictions, the uncalibrated average of the same K inner-fold models, use a "
-    "calibrator fit on all training out-of-fold predictions, so every calibrator is "
-    "applied to the kind of model it was learned from. "
+    "calibrator fit on all training out-of-fold predictions. Averaging makes the "
+    "held-out ensemble less over-confident than a single fold model, so held-out "
+    "calibration slopes after recalibration can sit modestly above 1. "
     "mu0 (mu1) calibrators are fit on control (treated) training rows and applied to "
     "every row. Continuous-outcome mu_hat is not recalibrated."
 )
@@ -7270,8 +7271,8 @@ def estimate_outer_fold(
         all_candidates=True,
         audit_dir=nuisance_audit_dir,
         # Held-out rows: the average of the same K inner-fold models (the
-        # cross-fitting ensemble), so the OOF-learned calibrator below is applied
-        # to the kind of model it was learned from. No separate full-data fit.
+        # cross-fitting ensemble) that produced the training OOF predictions.
+        # No separate full-data fit.
         heldout_extracted=candidate_heldout,
     )
     LOGGER.info("Stage 2 final nuisances completed output=%s", output_dir)

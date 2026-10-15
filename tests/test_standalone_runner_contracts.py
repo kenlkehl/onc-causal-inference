@@ -452,3 +452,67 @@ def test_explicit_forest_without_effect_modifiers_estimates_one_constant_effect(
     assert fitted["tau"].shape == (80,)
     assert np.allclose(fitted["tau"], fitted["tau"][0])
     assert np.isfinite(fitted["ate_metrics"]["ate_dr_heldout"])
+
+
+def test_agentic_example_config_extracts_from_long_notes_without_stopping():
+    from pathlib import Path
+
+    from oci.extraction.explicit_features import build_extraction_prompt
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "example_configs"
+        / "agentic_explicit_feature_forest_config.json"
+    )
+    features = ExperimentConfig.from_json(str(path)).applied_inference.explicit_features
+    # Bundled synthetic notes average about 50,000 characters (up to 130,000).
+    note = "Progress note: ECOG 1, stable disease. " * 3_500
+    prompt = build_extraction_prompt(
+        note,
+        [
+            ExplicitFeatureSpec(
+                name="ecog", type="categorical", categories=["0", "1", "2"],
+                roles=["confounder"],
+            )
+        ],
+        max_text_length=features.extraction_max_text_length,
+        context_strategy=features.extraction_context_strategy,
+    )
+    assert len(note) > 130_000
+    assert note in prompt
+
+
+@pytest.mark.parametrize("workers,accepted", [("0", False), ("-2", False), ("3", True)])
+def test_cli_workers_override_rejects_nonpositive_values(
+    tmp_path, monkeypatch, capsys, workers, accepted
+):
+    from oci import cli
+
+    dataset = tmp_path / "data.parquet"
+    _frame(n=12).to_parquet(dataset)
+    config = ExperimentConfig(
+        output_dir=str(tmp_path / "out"),
+        num_workers=2,
+        applied_inference=AppliedInferenceConfig(dataset_path=str(dataset)),
+    )
+    config_path = tmp_path / "config.json"
+    config.to_json(str(config_path))
+    ran = []
+
+    class FakeRunner:
+        def __init__(self, cfg):
+            ran.append(cfg)
+
+        def run(self):
+            return {}
+
+    monkeypatch.setattr(cli, "ExperimentRunner", FakeRunner)
+    monkeypatch.setattr(
+        sys, "argv", ["oci", "run", "--config", str(config_path), "--workers", workers]
+    )
+    status = cli.main()
+    if accepted:
+        assert status == 0 and ran[0].num_workers == int(workers)
+    else:
+        assert status == 1 and not ran
+        assert "--workers must be a positive integer" in capsys.readouterr().out

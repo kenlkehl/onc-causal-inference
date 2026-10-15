@@ -109,7 +109,7 @@ def select_predictive_nuisances(definitions, folds):
         "llm_roles_are_binding": False,
         "task_feature_ids": {task: task_sets[task] for task in ("treatment", "outcome")},
         "forest_internal_nuisances": "independently_regularized_on_X_plus_W",
-        "external_aipw_nuisances": "separate_task_specific_feature_lists",
+        "external_aipw_nuisances": "all_candidate_cross_fitted_elastic_nets",
         "outcome_support": "union_of_marginal_and_arm_specific_outcome_supports",
         "treatment_votes": votes["treatment"],
         "outcome_votes": votes["outcome"],

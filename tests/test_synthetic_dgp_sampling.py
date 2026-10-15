@@ -109,6 +109,9 @@ def test_scaffold_stores_the_ite_on_the_outcome_scale(outcome_type):
     metadata = _saved_dgp()
     config = SyntheticDataConfig.from_dict(metadata["config"])
     config.outcome_type = outcome_type
+    # The saved config predates the setting and loads as "normal"; the
+    # positivity assertions below exercise the log-normal draw.
+    config.continuous_covariate_distribution = "positive_lognormal"
     features = metadata["features"]
     stats = metadata["summary_statistics"]
 
@@ -201,3 +204,28 @@ def test_cli_treatment_effect_help_states_log_odds_units(capsys, monkeypatch):
     help_text = " ".join(capsys.readouterr().out.split())
     assert "log-odds units for binary outcomes" in help_text
     assert "not a probability-scale effect" in help_text
+
+
+def test_saved_configs_without_the_distribution_key_keep_normal_draws(tmp_path, monkeypatch):
+    bundled = SOURCE.parents[1]
+    for generation_config in sorted(bundled.glob("*/generation_config.json")):
+        raw = json.loads(generation_config.read_text())
+        assert raw["continuous_covariate_distribution"] == "normal"
+        assert SyntheticDataConfig.from_json(str(generation_config)).continuous_covariate_distribution == "normal"
+        # Expanding with the bundled config keeps the original Normal draws.
+        loaded = _run_cli(monkeypatch, tmp_path, "--config", str(generation_config))
+        assert loaded.continuous_covariate_distribution == "normal"
+    # The bundled metadata.json configs lack the key; it loads as "normal".
+    legacy = _saved_dgp()["config"]
+    assert "continuous_covariate_distribution" not in legacy
+    assert SyntheticDataConfig.from_dict(legacy).continuous_covariate_distribution == "normal"
+    explicit = dict(legacy, continuous_covariate_distribution="positive_lognormal")
+    assert (
+        SyntheticDataConfig.from_dict(explicit).continuous_covariate_distribution
+        == "positive_lognormal"
+    )
+
+
+def test_fresh_generation_defaults_to_positive_lognormal(tmp_path, monkeypatch):
+    assert SyntheticDataConfig().continuous_covariate_distribution == "positive_lognormal"
+    assert _run_cli(monkeypatch, tmp_path).continuous_covariate_distribution == "positive_lognormal"

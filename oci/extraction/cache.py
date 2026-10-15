@@ -1,9 +1,16 @@
 # oci/extraction/cache.py
 """Caching utilities for LLM-based explicit feature extraction results.
 
-The cache helps avoid redundant LLM calls by storing extraction results
-keyed by (dataset path hash + extraction config hash). Cache files are
-stored as Parquet files alongside the dataset.
+The cache avoids redundant LLM calls. Results are Parquet files under
+``{cache_dir}/.oci_cache/``; the explicit-feature runners pass
+``explicit_features.cache_dir`` or, when that is unset, their artifact
+directory (the dataset's directory is used only when no ``cache_dir`` is
+given). File names combine a hash of the dataset path with a hash of the
+extraction contract (feature definitions, prompt version, model, and
+extraction settings). Three kinds of file are kept: complete-cohort
+results (``extraction_``), a row-level partial cache that lets interrupted
+extraction resume (``extraction_rows_``), and a fold-independent per-patient
+cache keyed by each note's text hash (``extraction_patients_``).
 """
 
 import hashlib

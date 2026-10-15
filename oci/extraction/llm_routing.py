@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import logging
 import os
 import random
@@ -32,6 +33,49 @@ _GEMINI_36_MODEL_NAMES = {
 
 def _uses_gemini_36(model_name: Any) -> bool:
     return str(model_name or "").strip().lower() in _GEMINI_36_MODEL_NAMES
+
+
+# Configuration copies written to disk (run_config.json and similar) store this
+# string in place of every API key. It is never a credential: key resolution
+# treats it exactly like an unset key.
+REDACTED_API_KEY = "<redacted>"
+
+
+def is_api_key_field(name: Any) -> bool:
+    """Whether a configuration field holds an API key (``api_key`` or ``*_api_key``)."""
+
+    lowered = str(name).lower()
+    return lowered == "api_key" or lowered.endswith("_api_key")
+
+
+def redact_api_keys(value: Any) -> Any:
+    """Return a copy of a JSON-like configuration with every API-key field redacted."""
+
+    if isinstance(value, Mapping):
+        return {
+            str(key): (
+                REDACTED_API_KEY if is_api_key_field(key) else redact_api_keys(child)
+            )
+            for key, child in value.items()
+        }
+    if isinstance(value, (list, tuple)):
+        return [redact_api_keys(child) for child in value]
+    return copy.deepcopy(value)
+
+
+def configured_api_key(value: Any, environment_variable: str | None = None) -> str:
+    """Return the configured key, else the environment variable, else ``EMPTY``.
+
+    An absent or empty key and :data:`REDACTED_API_KEY` all mean "not
+    configured", so a relaunch from a saved configuration copy reads the
+    environment variable instead of sending the placeholder as a credential.
+    """
+
+    if value and str(value) != REDACTED_API_KEY:
+        return str(value)
+    if environment_variable:
+        return os.environ.get(environment_variable) or "EMPTY"
+    return "EMPTY"
 
 
 @dataclass(frozen=True)
@@ -77,10 +121,15 @@ def resolve_openai_api_key(
     configured: str,
     environment: Mapping[str, str] | None = None,
 ) -> str:
-    """Resolve an environment-backed bearer key immediately before use."""
+    """Resolve an environment-backed bearer key immediately before use.
+
+    The redaction placeholder from a saved configuration copy means no key.
+    """
 
     if not isinstance(configured, str) or not configured:
         raise ValueError("OpenAI-compatible api_key must be a nonempty string")
+    if configured == REDACTED_API_KEY:
+        return "EMPTY"
     if not configured.startswith(_API_KEY_ENV_REFERENCE_PREFIX):
         return configured
     name = configured[len(_API_KEY_ENV_REFERENCE_PREFIX) :]

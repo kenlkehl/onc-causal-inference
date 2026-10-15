@@ -38,6 +38,10 @@ class LLMConfig:
     api_base_url: str = "http://localhost:8000/v1"  # vLLM default
     api_key: str = ""  # Can be blank for local models
     model_name: str = "openai/gpt-oss-120b"  # Model name to use
+    # Fallback for LLMClient calls that pass no temperature. Every generation
+    # step sets its own (0.7 for variables and timelines, 0.5 for equations,
+    # distributions and documents), so this does not change generated data;
+    # the field remains so saved generation configs keep loading.
     temperature: float = 0.7
     max_tokens: int = 12000
     timeout: float = 300.0  # Request timeout in seconds
@@ -79,6 +83,8 @@ class SyntheticDataConfig:
     # "positive_lognormal": moment-matched log-normal when the mean is positive
     # (so values such as NLR or creatinine clearance cannot be negative),
     # Normal otherwise. "normal": the original untruncated Normal draw.
+    # Saved configs that lack this field predate it and load as "normal"
+    # (see ``from_dict``), which is how their cohorts were generated.
     continuous_covariate_distribution: str = "positive_lognormal"
     
     # Number of role-tagged explicit features (None = use LLM default of 8-12).
@@ -122,11 +128,17 @@ class SyntheticDataConfig:
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return asdict(self)
-    
+
+    def to_public_dict(self) -> Dict[str, Any]:
+        """Dictionary for files written to disk: ``llm.api_key`` is blanked."""
+        values = self.to_dict()
+        values["llm"]["api_key"] = ""
+        return values
+
     def to_json(self, path: str) -> None:
-        """Save config to JSON file."""
+        """Save config to JSON file (without the API key)."""
         with open(path, 'w') as f:
-            json.dump(self.to_dict(), f, indent=2)
+            json.dump(self.to_public_dict(), f, indent=2)
     
     @classmethod
     def from_json(cls, path: str) -> 'SyntheticDataConfig':
@@ -139,6 +151,9 @@ class SyntheticDataConfig:
     def from_dict(cls, data: Dict[str, Any]) -> 'SyntheticDataConfig':
         """Create config from dictionary."""
         data = data.copy()
+        # Saved configs written before continuous_covariate_distribution
+        # existed drew continuous covariates from a Normal distribution.
+        data.setdefault('continuous_covariate_distribution', 'normal')
         llm_data = data.pop('llm', {})
         llm_config = LLMConfig(**llm_data) if llm_data else LLMConfig()
         structured_data_data = data.pop('structured_data', {})
