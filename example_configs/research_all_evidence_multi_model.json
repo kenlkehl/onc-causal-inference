@@ -78,7 +78,7 @@
       "modifier_ridge_alpha": 10.0,
       "modifier_continuous_winsor_quantile": 0.005,
       "multi_model": {
-        "schema_version": "stage2_multi_model_selection_v7_adjusted_interactions",
+        "schema_version": "stage2_multi_model_selection_v8_opt_in_diagnostic_families",
         "repeats": 3,
         "row_fraction": 0.8,
         "l1_ratios": [

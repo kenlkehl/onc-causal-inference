@@ -62,6 +62,7 @@ def candidates(kw):
     return dict(
         nuisance_candidate_definitions=kw["definitions"],
         nuisance_candidate_fit=kw["extracted_fit"],
+        nuisance_candidate_heldout=kw["extracted_heldout"],
     )
 
 
@@ -162,7 +163,7 @@ def test_final_resume_reuses_nuisances_after_effect_fit_failure(tmp_path, monkey
             analysis.estimate_outer_fold(**kw, **candidates(kw), output_dir=tmp_path)
     assert not (tmp_path / "complete.json").exists()
     snapshots = {p: p.read_bytes() for p in tmp_path.glob("fit_checkpoints/*/**/*.json")}
-    assert len(snapshots) == 12
+    assert len(snapshots) == 9  # 3 inner folds x (propensity, mu0, mu1); no full-data fit
     monkeypatch.setattr(effects, "fit_interaction_effect", original)
 
     def forbidden(*args, **kwargs):
@@ -239,7 +240,8 @@ def test_real_final_estimation_parallel_equivalence_and_complete_resume(
             )
         frames.append(pd.read_csv(destination / "predictions.csv"))
         assert len(list(destination.glob("fit_checkpoints/*/cross_fit/fold_*/*.json"))) == 9
-        assert len(list(destination.glob("fit_checkpoints/*/full_training/*.json"))) == 3
+        # Held-out nuisances are the inner-fold ensemble: no separate full-data fit.
+        assert not list(destination.glob("fit_checkpoints/*/full_training/*.json"))
     pd.testing.assert_frame_equal(frames[0], frames[1], rtol=1e-12, atol=1e-12)
     if estimator == "causal_forest":
         for jobs, report in zip((1, 2), reports):

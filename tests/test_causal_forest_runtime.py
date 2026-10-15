@@ -126,6 +126,24 @@ def test_fitted_head_audits_every_crossfit_elastic_net_clone():
             isinstance(item["optimization"]["iteration_limit_reached"], bool)
             for item in fitted_models
         )
+        for item in fitted_models:
+            # Every EconML clone fits its own label-free scaler and records
+            # the explicit refit's iterations alongside the CV iterations.
+            assert item["standardization"]["method"] == "StandardScaler"
+            assert item["standardization"]["applied"] is True
+            assert item["standardization"]["with_mean"] is True
+            optimization = item["optimization"]
+            assert isinstance(optimization["refit_iterations"], int)
+            assert optimization["refit_iterations"] >= 1
+            assert isinstance(optimization["cv_maximum_iterations_observed"], int)
+            assert optimization["maximum_iterations_observed"] == max(
+                optimization["refit_iterations"],
+                optimization["cv_maximum_iterations_observed"],
+            )
+            assert optimization["iteration_limit_reached"] is (
+                optimization["refit_iteration_limit_reached"]
+                or optimization["cv_iteration_limit_reached"]
+            )
     json.dumps(audit)
 
 
@@ -169,6 +187,13 @@ def test_fitted_continuous_nuisance_audit_records_selected_alpha():
     assert audit["selected_regularization"]["parameter"] == "alpha"
     assert audit["selected_regularization"]["value"] > 0
     assert audit["optimization"]["duality_gap"] is not None
+    assert audit["optimization"]["refit_iterations"] >= 1
+    assert (
+        audit["optimization"]["maximum_iterations_observed"]
+        == audit["optimization"]["refit_iterations"]
+    )
+    assert audit["optimization"]["refit_iteration_limit_reached"] is False
+    assert audit["standardization"]["method"] == "StandardScaler"
     json.dumps(audit)
 
 

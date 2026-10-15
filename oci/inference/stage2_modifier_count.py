@@ -20,12 +20,18 @@ from . import stage2_modifier_ranking as ranking
 from . import stage2_modifier_concepts as concepts
 from . import stage2_modeling_pool as modeling
 from .stage2_prompt_catalog import PROMPT_VERSION
-from .stage2_effect_estimators import fit_interaction_effect
+from .stage2_effect_estimators import (
+    NUISANCE_ADJUSTMENT_DESCRIPTION,
+    PROGNOSTIC_FOREST_DESCRIPTION,
+    fit_interaction_effect,
+    nuisance_adjustment,
+    prognostic_score,
+)
 from .stage2_dina import fit_effect as fit_dina_effect, unpack_nuisances as unpack_dina_nuisances
 from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
-SCHEMA_VERSION = "stage2_nested_modifier_count_v7_balanced_interactions"
+SCHEMA_VERSION = "stage2_nested_modifier_count_v8_nuisance_adjusted"
 
 
 def choose_modifier_count(fold_losses):
@@ -145,7 +151,8 @@ def choose_effect_model(losses, *, interaction_utilities=None,
 
 
 def _score_interactions(
-    *, train, valid, definitions, feature_ids, t, y, tvr, yvr, binary, policy, seed
+    *, train, valid, definitions, feature_ids, t, y, tvr, yvr, binary, policy, seed,
+    adjustment=None,
 ):
     result = fit_interaction_effect(
         train=train,
@@ -157,6 +164,7 @@ def _score_interactions(
         binary=binary,
         policy=policy,
         seed=seed,
+        adjustment=adjustment,
     )
     errors = (yvr - tvr * result["tau"]) ** 2
     return {
@@ -171,13 +179,22 @@ def _score_interactions(
     }
 
 
-def _score_prefix(*, train, valid, definitions, feature_ids, tr, yr, tvr, yvr, seed, trees):
+def _score_prefix(*, train, valid, definitions, feature_ids, tr, yr, tvr, yvr, seed, trees,
+                  prognostic=None):
+    """Score a forest on the selected prefix (plus the prognostic column, if given).
+
+    ``prognostic`` is ``(train_values, valid_values)`` of the honest prognostic
+    score; the final binary-outcome forest also carries it in X (M-04).
+    """
     from econml.grf import CausalForest
     from .plain_handoff_stage2_analysis import _FeatureEncoder
 
     chosen = [f for f in definitions if str(f["feature_id"]) in set(feature_ids)]
     encoder = _FeatureEncoder(chosen).fit(train)
     x, xv = encoder.transform(train), encoder.transform(valid)
+    if prognostic is not None:
+        x = np.column_stack((x, np.asarray(prognostic[0], float)))
+        xv = np.column_stack((xv, np.asarray(prognostic[1], float)))
     constant = float(tr @ yr / (tr @ tr))
     params = {
         "n_estimators": trees,
@@ -209,6 +226,7 @@ def _score_prefix(*, train, valid, definitions, feature_ids, tr, yr, tvr, yvr, s
         "r_loss": float(errors.mean()),
         "constant_effect": constant,
         "constant_design": x.shape[1] == 0,
+        "prognostic_score_in_x": prognostic is not None,
         "forest_parameters": params,
     }
 
@@ -519,6 +537,30 @@ def select_modifier_count(
                 train.loc[keep].reset_index(drop=True),
                 valid.loc[keepv].reset_index(drop=True),
             )
+            # The same honest nuisances (OOF for these training rows, training-only
+            # fits for the scoring rows) supply the unpenalized interaction-model
+            # covariates (M-01) and the forest's prognostic column (M-04).
+            binary_outcome = outcome_type == "binary"
+            if "training_mu0" in nuisance and "validation_mu0" in nuisance:
+                mu0_train = np.asarray(nuisance["training_mu0"], float)
+                mu0_valid = np.asarray(nuisance["validation_mu0"], float)
+                prognostic_source = "control_arm_outcome_model_mu0"
+            else:
+                mu0_train, mu0_valid = m, mv
+                prognostic_source = "marginal_outcome_model_fallback"
+            adjustment = nuisance_adjustment(
+                train_propensity=e[keep],
+                valid_propensity=ev[keepv],
+                train_mu0=mu0_train[keep],
+                valid_mu0=mu0_valid[keepv],
+                binary=binary_outcome,
+            )
+            prognostic = (
+                (prognostic_score(mu0_train[keep], binary=True),
+                 prognostic_score(mu0_valid[keepv], binary=True))
+                if binary_outcome
+                else None
+            )
             fold_records.append(
                 {
                     "inner_fold": number,
@@ -531,6 +573,7 @@ def select_modifier_count(
                     "actual_additional_counts": {str(k): min(k, len(keys)) for k in counts},
                     "interaction_utilities": interaction_utilities,
                     "nuisance_sha256": _fingerprint(nuisance),
+                    "prognostic_score_source": prognostic_source,
                     "ranking_path": str(root / ("ranking/concepts/representative_ranking/ranking.json"
                                                 if cfg.concept_review else "ranking/ranking.json")),
                 }
@@ -616,6 +659,7 @@ def select_modifier_count(
                                         binary=outcome_type == "binary",
                                         policy=policy,
                                         seed=model_seed,
+                                        adjustment=adjustment,
                                     )
                                 return _score_prefix(
                                     train=ft,
@@ -628,6 +672,7 @@ def select_modifier_count(
                                     yvr=yvr,
                                     seed=model_seed,
                                     trees=estimation_trees,
+                                    prognostic=prognostic,
                                 )
 
                             scoring_jobs.append((estimator, count, numerical.checkpoint_future(
@@ -705,7 +750,15 @@ def select_modifier_count(
             "scoring": f"joint architecture/count rule={cfg.selection_rule}; paired validation R-loss with nested-training interaction evidence for balanced_evidence; forest seeds averaged within fold; all effects scored as probability differences for binary outcomes",
             "validation_estimators": list(estimators),
             "validation_adjustment": "all frozen candidates for scoring nuisances and interaction main effects; selected prefix for effect inputs/interactions",
-            "final_refit_adjustment": "retained confounders and modifiers; forest refits DML nuisances, interaction model retunes outcome penalty",
+            "methodology_notes": {
+                "interaction_model_nuisance_adjustment": NUISANCE_ADJUSTMENT_DESCRIPTION,
+                **(
+                    {"forest_prognostic_score": PROGNOSTIC_FOREST_DESCRIPTION}
+                    if outcome_type == "binary"
+                    else {}
+                ),
+            },
+            "final_refit_adjustment": "retained confounders and modifiers; forest refits DML nuisances (binary outcomes also carry the honest prognostic score in X); interaction model retunes its outcome penalty with unpenalized honest logit(e_hat) and prognostic covariates",
             "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
             "confounder_policy": "preserve separate statistically selected nuisance task supports and investigator locks",
             "boundaries": {

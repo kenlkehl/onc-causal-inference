@@ -11,7 +11,7 @@ modifier selection uses the separate nested ranking/count search.
 from __future__ import annotations
 
 from collections import Counter
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from functools import partial
 from hashlib import sha256
 import logging
@@ -34,6 +34,7 @@ from . import stage2_modeling_pool as modeling
 from . import stage2_evidence_stability as stability
 from . import stage2_interaction_screen as interaction_screen
 from . import stage2_nuisance_selection as nuisance_selection
+from .stage2_extraction_failures import companion_columns
 
 LOGGER = logging.getLogger(__name__)
 ROLES = ("treatment", "outcome", "effect")
@@ -169,10 +170,57 @@ def _validated_inputs(dataset, extracted, definitions, splits, treatment_column,
         raise ValueError("treatment and outcome must be finite")
     if set(labels[treatment_column].unique()) != {0, 1}:
         raise ValueError("multi_model requires both binary treatment arms")
-    return extracted[["_oci_row_id", *names]].set_index("_oci_row_id", drop=False), labels
+    # Extraction-failure companion columns travel with their parent features.
+    companions = companion_columns(extracted, definitions)
+    return (
+        extracted[["_oci_row_id", *names, *companions]].set_index("_oci_row_id", drop=False),
+        labels,
+    )
 
 
-def _matrix(design, treatment, kind, *, valid=False, modifier_ids=None):
+@dataclass(frozen=True)
+class _Adjustment:
+    """Unpenalized, fold-locally standardized nuisance covariates (never interacted with T)."""
+
+    train: np.ndarray
+    valid: np.ndarray
+    names: tuple[str, ...]
+
+    @property
+    def groups(self) -> tuple[str, ...]:
+        return tuple(f"adjustment:{name}" for name in self.names)
+
+
+def _standardized_adjustment(train_values, valid_values, names) -> _Adjustment:
+    """Standardize on training rows only; an unpenalized fit is scale invariant."""
+    train_values = np.asarray(train_values, dtype=float)
+    valid_values = np.asarray(valid_values, dtype=float)
+    if train_values.ndim != 2 or valid_values.ndim != 2:
+        raise ValueError("nuisance adjustment covariates must be two-dimensional")
+    if train_values.shape[1] != len(names) or valid_values.shape[1] != len(names):
+        raise ValueError("nuisance adjustment covariates do not match their names")
+    if not np.isfinite(train_values).all() or not np.isfinite(valid_values).all():
+        raise ValueError("nuisance adjustment covariates must be finite")
+    train_columns, valid_columns, kept_names = [], [], []
+    for index, name in enumerate(names):
+        column = train_values[:, index]
+        scale = float(np.std(column, ddof=0)) if len(column) else 0.0
+        if not np.isfinite(scale) or scale <= 1e-12:
+            continue  # A constant covariate is absorbed by the intercept.
+        mean = float(np.mean(column))
+        train_columns.append((column - mean) / scale)
+        valid_columns.append((valid_values[:, index] - mean) / scale)
+        kept_names.append(str(name))
+    return _Adjustment(
+        train=(np.column_stack(train_columns) if train_columns
+               else np.empty((len(train_values), 0), dtype=float)),
+        valid=(np.column_stack(valid_columns) if valid_columns
+               else np.empty((len(valid_values), 0), dtype=float)),
+        names=tuple(kept_names),
+    )
+
+
+def _matrix(design, treatment, kind, *, valid=False, modifier_ids=None, adjustment=None):
     x = design.valid if valid else design.train
     keys = list(design.column_feature_ids)
     if kind == "main":
@@ -181,11 +229,31 @@ def _matrix(design, treatment, kind, *, valid=False, modifier_ids=None):
     if kind == "interactions":
         mask = [modifier_ids is None or k in modifier_ids for k in keys]
         effect_keys = [k for k, keep in zip(keys, mask) if keep]
+        if adjustment is None or not adjustment.names:
+            a = np.empty((len(x), 0), dtype=float)
+            adjustment_keys: list[str] = []
+            adjustment_groups: list[str] = []
+        else:
+            a = adjustment.valid if valid else adjustment.train
+            if len(a) != len(x):
+                raise ValueError("nuisance adjustment rows do not match the design rows")
+            adjustment_keys = [f"__{name}__" for name in adjustment.names]
+            adjustment_groups = list(adjustment.groups)
         return (
-            np.column_stack((t, x, t * x[:, mask])),
-            ["__treatment__", *keys, *effect_keys],
-            ["treatment", *(["main"] * len(keys)), *(["effect"] * len(effect_keys))],
-            ["treatment", *(f"main:{k}" for k in keys), *(f"effect:{k}" for k in effect_keys)],
+            np.column_stack((t, a, x, t * x[:, mask])),
+            ["__treatment__", *adjustment_keys, *keys, *effect_keys],
+            [
+                "treatment",
+                *(["adjustment"] * len(adjustment_keys)),
+                *(["main"] * len(keys)),
+                *(["effect"] * len(effect_keys)),
+            ],
+            [
+                "treatment",
+                *adjustment_groups,
+                *(f"main:{k}" for k in keys),
+                *(f"effect:{k}" for k in effect_keys),
+            ],
         )
     if kind == "rlearner":
         return (
@@ -212,10 +280,25 @@ def _fit_linear(
     ratio,
     modifier_ids=None,
     path_submit=None,
+    adjustment=None,
 ):
-    """Tune inside training, leaving the explicit treatment main effect unpenalized."""
+    """Tune inside training, leaving the explicit treatment main effect unpenalized.
+
+    ``adjustment`` (interaction models only) is ``{"train": (n, p), "valid":
+    (m, p), "names": [...]}``: per-row covariates that enter as unpenalized main
+    effects, never interacted with T. They are standardized on the training rows
+    of each fit (CV partition or final refit).
+    """
     y = np.asarray(y, dtype=float)
     treatment = np.asarray(treatment, dtype=float)
+    if adjustment is not None and kind != "interactions":
+        raise ValueError("nuisance adjustment covariates apply only to interaction models")
+    if adjustment is not None:
+        adjustment_train = np.asarray(adjustment["train"], dtype=float)
+        adjustment_valid = np.asarray(adjustment["valid"], dtype=float)
+        adjustment_names = tuple(map(str, adjustment["names"]))
+        if adjustment_train.shape[0] != len(train) or adjustment_valid.shape[0] != len(valid):
+            raise ValueError("nuisance adjustment rows must align with training/validation rows")
     alphas = np.logspace(
         policy.minimum_log10_alpha,
         policy.maximum_log10_alpha,
@@ -229,14 +312,26 @@ def _fit_linear(
     final_design = linear._encode_design(
         train, valid, definitions, categorical_min_count=policy.categorical_min_count
     )
-    x, keys, blocks, groups = _matrix(final_design, treatment, kind, modifier_ids=modifier_ids)
+    final_adjustment = (
+        _standardized_adjustment(adjustment_train, adjustment_valid, adjustment_names)
+        if adjustment is not None
+        else None
+    )
+    x, keys, blocks, groups = _matrix(
+        final_design, treatment, kind, modifier_ids=modifier_ids, adjustment=final_adjustment
+    )
     xv, _, _, _ = _matrix(
-        final_design, valid_treatment, kind, valid=True, modifier_ids=modifier_ids
+        final_design, valid_treatment, kind, valid=True, modifier_ids=modifier_ids,
+        adjustment=final_adjustment,
     )
     intercept = kind != "rlearner"
     # This is the explicit T (or residual T) column, not a clinical feature
-    # named "treatment" in a nuisance model. Covariates and T:Z stay penalized.
+    # named "treatment" in a nuisance model. Covariates and T:Z stay penalized,
+    # except caller-supplied nuisance adjustment covariates (see
+    # stage2_effect_estimators.fit_interaction_effect), which stay unpenalized.
     unpenalized_groups = ("treatment",) if kind in {"interactions", "rlearner"} else ()
+    if final_adjustment is not None:
+        unpenalized_groups = (*unpenalized_groups, *final_adjustment.groups)
     if (binary and len(np.unique(y)) < 2) or x.shape[1] == 0:
         constant = float(np.clip(np.mean(y), 1e-6, 1 - 1e-6) if binary else np.mean(y))
         return {
@@ -255,6 +350,7 @@ def _fit_linear(
                 "cv_folds": 0,
                 "unpenalized_groups": list(unpenalized_groups),
             },
+            "adjustment": final_adjustment,
         }
     if not splits:
         raise NotEstimable("insufficient_rows_for_penalty_cv")
@@ -266,12 +362,26 @@ def _fit_linear(
             definitions,
             categorical_min_count=policy.categorical_min_count,
         )
-        fit_x, _, _, group_ids = _matrix(design, treatment[fit], kind, modifier_ids=modifier_ids)
-        hold_x, _, _, _ = _matrix(
-            design, treatment[hold], kind, valid=True, modifier_ids=modifier_ids
+        fold_adjustment = (
+            _standardized_adjustment(
+                adjustment_train[fit], adjustment_train[hold], adjustment_names
+            )
+            if adjustment is not None
+            else None
         )
+        fit_x, _, _, group_ids = _matrix(
+            design, treatment[fit], kind, modifier_ids=modifier_ids, adjustment=fold_adjustment
+        )
+        hold_x, _, _, _ = _matrix(
+            design, treatment[hold], kind, valid=True, modifier_ids=modifier_ids,
+            adjustment=fold_adjustment,
+        )
+        # A covariate that is constant within this partition is dropped there.
+        fold_unpenalized = ("treatment",) if kind in {"interactions", "rlearner"} else ()
+        if fold_adjustment is not None:
+            fold_unpenalized = (*fold_unpenalized, *fold_adjustment.groups)
         group_structure = linear._group_structure(
-            group_ids, unpenalized_feature_ids=unpenalized_groups
+            group_ids, unpenalized_feature_ids=fold_unpenalized
         )
         initial = None
         iterations = []
@@ -349,6 +459,7 @@ def _fit_linear(
             "cv_optimizer_audit": cv_iterations,
             "unpenalized_groups": list(unpenalized_groups),
         },
+        "adjustment": final_adjustment,
     }
 
 

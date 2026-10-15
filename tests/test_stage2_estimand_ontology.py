@@ -349,7 +349,9 @@ def test_pipeline_freezes_winners_before_heldout_extraction_and_passes_to_select
         assert result["estimand_ontology"]["status"] == "complete"
         assert saved["estimand_ontology"]["search_fingerprint"] == "accepted-definition-search"
         assert result["candidate_missingness_filter"]["after_estimand_refinement"]["candidates_dropped"] == int(sparse_alternative)
-    assert saved["candidate_missingness_filter"]["maximum_missing_fraction"] == 0.95
+    assert saved["candidate_missingness_filter"]["min_informative_patients"] == 20
+    assert saved["candidate_missingness_filter"]["max_extraction_failure_fraction"] == 0.10
+    assert audit["features"][1]["reason"] == "fewer_than_min_informative_patients_observed"
     assert pd.read_csv(tmp_path / "extraction/all_candidates_fit/extracted.csv").shape[1] == 3
     assert list(pd.read_csv(tmp_path / saved["preselection_matrix_path"]).columns) == [
         "_oci_row_id", *[f["name"] for f in saved["definitions"]]]

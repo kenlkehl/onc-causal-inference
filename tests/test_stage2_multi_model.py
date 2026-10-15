@@ -100,6 +100,9 @@ def test_real_models_are_honest_cover_candidates_and_resume_without_refitting(
     tmp_path, monkeypatch, binary, matched
 ):
     arguments = sample_inputs()
+    # Exercise every family, including the opt-in prediction diagnostics.
+    arguments["policy"] = replace(arguments["policy"], multi_model=replace(
+        arguments["policy"].multi_model, diagnostic_families=("penalized_main", "predictive_forest")))
     if matched:
         cfg = MatchedBatchConfig(enabled=True, batch_size=4, bins_per_nuisance=1, min_reference_arm=2,
             max_smd=100, min_delta=0, z_threshold=0, train_passes=3, validation_passes=3)
@@ -372,22 +375,40 @@ def test_default_policy_roundtrips_and_is_multi_model_only():
         assert statistical_selection_config_from_mapping(config.public_dict()) == config
 
 
-def test_retired_policy_fields_warn_and_are_ignored(caplog):
-    with caplog.at_level("WARNING"):
-        config = statistical_selection_config_from_mapping(
-            {"one_standard_error_rule": True, "modifier_top_n_per_inner_fold": 10,
-             "regularization_grid_size": 16}
-        )
-    assert config == statistical_selection_config_from_mapping({})
-    assert "one_standard_error_rule" in caplog.text
-    with caplog.at_level("WARNING"):
-        roles = role_adjudication_config_from_mapping(
-            {"enabled": True, "max_candidates_per_request": 20}
-        )
-    assert roles == Stage2RoleAdjudicationConfig()
-    assert "max_candidates_per_request" in caplog.text
+@pytest.mark.parametrize("name, value", [
+    ("nuisance_selection_rule", "any_fold"),
+    ("modifier_selection_rule", "any_fold"),
+    ("nuisance_selection_frequency", 0.5),
+    ("modifier_selection_frequency", 0.5),
+    ("regularization_grid_size", 16),
+    ("one_standard_error_rule", True),
+    ("nuisance_prediction_one_standard_error_rule", True),
+    ("univariable_confounder_p_value_threshold", 0.05),
+    ("univariable_confounder_q_value_threshold", 0.1),
+    ("nuisance_forest_trees", 100),
+    ("nuisance_forest_min_samples_leaf", 5),
+    ("modifier_top_n_per_inner_fold", 10),
+    ("modifier_min_fold_r_loss_improvement", 0.0),
+    ("modifier_min_mean_r_loss_improvement", 0.0),
+    ("modifier_min_positive_fold_fraction", 0.5),
+])
+def test_former_statistical_selection_fields_are_rejected(name, value):
+    # Saved configurations carrying removed selector fields fail closed.
+    with pytest.raises(
+        ValueError, match=rf"stage2\.statistical_selection contains unsupported fields: \['{name}'\]"
+    ):
+        statistical_selection_config_from_mapping({name: value})
+
+
+@pytest.mark.parametrize("name, value", [("enabled", True), ("max_candidates_per_request", 20)])
+def test_former_role_adjudication_fields_are_rejected(name, value):
+    with pytest.raises(
+        ValueError, match=rf"stage2\.role_adjudication contains unsupported fields: \['{name}'\]"
+    ):
+        role_adjudication_config_from_mapping({name: value})
     with pytest.raises(ValueError, match="unsupported"):
         role_adjudication_config_from_mapping({"unknown": 1})
+    assert role_adjudication_config_from_mapping({}) == Stage2RoleAdjudicationConfig()
 
 
 @pytest.mark.parametrize(

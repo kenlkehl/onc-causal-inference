@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "onc-causal-inference"
 version = "0.1.0"
-description = "Causal inference from clinical text using frozen LLM feature extraction"
+description = "Heterogeneous treatment-effect estimation from clinical text with LLM-defined variables"
 readme = "README.md"
 requires-python = ">=3.12,<3.14"
 license = "MIT"
@@ -25,15 +25,15 @@ dependencies = [
     "transformers>=5.3.0",
     "pandas>=1.5.0",
     "numpy>=1.23.0",
-    # LogisticRegression.multi_class is still used by the Stage 1 scientific
-    # configuration and was removed in scikit-learn 1.8.
+    # Tested against the locked 1.6 series; 1.8 has not been validated.
     "scikit-learn>=1.2.0,<1.8.0",
     "scipy>=1.10.0",
     "statsmodels>=0.14.0",
     "tqdm>=4.65.0",
     "pyarrow",
     "joblib>=1.2.0",
-    "accelerate>=0.20.0",
+    "pyyaml>=6.0",
+    "requests>=2.28",
     # 5.4+ probes the optional TorchCodec backend at import time. vLLM installs
     # TorchCodec, whose native libraries require system FFmpeg even for our
     # text-only embedding use case. 5.3 supports Transformers v5 without that
@@ -41,9 +41,9 @@ dependencies = [
     "sentence-transformers>=5.3.0,<5.4.0",
     "huggingface-hub>=1.0.0",
     "safetensors>=0.4.0",
+    # Tokenizer backends that transformers needs for some served models' tokenizers.
     "sentencepiece>=0.2.0",
     "tiktoken>=0.5.0",
-    "jsonschema==4.26.0",
     "openai>=1.0.0",
     "econml>=0.14.0",
     "llvmlite>=0.46.0",
@@ -56,13 +56,10 @@ dev = [
     "black>=23.0.0",
     "flake8>=6.0.0",
     "mypy>=1.0.0",
+    "jsonschema==4.26.0",
 ]
 extraction = [
     "google-auth[requests]>=2.0.0",
-]
-decision-extraction = [
-    # Verified Plumb Qwen3.5 next-token A–P readout through the pooling API.
-    "vllm>=0.30.0",
 ]
 local-llm = [
     "vllm>=0.20.1",
@@ -70,10 +67,6 @@ local-llm = [
     # Match the locked PyTorch/vLLM CUDA 13.0 runtime. FlashInfer compiles
     # Blackwell kernels at startup, so the runtime libraries alone are not enough.
     "cuda-toolkit[nvcc,cccl,crt,nvvm]==13.0.3; sys_platform == 'linux'",
-]
-gemini = [
-    "google-genai>=1.0.0",
-    "google-cloud-storage>=2.0.0",
 ]
 
 [project.scripts]

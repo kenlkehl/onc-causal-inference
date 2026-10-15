@@ -131,6 +131,8 @@ def test_final_crossfit_uses_unscreened_catalog_and_dina_reuses_honest_nuisances
     kw = final_inputs()
     all_fit = kw["extracted_fit"].copy()
     all_fit["discarded"] = np.arange(len(all_fit)) % 3
+    all_heldout = kw["extracted_heldout"].copy()
+    all_heldout["discarded"] = np.arange(len(all_heldout)) % 3
     candidates = [feature("x"), feature("discarded")]
     kw["definitions"][0].update(nuisance_model_roles=["outcome"])
     original = analysis._cross_fitted_nuisance
@@ -151,6 +153,7 @@ def test_final_crossfit_uses_unscreened_catalog_and_dina_reuses_honest_nuisances
         output_dir=tmp_path,
         nuisance_candidate_definitions=candidates,
         nuisance_candidate_fit=all_fit,
+        nuisance_candidate_heldout=all_heldout,
     )
     assert crossfit_calls == [True]
     assert result["nuisance_routing"]["treatment_feature_ids"] == []
@@ -165,5 +168,6 @@ def test_final_crossfit_uses_unscreened_catalog_and_dina_reuses_honest_nuisances
         output_dir=tmp_path,
         nuisance_candidate_definitions=candidates,
         nuisance_candidate_fit=all_fit,
+        nuisance_candidate_heldout=all_heldout,
     )
     assert resumed == result and len(crossfit_calls) == 1

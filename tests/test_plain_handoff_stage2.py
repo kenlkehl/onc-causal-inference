@@ -5852,6 +5852,8 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
         ),
         max_review_rounds=1,
         estimation_trees=10,
+        # Tiny synthetic cohorts: count-based informativeness rule with K=2.
+        min_informative_patients=2,
         required_architectures=(),
     )
 
@@ -5877,6 +5879,52 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert (output / "causal_estimate.json").is_file()
     assert (output / "posthoc_oracle_ite_metrics.json").is_file()
     assert (output / "posthoc_predictions_with_oracle_ite.csv").is_file()
+    # Oracle-free heterogeneity/overlap/balance diagnostics (P3-B).
+    heterogeneity_path = output / "heterogeneity_diagnostics.json"
+    assert str(heterogeneity_path) in first["artifacts"]
+    heterogeneity_text = heterogeneity_path.read_text(encoding="utf-8")
+    heterogeneity = json.loads(heterogeneity_text)
+    assert heterogeneity["schema_version"] == "stage2_heterogeneity_diagnostics_v1"
+    assert heterogeneity["oracle_columns_consumed"] is False
+    assert "true_ite" not in heterogeneity_text
+    assert heterogeneity["inputs"]["outer_folds"] == ["1", "2"]
+    assert heterogeneity["inputs"]["rows"] == 40
+    assert heterogeneity["inputs"]["recomputed_psi_max_abs_difference_from_aipw_score"] < 1e-9
+    assert set(heterogeneity["pooling_rules"]) == {
+        "blp", "gates", "clan", "rate", "overlap", "balance"
+    }
+    for name in (
+        "blp", "gates", "clan", "rate", "overlap_weighted_ate", "ipw_weights", "trimming_curve"
+    ):
+        assert heterogeneity[name]["interpretation"]
+        assert set(heterogeneity[name]["per_fold"]) == {"1", "2"}
+        assert heterogeneity[name]["pooled"]["status"] in {"ok", "unavailable"}
+    for name in ("overlap_weighted_ate", "ipw_weights", "trimming_curve"):
+        assert heterogeneity[name]["pooled"]["status"] == "ok"
+    assert [
+        point["alpha"] for point in heterogeneity["trimming_curve"]["pooled"]["curve"]
+    ] == [0.0, 0.01, 0.025, 0.05, 0.1, 0.15]
+    assert heterogeneity["balance"]["interpretation"]
+    assert heterogeneity["balance"]["training"]["status"] == "ok"
+    assert heterogeneity["balance"]["training"]["candidate_scope"] in {
+        "all_nuisance_candidates", "retained_features_only"
+    }
+    assert set(heterogeneity["balance"]["training"]["per_fold"]) == {"1", "2"}
+    assert "pooled_summary" in heterogeneity["balance"]["training"]
+    assert "pooled" in heterogeneity["balance"]["heldout"]
+    assert "error" not in re.findall(r'"status": "([a-z_]+)"', heterogeneity_text)
+    persisted_estimate = json.loads((output / "causal_estimate.json").read_text(encoding="utf-8"))
+    heterogeneity_summary = persisted_estimate["heterogeneity_diagnostics"]
+    assert heterogeneity_summary["path"] == str(heterogeneity_path)
+    assert {
+        "blp_pooled", "gates_pooled", "rate_pooled", "overlap_weighted_ate_pooled",
+        "ipw_weights_pooled", "trimming_curve_pooled", "balance_training", "balance_heldout",
+    } <= set(heterogeneity_summary)
+    assert first["causal_estimate"]["heterogeneity_diagnostics"] == heterogeneity_summary
+    # Existing documented keys are unchanged.
+    assert {"ate", "standard_error", "mean_estimated_cate", "predictions_path"} <= set(
+        persisted_estimate
+    )
     selection_path = output / "outer_001" / "selection" / "elastic_net_selection.json"
     assert selection_path.is_file()
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
@@ -6280,6 +6328,8 @@ def test_aggregate_supervisor_can_revise_then_reextract_a_definition(
             extraction_max_prompt_chars=20_000,
             max_review_rounds=2,
             estimation_trees=10,
+            # Tiny synthetic cohorts: count-based informativeness rule with K=2.
+            min_informative_patients=2,
         ),
     )
 
@@ -6358,6 +6408,8 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
         ),
         max_review_rounds=2,
         estimation_trees=10,
+        # Tiny synthetic cohorts: count-based informativeness rule with K=1 (three training rows).
+        min_informative_patients=1,
     )
     output_dir = tmp_path / "outer_001"
     matrix_path = output_dir / "extraction" / "all_candidates_fit" / "extracted.csv"
@@ -6466,11 +6518,18 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
             [],
         ),
     )
-    monkeypatch.setattr(
-        stage2_analysis,
-        "extract_rows",
-        lambda **kwargs: pd.DataFrame({"_oci_row_id": kwargs["row_ids"]}),
-    )
+    heldout_requests = []
+
+    def heldout_extract(**kwargs):
+        # Held-out patients are measured on the complete candidate catalog,
+        # even when no feature is selected (P3-A item 1).
+        heldout_requests.append([d["name"] for d in kwargs["definitions"]])
+        return pd.DataFrame({
+            "_oci_row_id": kwargs["row_ids"],
+            **{d["name"]: ["Present"] * len(kwargs["row_ids"]) for d in kwargs["definitions"]},
+        })
+
+    monkeypatch.setattr(stage2_analysis, "extract_rows", heldout_extract)
     monkeypatch.setattr(
         stage2_analysis,
         "_apply_harmonization_plans",
@@ -6521,6 +6580,7 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     result = run_fold_analysis(**arguments)
 
     assert result["estimation"]["status"] == "estimated_from_snapshot"
+    assert heldout_requests and heldout_requests[0] == ["baseline_status"]
     assert result["estimation"]["estimator"] == "linear_interactions"
     assert result["review_convergence"]["reused_frozen_preselection_snapshot"] is True
     assert result["review_rounds"] == 1
@@ -6588,6 +6648,8 @@ def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_m
         ),
         max_review_rounds=2,
         estimation_trees=10,
+        # Tiny synthetic cohorts: count-based informativeness rule with K=1 (three training rows).
+        min_informative_patients=1,
     )
     stage2_dir = tmp_path / "stage2"
     output_dir = stage2_dir / "outer_001"
@@ -7006,6 +7068,8 @@ def test_repeated_training_extraction_failures_refine_ontology_and_reextract(
             ontology_refinement_min_failure_patients=3,
             max_ontology_refinement_rounds=2,
             estimation_trees=10,
+            # Tiny synthetic cohorts: count-based informativeness rule with K=2.
+            min_informative_patients=2,
         ),
     )
 

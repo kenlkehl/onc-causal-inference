@@ -868,6 +868,7 @@ def _completed_stage2_reselection_fixture(tmp_path: Path):
         "features_by_outer_fold.jsonl",
         "cross_fitted_predictions.csv",
         "causal_estimate.json",
+        "heterogeneity_diagnostics.json",
         "posthoc_oracle_ite_metrics.json",
     ):
         (stage2_dir / name).write_text("{}\n", encoding="utf-8")

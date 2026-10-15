@@ -305,7 +305,8 @@ class CausalForestHead:
         self.n_jobs = n_jobs
         self.outcome_type = normalized_outcome_type
         self.discrete_outcome = normalized_outcome_type == "binary"
-        self.runtime_mode = "elastic_net_nuisance_v1"
+        # v2: the elastic-net nuisance wrappers standardize their design per fit.
+        self.runtime_mode = "elastic_net_nuisance_v2_standardized"
 
         # The CausalForestDML model (created during fit)
         self.model = None

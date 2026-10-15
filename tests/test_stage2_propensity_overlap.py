@@ -113,22 +113,16 @@ def final_fixture(monkeypatch, tmp_path):
     fitp = np.tile([0.05, 0.1, 0.5, 0.9, 0.95, 0.5], 3)
     heldp = np.array([0.05, 0.1, 0.5, 0.9, 0.95, 0.5])
     calls = []
-    monkeypatch.setattr(
-        analysis,
-        "_cross_fitted_nuisance",
-        lambda **kw: (fitp.copy(), np.full(18, 0.2), np.full(18, 0.8)),
-    )
 
-    def classifier(x, y, **kw):
-        calls.append(("nuisance", len(y)))
-        return {"rows": len(y), "seed": kw["seed"]}
+    def crossfit(**kw):
+        # Training OOF predictions plus the inner-fold ensemble's held-out ones.
+        calls.append(("crossfit", len(kw["fit_ids"]), len(kw["heldout_extracted"])))
+        return (
+            fitp.copy(), np.full(18, 0.2), np.full(18, 0.8),
+            heldp.copy(), np.full(6, 0.2), np.full(6, 0.8),
+        )
 
-    monkeypatch.setattr(analysis, "_fit_classifier", classifier)
-    monkeypatch.setattr(
-        analysis, "_predict_probability",
-        lambda model, x: heldp.copy() if model["rows"] == 18
-        else np.full(len(x), 0.2 if model["seed"] == 10003 else 0.8),
-    )
+    monkeypatch.setattr(analysis, "_cross_fitted_nuisance", crossfit)
 
     class Forest:
         def __init__(self, **kw):
@@ -162,6 +156,7 @@ def final_fixture(monkeypatch, tmp_path):
         definitions=definitions,
         nuisance_candidate_definitions=definitions,
         nuisance_candidate_fit=extracted.iloc[:18],
+        nuisance_candidate_heldout=extracted.iloc[18:],
         split={"fit_row_ids": list(range(18)), "heldout_row_ids": list(range(18, 24))},
         unit_id_column="patient_id",
         treatment_column="treatment",
@@ -179,7 +174,8 @@ def final_fixture(monkeypatch, tmp_path):
 def test_final_exclusion_preserves_audit_rows_and_invalidates_cache(monkeypatch, tmp_path):
     kw, calls = final_fixture(monkeypatch, tmp_path)
     d = analysis.estimate_outer_fold(**kw, min_propensity=0.1, max_propensity=0.9)
-    assert ("nuisance", 18) in calls  # external nuisances retain all training patients
+    # External nuisances retain all training patients and score every held-out one.
+    assert ("crossfit", 18, 6) in calls
     assert ("effect", 12) in calls
     assert ("predict", 4) in calls
     frame = pd.read_csv(tmp_path / "predictions.csv")

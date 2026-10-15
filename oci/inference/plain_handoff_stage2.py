@@ -863,8 +863,15 @@ class PlainHandoffStage2Config:
     min_propensity: float | None = None
     max_propensity: float | None = None
     propensity_clip: float = 0.02
-    min_nonmissing_fraction: float = 0.05
-    max_dominant_fraction: float = 0.98
+    # Count-based candidate informativeness rule (outer-training rows only):
+    # keep a candidate only if at least this many patients have an observed
+    # value and, for categorical features, at least two levels (counting "not
+    # documented") each have this many patients; continuous features need
+    # non-identical observed values.
+    min_informative_patients: int = 20
+    # Candidates whose training extraction failed after all repairs for more
+    # than this fraction of patients are dropped as unreliable.
+    max_extraction_failure_fraction: float = 0.10
     # None selects the publisher profile after endpoint/model resolution.
     # Explicit overrides apply to both primary and extraction requests.
     temperature: float | None = None
@@ -1188,10 +1195,19 @@ class PlainHandoffStage2Config:
             )
         if not 0.0 < self.propensity_clip < 0.5:
             raise ValueError("stage2.propensity_clip must be between 0 and 0.5")
-        if not 0.0 <= self.min_nonmissing_fraction <= 1.0:
-            raise ValueError("stage2.min_nonmissing_fraction must be between 0 and 1")
-        if not 0.0 <= self.max_dominant_fraction <= 1.0:
-            raise ValueError("stage2.max_dominant_fraction must be between 0 and 1")
+        if (
+            isinstance(self.min_informative_patients, bool)
+            or not isinstance(self.min_informative_patients, int)
+            or self.min_informative_patients < 1
+        ):
+            raise ValueError("stage2.min_informative_patients must be a positive integer")
+        if (
+            isinstance(self.max_extraction_failure_fraction, bool)
+            or not isinstance(self.max_extraction_failure_fraction, (int, float))
+            or not math.isfinite(float(self.max_extraction_failure_fraction))
+            or not 0.0 <= float(self.max_extraction_failure_fraction) <= 1.0
+        ):
+            raise ValueError("stage2.max_extraction_failure_fraction must be between 0 and 1")
         for name in SAMPLING_FIELDS:
             value = getattr(self, name)
             if value is None:
@@ -1528,8 +1544,9 @@ def plain_stage2_config_from_mapping(
         min_propensity=raw.get("min_propensity"),
         max_propensity=raw.get("max_propensity"),
         propensity_clip=float(raw.get("propensity_clip", 0.02)),
-        min_nonmissing_fraction=float(raw.get("min_nonmissing_fraction", 0.05)),
-        max_dominant_fraction=float(raw.get("max_dominant_fraction", 0.98)),
+        # Validated (not coerced) by PlainHandoffStage2Config.validate().
+        min_informative_patients=raw.get("min_informative_patients", 20),
+        max_extraction_failure_fraction=raw.get("max_extraction_failure_fraction", 0.10),
         **{name: raw.get(name) for name in SAMPLING_FIELDS},
         explicit_features=explicit_features,
         vllm=managed_vllm,
@@ -6668,6 +6685,16 @@ class PlainHandoffStage2:
             standard_error = (
                 float(np.std(scores, ddof=1) / math.sqrt(len(scores))) if len(scores) > 1 else None
             )
+            # Oracle-free BLP/GATES/CLAN/RATE, overlap and balance diagnostics
+            # from the frozen predictions and per-fold artifacts. Never raises.
+            from .stage2_diagnostics import write_heterogeneity_diagnostics
+
+            heterogeneity_path, heterogeneity_summary = write_heterogeneity_diagnostics(
+                output_dir=output_dir,
+                predictions=predictions,
+                propensity_clip=float(self.config.propensity_clip),
+                seed=seed,
+            )
             causal_estimate = {
                 "estimator": "cross-fitted_aipw_with_fold_trained_nuisance_models",
                 "estimand": (
@@ -6708,6 +6735,7 @@ class PlainHandoffStage2:
                 "oracle_ite_spearman_correlation": oracle_overall.get("spearman_correlation"),
                 "oracle_ite_evaluation": oracle_ite_evaluation,
                 "predictions_path": str(predictions_path),
+                "heterogeneity_diagnostics": heterogeneity_summary,
             }
             causal_path = output_dir / "causal_estimate.json"
             _write_json(causal_path, causal_estimate)
@@ -6722,6 +6750,7 @@ class PlainHandoffStage2:
                 [
                     str(predictions_path),
                     str(causal_path),
+                    str(heterogeneity_path),
                     str(output_dir / "posthoc_oracle_ite_metrics.json"),
                 ]
             )

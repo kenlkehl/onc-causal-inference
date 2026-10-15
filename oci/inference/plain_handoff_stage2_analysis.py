@@ -44,6 +44,8 @@ from ..models.elastic_net_nuisance import (
     ElasticNetRegressor,
 )
 from .stage2_elastic_net_selection import TEMPORAL_SCOPE
+from . import stage2_extraction_failures as extraction_failures
+from .stage2_extraction_failures import extraction_failure_column
 from .stage2_multi_model_selection import select_stage2_features_multi_model
 from .stage2_sequential_consolidation import (
     SELECTION_SCHEMA_VERSION,
@@ -70,7 +72,7 @@ PAGE_RECONCILIATION_CHECKPOINT_SCHEMA_VERSION = 'stage2_mode_reconciliation_v7_r
 EXTRACTION_ROUTING_SCHEMA_VERSION = 'stage2_extraction_mode_split_v1'
 REVIEW_CHECKPOINT_SCHEMA_VERSION = 'stage2_aggregate_ontology_supervisor_v2_scalar_contract_20261010'
 REVIEW_CONVERGENCE_SCHEMA_VERSION = "stage2_ontology_supervisor_convergence_v1"
-ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v9_architecture_search"
+ESTIMATION_CHECKPOINT_SCHEMA_VERSION = "stage2_outer_estimation_v10_unified_recalibrated_nuisances"
 STAGE2_ROLE_SELECTION_SCHEMA_VERSION = SELECTION_SCHEMA_VERSION
 PRESELECTION_SNAPSHOT_SCHEMA_VERSION = "stage2_frozen_preselection_snapshot_v1"
 HELDOUT_MEASUREMENT_CACHE_SCHEMA_VERSION = (
@@ -1370,6 +1372,8 @@ def _request_validated_extraction(
                     "failure_kind": "structural_response_failure",
                     "row_id": int(row_id),
                     "feature_name": None,
+                    # The features of this request; the failure mask needs them.
+                    "feature_names": list(feature_names),
                     "reason": f"{type(exc).__name__}: {exc}",
                 }
                 for row_id in row_ids
@@ -2396,6 +2400,7 @@ def _request_validated_page_observations(
                         "failure_kind": "structural_page_observation_failure",
                         "row_id": row_id,
                         "feature_name": None,
+                        "feature_names": [str(definition["name"]) for definition in definitions],
                         "reason": f"{type(exc).__name__}: {exc}",
                     }
                 ],
@@ -3138,6 +3143,10 @@ def _summarize_extraction_failures(
     definition_names = {str(definition["name"]) for definition in definitions}
     patterns: dict[tuple[str, str, str], dict[str, Any]] = {}
     structural_rows: set[int] = set()
+    # Every issue event is written only after the request's repairs are
+    # exhausted. Cells named by an event are candidate extraction failures;
+    # the mask keeps those whose final value is null.
+    terminal_cells: dict[str, set[int]] = {}
     # A split run supersedes the old all-variable page path. Historical failed
     # quote checks must not enter the new measurement-quality review.
     issue_root = output_dir / "by_strategy" if (output_dir / "extraction_routing.json").is_file() else output_dir
@@ -3163,9 +3172,18 @@ def _summarize_extraction_failures(
             reason = str(raw_event.get("reason") or "")
             if not feature_name:
                 structural_rows.add(row_id)
+                covered = raw_event.get("feature_names")
+                covered_names = (
+                    {str(name) for name in covered}
+                    if isinstance(covered, list)
+                    else set(definition_names)
+                )
+                for name in covered_names & definition_names:
+                    terminal_cells.setdefault(name, set()).add(row_id)
                 continue
             if feature_name not in definition_names:
                 continue
+            terminal_cells.setdefault(feature_name, set()).add(row_id)
             signature_reason = reason if failure_kind == "invalid_scalar_or_value_type" else ""
             key = (feature_name, failure_kind, signature_reason)
             pattern = patterns.setdefault(
@@ -3225,6 +3243,10 @@ def _summarize_extraction_failures(
         "feature_failure_patterns": rendered_patterns,
         "structural_failure_patient_count": len(structural_rows),
         "structural_failure_patient_row_ids": sorted(structural_rows),
+        "terminal_failure_cells": {
+            name: sorted(rows) for name, rows in sorted(terminal_cells.items())
+        },
+        "terminal_failure_policy": extraction_failures.TERMINAL_FAILURE_POLICY,
     }
     _write_json(output_dir / "failure_summary.json", summary)
     return summary
@@ -5195,59 +5217,189 @@ def _assert_extraction_health(
     return audit
 
 
+DEFAULT_MIN_INFORMATIVE_PATIENTS = 20
+DEFAULT_MAX_EXTRACTION_FAILURE_FRACTION = 0.10
+# Fail-closed sanity check, not a modeling rule: final matrices in which fewer
+# than 5% of patients have any retained value indicate a broken extraction.
+CATASTROPHIC_ROW_NONMISSING_FRACTION = 0.05
+CANDIDATE_FILTER_DESCRIPTION = (
+    "Outer-training candidates are kept only when (1) the fraction of training "
+    "patients whose extraction failed after all repairs is at most "
+    "stage2.max_extraction_failure_fraction; (2) at least "
+    "stage2.min_informative_patients training patients have an observed value; and "
+    "(3) the feature is not nearly constant: categorical/binary/ordinal features "
+    "need at least two levels (counting 'not documented' as a level, never counting "
+    "failed extractions) each with at least min_informative_patients patients, and "
+    "continuous features need non-identical observed values. Retained features "
+    "with training extraction failures get a grouped failure indicator column."
+)
+
+
+def _observed_distinct_values(series: pd.Series, strategy: str) -> int:
+    observed = series.dropna()
+    if strategy in {"continuous", "continuous_with_categorical_fallback"}:
+        numeric = pd.to_numeric(observed, errors="coerce")
+        keys = [
+            ("number", float(value)) if pd.notna(value) else ("text", str(raw))
+            for raw, value in zip(observed.tolist(), numeric.tolist())
+        ]
+        return len(set(keys))
+    return int(observed.astype(str).nunique())
+
+
 def _filter_sparse_training_candidates(
     frame: pd.DataFrame,
     definitions: Sequence[Mapping[str, Any]],
     *,
     audit_path: Path,
     health_audit_path: Path,
-    minimum_row_nonmissing_fraction: float,
+    min_informative_patients: int = DEFAULT_MIN_INFORMATIVE_PATIENTS,
+    max_extraction_failure_fraction: float = DEFAULT_MAX_EXTRACTION_FAILURE_FRACTION,
+    failure_mask: pd.DataFrame | None = None,
+    treatment: Sequence[float] | None = None,
 ) -> tuple[pd.DataFrame, list[dict[str, Any]], dict[str, Any]]:
-    """Drop candidates observed in fewer than 5% of outer-training patients."""
+    """Apply the count-based sparsity rule and the extraction-failure rule.
 
+    Uses outer-training rows only. ``failure_mask`` (``_oci_row_id`` plus one 0/1
+    column per measured feature) marks cells whose extraction failed after all
+    repairs; those cells are neither "observed" nor "not documented".
+    """
+
+    if (
+        isinstance(min_informative_patients, bool)
+        or not isinstance(min_informative_patients, (int, np.integer))
+        or int(min_informative_patients) < 1
+    ):
+        raise ValueError("stage2.min_informative_patients must be a positive integer")
+    if (
+        isinstance(max_extraction_failure_fraction, bool)
+        or not isinstance(max_extraction_failure_fraction, (int, float))
+        or not math.isfinite(float(max_extraction_failure_fraction))
+        or not 0.0 <= float(max_extraction_failure_fraction) <= 1.0
+    ):
+        raise ValueError("stage2.max_extraction_failure_fraction must be in [0, 1]")
+    k = int(min_informative_patients)
+    max_failure = float(max_extraction_failure_fraction)
     names = [str(feature["name"]) for feature in definitions]
     # A missing column is a malformed extraction, not an all-null measurement.
     values = frame[names]
     rows = len(frame)
     if not rows:
-        raise ValueError("Stage 2 missingness filtering requires training rows")
-    counts = values.notna().sum()
-    retained = []
+        raise ValueError("Stage 2 candidate filtering requires training rows")
+    row_ids = [int(value) for value in frame["_oci_row_id"]]
+    mask_by_id = failure_mask.set_index("_oci_row_id") if failure_mask is not None else None
+    if mask_by_id is not None and not set(row_ids).issubset(set(map(int, mask_by_id.index))):
+        raise ValueError("extraction-failure mask does not cover the training rows")
+    retained: list[dict[str, Any]] = []
     decisions = []
+    failure_columns: dict[str, np.ndarray] = {}
+    all_failed: dict[str, np.ndarray] = {}
     for feature in definitions:
         name = str(feature["name"])
-        observed = int(counts[name])
-        # Integer arithmetic preserves the strict boundary at exactly 95%.
-        drop = observed * 20 < rows
-        decisions.append({
+        series = values[name]
+        if mask_by_id is not None and name in mask_by_id.columns:
+            failed = mask_by_id.loc[row_ids, name].fillna(0).to_numpy(dtype=float) > 0.5
+        elif extraction_failure_column(name) in frame.columns:
+            failed = extraction_failures.failure_flags(
+                frame, {**feature, "extraction_failure_indicator": True}
+            ).to_numpy(dtype=bool)
+        else:
+            failed = np.zeros(rows, dtype=bool)
+        failed &= series.isna().to_numpy(dtype=bool)
+        all_failed[name] = failed.astype(int)
+        observed_mask = series.notna().to_numpy(dtype=bool)
+        observed = int(observed_mask.sum())
+        failed_rows = int(failed.sum())
+        not_documented = rows - observed - failed_rows
+        failure_fraction = failed_rows / rows
+        strategy = _feature_modeling_strategy(feature)
+        level_counts: dict[str, int] = {}
+        if strategy in {"continuous", "continuous_with_categorical_fallback"}:
+            distinct = _observed_distinct_values(series, strategy)
+            informative_levels = None
+        else:
+            level_counts = {
+                str(level): int(count)
+                for level, count in series.dropna().astype(str).value_counts().items()
+            }
+            if not_documented:
+                level_counts["__not_documented__"] = int(not_documented)
+            distinct = len([level for level in level_counts if level != "__not_documented__"])
+            informative_levels = sum(count >= k for count in level_counts.values())
+        if failure_fraction > max_failure:
+            action, reason = "drop", "extraction_failure_fraction_above_maximum"
+        elif observed < k:
+            action, reason = "drop", "fewer_than_min_informative_patients_observed"
+        elif informative_levels is None and distinct < 2:
+            action, reason = "drop", "constant_observed_values"
+        elif informative_levels is not None and informative_levels < 2:
+            action, reason = "drop", "fewer_than_two_levels_with_min_informative_patients"
+        else:
+            action, reason = "keep", "informative"
+        decision = {
             "feature_id": str(feature["feature_id"]),
             "name": name,
+            "modeling_strategy": strategy,
             "observed_rows": observed,
+            "not_documented_rows": not_documented,
+            "extraction_failed_rows": failed_rows,
+            "extraction_failure_fraction": failure_fraction,
             "missing_rows": rows - observed,
             "missing_fraction": (rows - observed) / rows,
+            "distinct_observed_values": distinct,
+            **(
+                {
+                    "level_counts": dict(sorted(level_counts.items())[:50]),
+                    "levels_with_min_informative_patients": informative_levels,
+                }
+                if informative_levels is not None
+                else {}
+            ),
             "configured_explicit_feature": bool(feature.get("configured_explicit_feature")),
-            "action": "drop" if drop else "keep",
-            "reason": "more_than_95_percent_missing" if drop else "at_least_5_percent_observed",
-        })
-        if not drop:
-            retained.append(dict(feature))
+            "action": action,
+            "reason": reason,
+        }
+        if action == "keep":
+            kept = dict(feature)
+            if failed_rows:
+                kept["extraction_failure_indicator"] = True
+                failure_columns[name] = failed.astype(int)
+                decision["extraction_failure_indicator"] = True
+            else:
+                kept.pop("extraction_failure_indicator", None)
+            retained.append(kept)
+        decisions.append(decision)
+    failure_report = extraction_failures.failure_rate_report(
+        pd.DataFrame({"_oci_row_id": row_ids, **all_failed}),
+        definitions,
+        scope="outer_training",
+        treatment=treatment,
+    )
     summary = {
-        "schema_version": "stage2_candidate_missingness_filter_v1",
+        "schema_version": "stage2_candidate_informativeness_filter_v2",
         "status": "failed" if definitions and not retained else "complete",
         "scope": "outer_training",
-        "maximum_missing_fraction": 0.95,
-        "drop_comparison": "strictly_greater_than",
+        "rule": "count_based_informativeness_and_extraction_failure",
+        "description": CANDIDATE_FILTER_DESCRIPTION,
+        "min_informative_patients": k,
+        "max_extraction_failure_fraction": max_failure,
         "rows": rows,
         "candidates_before": len(definitions),
         "candidates_retained": len(retained),
         "candidates_dropped": len(definitions) - len(retained),
         "dropped_feature_ids": [d["feature_id"] for d in decisions if d["action"] == "drop"],
+        "dropped_by_reason": dict(
+            Counter(d["reason"] for d in decisions if d["action"] == "drop")
+        ),
+        "extraction_failure_mask_available": failure_mask is not None,
+        "retained_with_failure_indicator": sorted(failure_columns),
+        "training_extraction_failure_report": failure_report,
         "input_matrix_fingerprint": _frame_fingerprint(frame),
         "audit_path": str(audit_path),
     }
     _write_json(audit_path, {**summary, "features": decisions})
     LOGGER.info(
-        "Stage 2 candidate missingness filter retained %d/%d features on %d training rows",
+        "Stage 2 candidate informativeness filter retained %d/%d features on %d training rows",
         len(retained), len(definitions), rows,
     )
     if definitions and not retained:
@@ -5256,26 +5408,45 @@ def _filter_sparse_training_candidates(
         # silently turn an extraction failure into an unadjusted analysis.
         health = _assert_extraction_health(
             frame, definitions, scope="training",
-            minimum_row_nonmissing_fraction=minimum_row_nonmissing_fraction,
+            minimum_row_nonmissing_fraction=CATASTROPHIC_ROW_NONMISSING_FRACTION,
             audit_path=health_audit_path,
         )
         _write_json(health_audit_path, {
-            **health, "status": "failed", "reason": "all_candidates_more_than_95_percent_missing",
+            **health, "status": "failed", "reason": "all_candidates_uninformative_or_unreliable",
         })
         raise ValueError(
-            "Stage 2 training extraction is catastrophically sparse: "
-            "all candidates are more than 95% missing"
+            "Stage 2 training extraction is catastrophically sparse: no candidate "
+            "passes the informativeness and extraction-failure rules"
         )
-    return frame[["_oci_row_id", *[f["name"] for f in retained]]].copy(), retained, summary
+    retained_names = [str(f["name"]) for f in retained]
+    result = frame[["_oci_row_id", *retained_names]].copy()
+    for name in retained_names:
+        if name in failure_columns:
+            result[extraction_failure_column(name)] = failure_columns[name]
+    return result, retained, summary
 
 
 class _FeatureEncoder:
+    """Fit-on-training feature encoder for nuisance models and forests.
+
+    A feature flagged ``extraction_failure_indicator`` gets one extra 0/1
+    column from its companion ``<name>__oci_extraction_failed`` column;
+    failed cells are excluded from the "missing"/"not documented" encoding
+    (continuous values are median-imputed, category indicators stay 0).
+    """
+
     def __init__(self, definitions: Sequence[Mapping[str, Any]]) -> None:
         self.definitions = list(definitions)
         self.encodings: list[tuple[str, str, Any]] = []
+        self.failure_indicators: dict[str, Mapping[str, Any]] = {}
 
     def fit(self, frame: pd.DataFrame) -> "_FeatureEncoder":
         self.encodings = []
+        self.failure_indicators = {
+            str(feature["name"]): feature
+            for feature in self.definitions
+            if extraction_failures.has_failure_indicator(feature)
+        }
         for feature in self.definitions:
             name = str(feature["name"])
             modeling_strategy = _feature_modeling_strategy(feature)
@@ -5326,16 +5497,23 @@ class _FeatureEncoder:
         columns: list[np.ndarray] = []
         for name, value_type, parameters in self.encodings:
             series = frame[name] if name in frame else pd.Series([None] * len(frame))
+            tracked = name in self.failure_indicators
+            failed = (
+                extraction_failures.failure_flags(frame, self.failure_indicators[name])
+                .to_numpy(dtype=bool)
+                if tracked and name in frame
+                else np.zeros(len(frame), dtype=bool)
+            )
             if value_type == "continuous":
                 median, scale = parameters
                 numeric = pd.to_numeric(series, errors="coerce")
-                missing = numeric.isna().to_numpy(dtype=float)
+                missing = (numeric.isna().to_numpy(dtype=bool) & ~failed).astype(float)
                 values = (numeric.fillna(median).to_numpy(dtype=float) - median) / scale
                 columns.extend([values, missing])
             elif value_type == "continuous_with_categorical_fallback":
                 median, scale, categories = parameters
                 numeric = pd.to_numeric(series, errors="coerce")
-                raw_missing = series.isna()
+                raw_missing = series.isna().to_numpy(dtype=bool) & ~failed
                 categorical_mask = series.notna() & numeric.isna()
                 normalized = series.where(categorical_mask, "").astype(str)
                 values = (numeric.fillna(median).to_numpy(dtype=float) - median) / scale
@@ -5343,7 +5521,7 @@ class _FeatureEncoder:
                     [
                         values,
                         numeric.notna().to_numpy(dtype=float),
-                        raw_missing.to_numpy(dtype=float),
+                        raw_missing.astype(float),
                     ]
                 )
                 for category in categories:
@@ -5356,9 +5534,17 @@ class _FeatureEncoder:
             else:
                 normalized = series.where(series.notna(), "__missing__").astype(str)
                 for category in parameters:
-                    columns.append((normalized == category).to_numpy(dtype=float))
+                    columns.append(
+                        ((normalized == category).to_numpy(dtype=bool) & ~failed).astype(float)
+                    )
                 if value_type == "categorical_with_other":
-                    columns.append((~normalized.isin(parameters)).to_numpy(dtype=float))
+                    columns.append(
+                        ((~normalized.isin(parameters)).to_numpy(dtype=bool) & ~failed).astype(
+                            float
+                        )
+                    )
+            if tracked:
+                columns.append(failed.astype(float))
         if not columns:
             return np.empty((len(frame), 0), dtype=float)
         return np.column_stack(columns).astype(float, copy=False)
@@ -6260,6 +6446,19 @@ def _merge_incremental_failure_summaries(
         for summary in (prior_summary, delta_summary)
         for row_id in summary.get("structural_failure_patient_row_ids") or []
     }
+    prior_cells = extraction_failures.terminal_failure_cells(prior_summary)
+    delta_cells = extraction_failures.terminal_failure_cells(delta_summary)
+    unexpected = sorted(set(delta_cells) - changed)
+    if unexpected:
+        raise ValueError(
+            "delta extraction reported failed cells for features that were not "
+            f"re-extracted: {unexpected}"
+        )
+    merged_cells = {
+        name: sorted(delta_cells.get(name, set()) if name in changed else prior_cells.get(name, set()))
+        for name in sorted(current)
+        if (delta_cells.get(name) if name in changed else prior_cells.get(name))
+    }
     return {
         "schema_version": EXTRACTION_ISSUE_SCHEMA_VERSION,
         "completed_at": _now(),
@@ -6274,6 +6473,8 @@ def _merge_incremental_failure_summaries(
         }} if "decision_feature_summary" in prior_summary or "decision_feature_summary" in delta_summary else {}),
         "structural_failure_patient_count": len(structural_rows),
         "structural_failure_patient_row_ids": sorted(structural_rows),
+        "terminal_failure_cells": merged_cells,
+        "terminal_failure_policy": extraction_failures.TERMINAL_FAILURE_POLICY,
         "incremental_refinement": {
             "schema_version": INCREMENTAL_REFINEMENT_EXTRACTION_SCHEMA_VERSION,
             "reextracted_feature_names": sorted(changed),
@@ -6592,21 +6793,39 @@ def _extract_training_with_ontology_feedback(
     return extracted, current, len(rounds)
 
 
-def _fit_nuisance_prediction(x, y, valid, *, binary, seed):
+def _fit_nuisance_prediction(x, y, valid, *, binary, seed, audit_path=None):
     model = _fit_classifier(x, y, seed=seed) if binary else _fit_regressor(x, y, seed=seed)
+    if audit_path is not None:
+        # The elastic-net wrappers report standardization, the selected penalty
+        # and CV/refit iteration counts (including whether a limit was reached).
+        fit_audit = getattr(model, "fit_audit", None)
+        _write_json(Path(audit_path), {
+            "schema_version": "stage2_nuisance_fit_audit_v1",
+            "rows": int(len(y)),
+            "columns": int(np.asarray(x).shape[1]),
+            "fit_audit": (
+                fit_audit() if callable(fit_audit)
+                else {"estimator": type(model).__name__, "fit_mode": "constant_or_external"}
+            ),
+        })
     return _predict_probability(model, valid) if binary else np.asarray(model.predict(valid), float)
 
 
 def _nuisance_prediction_futures(
     x_t, x_y, treatment, outcome, valid_t, valid_y, *, binary, seed,
     checkpoint_dir=None, checkpoint_fingerprint="uncached", name="full_training",
+    audit_dir=None,
 ):
     from functools import partial
     from .stage2_final_modeling import prediction_future
 
+    def audit_path(target):
+        return None if audit_dir is None else Path(audit_dir) / name / f"{target}.json"
+
     pending = [prediction_future(
         checkpoint_dir, f"{name}/propensity", checkpoint_fingerprint,
-        partial(_fit_nuisance_prediction, x_t, treatment, valid_t, binary=True, seed=seed),
+        partial(_fit_nuisance_prediction, x_t, treatment, valid_t, binary=True, seed=seed,
+                audit_path=audit_path("propensity")),
         len(valid_t),
     )]
     for arm in (0, 1):
@@ -6616,10 +6835,44 @@ def _nuisance_prediction_futures(
         pending.append(prediction_future(
             checkpoint_dir, f"{name}/mu{arm}", checkpoint_fingerprint,
             partial(_fit_nuisance_prediction, x_y[mask], outcome[mask], valid_y,
-                    binary=binary, seed=seed + arm),
+                    binary=binary, seed=seed + arm, audit_path=audit_path(f"mu{arm}")),
             len(valid_y),
         ))
     return pending
+
+
+def _nuisance_fit_audit_summary(audit_dir: Path) -> dict[str, Any]:
+    """Summarize persisted elastic-net nuisance fit audits (iteration limits etc.)."""
+
+    records = []
+    for path in sorted(Path(audit_dir).rglob("*.json")):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        audit = value.get("fit_audit") if isinstance(value, Mapping) else None
+        if not isinstance(audit, Mapping):
+            continue
+        optimization = audit.get("optimization") or {}
+        standardization = audit.get("standardization") or {}
+        records.append({
+            "fit": str(path.relative_to(audit_dir).with_suffix("")),
+            "fit_mode": audit.get("fit_mode"),
+            "selected_regularization": audit.get("selected_regularization"),
+            "standardized": standardization.get("applied"),
+            "refit_iterations": optimization.get("refit_iterations"),
+            "refit_iteration_limit_reached": bool(optimization.get("refit_iteration_limit_reached")),
+            "cv_iteration_limit_reached": bool(optimization.get("cv_iteration_limit_reached")),
+            "configured_max_iter": optimization.get("configured_max_iter"),
+        })
+    return {
+        "audit_dir": str(audit_dir),
+        "fits_audited": len(records),
+        "refit_iteration_limit_reached": [r["fit"] for r in records if r["refit_iteration_limit_reached"]],
+        "cv_iteration_limit_reached": [r["fit"] for r in records if r["cv_iteration_limit_reached"]],
+        "standardized_fits": sum(r["standardized"] is True for r in records),
+        "fits": records,
+    }
 
 
 def _cross_fitted_nuisance(
@@ -6636,7 +6889,19 @@ def _cross_fitted_nuisance(
     checkpoint_dir: Path | None = None,
     checkpoint_fingerprint: str = "uncached",
     all_candidates: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    audit_dir: Path | None = None,
+    heldout_extracted: pd.DataFrame | None = None,
+) -> tuple[np.ndarray, ...]:
+    """Inner cross-fitted e/mu0/mu1 for the outer-training rows.
+
+    With ``heldout_extracted`` (outer-held-out measurements, no labels), every
+    inner-fold model also predicts the held-out rows in the same prediction job,
+    and the held-out nuisances are the unweighted average of the K inner-fold
+    models (the standard cross-fitting ensemble). Six arrays are then returned:
+    training e, mu0, mu1 followed by held-out e, mu0, mu1. Averages are taken on
+    the prediction scale (probabilities for binary targets), before any
+    recalibration.
+    """
     from .stage2_final_modeling import prediction_result
 
     fit_ids = [int(value) for value in fit_ids]
@@ -6664,22 +6929,146 @@ def _cross_fitted_nuisance(
         x_t_valid = t_encoder.transform(valid_features)
         x_y_train = y_encoder.transform(train_features)
         x_y_valid = y_encoder.transform(valid_features)
+        if heldout_extracted is not None:
+            # The same fold model scores its inner-validation rows and the
+            # outer-held-out rows; the latter are appended after the former.
+            x_t_valid = np.vstack((x_t_valid, t_encoder.transform(heldout_extracted)))
+            x_y_valid = np.vstack((x_y_valid, y_encoder.transform(heldout_extracted)))
         valid_positions = [position[row_id] for row_id in valid_ids]
         jobs = _nuisance_prediction_futures(
             x_t_train, x_y_train, t_train, y_train, x_t_valid, x_y_valid,
             binary=binary, seed=seed + fold_index,
             checkpoint_dir=checkpoint_dir, checkpoint_fingerprint=checkpoint_fingerprint,
-            name=f"cross_fit/fold_{fold_index:03d}",
+            name=f"cross_fit/fold_{fold_index:03d}", audit_dir=audit_dir,
         )
         pending.append((valid_positions, jobs))
+    heldout_rows = 0 if heldout_extracted is None else len(heldout_extracted)
+    heldout_sums = [np.zeros(heldout_rows) for _ in range(3)]
     for valid_positions, jobs in pending:
-        for target, job in zip((e, mu0, mu1), jobs):
-            target[valid_positions] = prediction_result(job, len(valid_positions))
+        for index, (target, job) in enumerate(zip((e, mu0, mu1), jobs)):
+            values = prediction_result(job, len(valid_positions) + heldout_rows)
+            target[valid_positions] = values[: len(valid_positions)]
+            heldout_sums[index] += values[len(valid_positions):]
     if np.isnan(e).any() or np.isnan(mu0).any() or np.isnan(mu1).any():
         raise ValueError(
             "inner splits do not provide one nuisance prediction for every outer-fit row"
         )
-    return e, mu0, mu1
+    if heldout_extracted is None:
+        return e, mu0, mu1
+    if not pending:
+        raise ValueError("inner splits fitted no nuisance models for the held-out ensemble")
+    heldout_e, heldout_mu0, heldout_mu1 = (values / len(pending) for values in heldout_sums)
+    return e, mu0, mu1, heldout_e, heldout_mu0, heldout_mu1
+
+
+def _aligned_measurement_frame(
+    frame: pd.DataFrame,
+    row_ids: Sequence[int],
+    definitions: Sequence[Mapping[str, Any]],
+    *,
+    label: str,
+) -> pd.DataFrame:
+    """Return one row per requested patient, in order, with every candidate column."""
+
+    names = [str(feature["name"]) for feature in definitions]
+    missing = sorted(set(names) - set(frame.columns))
+    if missing:
+        raise ValueError(f"{label} nuisance-candidate measurements lack columns: {missing}")
+    ids = [int(value) for value in frame["_oci_row_id"]]
+    if len(set(ids)) != len(ids) or set(ids) != set(map(int, row_ids)):
+        raise ValueError(
+            f"{label} nuisance-candidate measurements do not cover exactly the "
+            "outer-fold rows"
+        )
+    companions = [
+        extraction_failure_column(name)
+        for name in names
+        if extraction_failure_column(name) in frame.columns
+    ]
+    return (
+        frame.set_index("_oci_row_id", drop=False)
+        .loc[[int(value) for value in row_ids], ["_oci_row_id", *names, *companions]]
+        .reset_index(drop=True)
+    )
+
+
+def _inner_fold_assignment(
+    fit_ids: Sequence[int], inner_splits: Sequence[Mapping[str, Any]]
+) -> np.ndarray:
+    """Map each outer-training row to the inner fold that holds it out."""
+
+    position = {int(row_id): index for index, row_id in enumerate(fit_ids)}
+    assignment = np.zeros(len(fit_ids), dtype=int)
+    for fold_index, fold in enumerate(inner_splits, start=1):
+        number = int(fold.get("inner_fold", fold_index))
+        for row_id in fold["heldout_row_ids"]:
+            if int(row_id) in position:
+                assignment[position[int(row_id)]] = number
+    if (assignment == 0).any():
+        raise ValueError("inner splits do not hold out every outer-training row once")
+    return assignment
+
+
+NUISANCE_RECALIBRATION_DESCRIPTION = (
+    "Propensity e_hat and, for binary outcomes, arm-specific mu0_hat/mu1_hat were "
+    "Platt-recalibrated (logistic regression of the label on [1, logit(prediction)]). "
+    "Calibrators are fit on training out-of-fold predictions only: each inner fold's "
+    "training predictions use a calibrator fit on the other inner folds; held-out "
+    "predictions, the uncalibrated average of the same K inner-fold models, use a "
+    "calibrator fit on all training out-of-fold predictions, so every calibrator is "
+    "applied to the kind of model it was learned from. "
+    "mu0 (mu1) calibrators are fit on control (treated) training rows and applied to "
+    "every row. Continuous-outcome mu_hat is not recalibrated."
+)
+
+
+def _recalibrated_nuisances(
+    *,
+    treatment: np.ndarray,
+    outcome: np.ndarray,
+    binary: bool,
+    inner_fold_ids: np.ndarray,
+    fit: tuple[np.ndarray, np.ndarray, np.ndarray],
+    heldout: tuple[np.ndarray, np.ndarray, np.ndarray],
+) -> dict[str, Any]:
+    """Cross-fitted Platt recalibration learned from training OOF predictions only."""
+
+    from ..utils.calibration import cross_fitted_platt
+
+    raw_e_fit, raw_mu0_fit, raw_mu1_fit = (np.asarray(v, dtype=float) for v in fit)
+    raw_e_held, raw_mu0_held, raw_mu1_held = (np.asarray(v, dtype=float) for v in heldout)
+    e_fit, e_held, e_audit = cross_fitted_platt(
+        raw_e_fit, treatment, inner_fold_ids, heldout_prob=raw_e_held
+    )
+    audit: dict[str, Any] = {
+        "schema_version": "stage2_nuisance_recalibration_v1",
+        "method": "cross_fitted_platt",
+        "description": NUISANCE_RECALIBRATION_DESCRIPTION,
+        "propensity": e_audit,
+    }
+    if binary:
+        mu0_fit, mu0_held, mu0_audit = cross_fitted_platt(
+            raw_mu0_fit, outcome, inner_fold_ids, heldout_prob=raw_mu0_held,
+            fit_mask=treatment == 0,
+        )
+        mu1_fit, mu1_held, mu1_audit = cross_fitted_platt(
+            raw_mu1_fit, outcome, inner_fold_ids, heldout_prob=raw_mu1_held,
+            fit_mask=treatment == 1,
+        )
+        audit.update(mu0=mu0_audit, mu1=mu1_audit)
+    else:
+        mu0_fit, mu1_fit, mu0_held, mu1_held = raw_mu0_fit, raw_mu1_fit, raw_mu0_held, raw_mu1_held
+        audit.update(
+            mu0={"method": "none", "reason": "continuous outcome"},
+            mu1={"method": "none", "reason": "continuous outcome"},
+        )
+    return {
+        "fit": (np.asarray(e_fit, float), np.asarray(mu0_fit, float), np.asarray(mu1_fit, float)),
+        "heldout": (
+            np.asarray(e_held, float), np.asarray(mu0_held, float), np.asarray(mu1_held, float)
+        ),
+        "audit": audit,
+    }
 
 
 def estimate_outer_fold(
@@ -6704,8 +7093,27 @@ def estimate_outer_fold(
     statistical_policy: Any = None,
     nuisance_candidate_definitions: Sequence[Mapping[str, Any]],
     nuisance_candidate_fit: pd.DataFrame,
+    nuisance_candidate_heldout: pd.DataFrame,
 ) -> dict[str, Any]:
-    from .stage2_effect_estimators import effect_model_family, fit_interaction_effect
+    """Estimate one outer fold with one honest nuisance construction everywhere.
+
+    Training rows get inner-cross-fitted, all-candidate elastic-net nuisances;
+    held-out rows get the average of those same K inner-fold models (the
+    cross-fitting ensemble). Both are Platt-recalibrated with calibrators
+    learned from training out-of-fold predictions only. These same e/mu0/mu1 feed eligibility, the
+    held-out AIPW scores, the DINA offsets, the interaction model's unpenalized
+    adjustment covariates, the forest's prognostic column and the diagnostics.
+    Held-out treatment/outcome labels are read only after effect predictions
+    are frozen.
+    """
+    from .stage2_effect_estimators import (
+        NUISANCE_ADJUSTMENT_DESCRIPTION,
+        PROGNOSTIC_FOREST_DESCRIPTION,
+        effect_model_family,
+        fit_interaction_effect,
+        nuisance_adjustment,
+        prognostic_score,
+    )
 
     model_family = effect_model_family(estimator, outcome_type)
     if estimator in {"linear_interactions", "dina"}:
@@ -6735,6 +7143,7 @@ def estimate_outer_fold(
                 name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
                 for name in (
                     "plain_handoff_stage2_analysis.py", "stage2_final_modeling.py",
+                    "stage2_effect_estimators.py", "../utils/calibration.py",
                     "../models/elastic_net_nuisance.py", "../models/causal_forest_head.py",
                 )
             },
@@ -6767,6 +7176,7 @@ def estimate_outer_fold(
             "nuisance_candidates": {
                 "definitions": list(nuisance_candidate_definitions),
                 "training_measurements": _frame_fingerprint(nuisance_candidate_fit),
+                "heldout_measurements": _frame_fingerprint(nuisance_candidate_heldout),
             },
         }
     )
@@ -6803,10 +7213,10 @@ def estimate_outer_fold(
     heldout_data = dataset.iloc[heldout_ids]
     t_fit = fit_data[treatment_column].to_numpy(dtype=float)
     y_fit = fit_data[outcome_column].to_numpy(dtype=float)
-    t_heldout = heldout_data[treatment_column].to_numpy(dtype=float)
-    y_heldout = heldout_data[outcome_column].to_numpy(dtype=float)
 
     adjustment_defs = _definitions_for_roles(definitions, {"confounder"})
+    # Statistically selected task supports are reported for transparency only.
+    # Every nuisance model below uses the complete candidate catalog (M-02).
     propensity_defs = _definitions_for_nuisance_role(definitions, "treatment")
     outcome_defs = _definitions_for_nuisance_role(definitions, "outcome")
     effect_defs = _definitions_for_roles(definitions, {"effect_modifier"})
@@ -6814,13 +7224,38 @@ def estimate_outer_fold(
     pure_confounder_defs = [
         feature for feature in adjustment_defs if str(feature["feature_id"]) not in effect_ids
     ]
+    for frame, ids, label in (
+        (extracted_fit, fit_ids, "training"),
+        (extracted_heldout, heldout_ids, "held-out"),
+    ):
+        if [int(value) for value in frame["_oci_row_id"]] != ids:
+            raise ValueError(f"{label} measurements must follow the outer-fold row order")
+    candidate_fit = _aligned_measurement_frame(
+        nuisance_candidate_fit, fit_ids, nuisance_candidate_definitions, label="training"
+    )
+    candidate_heldout = _aligned_measurement_frame(
+        nuisance_candidate_heldout, heldout_ids, nuisance_candidate_definitions,
+        label="held-out",
+    )
+    _write_frame(output_dir / "nuisance_candidate_fit.csv", candidate_fit)
+    _write_frame(output_dir / "nuisance_candidate_heldout.csv", candidate_heldout)
+    _write_json(
+        output_dir / "nuisance_candidate_definitions.json",
+        {"features": [dict(feature) for feature in nuisance_candidate_definitions]},
+    )
     # Eligibility for effect fitting must not use in-sample propensity predictions.
     supplied_inner = list(split.get("inner_splits") or []) or _fallback_inner_splits(
         fit_ids, folds=inner_folds, seed=seed
     )
-    fit_propensity, fit_mu0, fit_mu1 = _cross_fitted_nuisance(
+    inner_fold_ids = _inner_fold_assignment(fit_ids, supplied_inner)
+    # Fit audits live beside (not inside) the prediction checkpoints.
+    nuisance_audit_dir = output_dir / "nuisance_fit_audits" / final_fit_fingerprint[:20]
+    (
+        raw_fit_propensity, raw_fit_mu0, raw_fit_mu1,
+        raw_propensity, raw_mu0, raw_mu1,
+    ) = _cross_fitted_nuisance(
         dataset=dataset,
-        extracted=nuisance_candidate_fit,
+        extracted=candidate_fit,
         definitions=nuisance_candidate_definitions,
         fit_ids=fit_ids,
         inner_splits=supplied_inner,
@@ -6833,18 +7268,38 @@ def estimate_outer_fold(
         # The pooled support was learned across all outer-training patients.
         # It must not screen predictors for their own OOF nuisance predictions.
         all_candidates=True,
+        audit_dir=nuisance_audit_dir,
+        # Held-out rows: the average of the same K inner-fold models (the
+        # cross-fitting ensemble), so the OOF-learned calibrator below is applied
+        # to the kind of model it was learned from. No separate full-data fit.
+        heldout_extracted=candidate_heldout,
     )
+    LOGGER.info("Stage 2 final nuisances completed output=%s", output_dir)
+    recalibrated = _recalibrated_nuisances(
+        treatment=t_fit,
+        outcome=y_fit,
+        binary=binary,
+        inner_fold_ids=inner_fold_ids,
+        fit=(raw_fit_propensity, raw_fit_mu0, raw_fit_mu1),
+        heldout=(raw_propensity, raw_mu0, raw_mu1),
+    )
+    fit_propensity, fit_mu0, fit_mu1 = recalibrated["fit"]
+    propensity, mu0, mu1 = recalibrated["heldout"]
     fit_keep = propensity_eligibility(fit_propensity, min_propensity, max_propensity)
     _write_frame(
         output_dir / "nuisance_fit_predictions.csv",
         pd.DataFrame(
             {
                 "_oci_row_id": fit_ids,
+                "inner_fold": inner_fold_ids,
                 "treatment": t_fit,
                 "outcome": y_fit,
                 "propensity": fit_propensity,
                 "mu0": fit_mu0,
                 "mu1": fit_mu1,
+                "propensity_uncalibrated": raw_fit_propensity,
+                "mu0_uncalibrated": raw_fit_mu0,
+                "mu1_uncalibrated": raw_fit_mu1,
                 "effect_eligible": fit_keep,
             }
         ),
@@ -6855,28 +7310,13 @@ def estimate_outer_fold(
         raise ValueError(
             "propensity bounds leave insufficient training rows or treatment arms for effect estimation"
         )
-    t_encoder = _FeatureEncoder(propensity_defs).fit(extracted_fit)
-    y_encoder = _FeatureEncoder(outcome_defs).fit(extracted_fit)
     eligible_fit = extracted_fit.iloc[np.flatnonzero(fit_keep)]
-    x_t_fit = t_encoder.transform(extracted_fit)
-    x_t_heldout = t_encoder.transform(extracted_heldout)
-    x_y_fit = y_encoder.transform(extracted_fit)
-    x_y_heldout = y_encoder.transform(extracted_heldout)
-    nuisance_jobs = _nuisance_prediction_futures(
-        x_t_fit, x_y_fit, t_fit, y_fit, x_t_heldout, x_y_heldout,
-        binary=binary, seed=seed + 10_000, checkpoint_dir=final_fit_dir,
-        checkpoint_fingerprint=final_fit_fingerprint,
-    )
-    propensity, mu0, mu1 = (
-        final_modeling.prediction_result(job, len(heldout_ids)) for job in nuisance_jobs
-    )
-    LOGGER.info("Stage 2 final nuisances completed output=%s", output_dir)
     heldout_keep = propensity_eligibility(propensity, min_propensity, max_propensity)
     overlap = {
         "fit": fit_overlap,
         "heldout": overlap_diagnostics(propensity, min_propensity, max_propensity),
-        "fit_eligibility_source": "inner_out_of_fold_external_propensity",
-        "heldout_eligibility_source": "outer_training_only_external_propensity",
+        "fit_eligibility_source": "inner_out_of_fold_all_candidate_recalibrated_propensity",
+        "heldout_eligibility_source": "inner_fold_ensemble_all_candidate_recalibrated_propensity",
     }
     _write_json(output_dir / "propensity_overlap.json", overlap)
     if not heldout_keep.any():
@@ -6886,10 +7326,24 @@ def estimate_outer_fold(
         control_encoder = _FeatureEncoder(pure_confounder_defs).fit(eligible_fit)
         x_effect_fit = effect_encoder.transform(extracted_fit)
         x_effect_heldout = effect_encoder.transform(extracted_heldout)
+        selected_modifier_columns = int(x_effect_fit.shape[1])
         w_fit = control_encoder.transform(extracted_fit)
+        # M-04: on the risk-difference scale the CATE moves with baseline risk
+        # even under a constant odds ratio, so X carries the honest prognostic
+        # score (OOF for training rows, inner-fold ensemble for held-out rows).
+        prognostic_in_x = binary
+        if prognostic_in_x:
+            x_effect_fit = np.column_stack(
+                (x_effect_fit, prognostic_score(fit_mu0, binary=True))
+            )
+            x_effect_heldout = np.column_stack(
+                (x_effect_heldout, prognostic_score(mu0, binary=True))
+            )
         if x_effect_fit.shape[1] == 0:
             # EconML requires X for heterogeneous-effect prediction. A constant X
-            # yields one fold-level treatment effect when no modifier survived.
+            # yields one fold-level treatment effect when no modifier survived
+            # (continuous outcomes only; binary outcomes always carry the
+            # prognostic score).
             x_effect_fit = np.ones((len(extracted_fit), 1), dtype=float)
             x_effect_heldout = np.ones((len(extracted_heldout), 1), dtype=float)
             constant_effect_design = True
@@ -6932,6 +7386,18 @@ def estimate_outer_fold(
             "dual_role_features_in_x_only": len(
                 [f for f in adjustment_defs if str(f["feature_id"]) in effect_ids]
             ),
+            "selected_modifier_columns_in_x": selected_modifier_columns,
+            "prognostic_score_in_x": prognostic_in_x,
+            "prognostic_score": (
+                {
+                    "column": "logit_prognostic_mu0",
+                    "training_source": "inner_out_of_fold_all_candidate_recalibrated_mu0",
+                    "heldout_source": "inner_fold_ensemble_all_candidate_recalibrated_mu0",
+                    "description": PROGNOSTIC_FOREST_DESCRIPTION,
+                }
+                if prognostic_in_x
+                else {"column": None, "reason": "continuous outcome: no scale-induced heterogeneity"}
+            ),
             "constant_effect_design": constant_effect_design,
         }
     elif estimator == "dina":
@@ -6967,6 +7433,11 @@ def estimate_outer_fold(
         fit_audit = result["audit"]
         architecture_diagnostics = {
             "dina_fit_audit": fit_audit,
+            "dina_offsets": (
+                "training rows: inner out-of-fold all-candidate recalibrated e/mu0/mu1; "
+                "held-out rows: inner-fold-ensemble all-candidate recalibrated e/mu0/mu1 "
+                "(one construction for fitting and prediction)"
+            ),
             "cate_confidence_intervals": "not_computed_for_grouped_dina",
         }
     else:
@@ -6984,6 +7455,13 @@ def estimate_outer_fold(
             path_submit=final_modeling.penalty_path_submitter(
                 final_fit_dir, final_fit_fingerprint
             ),
+            adjustment=nuisance_adjustment(
+                train_propensity=fit_propensity[fit_keep],
+                valid_propensity=propensity[heldout_keep],
+                train_mu0=fit_mu0[fit_keep],
+                valid_mu0=mu0[heldout_keep],
+                binary=binary,
+            ),
         )
         effect_predictions = {"tau_pred": result["tau"]}
         fit_audit = result["audit"]
@@ -7000,10 +7478,13 @@ def estimate_outer_fold(
             values[heldout_keep] = np.asarray(prediction, dtype=float).reshape(-1)
         return values
 
+    # Effect predictions are frozen here; held-out labels are read only below.
     cate = scatter_prediction("tau_pred")
     cate_lower_values = scatter_prediction("tau_lower")
     cate_upper_values = scatter_prediction("tau_upper")
     cate_std_values = scatter_prediction("tau_std")
+    t_heldout = heldout_data[treatment_column].to_numpy(dtype=float)
+    y_heldout = heldout_data[outcome_column].to_numpy(dtype=float)
     aipw = np.full(len(heldout_ids), np.nan)
     aipw[heldout_keep] = _dr_score(
         y_heldout[heldout_keep],
@@ -7037,6 +7518,9 @@ def estimate_outer_fold(
             "estimated_cate_lower_95": cate_lower_values,
             "estimated_cate_upper_95": cate_upper_values,
             "estimated_cate_standard_error": cate_std_values,
+            "propensity_uncalibrated": raw_propensity,
+            "mu0_uncalibrated": raw_mu0,
+            "mu1_uncalibrated": raw_mu1,
         }
     )
     _write_frame(output_dir / "predictions.csv", predictions)
@@ -7047,11 +7531,105 @@ def estimate_outer_fold(
     standard_error = (
         float(np.std(finite, ddof=1) / math.sqrt(len(finite))) if len(finite) > 1 else None
     )
+
+    def calibration_set(e_fit, m0_fit, m1_fit, e_held, m0_held, m1_held):
+        return {
+            "fit_out_of_fold_treatment": calibration_diagnostics(t_fit, e_fit, binary=True),
+            "fit_out_of_fold_outcome_factual": calibration_diagnostics(
+                y_fit, np.where(t_fit == 1, m1_fit, m0_fit), binary=binary
+            ),
+            "fit_out_of_fold_outcome_by_arm": {
+                str(arm): calibration_diagnostics(
+                    y_fit[t_fit == arm], (m1_fit if arm else m0_fit)[t_fit == arm],
+                    binary=binary,
+                )
+                for arm in (0, 1)
+            },
+            "heldout_treatment": calibration_diagnostics(t_heldout, e_held, binary=True),
+            "heldout_outcome_factual": calibration_diagnostics(
+                y_heldout, np.where(t_heldout == 1, m1_held, m0_held), binary=binary
+            ),
+            "heldout_outcome_by_arm": {
+                str(arm): calibration_diagnostics(
+                    y_heldout[t_heldout == arm],
+                    (m1_held if arm else m0_held)[t_heldout == arm],
+                    binary=binary,
+                )
+                for arm in (0, 1)
+            },
+        }
+
+    nuisance_calibration = calibration_set(
+        fit_propensity, fit_mu0, fit_mu1, propensity, mu0, mu1
+    )
+    nuisance_calibration.update(
+        {
+            "eligible_heldout_treatment": calibration_diagnostics(
+                t_heldout[heldout_keep], propensity[heldout_keep], binary=True
+            ),
+            "eligible_heldout_outcome_factual": calibration_diagnostics(
+                y_heldout[heldout_keep],
+                np.where(t_heldout == 1, mu1, mu0)[heldout_keep],
+                binary=binary,
+            ),
+            "predictions_used_downstream": "recalibrated",
+            "before_recalibration": calibration_set(
+                raw_fit_propensity, raw_fit_mu0, raw_fit_mu1, raw_propensity, raw_mu0, raw_mu1
+            ),
+            "recalibration": recalibrated["audit"],
+        }
+    )
+
+    def slope_pair(name):
+        before = nuisance_calibration["before_recalibration"][name]
+        after = nuisance_calibration[name]
+        return {
+            "before": {k: before.get(k) for k in ("calibration_intercept", "calibration_slope")},
+            "after": {k: after.get(k) for k in ("calibration_intercept", "calibration_slope")},
+        }
+
+    nuisance_calibration["calibration_slope_summary"] = {
+        name: slope_pair(name)
+        for name in (
+            "fit_out_of_fold_treatment",
+            "fit_out_of_fold_outcome_factual",
+            "heldout_treatment",
+            "heldout_outcome_factual",
+        )
+    }
+    methodology_notes = {
+        "unified_nuisances": (
+            "Training out-of-fold and outer-held-out nuisances use one construction: "
+            "elastic nets on the complete nuisance-candidate catalog with fold-local "
+            "regularization, fitted in the K inner cross-fitting folds. Training rows get "
+            "the prediction of the fold model that did not see them; held-out rows (whose "
+            "patients were measured on the full catalog) get the average of the same K "
+            "fold models' predictions (probability scale for binary targets). The same "
+            "e/mu0/mu1 feed eligibility, AIPW, DINA offsets, interaction-model adjustment "
+            "covariates, the forest prognostic score and these diagnostics."
+        ),
+        "nuisance_recalibration": recalibrated["audit"]["description"],
+        "elastic_net_standardization": (
+            "Elastic-net nuisance wrappers standardize their design with a StandardScaler "
+            "fit on each fit's own rows; refit iteration counts are in the fit audits."
+        ),
+        **(
+            {"interaction_model_nuisance_adjustment": NUISANCE_ADJUSTMENT_DESCRIPTION}
+            if estimator == "linear_interactions"
+            else {}
+        ),
+        **(
+            {"forest_prognostic_score": PROGNOSTIC_FOREST_DESCRIPTION}
+            if estimator == "causal_forest" and binary
+            else {}
+        ),
+    }
     diagnostics = {
         "model_family": model_family,
         "estimator": estimator,
         "effect_model_fit_audit": fit_audit,
         **architecture_diagnostics,
+        "methodology_notes": methodology_notes,
         "primary_ate_estimator": "outer_cross_fitted_aipw",
         "nuisance_model_family": "elastic_net",
         "binary_nuisance_model": ("oci.models.elastic_net_nuisance.ElasticNetLogisticClassifier"),
@@ -7066,45 +7644,24 @@ def estimate_outer_fold(
             else "average_treatment_effect"
         ),
         "propensity_overlap": overlap,
-        "nuisance_calibration": {
-            "fit_out_of_fold_treatment": calibration_diagnostics(
-                t_fit, fit_propensity, binary=True
-            ),
-            "fit_out_of_fold_outcome_factual": calibration_diagnostics(
-                y_fit, np.where(t_fit == 1, fit_mu1, fit_mu0), binary=binary
-            ),
-            "heldout_treatment": calibration_diagnostics(t_heldout, propensity, binary=True),
-            "heldout_outcome_factual": calibration_diagnostics(
-                y_heldout, np.where(t_heldout == 1, mu1, mu0), binary=binary
-            ),
-            "heldout_outcome_by_arm": {
-                str(arm): calibration_diagnostics(
-                    y_heldout[t_heldout == arm],
-                    (mu1 if arm else mu0)[t_heldout == arm],
-                    binary=binary,
-                )
-                for arm in (0, 1)
-            },
-            "eligible_heldout_treatment": calibration_diagnostics(
-                t_heldout[heldout_keep], propensity[heldout_keep], binary=True
-            ),
-            "eligible_heldout_outcome_factual": calibration_diagnostics(
-                y_heldout[heldout_keep],
-                np.where(t_heldout == 1, mu1, mu0)[heldout_keep],
-                binary=binary,
-            ),
-        },
+        "nuisance_calibration": nuisance_calibration,
         "features": len(definitions),
         "confounders": len(adjustment_defs),
-        "treatment_nuisance_features": len(propensity_defs),
-        "outcome_nuisance_features": len(outcome_defs),
+        "treatment_nuisance_features": len(nuisance_candidate_definitions),
+        "outcome_nuisance_features": len(nuisance_candidate_definitions),
         "nuisance_routing": {
             "treatment_feature_ids": [str(f["feature_id"]) for f in propensity_defs],
             "outcome_feature_ids": [str(f["feature_id"]) for f in outcome_defs],
+            "selected_task_supports_used_for_nuisances": False,
             "training_crossfit_design": "all_candidates_with_fold_local_regularization",
+            "heldout_design": "average_of_the_inner_fold_all_candidate_models",
+            "heldout_ensemble_models": int(len(set(inner_fold_ids.tolist()))),
             "training_crossfit_candidates": len(nuisance_candidate_definitions),
+            "heldout_candidates": len(nuisance_candidate_definitions),
+            "recalibration": "cross_fitted_platt",
             "dina_reuses_external_nuisances": estimator == "dina",
         },
+        "nuisance_fit_audit_summary": _nuisance_fit_audit_summary(nuisance_audit_dir),
         "effect_modifiers": len(effect_defs),
         "ate_aipw": ate,
         "standard_error": standard_error,
@@ -7425,6 +7982,31 @@ def _extract_outer_heldout_measurements(
     return combined
 
 
+def _heldout_failure_summary(
+    output_dir: Path, *, frozen_cache_used: bool
+) -> tuple[dict[str, Any], str]:
+    """Load the failure summary of the held-out extraction that produced the values."""
+
+    heldout_dir = Path(output_dir) / "extraction" / "heldout"
+    path = (
+        heldout_dir / "new_measurements" / "failure_summary.json"
+        if frozen_cache_used
+        else heldout_dir / "failure_summary.json"
+    )
+    if not path.is_file():
+        return {}, (
+            "unavailable_reused_archived_measurements"
+            if frozen_cache_used
+            else "unavailable_no_failure_summary"
+        )
+    summary = json.loads(path.read_text(encoding="utf-8"))
+    return dict(summary), (
+        "newly_extracted_heldout_issue_events_archived_measurements_unknown"
+        if frozen_cache_used
+        else "heldout_extraction_issue_events"
+    )
+
+
 def _run_stage2_statistical_selection(
     selector_arguments: Mapping[str, Any],
 ) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]], list[Any]]:
@@ -7713,6 +8295,12 @@ def run_fold_analysis(
             **serial_extraction,
         )
         ontology_refinement_rounds += feedback_rounds
+        final_fit_failure_summary = json.loads(
+            (
+                output_dir / "extraction" / "all_candidates_fit_refinement"
+                / "final_failure_summary.json"
+            ).read_text(encoding="utf-8")
+        )
         final_fit_all, current, _ = _harmonize_training_extraction(
             extracted=final_fit_raw,
             definitions=current,
@@ -7727,13 +8315,45 @@ def run_fold_analysis(
             final_fit_all,
         )
 
+    # Cells whose extraction failed after every repair (S2A-004). A frozen
+    # preselection snapshot carries no failure provenance; that is recorded.
+    min_informative_patients = int(
+        getattr(config, "min_informative_patients", DEFAULT_MIN_INFORMATIVE_PATIENTS)
+    )
+    max_extraction_failure_fraction = float(
+        getattr(
+            config, "max_extraction_failure_fraction", DEFAULT_MAX_EXTRACTION_FAILURE_FRACTION
+        )
+    )
+    fit_failure_mask_available = frozen_snapshot is None
+    fit_failure_mask = extraction_failures.failure_mask(
+        final_fit_raw.set_index("_oci_row_id", drop=False).loc[fit_ids].reset_index(drop=True)
+        if "_oci_row_id" in final_fit_raw
+        else final_fit_raw,
+        final_fit_failure_summary,
+        current,
+    )
+    _write_frame(output_dir / "extraction" / "failure_mask_fit.csv", fit_failure_mask)
+    fit_treatment = dataset.iloc[fit_ids][treatment_column].to_numpy(dtype=float)
     # Measure coverage after repair/review, before any supervised modeling.
     # Keep the complete extraction checkpoint available for audit and reuse.
     final_fit_all, current, missingness_report = _filter_sparse_training_candidates(
         final_fit_all, current,
         audit_path=output_dir / "extraction" / "candidate_missingness_filter.json",
         health_audit_path=output_dir / "extraction" / "fit_health.json",
-        minimum_row_nonmissing_fraction=float(config.min_nonmissing_fraction),
+        min_informative_patients=min_informative_patients,
+        max_extraction_failure_fraction=max_extraction_failure_fraction,
+        failure_mask=fit_failure_mask,
+        treatment=fit_treatment,
+    )
+    missingness_report["extraction_failure_mask_source"] = (
+        "training_extraction_issue_events"
+        if fit_failure_mask_available
+        else "unavailable_for_frozen_preselection_snapshot"
+    )
+    _write_json(
+        output_dir / "extraction" / "failure_report_fit.json",
+        missingness_report["training_extraction_failure_report"],
     )
     preselection_matrix_relative = (
         Path("extraction") / "coverage_filtered_fit"
@@ -7795,7 +8415,10 @@ def run_fold_analysis(
             final_fit_all, current,
             audit_path=output_dir / "extraction" / "estimand_candidate_missingness_filter.json",
             health_audit_path=output_dir / "extraction" / "fit_health.json",
-            minimum_row_nonmissing_fraction=float(config.min_nonmissing_fraction),
+            min_informative_patients=min_informative_patients,
+            max_extraction_failure_fraction=max_extraction_failure_fraction,
+            failure_mask=fit_failure_mask,
+            treatment=fit_treatment,
         )
         missingness_report["after_estimand_refinement"] = alternative_missingness_report
         # A frozen preselection snapshot may point at the original matrix.
@@ -7833,8 +8456,8 @@ def run_fold_analysis(
         "preselection_matrix_path": str(preselection_matrix_relative),
         "candidate_missingness_filter": {
             "schema_version": missingness_report["schema_version"],
-            "maximum_missing_fraction": 0.95,
-            "drop_comparison": "strictly_greater_than",
+            "min_informative_patients": min_informative_patients,
+            "max_extraction_failure_fraction": max_extraction_failure_fraction,
             "scope": "outer_training",
             "audit_fingerprint": _value_fingerprint(missingness_report),
         },
@@ -8125,7 +8748,13 @@ def run_fold_analysis(
     if modeling_fit_frame is None:
         raise RuntimeError("Stage 2 selection did not produce a modeling fit frame")
     selected_names = [str(feature["name"]) for feature in selected]
-    fit_selected = modeling_fit_frame[["_oci_row_id", *selected_names]].copy()
+    fit_selected = modeling_fit_frame[
+        [
+            "_oci_row_id",
+            *selected_names,
+            *extraction_failures.companion_columns(modeling_fit_frame, selected),
+        ]
+    ].copy()
     _write_frame(output_dir / "extraction" / "fit" / "extracted.csv", fit_selected)
     _write_frame(output_dir / "extraction" / "fit" / "harmonized.csv", fit_selected)
     if selected:
@@ -8133,7 +8762,7 @@ def run_fold_analysis(
             fit_selected,
             selected,
             scope="training",
-            minimum_row_nonmissing_fraction=float(config.min_nonmissing_fraction),
+            minimum_row_nonmissing_fraction=CATASTROPHIC_ROW_NONMISSING_FRACTION,
             audit_path=output_dir / "extraction" / "fit_health.json",
         )
     else:
@@ -8148,11 +8777,34 @@ def run_fold_analysis(
             },
         )
 
+    # Held-out patients are measured on the COMPLETE nuisance-candidate catalog
+    # (not only the selected features' dependencies), so held-out nuisances can
+    # use the same all-candidate construction as the training OOF nuisances.
+    # Definitions and harmonization plans are the frozen training ones.
+    candidate_definitions = list(nuisance_candidates["features"])
+    candidate_names = [str(feature["name"]) for feature in candidate_definitions]
+    heldout_measurement_definitions = measurement_definitions_for_selected(
+        candidate_definitions, current
+    )
+    heldout_latent_states = latent_states_for_selected(
+        candidate_definitions, nuisance_candidates["latents"]
+    )
+    missing_selected = sorted(
+        str(feature["feature_id"])
+        for feature in measurement_definitions
+        if str(feature["feature_id"])
+        not in {str(item["feature_id"]) for item in heldout_measurement_definitions}
+    )
+    if missing_selected:
+        raise RuntimeError(
+            "selected measurement dependencies are missing from the nuisance-candidate "
+            f"catalog: {missing_selected}"
+        )
     heldout_raw = _extract_outer_heldout_measurements(
         dataset=dataset,
         heldout_ids=heldout_ids,
         text_column=text_column,
-        measurement_definitions=measurement_definitions,
+        measurement_definitions=heldout_measurement_definitions,
         output_dir=output_dir,
         request_json=request_json,
         workers=extraction_workers,
@@ -8165,7 +8817,7 @@ def run_fold_analysis(
     )
     heldout_measurements, heldout_harmonization = _apply_harmonization_plans(
         heldout_raw,
-        measurement_definitions,
+        heldout_measurement_definitions,
         scope="outer_heldout",
     )
     _write_frame(
@@ -8178,10 +8830,36 @@ def run_fold_analysis(
     )
     heldout_with_latents = materialize_selected_latents(
         frame=heldout_measurements,
-        latent_states=latent_states,
-        measurement_definitions=measurement_definitions,
+        latent_states=heldout_latent_states,
+        measurement_definitions=heldout_measurement_definitions,
     )
-    heldout_extraction = heldout_with_latents[["_oci_row_id", *selected_names]].copy()
+    # Held-out extraction failures use the same rule as training. Companion
+    # indicator columns exist only for features with training failures; a
+    # held-out failure in any other feature is encoded as missing and reported.
+    heldout_failure_summary, heldout_failure_source = _heldout_failure_summary(
+        output_dir, frozen_cache_used=frozen_heldout_measurement_cache is not None
+    )
+    heldout_failure_mask = extraction_failures.failure_mask(
+        heldout_raw, heldout_failure_summary, heldout_measurement_definitions
+    )
+    _write_frame(output_dir / "extraction" / "failure_mask_heldout.csv", heldout_failure_mask)
+    heldout_with_latents = extraction_failures.attach_failure_columns(
+        heldout_with_latents, heldout_failure_mask, candidate_definitions
+    )
+    heldout_candidates = heldout_with_latents[
+        [
+            "_oci_row_id",
+            *candidate_names,
+            *extraction_failures.companion_columns(heldout_with_latents, candidate_definitions),
+        ]
+    ].copy()
+    heldout_extraction = heldout_with_latents[
+        [
+            "_oci_row_id",
+            *selected_names,
+            *extraction_failures.companion_columns(heldout_with_latents, selected),
+        ]
+    ].copy()
     _write_frame(
         output_dir / "extraction" / "heldout" / "harmonized.csv",
         heldout_extraction,
@@ -8191,7 +8869,7 @@ def run_fold_analysis(
             heldout_extraction,
             selected,
             scope="heldout",
-            minimum_row_nonmissing_fraction=float(config.min_nonmissing_fraction),
+            minimum_row_nonmissing_fraction=CATASTROPHIC_ROW_NONMISSING_FRACTION,
             audit_path=output_dir / "extraction" / "heldout_health.json",
         )
     else:
@@ -8241,6 +8919,10 @@ def run_fold_analysis(
             "schema_version": STAGE2_ROLE_SELECTION_SCHEMA_VERSION,
             "features": selected,
             "measurement_dependencies": measurement_definitions,
+            "heldout_measurement_scope": "complete_nuisance_candidate_catalog",
+            "heldout_measurement_definitions": [
+                str(feature["feature_id"]) for feature in heldout_measurement_definitions
+            ],
             "selected_latent_states_artifact": str(latent_states_path),
             "all_candidate_features": len(current),
             "active_candidates_after_consolidation": int(
@@ -8288,9 +8970,45 @@ def run_fold_analysis(
         estimator=final_estimator,
         statistical_policy=statistical_policy,
         output_dir=output_dir / "estimation",
-        nuisance_candidate_definitions=nuisance_candidates["features"],
+        nuisance_candidate_definitions=candidate_definitions,
         nuisance_candidate_fit=modeling_fit_frame,
+        nuisance_candidate_heldout=heldout_candidates,
     )
+    # Held-out treatment labels are used here only for a descriptive
+    # differential-measurement report, after effect predictions are frozen.
+    heldout_failure_report = extraction_failures.failure_rate_report(
+        heldout_failure_mask,
+        heldout_measurement_definitions,
+        scope="outer_heldout",
+        treatment=dataset.iloc[heldout_ids][treatment_column].to_numpy(dtype=float),
+    )
+    flagged_names = {
+        str(feature["name"])
+        for feature in candidate_definitions
+        if extraction_failures.has_failure_indicator(feature)
+    }
+    heldout_failure_report.update(
+        failure_source=heldout_failure_source,
+        encoded_as_missing_without_training_indicator=sorted(
+            record["name"]
+            for record in heldout_failure_report["per_feature"]
+            if record["failed_rows"] and record["name"] not in flagged_names
+        ),
+        reported_after_effect_predictions_were_frozen=True,
+    )
+    _write_json(output_dir / "extraction" / "failure_report_heldout.json", heldout_failure_report)
+    extraction_failure_summary = {
+        "description": extraction_failures.TERMINAL_FAILURE_POLICY,
+        "training": missingness_report["training_extraction_failure_report"],
+        "training_mask_source": missingness_report.get("extraction_failure_mask_source"),
+        "heldout": heldout_failure_report,
+        "training_mask_path": str(output_dir / "extraction" / "failure_mask_fit.csv"),
+        "heldout_mask_path": str(output_dir / "extraction" / "failure_mask_heldout.csv"),
+        "features_with_grouped_failure_indicator": sorted(flagged_names),
+    }
+    diagnostics["extraction_failures"] = extraction_failure_summary
+    _write_json(output_dir / "estimation" / "extraction_failure_diagnostics.json",
+                extraction_failure_summary)
     return {
         "features": selected,
         "review_rounds": review_rounds,
@@ -8301,6 +9019,7 @@ def run_fold_analysis(
         "screening_model_family": "multi_model_evidence_with_predictive_nuisance_selection",
         "selection": selection_report,
         "candidate_missingness_filter": missingness_report,
+        "extraction_failures": extraction_failure_summary,
         "measurement_dependencies": measurement_definitions,
         "harmonization_validation_fallbacks": harmonization_validation_fallbacks,
         **({"estimand_ontology": estimand_report} if estimand_policy.enabled else {}),

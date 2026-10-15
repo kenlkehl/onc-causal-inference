@@ -1,10 +1,11 @@
 """Lightweight scientific policy for the Stage 2 multi-model evidence ensemble."""
 
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v7_adjusted_interactions"
+SCHEMA_VERSION = "stage2_multi_model_selection_v8_opt_in_diagnostic_families"
 FAMILIES = (
     "univariable",
     "penalized_main",
@@ -16,6 +17,32 @@ FAMILIES = (
     "dina",
     "matched_batch_contrast",
 )
+# Treatment/outcome prediction families that write only treatment- and
+# outcome-role records. Modifier ranking reads effect-role records only,
+# nuisance selection reads the fold elastic-net supports, and concept review
+# prompts list effect-role rows only, so these run only when requested.
+DIAGNOSTIC_FAMILIES = ("penalized_main", "predictive_forest")
+EVIDENCE_FAMILY_POLICY = {
+    "default_active": [
+        "univariable",
+        "penalized_interactions",
+        "orthogonal_linear",
+        "univariable_rlearner",
+        "causal_forest",
+        "dina",
+    ],
+    "opt_in": {
+        "penalized_main": "listed in diagnostic_families",
+        "predictive_forest": "listed in diagnostic_families",
+        "matched_batch_contrast": "matched_batch.enabled is true",
+    },
+    "rule": (
+        "dina runs for binary outcomes only. penalized_main and predictive_forest "
+        "produce treatment/outcome prediction diagnostics that no modifier ranking, "
+        "nuisance selection, modifier-count, or concept-review step reads; they run "
+        "only when listed in diagnostic_families."
+    ),
+}
 FINAL_ESTIMATORS = ("causal_forest", "linear_interactions", "dina")
 
 
@@ -156,8 +183,20 @@ class Stage2MultiModelConfig:
     max_prompt_chars: int = 100_000
     modifier_count: ModifierCountConfig = field(default_factory=ModifierCountConfig)
     matched_batch: MatchedBatchConfig = MatchedBatchConfig()
+    diagnostic_families: tuple[str, ...] = ()
 
     def validate(self) -> None:
+        if (
+            not isinstance(self.diagnostic_families, tuple)
+            or any(not isinstance(v, str) or v not in DIAGNOSTIC_FAMILIES
+                   for v in self.diagnostic_families)
+            or self.diagnostic_families
+            != tuple(f for f in DIAGNOSTIC_FAMILIES if f in self.diagnostic_families)
+        ):
+            raise ValueError(
+                "multi_model.diagnostic_families must list unique values from "
+                f"{list(DIAGNOSTIC_FAMILIES)} in that order"
+            )
         if not isinstance(self.stability, EvidenceStabilityConfig):
             raise ValueError('multi_model.stability must be an EvidenceStabilityConfig object')
         self.stability.validate()
@@ -213,6 +252,8 @@ class Stage2MultiModelConfig:
             "schema_version": SCHEMA_VERSION,
             **asdict(self),
             "modifier_count": self.modifier_count.public_dict(),
+            "diagnostic_families": list(self.diagnostic_families),
+            "evidence_family_policy": deepcopy(EVIDENCE_FAMILY_POLICY),
         }
         # Existing saved runs keep their policy unless this family is requested.
         if self.matched_batch == MatchedBatchConfig():
@@ -220,10 +261,12 @@ class Stage2MultiModelConfig:
         return result
 
     def active_families(self, outcome_type=None):
+        """Evidence families fitted in each inner fold, in canonical order."""
         return tuple(
             f
             for f in FAMILIES
             if (f != "matched_batch_contrast" or self.matched_batch.enabled)
+            and (f not in DIAGNOSTIC_FAMILIES or f in self.diagnostic_families)
             and (f != "dina" or outcome_type in {None, "binary"})
         )
 
@@ -236,9 +279,25 @@ def multi_model_config_from_mapping(
     raw = dict(value or {})
     if raw.pop("schema_version", SCHEMA_VERSION) != SCHEMA_VERSION:
         raise ValueError("unsupported multi_model schema_version")
+    # public_dict() records the family policy; a saved policy must match it.
+    if raw.pop("evidence_family_policy", EVIDENCE_FAMILY_POLICY) != EVIDENCE_FAMILY_POLICY:
+        raise ValueError("multi_model.evidence_family_policy does not match this schema")
     unknown = set(raw) - set(Stage2MultiModelConfig.__dataclass_fields__)
     if unknown:
         raise ValueError(f"unsupported multi_model fields: {sorted(unknown)}")
+    if "diagnostic_families" in raw:
+        names = raw["diagnostic_families"]
+        if not isinstance(names, (list, tuple)):
+            raise ValueError("multi_model.diagnostic_families must be a list")
+        if (
+            any(not isinstance(v, str) or v not in DIAGNOSTIC_FAMILIES for v in names)
+            or len(set(names)) != len(names)
+        ):
+            raise ValueError(
+                "multi_model.diagnostic_families must list unique values from "
+                f"{list(DIAGNOSTIC_FAMILIES)}"
+            )
+        raw["diagnostic_families"] = tuple(f for f in DIAGNOSTIC_FAMILIES if f in names)
     if "l1_ratios" in raw:
         if not isinstance(raw["l1_ratios"], (list, tuple)):
             raise ValueError("multi_model.l1_ratios must be a list")

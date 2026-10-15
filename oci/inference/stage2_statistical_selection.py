@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from .stage2_extraction_failures import failure_flags, has_failure_indicator
+
 
 def _feature_strategy(feature: Mapping[str, Any]) -> str:
     plan = feature.get("harmonization_plan")
@@ -75,6 +77,8 @@ def _encode_feature(
         else pd.Series([None] * len(frame), dtype=object)
     )
     strategy = _feature_strategy(feature)
+    # Failed extractions are not "not documented"; they get their own column.
+    failed = failure_flags(frame, feature).reset_index(drop=True)
     main_columns: list[np.ndarray] = []
     main_names: list[str] = []
     interaction_columns: list[np.ndarray] = []
@@ -101,7 +105,7 @@ def _encode_feature(
                 main_names.append(f"{name}:fallback={category}")
                 interaction_columns.append(column)
                 interaction_names.append(f"{name}:fallback={category}")
-        missing = series.isna().to_numpy(dtype=float)
+        missing = (series.isna() & ~failed).to_numpy(dtype=float)
         main_columns.append(missing)
         main_names.append(f"{name}:missing")
     else:
@@ -126,8 +130,11 @@ def _encode_feature(
             main_names.append(f"{name}:level={category}")
             interaction_columns.append(column)
             interaction_names.append(f"{name}:level={category}")
-        main_columns.append(missing.to_numpy(dtype=float))
+        main_columns.append((missing & ~failed).to_numpy(dtype=float))
         main_names.append(f"{name}:missing")
+    if has_failure_indicator(feature):
+        main_columns.append(failed.to_numpy(dtype=float))
+        main_names.append(f"{name}:extraction_failed")
 
     raw_main = (
         np.column_stack(main_columns).astype(float, copy=False)

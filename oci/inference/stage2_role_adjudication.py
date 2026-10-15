@@ -11,17 +11,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import logging
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-LOGGER = logging.getLogger(__name__)
 ALLOWED_ROLES = ("confounder", "effect_modifier")
-# Fields of the removed LLM role adjudicator; saved configurations that still
-# carry them load with a warning.
-RETIRED_FIELDS = ("enabled", "max_candidates_per_request")
 
 
 @dataclass(frozen=True)
@@ -54,13 +49,6 @@ def role_adjudication_config_from_mapping(
     if value is not None and not isinstance(value, Mapping):
         raise ValueError("stage2.role_adjudication must be an object")
     raw = dict(value or {})
-    retired = sorted(name for name in RETIRED_FIELDS if name in raw)
-    if retired:
-        LOGGER.warning(
-            "ignoring retired stage2.role_adjudication fields: %s", ", ".join(retired)
-        )
-        for name in retired:
-            raw.pop(name)
     known = set(Stage2RoleAdjudicationConfig.__dataclass_fields__)
     unknown = sorted(set(raw) - known)
     if unknown:

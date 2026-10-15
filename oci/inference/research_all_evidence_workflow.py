@@ -2487,6 +2487,7 @@ def prepare_stage2_reselection(
         "features_by_outer_fold.jsonl",
         "cross_fitted_predictions.csv",
         "causal_estimate.json",
+        "heterogeneity_diagnostics.json",
         "posthoc_oracle_ite_metrics.json",
         "posthoc_predictions_with_oracle_ite.csv",
     )

@@ -1,7 +1,10 @@
 """Held-out nuisance diagnostics and a shared, inclusive overlap policy.
 
-Calibration is descriptive only: it never recalibrates predictions or uses
-held-out outcomes to choose propensity eligibility.
+These calibration diagnostics are descriptive only: they never recalibrate
+predictions or use held-out outcomes to choose propensity eligibility. (Stage 2
+recalibrates its nuisances separately, with ``oci.utils.calibration.
+cross_fitted_platt`` fit on training out-of-fold predictions only; these
+functions report calibration before and after that step.)
 """
 
 from __future__ import annotations

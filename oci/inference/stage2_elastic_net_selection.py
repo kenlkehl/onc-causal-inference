@@ -9,7 +9,6 @@ only the current outer-training partition and inner-fold honest evaluation.
 
 from __future__ import annotations
 
-import logging
 import math
 from dataclasses import asdict, dataclass, field
 from typing import Any, Mapping, Sequence
@@ -33,31 +32,10 @@ from .stage2_statistical_selection import (
     _rank_safe_columns as _univariable_rank_safe_columns,
 )
 from .stage2_multi_model_config import Stage2MultiModelConfig, multi_model_config_from_mapping
+from .stage2_extraction_failures import failure_flags, has_failure_indicator
 
-LOGGER = logging.getLogger(__name__)
 
 TEMPORAL_SCOPE = "pre_index_treatment"
-
-# Fields of removed selection modes (llm_roles, independent_tasks) and of
-# earlier selectors. Saved configurations that still carry them load with a
-# warning; the values never affect computation.
-RETIRED_FIELDS = (
-    "nuisance_selection_rule",
-    "modifier_selection_rule",
-    "nuisance_selection_frequency",
-    "modifier_selection_frequency",
-    "regularization_grid_size",
-    "one_standard_error_rule",
-    "nuisance_prediction_one_standard_error_rule",
-    "univariable_confounder_p_value_threshold",
-    "univariable_confounder_q_value_threshold",
-    "nuisance_forest_trees",
-    "nuisance_forest_min_samples_leaf",
-    "modifier_top_n_per_inner_fold",
-    "modifier_min_fold_r_loss_improvement",
-    "modifier_min_mean_r_loss_improvement",
-    "modifier_min_positive_fold_fraction",
-)
 
 
 @dataclass(frozen=True)
@@ -166,13 +144,6 @@ def statistical_selection_config_from_mapping(
             "stage2.statistical_selection.selection_mode: only 'multi_model' is "
             "supported; llm_roles and independent_tasks were removed"
         )
-    retired = sorted(name for name in RETIRED_FIELDS if name in raw)
-    if retired:
-        LOGGER.warning(
-            "ignoring retired stage2.statistical_selection fields: %s", ", ".join(retired)
-        )
-        for name in retired:
-            raw.pop(name)
     known = set(Stage2ElasticNetSelectionConfig.__dataclass_fields__)
     unknown = sorted(set(raw) - known)
     if unknown:
@@ -247,6 +218,34 @@ def _append_variable_column(
     column_names.append(name)
 
 
+def _append_failure_column(
+    train_columns: list[np.ndarray],
+    valid_columns: list[np.ndarray],
+    column_feature_ids: list[str],
+    column_names: list[str],
+    *,
+    definition: Mapping[str, Any],
+    feature_id: str,
+    name: str,
+    train_failed: pd.Series,
+    valid_failed: pd.Series,
+) -> None:
+    """Grouped extraction-failure indicator (dropped when constant in training)."""
+
+    if not has_failure_indicator(definition):
+        return
+    _append_variable_column(
+        train_columns,
+        valid_columns,
+        column_feature_ids,
+        column_names,
+        feature_id=feature_id,
+        name=f"{name}:extraction_failed",
+        train_values=train_failed.to_numpy(dtype=float),
+        valid_values=valid_failed.to_numpy(dtype=float),
+    )
+
+
 def _ordered_values(
     train_series: pd.Series,
     valid_series: pd.Series,
@@ -299,6 +298,10 @@ def _encode_design(
             if name in valid
             else pd.Series([None] * len(valid), dtype=object)
         )
+        # Extraction failures (null after all repairs) are not "not documented":
+        # they get their own indicator in the parent feature's column group.
+        train_failed = failure_flags(train, definition).reset_index(drop=True)
+        valid_failed = failure_flags(valid, definition).reset_index(drop=True)
         strategy = _feature_strategy(definition)
         if strategy in {
             "continuous",
@@ -360,15 +363,18 @@ def _encode_design(
                 feature_id=feature_id,
                 name=f"{name}:missing",
                 train_values=(
-                    train_numeric.isna().to_numpy()
-                    if strategy == "ordinal"
-                    else train_series.isna().to_numpy()
-                ),
+                    (train_numeric.isna() if strategy == "ordinal" else train_series.isna())
+                    & ~train_failed
+                ).to_numpy(),
                 valid_values=(
-                    valid_numeric.isna().to_numpy()
-                    if strategy == "ordinal"
-                    else valid_series.isna().to_numpy()
-                ),
+                    (valid_numeric.isna() if strategy == "ordinal" else valid_series.isna())
+                    & ~valid_failed
+                ).to_numpy(),
+            )
+            _append_failure_column(
+                train_columns, valid_columns, column_feature_ids, column_names,
+                definition=definition, feature_id=feature_id, name=name,
+                train_failed=train_failed, valid_failed=valid_failed,
             )
             continue
 
@@ -413,8 +419,13 @@ def _encode_design(
             column_names,
             feature_id=feature_id,
             name=f"{name}:missing",
-            train_values=train_missing.to_numpy(),
-            valid_values=valid_missing.to_numpy(),
+            train_values=(train_missing & ~train_failed).to_numpy(),
+            valid_values=(valid_missing & ~valid_failed).to_numpy(),
+        )
+        _append_failure_column(
+            train_columns, valid_columns, column_feature_ids, column_names,
+            definition=definition, feature_id=feature_id, name=name,
+            train_failed=train_failed, valid_failed=valid_failed,
         )
     return _EncodedDesign(
         train=(

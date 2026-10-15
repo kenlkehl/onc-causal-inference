@@ -204,6 +204,19 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
             assert np.allclose(cell["squared_errors"], expected)
             assert np.isclose(cell["r_loss"], expected.mean())
             all_ids.append(cell["validation_row_ids"])
+            estimator_name = path.parent.parent.name
+            if estimator_name == "linear_interactions":
+                # M-01: honest logit(e) and prognostic covariates, unpenalized.
+                adjustment = cell["model_audit"]["nuisance_adjustment"]
+                assert adjustment["penalized"] is False
+                assert adjustment["requested_columns"] == [
+                    "logit_propensity", "logit_prognostic_mu0" if binary else "prognostic_mu0",
+                ]
+                assert set(adjustment["columns"]) <= set(adjustment["requested_columns"])
+            elif estimator_name == "causal_forest":
+                # M-04: binary-outcome forests always carry the prognostic score.
+                assert cell["prognostic_score_in_x"] is binary
+                assert cell["constant_design"] is (not binary and cell["encoded_columns"] == 0)
         assert len(all_ids) == (
             16 if binary else 12
         )  # Four sizes: two forest seeds and one interaction fit; common patients.
@@ -213,7 +226,12 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
     eligible_utilities = [o['mean_interaction_utility'] for opts in options.values()
                           for o in opts.values() if o['within_predictive_guardrail']]
     assert chosen_details['mean_interaction_utility'] == pytest.approx(max(eligible_utilities))
+    assert "regularization-induced confounding" in audit["methodology_notes"][
+        "interaction_model_nuisance_adjustment"]
+    assert ("forest_prognostic_score" in audit["methodology_notes"]) is binary
     for fold in audit['folds']:
+        assert fold["prognostic_score_source"] in {
+            "control_arm_outcome_model_mu0", "marginal_outcome_model_fallback"}
         ranked = json.loads(Path(fold['ranking_path']).read_text())
         utilities = {c['feature_id']: c['interaction_test']['selection_utility']
                      for c in ranked['candidate_scores']}
