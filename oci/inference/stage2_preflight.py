@@ -47,13 +47,18 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
     saved_policy = statistical_selection_config_from_mapping(saved.get("statistical_selection"))
     if saved_policy.public_dict() != config.stage2.statistical_selection.public_dict():
         raise RuntimeError("Stage 2 multi-model policy changed; use guarded --stage2-reselect")
-    if saved.get("estimation_trees") != config.stage2.estimation_trees:
+    orthogonal = (
+        config.stage2.statistical_selection.multi_model.modifier_selection.rule
+        == "orthogonal_tests"
+    )
+    # Only the balanced_evidence count search scores forests of estimation_trees;
+    # under orthogonal_tests a change refits final estimation only.
+    if not orthogonal and saved.get("estimation_trees") != config.stage2.estimation_trees:
         raise RuntimeError(
             "Stage 2 modifier-count estimation_trees changed; use guarded --stage2-reselect"
         )
     if (
-        config.stage2.statistical_selection.multi_model.modifier_selection.rule
-        == "orthogonal_tests"
+        orthogonal
         and "propensity_clip" in saved
         and saved["propensity_clip"] != config.stage2.propensity_clip
     ):

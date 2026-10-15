@@ -6599,8 +6599,24 @@ def test_fold_reselection_uses_frozen_preselection_without_training_extraction(
     resumed = run_fold_analysis(**arguments)
     assert resumed["estimation"]["estimator"] == "linear_interactions"
     assert count_calls == [10]
+    # Under the default orthogonal_tests rule the trees do not enter selection.
     run_fold_analysis(**{**arguments, "config": replace(config, estimation_trees=20)})
-    assert count_calls == [10, 20]
+    assert count_calls == [10]
+    # The balanced_evidence count search scores forests of that size.
+    from oci.inference.stage2_multi_model_config import ModifierSelectionConfig
+
+    selection_policy = config.statistical_selection
+    balanced = replace(config, statistical_selection=replace(
+        selection_policy,
+        multi_model=replace(
+            selection_policy.multi_model,
+            modifier_selection=ModifierSelectionConfig(rule="balanced_evidence"),
+        ),
+    ))
+    run_fold_analysis(**{**arguments, "config": balanced})
+    assert count_calls == [10, 10]
+    run_fold_analysis(**{**arguments, "config": replace(balanced, estimation_trees=20)})
+    assert count_calls == [10, 10, 20]
 
 
 def test_fold_reselection_reuses_archived_heldout_components_and_extracts_only_missing(

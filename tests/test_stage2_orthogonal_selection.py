@@ -118,16 +118,9 @@ def _request_json(messages, validate, *, request_kind="interpretation", **_kwarg
     return validate({"action": "keep", "reason": "Consistent aggregate extraction."})
 
 
-def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
-    tmp_path, monkeypatch
-):
-    install(monkeypatch)
+def _run_fold(output, *, estimation_trees=12):
     dataset, definitions, split = _fold_inputs()
-    nested = []
-    monkeypatch.setattr(count, "_score_prefix", lambda **k: nested.append(k))
-    stage2_dir = tmp_path / "stage2"
-    output = stage2_dir / "outer_001"
-    result = analysis.run_fold_analysis(
+    return analysis.run_fold_analysis(
         dataset=dataset,
         definitions=definitions,
         split=split,
@@ -150,13 +143,32 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
             max_prompt_chars=12_000,
             extraction_max_prompt_chars=20_000,
             max_review_rounds=1,
-            estimation_trees=12,
+            estimation_trees=estimation_trees,
             min_informative_patients=2,
             min_propensity=0.05,
             max_propensity=0.95,
             statistical_selection=small_policy(),
         ),
     )
+
+
+def _audits(directory: Path) -> dict[str, dict]:
+    return {
+        str(path.relative_to(directory)): json.loads(path.read_text())
+        for path in sorted(directory.rglob("*.json"))
+    }
+
+
+def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
+    tmp_path, monkeypatch
+):
+    install(monkeypatch)
+    _, _, split = _fold_inputs()
+    nested = []
+    monkeypatch.setattr(count, "_score_prefix", lambda **k: nested.append(k))
+    stage2_dir = tmp_path / "stage2"
+    output = stage2_dir / "outer_001"
+    result = _run_fold(output)
     # No nested count search under the default rule.
     assert nested == []
     selection = json.loads((output / "selection" / "elastic_net_selection.json").read_text())
@@ -213,12 +225,30 @@ def test_run_fold_analysis_selects_modifiers_by_orthogonal_tests_and_ensembles(
     assert set(evidence["component_p_values"]) == set(modifier_tests.COMPONENTS)
 
     # Testing nuisances equal the final estimation's training out-of-fold values.
-    testing = pd.read_csv(report["testing_nuisances"]["predictions_path"])
-    fitted = pd.read_csv(output / "estimation" / "nuisance_fit_predictions.csv")
+    testing = pd.read_csv(report["testing_nuisances"]["predictions_path"],
+                          float_precision="round_trip")
+    fitted = pd.read_csv(output / "estimation" / "nuisance_fit_predictions.csv",
+                         float_precision="round_trip")
     assert testing["_oci_row_id"].tolist() == fitted["_oci_row_id"].tolist() == split[
         "fit_row_ids"]
     for column in ("propensity", "mu0", "mu1", "effect_eligible", "inner_fold"):
         np.testing.assert_array_equal(testing[column].to_numpy(), fitted[column].to_numpy())
+    # Final estimation scored the held-out rows with the stored selection-time
+    # inner-fold models (2 folds x e, mu0, mu1) instead of refitting them, and
+    # their fit audits are identical.
+    store = result["estimation"]["nuisance_model_store"]
+    assert store["status"] == "available"
+    assert store["fingerprint"] == report["testing_nuisances"]["model_store"]["fingerprint"]
+    assert result["estimation"]["nuisance_fit_audit_summary"]["model_sources"] == {
+        "reused_stored_model": 6}
+    selection_audits = _audits(Path(report["checkpoint_dir"]) / "testing_nuisance_fit_audits")
+    estimation_audits = _audits(next((output / "estimation" / "nuisance_fit_audits").iterdir()))
+    assert set(selection_audits) == set(estimation_audits) and len(selection_audits) == 6
+    for name, audit in selection_audits.items():
+        assert audit["model_source"] == "fitted"
+        assert estimation_audits[name]["model_source"] == "reused_stored_model"
+        for key in ("rows", "columns", "fit_audit"):
+            assert estimation_audits[name][key] == audit[key], (name, key)
 
     # The ensemble: per-estimator columns, their unweighted mean, empty intervals.
     diagnostics = result["estimation"]
@@ -440,3 +470,203 @@ def test_ensemble_without_modifiers_and_with_an_unestimable_component(tmp_path, 
                      "estimated_cate_linear_interactions"]].mean(axis=1),
         rtol=0, atol=1e-12,
     )
+
+
+@pytest.mark.parametrize("binary", [False, True])
+def test_orthogonal_rule_skips_unread_effect_evidence_and_keeps_roles(
+    tmp_path, monkeypatch, binary
+):
+    arguments = sample_inputs()
+    if binary:
+        arguments["dataset"]["outcome"] = (arguments["dataset"]["outcome"] > 0).astype(int)
+        arguments["outcome_type"] = "binary"
+    balanced = replace(arguments["policy"], multi_model=replace(
+        arguments["policy"].multi_model,
+        modifier_selection=ModifierSelectionConfig(rule="balanced_evidence")))
+    # Both rules share one checkpoint root: the evidence scope is in the identity.
+    root = tmp_path / "numerical"
+    full_selected, full, _, _ = numerical.select_stage2_features_multi_model(
+        **{**arguments, "policy": balanced}, checkpoint_dir=root)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("effect-only evidence fitted under orthogonal_tests")
+
+    for name in ("_forests", "_penalized_family", "_univariable_rlearner"):
+        monkeypatch.setattr(numerical, name, forbidden)
+    monkeypatch.setattr(stage2_dina, "joint_evidence", forbidden)
+    monkeypatch.setattr(stage2_dina, "candidate_evidence", forbidden)
+    monkeypatch.setattr(numerical, "_modifier_test_chunk", forbidden)
+    selected, report, _, _ = numerical.select_stage2_features_multi_model(
+        **arguments, checkpoint_dir=root)
+    assert report["input_fingerprint"] != full["input_fingerprint"]
+    assert report["model_families"] == ["univariable"]
+    skipped = report["skipped_effect_evidence"]
+    assert skipped["families"] == [f for f in full["model_families"] if f != "univariable"]
+    assert skipped["univariable_interaction_test"] is True
+    assert "skipped_effect_evidence" not in full
+    univariable = [c for c in report["cells"] if c["family"] == "univariable"]
+    assert univariable and all(
+        {r["role"] for r in cell["records"]} == {"treatment", "outcome"} for cell in univariable)
+    assert all(c["audit"]["effect_status"] == "not_run_under_orthogonal_tests"
+               for c in univariable)
+    # The kept treatment/outcome evidence and every role input are unchanged.
+    assert [
+        {**c, "records": [r for r in c["records"] if r["role"] != "effect"], "audit": None}
+        for c in univariable
+    ] == [
+        {**c, "records": [r for r in c["records"] if r["role"] != "effect"], "audit": None}
+        for c in full["cells"] if c["family"] == "univariable"
+    ]
+    assert selected == full_selected
+    for key in ("decisions", "nuisance_selection", "retained_feature_ids",
+                "cross_fitted_nuisance_models", "measurement_groups"):
+        assert report[key] == full[key], key
+
+
+def test_changing_estimation_trees_reuses_orthogonal_selection(tmp_path, monkeypatch):
+    install(monkeypatch)
+    output = tmp_path / "stage2" / "outer_001"
+    first = _run_fold(output, estimation_trees=12)
+    selection_files = {
+        path: path.read_bytes()
+        for path in (output / "selection").rglob("*") if path.is_file()
+    }
+
+    def forbidden(**kwargs):
+        raise AssertionError("selection reran after an estimation_trees change")
+
+    monkeypatch.setattr(count, "select_modifier_count", forbidden)
+    monkeypatch.setattr(analysis, "select_stage2_features_multi_model", forbidden)
+    second = _run_fold(output, estimation_trees=16)
+    assert {path: path.read_bytes() for path in selection_files} == selection_files
+    forests = [
+        result["estimation"]["ensemble"]["component_audits"]["causal_forest"]
+        ["causal_forest_trees"]
+        for result in (first, second)
+    ]
+    assert forests == [12, 16]
+    # Only the estimation refits; its nuisance models are still the stored ones.
+    assert second["estimation"]["nuisance_fit_audit_summary"]["model_sources"] == {
+        "reused_stored_model": 6}
+    assert second["selection"]["modifier_count_selection"] == (
+        first["selection"]["modifier_count_selection"])
+
+
+def _stored_nuisances(kw, store, **overrides):
+    """The modifier tests' training-only call, which stores the inner-fold models."""
+    fit_ids = kw["split"]["fit_row_ids"]
+    candidate_fit = analysis._aligned_measurement_frame(
+        kw["extracted_fit"], fit_ids, kw["definitions"], label="training")
+    return analysis._outer_training_nuisances(**{
+        "dataset": kw["dataset"],
+        "candidate_fit": candidate_fit,
+        "candidate_definitions": kw["definitions"],
+        "fit_ids": fit_ids,
+        "inner_splits": kw["split"]["inner_splits"],
+        "treatment_column": "treatment",
+        "outcome_column": "outcome",
+        "binary": kw["outcome_type"] == "binary",
+        "seed": kw["seed"],
+        "checkpoint_dir": store.parent / "testing_checkpoints",
+        "checkpoint_fingerprint": "testing",
+        "audit_dir": store.parent / "testing_audits",
+        "model_store_root": store,
+        "model_store_mode": "save",
+        **overrides,
+    })
+
+
+@pytest.mark.parametrize("binary", [True, False])
+def test_final_estimation_reuses_stored_nuisance_models_without_refitting(
+    tmp_path, monkeypatch, binary
+):
+    kw = final_inputs(binary)
+    store = tmp_path / "selection" / "nuisance_models"
+    saved = _stored_nuisances(kw, store)
+    assert saved["model_store"]["status"] == "saved"
+    root = Path(saved["model_store"]["root"])
+    manifest = json.loads((root / analysis.NUISANCE_MODEL_MANIFEST).read_text())
+    assert len(manifest["models"]) == 9  # 3 inner folds x (e, mu0, mu1)
+    assert manifest["identity"]["libraries"]["scikit-learn"]
+
+    refit = analysis.estimate_outer_fold(
+        **kw, **final_candidates(kw), estimator="linear_interactions",
+        statistical_policy=small_policy(), output_dir=tmp_path / "refit",
+    )
+    assert "nuisance_model_store" not in refit
+
+    def no_refit(*args, **kwargs):
+        raise AssertionError("a stored nuisance model was refitted")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(analysis, "_fit_classifier", no_refit)
+        patch.setattr(analysis, "_fit_regressor", no_refit)
+        reused = analysis.estimate_outer_fold(
+            **kw, **final_candidates(kw), estimator="linear_interactions",
+            statistical_policy=small_policy(), output_dir=tmp_path / "reused",
+            nuisance_model_store=store,
+        )
+    assert reused["nuisance_model_store"]["status"] == "available"
+    assert reused["nuisance_fit_audit_summary"]["model_sources"] == {"reused_stored_model": 9}
+    for name in ("predictions.csv", "nuisance_fit_predictions.csv"):
+        pd.testing.assert_frame_equal(
+            pd.read_csv(tmp_path / "reused" / name), pd.read_csv(tmp_path / "refit" / name))
+    # Training predictions equal the stored models' own training out-of-fold values.
+    fitted = pd.read_csv(tmp_path / "reused" / "nuisance_fit_predictions.csv",
+                         float_precision="round_trip")
+    for column, values in zip(("propensity", "mu0", "mu1"), saved["recalibrated"]["fit"]):
+        np.testing.assert_array_equal(fitted[column], values)
+    refit_audits = _audits(next((tmp_path / "refit" / "nuisance_fit_audits").iterdir()))
+    reused_audits = _audits(next((tmp_path / "reused" / "nuisance_fit_audits").iterdir()))
+    stored_audits = _audits(tmp_path / "selection" / "testing_audits")
+    assert set(refit_audits) == set(reused_audits) == set(stored_audits)
+    for name, audit in reused_audits.items():
+        assert audit["fit_audit"] == refit_audits[name]["fit_audit"] == (
+            stored_audits[name]["fit_audit"])
+
+    # Fail closed: a corrupted model file is refitted; the others are reused.
+    corrupted = next(iter(sorted(root.rglob("*.joblib"))))
+    corrupted.write_bytes(corrupted.read_bytes() + b"tampered")
+    partial = analysis.estimate_outer_fold(
+        **kw, **final_candidates(kw), estimator="linear_interactions",
+        statistical_policy=small_policy(), output_dir=tmp_path / "partial",
+        nuisance_model_store=store,
+    )
+    assert partial["nuisance_fit_audit_summary"]["model_sources"] == {
+        "fitted": 1, "reused_stored_model": 8}
+    pd.testing.assert_frame_equal(
+        pd.read_csv(tmp_path / "partial" / "predictions.csv"),
+        pd.read_csv(tmp_path / "refit" / "predictions.csv"))
+
+    # Changed inputs give another fingerprint: nothing is loaded.
+    changed = {**kw, "seed": kw["seed"] + 1}
+    absent = analysis.estimate_outer_fold(
+        **changed, **final_candidates(kw), estimator="linear_interactions",
+        statistical_policy=small_policy(), output_dir=tmp_path / "changed",
+        nuisance_model_store=store,
+    )
+    assert absent["nuisance_model_store"]["status"] == "absent"
+    assert "model_sources" not in absent["nuisance_fit_audit_summary"]
+
+
+def test_stored_nuisance_model_loader_fails_closed(tmp_path):
+    kw = final_inputs(True)
+    store = tmp_path / "selection" / "nuisance_models"
+    saved = _stored_nuisances(kw, store)
+    root = Path(saved["model_store"]["root"])
+    path = root / "cross_fit" / "fold_001" / "propensity.joblib"
+    entry = {"path": str(path), "manifest": str(root / analysis.NUISANCE_MODEL_MANIFEST),
+             "fingerprint": saved["model_store"]["fingerprint"], "mode": "load"}
+    columns = analysis._FeatureEncoder(kw["definitions"]).fit(kw["extracted_fit"]).transform(
+        kw["extracted_fit"]).shape[1]
+    assert analysis._load_stored_nuisance_model(entry, columns) is not None
+    assert analysis._load_stored_nuisance_model({**entry, "fingerprint": "other"}, columns) is None
+    assert analysis._load_stored_nuisance_model(entry, columns + 1) is None
+    assert analysis._load_stored_nuisance_model(
+        {**entry, "path": str(root / "missing.joblib")}, columns) is None
+    manifest_path = root / analysis.NUISANCE_MODEL_MANIFEST
+    manifest = json.loads(manifest_path.read_text())
+    manifest["identity"]["libraries"]["scikit-learn"] = "0.0"
+    manifest["fingerprint"] = "edited"
+    manifest_path.write_text(json.dumps(manifest))
+    assert analysis._load_stored_nuisance_model(entry, columns) is None

@@ -1,7 +1,10 @@
 """Resumable final-fit predictions and independent penalty-CV paths.
 
-Only JSON predictions and optimizer diagnostics are cached, never executable
-model pickles. The caller supplies the complete estimation input identity.
+These checkpoints hold only JSON predictions and optimizer diagnostics. The
+caller supplies the complete estimation input identity. (The inner-fold
+nuisance models of the orthogonal modifier tests are stored separately with
+joblib by ``plain_handoff_stage2_analysis`` and loaded only after their
+fingerprint and file hash are verified.)
 """
 
 from functools import partial

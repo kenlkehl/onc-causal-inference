@@ -176,7 +176,10 @@ uv run python scripts/run_all_evidence.py --config /path/to/output/run_config.js
 
 Reselection archives the previous selection and estimates under
 `stage2/reselection_archives/` and reuses the frozen definitions and extracted
-measurements; it repeats no Stage 1 modeling. For the synthetic launcher, use
+measurements; it repeats no Stage 1 modeling. Under the default
+`orthogonal_tests` modifier rule, changing `stage2.estimation_trees` needs no
+reselection: the selection and its stored nuisance models are reused and only
+the final estimation is refitted. For the synthetic launcher, use
 `STAGE2_ONLY=1` (with `STAGE2_RESELECT=1` or `OCI_PREFLIGHT_ONLY=1` as needed).
 Changing data, definitions, or scientific settings can invalidate checkpoints;
 use a separate output directory for a different study. Details are in

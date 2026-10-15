@@ -222,7 +222,7 @@ defaults the input budget per extraction request is
 | `max_extraction_failure_fraction` | 0.10 | Candidates whose training [extraction failures](glossary.md#extraction-failure) exceed this fraction of patients are dropped |
 | `min_propensity`, `max_propensity` | null | Inclusive [propensity eligibility bounds](glossary.md#propensity-eligibility-and-clipping) for effect estimation; either may be set alone. Set them here, not under `statistical_selection` |
 | `propensity_clip` | 0.02 | Clipping of AIPW denominators to `[c, 1 − c]`; excludes no one. Under the `orthogonal_tests` modifier rule it also clips the AIPW projection test, so it is part of the selection identity |
-| `estimation_trees` | 200 | Trees in the final causal forest and, under `balanced_evidence`, in the forests used for modifier-budget selection (minimum 10) |
+| `estimation_trees` | 200 | Trees in the final causal forest and, under `balanced_evidence`, in the forests used for modifier-budget selection (minimum 10). Under `orthogonal_tests` selection does not depend on it, so a change refits only the final estimation |
 | `modeling_workers` | 1 | CPU processes shared by numerical selection, modifier testing, and final estimation across all outer folds (see [Parallelism](#parallelism)) |
 | `estimand_ontology` | disabled | Outcome-informed search over alternative definitions ([Optional extensions](optional_extensions.md#estimand-informed-ontology-search)) |
 | `selection_consolidation` | disabled | Merging of equivalent extracted variables before selection ([Optional extensions](optional_extensions.md#pre-selection-measurement-consolidation)) |
@@ -743,7 +743,14 @@ candidate in `candidates`:
 `selection/modifier_count/<fingerprint>/testing_nuisances.csv` holds each
 training patient's testing nuisances (`propensity`, `mu0`, `mu1`,
 `marginal_outcome`, `inner_fold`, `effect_eligible`); they equal the training
-columns of `estimation/nuisance_fit_predictions.csv`. Each effect modifier in
+columns of `estimation/nuisance_fit_predictions.csv`. The inner-fold models
+behind them are stored in `selection/nuisance_models/<fingerprint>/` (joblib
+files and a `manifest.json` with file hashes and the input, code, and library
+fingerprint); the final estimation reuses verified models for the held-out
+patients and refits any that fail verification, recording
+`nuisance_model_store` and `model_sources` in `estimation/diagnostics.json`.
+`selection/statistical_evidence.json` lists the effect evidence the rule does
+not compute under `skipped_effect_evidence`. Each effect modifier in
 `final_definitions.json` carries a `modifier_evidence` record with its rule,
 combined and component p- and q-values, labels, flag, rank, and lock status.
 
@@ -797,7 +804,8 @@ Stage 2 checks its saved state on every start:
 | Endpoint URLs, ports, worker counts, timeouts | Allowed |
 | Interpretation sampling, reasoning, or `max_tokens` | Completed feature definitions do not match the requested policy; the run stops |
 | Extraction context window, margin, chunk size, or output ceilings | Affected extraction chunks are extracted again |
-| `min_propensity`, `max_propensity`, `statistical_selection`, `estimation_trees`, or (under `orthogonal_tests`) `propensity_clip` after selection has run | Refused; use [guarded reselection](#guarded-reselection) |
+| `min_propensity`, `max_propensity`, `statistical_selection`, or, after selection has run, `propensity_clip` (under `orthogonal_tests`) or `estimation_trees` (under `balanced_evidence`) | Refused; use [guarded reselection](#guarded-reselection) |
+| `estimation_trees` under `orthogonal_tests` | Allowed; selection and its stored nuisance models are reused and only the final estimation is refitted |
 
 `run_config.json` stores every API key as `<redacted>`. When relaunching from it
 against servers that require a key, set the `OCI_STAGE2_*_API_KEY` environment
@@ -847,9 +855,9 @@ The report states whether Stage 2 will start, resume, or reselect.
 
 `--stage2-only --stage2-reselect` reruns variable selection and estimation of a
 completed Stage 2 run without repeating interpretation, extraction review, or
-outer-training extraction. Use it after changing selection or estimation
-settings such as `statistical_selection`, `estimation_trees`, the propensity
-bounds, or, under `orthogonal_tests`, `propensity_clip`.
+outer-training extraction. Use it after changing selection settings such as
+`statistical_selection`, the propensity bounds, `estimation_trees` under
+`balanced_evidence`, or `propensity_clip` under `orthogonal_tests`.
 
 ```bash
 python scripts/run_all_evidence.py \

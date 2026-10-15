@@ -54,12 +54,12 @@ candidates. Every candidate is exposed to every active family.
 
 | Family (config name) | Default | What it measures |
 |---|---|---|
-| Univariable models (`univariable`) | on | Per candidate: association with treatment; treatment-adjusted association with outcome; and the adjusted interaction test described below |
-| Penalized outcome interactions (`penalized_interactions`) | on | Grouped elastic net for `Y ~ T + all candidates + all T × candidate`; the selection of each candidate's interaction group, and the whole model's validation R-loss gain over a constant effect |
-| Orthogonal joint model (`orthogonal_linear`) | on | All candidates jointly: grouped elastic-net DINA for binary outcomes; grouped residual model `(Y − m̂) ~ (T − ê)·(1 + candidates)` for continuous outcomes |
-| One-candidate effect models (`univariable_rlearner`) | on | One candidate at a time: validation gain of a ridge DINA model (binary) or ridge R-learner (continuous) over a constant effect |
-| Causal forests (`causal_forest`) | on | Honest forests (800 trees, minimum leaf 10) fitted to the residuals `T − ê` and `Y − m̂`; validation R-loss increase when a candidate is permuted |
-| Joint DINA permutation (`dina`) | on, binary only | Validation DINA-loss increase when a candidate is permuted in the joint DINA model |
+| Univariable models (`univariable`) | on | Per candidate: association with treatment; treatment-adjusted association with outcome; and (`balanced_evidence` only) the adjusted interaction test described below |
+| Penalized outcome interactions (`penalized_interactions`) | `balanced_evidence` | Grouped elastic net for `Y ~ T + all candidates + all T × candidate`; the selection of each candidate's interaction group, and the whole model's validation R-loss gain over a constant effect |
+| Orthogonal joint model (`orthogonal_linear`) | `balanced_evidence` | All candidates jointly: grouped elastic-net DINA for binary outcomes; grouped residual model `(Y − m̂) ~ (T − ê)·(1 + candidates)` for continuous outcomes |
+| One-candidate effect models (`univariable_rlearner`) | `balanced_evidence` | One candidate at a time: validation gain of a ridge DINA model (binary) or ridge R-learner (continuous) over a constant effect |
+| Causal forests (`causal_forest`) | `balanced_evidence` | Honest forests (800 trees, minimum leaf 10) fitted to the residuals `T − ê` and `Y − m̂`; validation R-loss increase when a candidate is permuted |
+| Joint DINA permutation (`dina`) | `balanced_evidence`, binary only | Validation DINA-loss increase when a candidate is permuted in the joint DINA model |
 | Penalized main effects (`penalized_main`) | off | Grouped elastic nets for treatment and outcome; diagnostic only |
 | Predictive forests (`predictive_forest`) | off | Random-forest permutation importance for treatment and outcome; diagnostic only |
 | Matched-batch contrasts (`matched_batch_contrast`) | off | See [Optional extensions](optional_extensions.md) |
@@ -69,11 +69,18 @@ that no later step reads; list them in `multi_model.diagnostic_families` to run
 them. Matched-batch evidence runs when `multi_model.matched_batch.enabled` is
 true.
 
-The families run under both modifier rules. Under `orthogonal_tests`, their
-effect evidence is recorded in `selection/statistical_evidence.json` for audit
-and does not choose modifiers; under `balanced_evidence`, it feeds the
-[modifier ranking](#modifier-ranking). The nuisance supports always come from
-the split nuisance models described below.
+Under `balanced_evidence`, the effect families feed the
+[modifier ranking](#modifier-ranking). Under the default `orthogonal_tests`
+rule, modifiers come from the [orthogonal tests](#modifier-selection-by-orthogonal-tests)
+and no role, nuisance model, forest W, or kept output reads effect evidence, so
+`penalized_interactions`, `orthogonal_linear`, `univariable_rlearner`,
+`causal_forest`, `dina`, and the univariable interaction test are not run;
+`selection/statistical_evidence.json` lists them under
+`skipped_effect_evidence`. The univariable treatment and outcome associations,
+the split nuisance models, and any requested opt-in family still run. The
+evidence scope is part of the numerical-evidence identity, so evidence computed
+under one rule is never reused under the other. The nuisance supports always
+come from the split nuisance models described below.
 
 **Adjusted interaction test.** For each candidate `Z`, two models are fitted on
 training patients:
@@ -181,10 +188,12 @@ fitted in the inner cross-fitting folds with the final estimation's seeds,
 encoders, and standardization, followed by cross-fitted Platt recalibration.
 Each training patient receives `ê`, `μ̂0`, and `μ̂1` from the inner-fold model
 that did not see it. Held-out patients take no part; their measurements do not
-exist yet. The final estimation repeats the construction with the held-out
-patients added and reproduces the same training values exactly, because each
-inner-fold model predicts its inner-validation patients and the held-out
-patients in separate calls. The tests use the marginal outcome prediction
+exist yet. The fitted inner-fold models are stored (see
+[Nuisance construction](#nuisance-construction)), and the final estimation
+reuses them to score the held-out patients instead of refitting them. Either
+way the training values are reproduced exactly, because each inner-fold model
+predicts its inner-validation patients and the held-out patients in separate
+calls. The tests use the marginal outcome prediction
 
 $$
 \hat m = \hat e\,\hat\mu_1 + (1 - \hat e)\,\hat\mu_0 .
@@ -658,7 +667,20 @@ supplies the [testing nuisances](#testing-nuisances) of the orthogonal tests.
    unweighted average of the five inner-fold models' predictions (on the
    probability scale for binary targets). There is no separate model fitted on
    all outer-training patients.
-4. **Recalibration.** The propensity and, for binary outcomes, both arm-specific
+4. **Model reuse.** Under `orthogonal_tests`, the modifier tests fit these
+   inner-fold models before selection and store them with joblib in
+   `selection/nuisance_models/<id>/`, together with a `manifest.json` holding
+   each file's SHA-256 and a fingerprint of the training measurements and
+   labels, candidate definitions, folds, seed, source code, and library
+   versions (Python, NumPy, pandas, SciPy, scikit-learn, joblib). The final
+   estimation recomputes that fingerprint from its own inputs and loads a model
+   only when the fingerprint and file hash match and the model's input width
+   agrees; otherwise, or on any load error, it refits that model. Reused and
+   refitted models give identical predictions, and each model's fit audit is
+   written either way, marked `model_source` `reused_stored_model` or
+   `fitted`. Under `balanced_evidence` no models are stored and the final
+   estimation fits them.
+5. **Recalibration.** The propensity and, for binary outcomes, both arm-specific
    outcome predictions are Platt-recalibrated: a logistic regression of the label
    on `[1, logit(prediction)]`. Each inner fold's training predictions use a
    calibrator fitted on the out-of-fold predictions of the other inner folds;
@@ -673,8 +695,10 @@ The recalibrated predictions are written as `propensity`, `mu0`, and `mu1`; the
 raw predictions are kept as `propensity_uncalibrated`, `mu0_uncalibrated`, and
 `mu1_uncalibrated`. Each fold's `estimation/diagnostics.json` reports
 calibration before and after recalibration (`nuisance_calibration`, including a
-`calibration_slope_summary`) and elastic-net fit audits, including any fit that
-reached its iteration limit. The held-out calibrator is learned from
+`calibration_slope_summary`), elastic-net fit audits, including any fit that
+reached its iteration limit (with `model_sources` counts when a model store was
+consulted), and, under `orthogonal_tests`, `nuisance_model_store` (`available`
+or `absent`, with the store fingerprint). The held-out calibrator is learned from
 single-model out-of-fold predictions but applied to an average of five models,
 which is slightly less dispersed; held-out calibration slopes after
 recalibration can therefore sit modestly above 1 (see
@@ -841,11 +865,12 @@ Per outer fold, under `stage2/outer_NNN/`:
 | Path | Contents |
 |---|---|
 | `extraction/candidate_missingness_filter.json` | The informativeness filter's decision for every candidate |
-| `selection/statistical_evidence.json` | All evidence cells, family summaries, nuisance supports, and policy |
+| `selection/statistical_evidence.json` | All evidence cells, family summaries, nuisance supports, and policy (under `orthogonal_tests`, also `skipped_effect_evidence`) |
 | `selection/nuisance_predictions.csv` | Out-of-fold nuisance predictions of the evidence families (outer-training patients only) |
 | `selection/modifier_tests.json` | `orthogonal_tests`: every candidate's component and combined p-values, q-values, selection, and labels |
 | `selection/modifier_count/selection.json` | The modifier selection report: for `orthogonal_tests`, the selected modifiers, estimator policy, and test summary; for `balanced_evidence`, the loss surface, guardrail, utilities, fold rankings, and the full-training ranking |
 | `selection/modifier_count/<id>/testing_nuisances.csv` | `orthogonal_tests`: the testing nuisances and eligibility of each training patient |
+| `selection/nuisance_models/<id>/` | `orthogonal_tests`: the stored inner-fold nuisance models (joblib) and their `manifest.json`, reused by the final estimation |
 | `selection/modifier_count/<id>/fold_NNN/ranking/ranking.json` | `balanced_evidence`: one nested ranking with every candidate's component scores |
 | `selection/elastic_net_selection.json` | Final role decisions with their sources |
 | `final_definitions.json` | Retained variables, roles (with `modifier_evidence` for each modifier under `orthogonal_tests`), definitions, and the final estimator |

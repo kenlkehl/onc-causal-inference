@@ -60,7 +60,11 @@ def _frame_hash(frame: pd.DataFrame) -> str:
 def numerical_identity(
     *, frame, labels, definitions, inner_splits, outcome_type, seed, policy
 ):
-    """Count-search settings do not change the underlying numerical evidence."""
+    """Count-search settings do not change the underlying numerical evidence.
+
+    The modifier rule matters only through the evidence scope: the fitted
+    families and whether the univariable interaction test runs.
+    """
     numerical_policy = policy.public_dict()
     numerical_policy["multi_model"].pop("modifier_count", None)
     numerical_policy["multi_model"].pop("modifier_selection", None)
@@ -68,6 +72,8 @@ def numerical_identity(
     return {
         "schema_version": SCHEMA_VERSION,
         "policy": numerical_policy,
+        "evidence_families": list(policy.multi_model.active_families(outcome_type)),
+        "univariable_effect_tests": policy.multi_model.computes_effect_evidence,
         "seed": int(seed),
         "definitions": definitions,
         "inner_splits": list(inner_splits),
@@ -646,13 +652,15 @@ def _subsample(treatment, fraction, rng):
     return np.asarray(sorted(indices), dtype=int)
 
 
-def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_keep=None):
+def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_keep=None,
+                 effect_tests=True):
+    """Treatment/outcome associations and, with ``effect_tests``, adjusted interactions."""
     records = []
     if effect_keep is None:
         effect_keep = np.ones(len(train), dtype=bool)
     effect_train = train.loc[effect_keep].reset_index(drop=True)
     effect_t, effect_y = t[effect_keep], y[effect_keep]
-    effect_evaluable = len(effect_t) >= 4 and len(np.unique(effect_t)) == 2
+    effect_evaluable = effect_tests and len(effect_t) >= 4 and len(np.unique(effect_t)) == 2
     e, m = (np.asarray(nuisance[key], dtype=float) for key in ("e", "m"))
     if e.shape != t.shape or m.shape != t.shape:
         raise ValueError("interaction-test nuisances must align with training rows")
@@ -701,6 +709,8 @@ def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_k
             else None,
         )
         for role, p in zip(ROLES, values):
+            if role == "effect" and not effect_tests:
+                continue
             records.append(
                 _record(
                     _key(feature),
@@ -719,21 +729,25 @@ def _univariable(train, definitions, t, y, *, binary, policy, nuisance, effect_k
         for row, q in zip(rows, linear._benjamini_hochberg([r["p_value"] for r in rows])):
             row["q_value"] = q
             row["q_supported"] = q < policy.multi_model.q_threshold if q is not None else None
-    return {
-        "records": records,
-        "audit": {
-            "modifier_model": "Y ~ T + candidate + T:candidate + f(propensity_oof) + g(outcome_oof)",
-            "interaction_adjustment": adjustment_audit,
-            "outcome_association_model": "Y ~ T + candidate",
-            "multiplicity": "BH_within_resample_and_endpoint",
-            "hard_gate": False,
-            "association_fit_row_ids": train._oci_row_id.astype(int).tolist(),
-            "effect_fit_row_ids": effect_train._oci_row_id.astype(int).tolist(),
-            "effect_status": "ok"
-            if effect_evaluable
-            else "insufficient_eligible_rows_or_treatment_arms",
-        },
+    audit = {
+        "modifier_model": "Y ~ T + candidate + T:candidate + f(propensity_oof) + g(outcome_oof)",
+        "interaction_adjustment": adjustment_audit,
+        "outcome_association_model": "Y ~ T + candidate",
+        "multiplicity": "BH_within_resample_and_endpoint",
+        "hard_gate": False,
+        "association_fit_row_ids": train._oci_row_id.astype(int).tolist(),
+        "effect_fit_row_ids": effect_train._oci_row_id.astype(int).tolist(),
+        "effect_status": "ok"
+        if effect_evaluable
+        else "insufficient_eligible_rows_or_treatment_arms",
     }
+    if not effect_tests:
+        audit.update(
+            modifier_model=None,
+            effect_fit_row_ids=[],
+            effect_status="not_run_under_orthogonal_tests",
+        )
+    return {"records": records, "audit": audit}
 
 
 def _penalized_family(
@@ -1223,6 +1237,7 @@ def select_stage2_features_multi_model(
                                         effect_keep=linear.propensity_eligibility(
                                             e[rows], policy.min_propensity, policy.max_propensity
                                         ),
+                                        effect_tests=cfg.computes_effect_evidence,
                                     )
                                 elif binary and family in {
                                     "orthogonal_linear",
@@ -1393,6 +1408,27 @@ def select_stage2_features_multi_model(
         "measurement_groups": representative_groups,
         "measurement_observed_fractions": {f['feature_id']: float(frame[f['name']].notna().mean()) for f in definitions},
         "model_families": list(families),
+        **(
+            {}
+            if cfg.computes_effect_evidence
+            else {
+                "skipped_effect_evidence": {
+                    "families": [
+                        f for f in replace(
+                            cfg, modifier_selection=replace(
+                                cfg.modifier_selection, rule="balanced_evidence")
+                        ).active_families(outcome_type)
+                        if f not in families
+                    ],
+                    "univariable_interaction_test": True,
+                    "reason": (
+                        "modifier_selection.rule is orthogonal_tests: modifiers come from "
+                        "the orthogonal tests, and no role, nuisance, or kept output reads "
+                        "this effect evidence"
+                    ),
+                }
+            }
+        ),
         "evaluable_cells_by_family": availability,
         "multi_model_evidence": summaries,
         "cells": cells,

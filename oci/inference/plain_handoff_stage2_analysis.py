@@ -6793,14 +6793,150 @@ def _extract_training_with_ontology_feedback(
     return extracted, current, len(rounds)
 
 
-def _fit_nuisance_prediction(x, y, valid, *, binary, seed, audit_path=None, split_at=None):
-    """Fit one nuisance model and predict ``valid``.
+NUISANCE_MODEL_STORE_SCHEMA_VERSION = "stage2_nuisance_model_store_v1"
+NUISANCE_MODEL_MANIFEST = "manifest.json"
+_STORABLE_NUISANCE_MODELS = (
+    ElasticNetLogisticClassifier,
+    ElasticNetRegressor,
+    _ConstantClassifier,
+    _ConstantRegressor,
+)
+
+
+def _nuisance_library_versions() -> dict[str, str]:
+    import platform
+
+    import joblib
+    import scipy
+    import sklearn
+
+    return {
+        "python": platform.python_version(),
+        "numpy": np.__version__,
+        "pandas": pd.__version__,
+        "scipy": scipy.__version__,
+        "scikit-learn": sklearn.__version__,
+        "joblib": joblib.__version__,
+    }
+
+
+def _nuisance_model_identity(
+    *,
+    dataset: pd.DataFrame,
+    candidate_fit: pd.DataFrame,
+    candidate_definitions: Sequence[Mapping[str, Any]],
+    fit_ids: Sequence[int],
+    inner_splits: Sequence[Mapping[str, Any]],
+    treatment_column: str,
+    outcome_column: str,
+    binary: bool,
+    seed: int,
+) -> dict[str, Any]:
+    """Everything the inner-fold nuisance models depend on, plus code and library versions."""
+
+    fit_ids = [int(value) for value in fit_ids]
+    return {
+        "schema_version": NUISANCE_MODEL_STORE_SCHEMA_VERSION,
+        "definitions": list(candidate_definitions),
+        "training_measurements": _frame_fingerprint(candidate_fit),
+        "training_labels": _frame_fingerprint(
+            dataset.iloc[fit_ids][[treatment_column, outcome_column]].reset_index(drop=True)
+        ),
+        "fit_row_ids": fit_ids,
+        "inner_splits": [dict(split) for split in inner_splits],
+        "binary": bool(binary),
+        "seed": int(seed) + FINAL_NUISANCE_SEED_OFFSET,
+        "sources": {
+            name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()
+            for name in ("plain_handoff_stage2_analysis.py", "../models/elastic_net_nuisance.py")
+        },
+        "libraries": _nuisance_library_versions(),
+    }
+
+
+def _store_nuisance_model(store: Mapping[str, Any], model: Any) -> None:
+    import joblib
+
+    path = Path(store["path"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    joblib.dump(model, temporary)
+    os.replace(temporary, path)
+
+
+def _load_stored_nuisance_model(store: Mapping[str, Any], columns: int) -> Any | None:
+    """Return a stored fitted model, or None (refit) on any mismatch or error.
+
+    The file is unpickled only after its SHA-256 matches the store manifest,
+    whose fingerprint covers the training inputs, the source code and the
+    library versions.
+    """
+
+    import io
+
+    import joblib
+
+    try:
+        manifest_path = Path(store["manifest"])
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if (
+            manifest.get("schema_version") != NUISANCE_MODEL_STORE_SCHEMA_VERSION
+            or manifest.get("fingerprint") != store["fingerprint"]
+        ):
+            return None
+        path = Path(store["path"])
+        expected = (manifest.get("models") or {}).get(
+            path.relative_to(manifest_path.parent).as_posix()
+        )
+        payload = path.read_bytes()
+        if expected is None or hashlib.sha256(payload).hexdigest() != expected:
+            return None
+        model = joblib.load(io.BytesIO(payload))
+        if not isinstance(model, _STORABLE_NUISANCE_MODELS):
+            return None
+        if int(getattr(model, "n_features_in_", columns)) != int(columns):
+            return None
+        return model
+    except Exception:  # fail closed to refitting
+        LOGGER.warning("stored nuisance model unusable; refitting: %s", store.get("path"),
+                       exc_info=True)
+        return None
+
+
+def _write_nuisance_model_manifest(root: Path, identity: Mapping[str, Any], fingerprint: str) -> None:
+    models = {
+        path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(root.rglob("*.joblib"))
+    }
+    _write_json(root / NUISANCE_MODEL_MANIFEST, {
+        "schema_version": NUISANCE_MODEL_STORE_SCHEMA_VERSION,
+        "fingerprint": fingerprint,
+        "identity": dict(identity),
+        "models": models,
+        "serialization": "joblib; loaded only when the file SHA-256 matches this manifest",
+    })
+
+
+def _fit_nuisance_prediction(
+    x, y, valid, *, binary, seed, audit_path=None, split_at=None, model_store=None,
+):
+    """Fit one nuisance model (or load it from a model store) and predict ``valid``.
 
     With ``split_at``, rows ``valid[:split_at]`` and ``valid[split_at:]`` are
     predicted in separate calls, so the first block's values do not depend on
-    the rows appended after it.
+    the rows appended after it. ``model_store`` (``path``, ``manifest``,
+    ``fingerprint``, ``mode``) saves the fitted model (``"save"``) or reuses a
+    verified stored one (``"load"``), falling back to fitting.
     """
-    model = _fit_classifier(x, y, seed=seed) if binary else _fit_regressor(x, y, seed=seed)
+    model, source = None, "fitted"
+    if model_store is not None and model_store.get("mode") == "load":
+        model = _load_stored_nuisance_model(model_store, np.asarray(x).shape[1])
+        if model is not None:
+            source = "reused_stored_model"
+    if model is None:
+        model = _fit_classifier(x, y, seed=seed) if binary else _fit_regressor(x, y, seed=seed)
+        if model_store is not None and model_store.get("mode") == "save":
+            _store_nuisance_model(model_store, model)
     if audit_path is not None:
         # The elastic-net wrappers report standardization, the selected penalty
         # and CV/refit iteration counts (including whether a limit was reached).
@@ -6813,6 +6949,7 @@ def _fit_nuisance_prediction(x, y, valid, *, binary, seed, audit_path=None, spli
                 fit_audit() if callable(fit_audit)
                 else {"estimator": type(model).__name__, "fit_mode": "constant_or_external"}
             ),
+            **({"model_source": source} if model_store is not None else {}),
         })
 
     def predict(rows):
@@ -6826,7 +6963,7 @@ def _fit_nuisance_prediction(x, y, valid, *, binary, seed, audit_path=None, spli
 def _nuisance_prediction_futures(
     x_t, x_y, treatment, outcome, valid_t, valid_y, *, binary, seed,
     checkpoint_dir=None, checkpoint_fingerprint="uncached", name="full_training",
-    audit_dir=None, split_at=None,
+    audit_dir=None, split_at=None, model_store=None,
 ):
     from functools import partial
     from .stage2_final_modeling import prediction_future
@@ -6834,10 +6971,22 @@ def _nuisance_prediction_futures(
     def audit_path(target):
         return None if audit_dir is None else Path(audit_dir) / name / f"{target}.json"
 
+    def store(target):
+        if model_store is None:
+            return None
+        root = Path(model_store["root"])
+        return {
+            "path": str(root / name / f"{target}.joblib"),
+            "manifest": str(root / NUISANCE_MODEL_MANIFEST),
+            "fingerprint": model_store["fingerprint"],
+            "mode": model_store["mode"],
+        }
+
     pending = [prediction_future(
         checkpoint_dir, f"{name}/propensity", checkpoint_fingerprint,
         partial(_fit_nuisance_prediction, x_t, treatment, valid_t, binary=True, seed=seed,
-                audit_path=audit_path("propensity"), split_at=split_at),
+                audit_path=audit_path("propensity"), split_at=split_at,
+                model_store=store("propensity")),
         len(valid_t),
     )]
     for arm in (0, 1):
@@ -6848,7 +6997,7 @@ def _nuisance_prediction_futures(
             checkpoint_dir, f"{name}/mu{arm}", checkpoint_fingerprint,
             partial(_fit_nuisance_prediction, x_y[mask], outcome[mask], valid_y,
                     binary=binary, seed=seed + arm, audit_path=audit_path(f"mu{arm}"),
-                    split_at=split_at),
+                    split_at=split_at, model_store=store(f"mu{arm}")),
             len(valid_y),
         ))
     return pending
@@ -6877,10 +7026,13 @@ def _nuisance_fit_audit_summary(audit_dir: Path) -> dict[str, Any]:
             "refit_iteration_limit_reached": bool(optimization.get("refit_iteration_limit_reached")),
             "cv_iteration_limit_reached": bool(optimization.get("cv_iteration_limit_reached")),
             "configured_max_iter": optimization.get("configured_max_iter"),
+            **({"model_source": value["model_source"]} if "model_source" in value else {}),
         })
+    sources = Counter(r["model_source"] for r in records if "model_source" in r)
     return {
         "audit_dir": str(audit_dir),
         "fits_audited": len(records),
+        **({"model_sources": dict(sorted(sources.items()))} if sources else {}),
         "refit_iteration_limit_reached": [r["fit"] for r in records if r["refit_iteration_limit_reached"]],
         "cv_iteration_limit_reached": [r["fit"] for r in records if r["cv_iteration_limit_reached"]],
         "standardized_fits": sum(r["standardized"] is True for r in records),
@@ -6904,6 +7056,7 @@ def _cross_fitted_nuisance(
     all_candidates: bool = False,
     audit_dir: Path | None = None,
     heldout_extracted: pd.DataFrame | None = None,
+    model_store: Mapping[str, Any] | None = None,
 ) -> tuple[np.ndarray, ...]:
     """Inner cross-fitted e/mu0/mu1 for the outer-training rows.
 
@@ -6956,6 +7109,7 @@ def _cross_fitted_nuisance(
             checkpoint_dir=checkpoint_dir, checkpoint_fingerprint=checkpoint_fingerprint,
             name=f"cross_fit/fold_{fold_index:03d}", audit_dir=audit_dir,
             split_at=len(valid_ids) if heldout_extracted is not None else None,
+            model_store=model_store,
         )
         pending.append((valid_positions, jobs))
     heldout_rows = 0 if heldout_extracted is None else len(heldout_extracted)
@@ -7113,6 +7267,8 @@ def _outer_training_nuisances(
     checkpoint_fingerprint: str,
     audit_dir: Path | None,
     candidate_heldout: pd.DataFrame | None = None,
+    model_store_root: Path | None = None,
+    model_store_mode: str | None = None,
 ) -> dict[str, Any]:
     """All-candidate, inner-cross-fitted, Platt-recalibrated e/mu0/mu1.
 
@@ -7120,6 +7276,14 @@ def _outer_training_nuisances(
     (training rows only, before held-out measurements exist) share this
     construction: same candidates, folds, seeds, standardization and
     recalibration. Training values are identical in both calls.
+
+    ``model_store_root`` with ``model_store_mode="save"`` (modifier tests)
+    persists every inner-fold model under ``<root>/<fingerprint>``; with
+    ``"load"`` (final estimation) those verified models score the held-out rows
+    instead of being refitted. The fingerprint covers the training inputs, the
+    source code and the library versions; any mismatch or load error refits.
+    The Platt recalibration is recomputed from the identical training
+    predictions.
     """
 
     fit_ids = [int(value) for value in fit_ids]
@@ -7127,6 +7291,34 @@ def _outer_training_nuisances(
     treatment = fit_data[treatment_column].to_numpy(dtype=float)
     outcome = fit_data[outcome_column].to_numpy(dtype=float)
     inner_fold_ids = _inner_fold_assignment(fit_ids, inner_splits)
+    store, store_report = None, {"status": "not_configured"}
+    if model_store_root is not None and model_store_mode is not None:
+        if model_store_mode not in {"save", "load"}:
+            raise ValueError("model_store_mode must be 'save' or 'load'")
+        identity = _nuisance_model_identity(
+            dataset=dataset,
+            candidate_fit=candidate_fit,
+            candidate_definitions=candidate_definitions,
+            fit_ids=fit_ids,
+            inner_splits=inner_splits,
+            treatment_column=treatment_column,
+            outcome_column=outcome_column,
+            binary=binary,
+            seed=seed,
+        )
+        store_fingerprint = _value_fingerprint(identity)
+        store_root = Path(model_store_root) / store_fingerprint[:20]
+        store_report = {
+            "status": "saved" if model_store_mode == "save" else "absent",
+            "mode": model_store_mode,
+            "root": str(store_root),
+            "fingerprint": store_fingerprint,
+        }
+        if model_store_mode == "save" or (store_root / NUISANCE_MODEL_MANIFEST).is_file():
+            store = {"root": str(store_root), "mode": model_store_mode,
+                     "fingerprint": store_fingerprint}
+            if model_store_mode == "load":
+                store_report["status"] = "available"
     raw = _cross_fitted_nuisance(
         dataset=dataset,
         extracted=candidate_fit,
@@ -7147,7 +7339,10 @@ def _outer_training_nuisances(
         # cross-fitting ensemble) that produced the training OOF predictions.
         # No separate full-data fit.
         heldout_extracted=candidate_heldout,
+        model_store=store,
     )
+    if store is not None and model_store_mode == "save":
+        _write_nuisance_model_manifest(Path(store["root"]), identity, store["fingerprint"])
     raw_fit = tuple(raw[:3])
     raw_heldout = tuple(raw[3:]) if candidate_heldout is not None else None
     recalibrated = _recalibrated_nuisances(
@@ -7165,6 +7360,7 @@ def _outer_training_nuisances(
         "raw_fit": raw_fit,
         "raw_heldout": raw_heldout,
         "recalibrated": recalibrated,
+        "model_store": store_report,
     }
 
 
@@ -7191,8 +7387,13 @@ def estimate_outer_fold(
     nuisance_candidate_definitions: Sequence[Mapping[str, Any]],
     nuisance_candidate_fit: pd.DataFrame,
     nuisance_candidate_heldout: pd.DataFrame,
+    nuisance_model_store: Path | None = None,
 ) -> dict[str, Any]:
     """Estimate one outer fold with one honest nuisance construction everywhere.
+
+    ``nuisance_model_store`` is the root where the modifier tests stored their
+    inner-fold nuisance models; verified models are reused to score the
+    held-out rows, otherwise they are refitted (identical values either way).
 
     Training rows get inner-cross-fitted, all-candidate elastic-net nuisances;
     held-out rows get the average of those same K inner-fold models (the
@@ -7363,6 +7564,8 @@ def estimate_outer_fold(
         checkpoint_fingerprint=final_fit_fingerprint,
         audit_dir=nuisance_audit_dir,
         candidate_heldout=candidate_heldout,
+        model_store_root=nuisance_model_store,
+        model_store_mode="load" if nuisance_model_store is not None else None,
     )
     inner_fold_ids = nuisances["inner_fold_ids"]
     raw_fit_propensity, raw_fit_mu0, raw_fit_mu1 = nuisances["raw_fit"]
@@ -7872,6 +8075,11 @@ def estimate_outer_fold(
             or (ensemble is not None and "dina" in ensemble["fitted_estimators"]),
         },
         "nuisance_fit_audit_summary": _nuisance_fit_audit_summary(nuisance_audit_dir),
+        **(
+            {"nuisance_model_store": nuisances["model_store"]}
+            if nuisance_model_store is not None
+            else {}
+        ),
         "effect_modifiers": len(effect_defs),
         "ate_aipw": ate,
         "standard_error": standard_error,
@@ -8696,7 +8904,6 @@ def run_fold_analysis(
             name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
             for name in ("stage2_nuisance_selection.py", "stage2_multi_model_selection.py")
         },
-        "modifier_count_estimation_trees": int(config.estimation_trees),
         # A completed selection must not bypass a changed ranking criterion.
         # Numerical evidence has its own independent identity and remains reusable.
         "modifier_ranking_source_sha256": hashlib.sha256(
@@ -8705,10 +8912,14 @@ def run_fold_analysis(
     }
     if statistical_policy.multi_model.modifier_selection.rule == "orthogonal_tests":
         # The AIPW projection test clips propensities exactly as the AIPW ATE does.
+        # The trees matter only to final estimation, which has its own identity.
         selection_input["modifier_test_propensity_clip"] = float(config.propensity_clip)
         selection_input["modifier_tests_source_sha256"] = hashlib.sha256(
             Path(__file__).with_name("stage2_modifier_tests.py").read_bytes()
         ).hexdigest()
+    else:
+        # The balanced_evidence count search scores causal forests of this size.
+        selection_input["modifier_count_estimation_trees"] = int(config.estimation_trees)
     if getattr(
         getattr(statistical_policy.multi_model, "matched_batch", None), "enabled", False
     ):
@@ -8902,6 +9113,7 @@ def run_fold_analysis(
                 fit_row_ids=fit_ids,
                 propensity_clip=float(config.propensity_clip),
                 tests_path=selection_dir / "modifier_tests.json",
+                nuisance_model_store=selection_dir / "nuisance_models",
             )
         measurement_definitions = measurement_definitions_for_selected(
             selected,
@@ -9213,6 +9425,8 @@ def run_fold_analysis(
         nuisance_candidate_definitions=candidate_definitions,
         nuisance_candidate_fit=modeling_fit_frame,
         nuisance_candidate_heldout=heldout_candidates,
+        # Inner-fold nuisance models stored by the modifier tests, if any.
+        nuisance_model_store=selection_dir / "nuisance_models",
     )
     # Held-out treatment labels are used here only for a descriptive
     # differential-measurement report, after effect predictions are frozen.

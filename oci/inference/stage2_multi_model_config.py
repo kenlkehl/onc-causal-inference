@@ -22,6 +22,17 @@ FAMILIES = (
 # nuisance selection reads the fold elastic-net supports, and concept review
 # prompts list effect-role rows only, so these run only when requested.
 DIAGNOSTIC_FAMILIES = ("penalized_main", "predictive_forest")
+# Families whose only products are effect-role evidence. The orthogonal_tests
+# rule chooses modifiers from its own tests, and no role, nuisance, forest W, or
+# kept output reads these, so that rule skips them (and the univariable
+# family's interaction test). balanced_evidence ranks candidates with them.
+ORTHOGONAL_TESTS_SKIPPED_FAMILIES = (
+    "penalized_interactions",
+    "orthogonal_linear",
+    "univariable_rlearner",
+    "causal_forest",
+    "dina",
+)
 EVIDENCE_FAMILY_POLICY = {
     "default_active": [
         "univariable",
@@ -36,11 +47,15 @@ EVIDENCE_FAMILY_POLICY = {
         "predictive_forest": "listed in diagnostic_families",
         "matched_batch_contrast": "matched_batch.enabled is true",
     },
+    "orthogonal_tests_skipped": list(ORTHOGONAL_TESTS_SKIPPED_FAMILIES),
     "rule": (
         "dina runs for binary outcomes only. penalized_main and predictive_forest "
         "produce treatment/outcome prediction diagnostics that no modifier ranking, "
         "nuisance selection, modifier-count, or concept-review step reads; they run "
-        "only when listed in diagnostic_families."
+        "only when listed in diagnostic_families. Under modifier_selection.rule "
+        "orthogonal_tests, the orthogonal_tests_skipped families and the univariable "
+        "interaction test are not run: modifiers come from the orthogonal tests and "
+        "nothing reads that effect evidence. Opt-in families still run when requested."
     ),
 }
 FINAL_ESTIMATORS = ("causal_forest", "linear_interactions", "dina")
@@ -351,6 +366,11 @@ class Stage2MultiModelConfig:
             result.pop("matched_batch")
         return result
 
+    @property
+    def computes_effect_evidence(self) -> bool:
+        """Whether the default effect-evidence families and interaction tests run."""
+        return self.modifier_selection.rule == "balanced_evidence"
+
     def active_families(self, outcome_type=None):
         """Evidence families fitted in each inner fold, in canonical order."""
         return tuple(
@@ -359,6 +379,7 @@ class Stage2MultiModelConfig:
             if (f != "matched_batch_contrast" or self.matched_batch.enabled)
             and (f not in DIAGNOSTIC_FAMILIES or f in self.diagnostic_families)
             and (f != "dina" or outcome_type in {None, "binary"})
+            and (f not in ORTHOGONAL_TESTS_SKIPPED_FAMILIES or self.computes_effect_evidence)
         )
 
 

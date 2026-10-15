@@ -346,6 +346,7 @@ def _select_by_orthogonal_tests(
     fit_row_ids,
     propensity_clip,
     tests_path,
+    nuisance_model_store=None,
 ):
     """BH selection on Cauchy-combined orthogonal tests; no nested count search.
 
@@ -409,6 +410,10 @@ def _select_by_orthogonal_tests(
     directory = Path(output_dir) / fingerprint[:20]
     _write_json(directory / "input.json", {**identity, "input_fingerprint": fingerprint})
     tests_path = Path(tests_path) if tests_path is not None else Path(output_dir) / "modifier_tests.json"
+    nuisance_model_store = (
+        Path(nuisance_model_store) if nuisance_model_store is not None
+        else Path(output_dir) / "nuisance_models"
+    )
 
     def compute():
         # The exact frame the final estimation aligns for its nuisance candidates.
@@ -429,6 +434,9 @@ def _select_by_orthogonal_tests(
             checkpoint_dir=directory / "testing_nuisances",
             checkpoint_fingerprint=fingerprint,
             audit_dir=directory / "testing_nuisance_fit_audits",
+            # The final estimation reuses these inner-fold models for held-out rows.
+            model_store_root=nuisance_model_store,
+            model_store_mode="save",
         )
         e, mu0, mu1 = nuisances["recalibrated"]["fit"]
         t, y = nuisances["treatment"], nuisances["outcome"]
@@ -532,6 +540,7 @@ def _select_by_orthogonal_tests(
             "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
             "seed_offset": analysis.FINAL_NUISANCE_SEED_OFFSET,
             "predictions_path": str(nuisance_path),
+            "model_store": nuisances["model_store"],
             "recalibration": nuisances["recalibrated"]["audit"],
             "fit_audit_summary": analysis._nuisance_fit_audit_summary(
                 directory / "testing_nuisance_fit_audits"
@@ -640,12 +649,14 @@ def select_modifier_count(
     fit_row_ids=None,
     propensity_clip=DEFAULT_PROPENSITY_CLIP,
     tests_path=None,
+    nuisance_model_store=None,
 ):
     """Select modifiers (and the final estimator), preserving each nuisance task's support.
 
     ``fit_row_ids`` is the outer split's training-row order (the order the final
-    estimation uses); ``tests_path`` receives ``modifier_tests.json`` under
-    ``orthogonal_tests``.
+    estimation uses); ``tests_path`` receives ``modifier_tests.json`` and
+    ``nuisance_model_store`` the inner-fold testing-nuisance models (reused by
+    the final estimation) under ``orthogonal_tests``.
     """
     policy.validate()
     cfg = policy.multi_model.modifier_count
@@ -699,6 +710,7 @@ def select_modifier_count(
             fit_row_ids=fit_row_ids,
             propensity_clip=propensity_clip,
             tests_path=tests_path,
+            nuisance_model_store=nuisance_model_store,
         )
 
     identity = {

@@ -136,12 +136,16 @@ outer-training extraction with aggregate review and failure-driven definition
 refinement → informativeness and extraction-failure filter
 (`min_informative_patients`, `max_extraction_failure_fraction`) → optional
 estimand search and selection consolidation → resampled evidence families and
-predictive nuisance selection → modifier selection by `orthogonal_tests` (the
-default: training-row final-estimation nuisances; `r_projection`,
+predictive nuisance selection (under `orthogonal_tests` only the nuisance
+models and the univariable treatment/outcome associations run; the effect-only
+families are skipped) → modifier selection by `orthogonal_tests` (the
+default: training-row final-estimation nuisances, whose inner-fold models are
+stored in `selection/nuisance_models/` for reuse; `r_projection`,
 `aipw_projection`, and `outcome_interaction` tests per candidate; Cauchy
 combination; BH at `modifier_selection.q`) → held-out extraction of the full
-nuisance-candidate catalog → final refit with recalibrated nuisances of the
-estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
+nuisance-candidate catalog → final refit with recalibrated nuisances (the
+stored inner-fold models score the held-out rows when their fingerprint
+verifies) of the estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
 and `dina` for binary outcomes) → cross-fitted predictions, AIPW ATE, and
 `heterogeneity_diagnostics.json`, including the reporting-only outer-fold
 confirmation of the selected modifiers. `modifier_selection.rule:
@@ -157,7 +161,9 @@ Configuration rules:
 - `run_config.json` redacts API keys; Stage 2 checks model identity
   (`stage2/model_identity.json`) and selection policy on resume. Selection or
   estimation policy changes on a completed run go through
-  `--stage2-only --stage2-reselect`.
+  `--stage2-only --stage2-reselect`; under `orthogonal_tests`,
+  `estimation_trees` is not part of the selection identity, so changing it
+  refits only the final estimation.
 - Diagnostic evidence families (`multi_model.diagnostic_families`) and
   matched-batch evidence are opt-in and do not drive selection.
 - Outer-fold confirmation (`modifier_confirmation` in

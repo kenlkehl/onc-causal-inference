@@ -245,9 +245,14 @@ point; see [Optional extensions](optional_extensions.md).
 
 ### 7. Build statistical evidence about every candidate
 
-This is the first large CPU phase. Within each inner split, several
+This is the first large CPU phase. Within each inner split, cross-fitted
+elastic-net nuisance models are fitted (step 8 reads their supports), and the
+univariable family tests every candidate's association with treatment and with
+the outcome. Under the default `orthogonal_tests` modifier rule nothing else
+runs here, because the step 9 tests choose the modifiers and nothing reads
+further effect evidence. Under `balanced_evidence`, several more
 [evidence families](glossary.md#evidence-family) score every candidate's
-relation to treatment, outcome, and treatment-effect variation:
+relation to treatment-effect variation:
 
 - a conventional treatment-by-candidate interaction test, adjusted for
   cross-fitted propensity and outcome predictions, with
@@ -263,8 +268,7 @@ outer-training patients, over row subsamples, and over random subsets of about
 32 candidates, so each candidate is assessed in several covariate contexts.
 Whole-model gains over a constant effect are recorded alongside per-candidate
 importance, because an importance score from a model that does not generalize
-is weak evidence. Under the default modifier rule this effect evidence is
-recorded for audit, and the step 9 tests choose the modifiers. See
+is weak evidence. See
 [Stage 2 selection](stage2_selection.md#evidence-families-and-resampling).
 
 ### 8. Select nuisance-model inputs
@@ -331,8 +335,11 @@ five inner folds; each training patient gets the prediction of the model that
 did not see it, and each held-out patient gets the average of the five models'
 predictions. The propensity and, for binary outcomes, both arm-specific outcome
 predictions are then Platt-recalibrated using calibrators learned from training
-predictions only. The training predictions equal those used by the step 9
-tests. These predictions drive eligibility, the AIPW scores, the DINA offsets,
+predictions only. Under `orthogonal_tests` the step 9 tests already fitted
+these five models and stored them, so they are reused (after a fingerprint and
+file-hash check) to score the held-out patients instead of being refitted; the
+training predictions equal those used by the tests. These predictions drive
+eligibility, the AIPW scores, the DINA offsets,
 the interaction model's adjustment covariates, the forest's prognostic score,
 and the diagnostics. See
 [Stage 2 selection](stage2_selection.md#nuisance-construction).
