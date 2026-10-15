@@ -2,51 +2,102 @@
 
 ## Purpose
 
-OCI implements a science-first, multi-model causal-text workflow:
+OCI (Oncology Causal Inference) estimates treatment effects from clinical text
+with a two-stage, science-first workflow:
 
-1. Stage 1 produces frozen evidence from ten independent architectures.
-2. A versioned plain handoff exposes only the selected architectures.
-3. Stage 2 reviews and consolidates evidence before structured estimation.
-4. Post-hoc evaluation compares each frozen Stage 1 architecture with oracle
-   truth without allowing oracle information into discovery or fitting.
+1. **Stage 1** fits up to ten independent text-model architectures on each
+   outer training fold and freezes their evidence (which parts of the record
+   relate to treatment, outcome, or treatment-effect variation).
+2. A **handoff** (`handoff/evidence.jsonl`) passes only the selected
+   architectures' evidence to Stage 2.
+3. **Stage 2** turns the evidence into named variables with an interpretation
+   LLM, extracts them from every patient's text with an extraction LLM, selects
+   confounders and effect modifiers with the deterministic `multi_model`
+   procedure, and estimates CATEs and the AIPW ATE on outer held-out patients.
+4. **Post-hoc evaluation** compares frozen outputs with oracle truth on
+   synthetic data without letting oracle columns reach discovery or fitting.
 
-The supported production entry point is `scripts/run_all_evidence.py`. The
-`oci run` compatibility command is retained only for explicit-feature
-workflows.
+User documentation: `README.md` (entry point) and `docs/` — `glossary.md`,
+`how_it_works.md`, `stage1_architectures.md`, `stage2_selection.md`,
+`configuration.md`, `serving.md`, `optional_extensions.md`,
+`synthetic_data.md`, and `design_notes/`.
 
-## Retained package structure
+## Entry points
+
+| Command | Code | Purpose |
+|---|---|---|
+| `python scripts/run_all_evidence.py` | `oci/inference/research_all_evidence_workflow.py` (`build_parser`, `main`) | Run, resume, or relaunch the all-evidence workflow (29 flags; everything else via `--set KEY=VALUE`) |
+| `./run_synthetic.sh COHORT [OUT]` | `run_synthetic.sh`, `scripts/presets/{external,h100x8,rtxpro6000x8}.env` | Run a bundled synthetic cohort with a serving preset |
+| `oci-evaluate-stage1` | `oci/evaluation/stage1.py` | Oracle-safe evaluation of frozen Stage 1 architectures |
+| `python scripts/run_stage2_from_artifacts.py` | same name | Stage 2 in a separate directory from a preserved handoff and split file (external endpoints only) |
+| `oci run`, `oci init` | `oci/cli.py`, `oci/experiments/runner.py`, `oci/inference/applied.py` | Standalone explicit-feature workflows |
+| `python -m synthetic_data.cli` | `synthetic_data/` | Synthetic cohort generator |
+
+Helper scripts: `scripts/detect_all_evidence_hardware.py` (GPU and worker
+sizing for `run_synthetic.sh`) and `scripts/configure_local_cuda.py` (exposes
+the `local-llm` CUDA toolkit inside `.venv` for vLLM).
+
+## Package map
 
 ```text
 oci/
-├── config.py                         # Stage 1 and explicit-feature configuration
-├── evaluation/stage1.py              # Oracle-safe architecture evaluation
-├── extraction/                       # Explicit-feature extraction contracts
-├── inference/
-│   ├── research_all_evidence_workflow.py
-│   ├── multi_model_forest_stage1.py
-│   ├── stage1_architectures.py
-│   ├── stage1_architecture_artifacts.py
-│   ├── plain_handoff_stage2.py
-│   ├── vllm_server_pool.py
-│   ├── plain_handoff_stage2_evidence.py
-│   ├── all_evidence_fusion.py
-│   ├── tfidf_topic_stage1.py
-│   ├── embedding_contrast_discovery.py
-│   ├── neural_query_discovery_runtime.py
-│   └── agentic_explicit_feature_forest.py
+├── config.py                         # Stage 1 template and `oci run` dataclasses (ExperimentConfig)
+├── cli.py                            # `oci init`, `oci run`
+├── evaluation/stage1.py              # oci-evaluate-stage1
+├── extraction/                       # `oci run` extraction: explicit_features, complete_paged,
+│                                     #   contract_lexical_context, llm_routing, cache
 ├── models/
-│   ├── causal_forest_head.py
-│   ├── elastic_net_nuisance.py
-│   ├── hierarchical_transformer_extractor.py
-│   ├── concept_embedding_cache.py
-│   ├── explicit_feature_featurizer.py
-│   └── structured_interaction_head.py
-└── utils/
+│   ├── causal_forest_head.py         # CausalForestDML wrapper with elastic-net nuisances
+│   ├── elastic_net_nuisance.py       # Clone-safe elastic-net nuisance estimators and fit audits
+│   ├── dina.py                       # Gao–Hastie Bernoulli DINA objectives
+│   ├── hierarchical_transformer_extractor.py   # HTR model
+│   ├── concept_embedding_cache.py    # Chunk embedding cache (Stage 1)
+│   └── explicit_feature_featurizer.py          # `oci run` featurization
+├── utils/calibration.py              # Platt recalibration of nuisance predictions
+└── inference/
+    │ # Workflow and Stage 1
+    ├── research_all_evidence_workflow.py   # Components, config compilation, resume, reselection
+    ├── stage1_architectures.py       # Canonical registry and selector semantics
+    ├── stage1_architecture_artifacts.py    # Per-architecture views for explicit selections
+    ├── stage1_checkpointing.py       # Per-context Stage 1 checkpoints
+    ├── multi_model_forest_stage1.py  # BoW, HTR, embedding, matched-pair text models per context
+    ├── htr_trainer.py, htr_evidence_provider.py, multi_model_pair_uplift.py, stage1_dina.py
+    ├── sparse_text_modeling.py, stage1_modeling_support.py   # Shared Stage 1 modeling primitives
+    ├── embedding_contrast_discovery.py     # Embedding contrasts (whole-cohort, clustered, retrieval)
+    ├── tfidf_topic_stage1.py, tfidf_topic_discovery.py, tfidf_topic_score_selection.py
+    │                                 # TF-IDF topics and orphan n-grams; writes split_provenance.jsonl
+    ├── neural_query_agentic_forest.py, neural_query_discovery_runtime.py, neural_cohort_witness.py
+    │ # Stage 2
+    ├── plain_handoff_stage2.py       # Stage 2 config, LLM transport, managed-pool orchestration,
+    │                                 #   evidence interpretation, consolidation, definitions, run loop
+    ├── plain_handoff_stage2_evidence.py    # Handoff → evidence cards (uses all_evidence_fusion.py)
+    ├── plain_handoff_stage2_analysis.py    # Extraction, aggregate review and refinement, filters,
+    │                                 #   selection driver, held-out extraction, final estimation
+    ├── stage2_multi_model_config.py, stage2_elastic_net_selection.py   # Selection policy (config)
+    ├── stage2_multi_model_selection.py     # Resampled evidence families, predictive nuisance selection
+    ├── stage2_modifier_ranking.py, stage2_modifier_count.py   # Modifier ranking, budget/estimator choice
+    ├── stage2_nuisance_selection.py, stage2_statistical_selection.py, stage2_interaction_screen.py
+    ├── stage2_effect_estimators.py, stage2_dina.py, stage2_final_modeling.py   # Final effect models
+    ├── stage2_diagnostics.py         # Oracle-free BLP, GATES, CLAN, RATE, ATO, trimming, SMDs
+    ├── stage2_extraction_failures.py # Extraction-failure masks and reports
+    ├── nuisance_diagnostics.py       # Held-out nuisance diagnostics, overlap policy
+    ├── stage2_estimand_ontology*.py, stage2_modifier_concepts.py, stage2_multi_model_adjudication.py,
+    │   stage2_matched_batch.py, stage2_sequential_consolidation.py   # Optional extensions
+    ├── stage2_sampling.py, stage2_endpoint_pool.py, stage2_concurrency.py, vllm_server_pool.py
+    │                                 # Sampling profiles, extraction routing, live limits, managed vLLM
+    ├── stage2_preflight.py           # Read-only Stage 2-only validation
+    ├── stage2_prompt_catalog.py, stage2_clinical_prompts.py, stage2_request_audit.py, ...
+    │ # `oci run`
+    └── applied.py, applied_explicit_feature_forest.py, agentic_explicit_feature_forest.py,
+        agentic_attention_variable_forest.py, multi_model_agentic_forest.py
 ```
 
-The repository intentionally does not ship the retired DragonNet pipeline,
-single-representation neural heads, CNN/GRU/slot extractors, generic hidden-
-state cache, post-hoc matching package, or standalone TF-IDF forest wrapper.
+Stage 1 uses `htr_trainer.py` and `sparse_text_modeling.py` and never imports
+the `oci run` agentic runners (`tests/test_import_boundaries.py` enforces
+this). The dependency runs the other way: `AgenticAttentionVariableForestRunner`
+subclasses `HTRTrainer`, so changes to `htr_trainer.py` affect both Stage 1 and
+`oci run`. `stage2_role_adjudication.py` holds only prompt-bounding limits and
+JSON helpers; roles come from statistical selection.
 
 ## Stage 1 architectures
 
@@ -63,55 +114,107 @@ The canonical order in `oci/inference/stage1_architectures.py` is:
 9. `tfidf_orphan_ngrams`
 10. `neural_query_moments`
 
-When `stage1_architectures` is omitted, all ten run in canonical order for
-backward compatibility. An explicit selector is frozen into run state and may
-not change on resume. Private prerequisites may run, but only selected lanes
-may enter the Stage 2 handoff.
+When `science.stage1_architectures` (`--architectures`) is omitted, the
+architectures enabled by the Stage 1 template's switches run: eight with the
+bundled template (all except `tfidf_semantic_retrieval_contrasts`
+and `tfidf_orphan_ngrams`), seven for continuous outcomes because
+`matched_pair_uplift` is skipped. `all` selects all ten and is rejected for
+continuous outcomes, where `matched_pair_uplift` is unavailable. An explicit
+selection is recorded in `stage1_architectures/manifest.json` and cannot change
+on resume. Private prerequisites (for example BoW nuisance fits for embedding
+architectures) may run, but only selected architectures enter the handoff.
+Keep the omitted-selector path's behavior unchanged.
+
+## Stage 2
+
+`multi_model` is the only selection mode and the default. Per outer fold:
+evidence cards → interpretation → candidate merging → extraction definitions →
+outer-training extraction with aggregate review and failure-driven definition
+refinement → informativeness and extraction-failure filter
+(`min_informative_patients`, `max_extraction_failure_fraction`) → optional
+estimand search and selection consolidation → resampled evidence families and
+predictive nuisance selection → modifier ranking and `balanced_evidence`
+budget/estimator choice (`causal_forest`, `linear_interactions`, `dina`) →
+held-out extraction of the full nuisance-candidate catalog → final refit with
+recalibrated nuisances → cross-fitted predictions, AIPW ATE, and
+`heterogeneity_diagnostics.json`. Details: `docs/how_it_works.md` and
+`docs/stage2_selection.md`.
+
+Configuration rules:
+
+- Unknown keys under `stage2` are errors (`_reject_unknown_stage2_keys`).
+- Stage 2 requires the frozen split file
+  `components/tfidf/split_provenance.jsonl` and never resamples folds.
+- `run_config.json` redacts API keys; Stage 2 checks model identity
+  (`stage2/model_identity.json`) and selection policy on resume. Selection or
+  estimation policy changes on a completed run go through
+  `--stage2-only --stage2-reselect`.
+- Diagnostic evidence families (`multi_model.diagnostic_families`) and
+  matched-batch evidence are opt-in and do not drive selection.
 
 ## Scientific invariants
 
-- Never use oracle columns during discovery, fitting, selection, or handoff
-  construction.
-- Final Stage 2 role prompts may contain only the allowlisted aggregate evidence
-  bundle. Never add dataset paths/names, synthetic-generation metadata, known
-  data-generating roles, row values, identifiers, or outer-heldout information.
+- Never use oracle columns (`true_*`, `oracle_*`, `ground_truth*`) during
+  discovery, extraction, fitting, selection, or handoff construction. Join them
+  only after predictions are frozen and hashed.
 - Hash frozen Stage 1 artifacts before loading oracle data for evaluation.
-- Keep outer-test rows unavailable to inner-fold discovery and review.
+- Keep outer held-out rows unavailable to inner-fold discovery, review,
+  selection, and definition search.
+- LLM prompts never contain dataset paths or names, synthetic-generation
+  metadata, known data-generating roles, identifiers, or outer held-out
+  information. Prompts that see selection evidence (concept review) accept only
+  the allowlisted aggregate evidence bundle.
 - Preserve exact row, split, component, architecture, and configuration
   provenance in sidecars.
 - Fail closed when text capacity would truncate semantic content.
-- Keep causal-forest nuisance models elastic-net-only, and retain fitted-clone
-  audit records for selected regularization and optimizer iteration limits.
-- Do not silently change the omitted-selector legacy path.
+- Keep causal-forest nuisance models and the final Stage 2 nuisance models
+  elastic-net-only, and keep the fitted-clone audit records of the selected
+  regularization and optimizer iteration limits.
+- Estimand-informed definition search uses outcome information to choose
+  definitions; keep it opt-in and training-only.
 
 ## Explicit-feature functionality
 
 Explicit-feature extraction and modeling are supported and must not be removed
-as incidental cleanup. Retained standalone model types are:
+as incidental cleanup. The standalone `oci run` model types are:
 
 - `explicit_feature_forest`
 - `agentic_explicit_feature_forest`
 - `agentic_attention_variable_forest`
 - `multi_model_agentic_forest`
 
-Feature contracts are role-aware. Use `roles: ["confounder"]`,
-`roles: ["effect_modifier"]`, or both. Preserve complete-note paging,
-citation validation, extraction caching, post-extraction review, and the
-explicit-feature featurizers.
+Feature contracts are role-aware: `roles: ["confounder"]`,
+`roles: ["effect_modifier"]`, or both. Preserve the extraction strategies
+(`full_record`, `complete_paged_v1`, `contract_lexical_rag`, `tail`),
+complete-note paging and citation validation, extraction caching, the
+`multi_model_agentic_forest` extracted-feature review, and the explicit-feature
+featurizers. Stage 2 also accepts investigator-specified variables through
+`stage2.explicit_features`; their definitions and roles are locked.
 
 ## Common commands
 
 ```bash
-# Full or resumed Stage 1 → Stage 2 workflow
-python scripts/run_all_evidence.py --config example_configs/research_all_evidence.json
+# Install (add --extra local-llm for managed vLLM pools)
+uv sync --frozen
 
-# Select a subset of Stage 1 architectures
-python scripts/run_all_evidence.py --config example_configs/research_all_evidence.json \
-  --architectures bow_nuisance,tfidf_topics
+# Full or resumed workflow on your cohort
+python scripts/run_all_evidence.py --config example_configs/research_all_evidence_multi_model.json
 
-# Evaluate frozen Stage 1 outputs
-python scripts/evaluate_stage1_architectures.py \
-  --run-dir artifacts/research_all_evidence --architectures all
+# Stage 1 only, or a subset of architectures
+python scripts/run_all_evidence.py --config CONFIG.json --stage1-only
+python scripts/run_all_evidence.py --config CONFIG.json --architectures bow_nuisance,tfidf_topics
+
+# Progress, Stage 2-only relaunch, preflight, guarded reselection
+python scripts/run_all_evidence.py --config OUT/run_config.json --status
+python scripts/run_all_evidence.py --config OUT/run_config.json --stage2-only --preflight-only
+python scripts/run_all_evidence.py --config OUT/run_config.json --stage2-only --stage2-reselect
+
+# Bundled synthetic cohorts
+./run_synthetic.sh one_conf_one_mod
+PRESET=h100x8 ./run_synthetic.sh five_conf_five_mod /path/to/output
+
+# Evaluate frozen Stage 1 outputs against oracle columns
+oci-evaluate-stage1 --run-dir OUT --architectures all
 
 # Standalone explicit-feature workflow
 oci run --config example_configs/agentic_explicit_feature_forest_config.json
@@ -125,11 +228,16 @@ pytest -q
 When changing Stage 1 or Stage 2:
 
 1. Update the canonical registry if architecture identity changes.
-2. Preserve or deliberately version handoff and artifact schemas.
+2. Preserve or deliberately version handoff, checkpoint, and artifact schemas.
 3. Test omitted, subset, resume, and missing-artifact behavior.
 4. Add architecture-native evaluation metrics without refitting.
-5. Verify lightweight imports do not initialize retired or optional runners.
-6. Run `git diff --check`, focused tests, the full suite, and package build.
+5. Verify lightweight imports do not initialize optional runners
+   (`tests/test_import_boundaries.py`).
+6. Keep CLI flags, config keys, defaults, and output names in
+   `docs/configuration.md` in step with the code.
+7. Run `git diff --check`, focused tests, the full suite, and a package build.
 
-More detail is in `docs/all_evidence_workflow.md` and
-`docs/all_evidence_quickstart.md`.
+**Documentation rule:** README.md and CLAUDE.md must stay in sync. When a
+change affects user-visible behavior, update README.md and the relevant page in
+`docs/` together with this file. Documentation describes current behavior only,
+without change-log language.
