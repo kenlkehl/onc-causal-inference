@@ -6688,11 +6688,20 @@ class PlainHandoffStage2:
             # from the frozen predictions and per-fold artifacts. Never raises.
             from .stage2_diagnostics import write_heterogeneity_diagnostics
 
+            modifier_selection = self.config.statistical_selection.multi_model.modifier_selection
             heterogeneity_path, heterogeneity_summary = write_heterogeneity_diagnostics(
                 output_dir=output_dir,
                 predictions=predictions,
                 propensity_clip=float(self.config.propensity_clip),
                 seed=seed,
+                # Reporting only: held-out confirmation of each fold's selected
+                # modifiers, computed after every prediction is frozen.
+                modifier_confirmation_policy={
+                    "outcome_type": outcome_type,
+                    "q": modifier_selection.q,
+                    "weights": modifier_selection.weights,
+                    "min_count": self.config.statistical_selection.categorical_min_count,
+                },
             )
             causal_estimate = {
                 "estimator": "cross-fitted_aipw_with_fold_trained_nuisance_models",

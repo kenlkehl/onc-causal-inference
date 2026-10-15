@@ -83,7 +83,8 @@ $$
 \Big[\big(Y_i - \hat m(X_i)\big) - \big(T_i - \hat e(X_i)\big)\,\hat\tau(X_i)\Big]^2 .
 $$
 
-Lower is better. OCI uses validation R-loss to compare effect models that have
+Lower is better. OCI uses validation R-loss in its evidence families and, under
+the `balanced_evidence` modifier rule, to compare effect models that have
 different internal objectives (causal forest, penalized interaction model, DINA)
 on a common scale. For binary outcomes, `τ̂` is a risk difference.
 
@@ -158,8 +159,39 @@ outcomes.
 
 A Benjamini–Hochberg adjusted p-value. Among all tests with `q ≤ 0.10`, the
 expected fraction of false discoveries is at most 10% when the tests' p-values
-are valid. OCI computes q-values within each resample and endpoint and uses them
-as graded evidence, never as a hard inclusion gate.
+are valid. The default modifier rule selects candidates whose combined test has
+`q ≤ modifier_selection.q` (default 0.10). In the evidence families, q-values are
+computed within each resample and endpoint and used as graded evidence, never
+as a hard inclusion gate.
+
+### R-learner projection
+
+A test of whether a candidate `Z` explains variation in the treatment effect on
+the absolute scale: ordinary least squares of `Y − m̂` on
+`[(T − ê), (T − ê)·Z]` with cross-fitted nuisances, and a Wald test of the
+`(T − ê)·Z` coefficients with HC3 standard errors. Patients weigh in proportion
+to `(T − ê)²`, so the test emphasizes patients with substantial uncertainty in
+their treatment assignment (overlap-weighted). It is the `r_projection`
+component of the default modifier tests; see
+[Stage 2 selection](stage2_selection.md#component-tests).
+
+### AIPW projection
+
+A test of whether a candidate `Z` predicts the [AIPW](#aipw) score `ψ`:
+ordinary least squares of `ψ` on `[1, Z]` and a Wald test of the `Z`
+coefficients with HC3 standard errors (a DR-learner projection; Semenova and
+Chernozhukov 2021). Every patient weighs equally (population-weighted), so
+patients with extreme propensities can dominate. It is the `aipw_projection`
+component of the default modifier tests.
+
+### Cauchy combination
+
+A way to merge several p-values for the same hypothesis (Liu and Xie, *JASA*
+2020): `T = Σ_k w_k tan{(0.5 − p_k)π}` with weights summing to 1, and combined
+`p = 0.5 − arctan(T)/π`. It is exact when the p-values are independent and
+remains accurate for small p-values under arbitrary dependence. OCI combines
+its three modifier-test components this way; see
+[Stage 2 selection](stage2_selection.md#cauchy-combination).
 
 ### BLP, GATES, CLAN, and RATE
 
@@ -303,9 +335,22 @@ adjusted interaction test or the causal-forest permutation importance. See
 
 ### Modifier budget
 
-The number of top-ranked candidates, beyond any investigator-locked modifiers,
-given the effect-modifier role. Stage 2 chooses it from a configured list
-(`0, 4, 8, 12, 16, 24, 32` plus the full shortlist, capped at 64).
+Under the `balanced_evidence` modifier rule, the number of top-ranked
+candidates, beyond any investigator-locked modifiers, given the effect-modifier
+role. Stage 2 chooses it from a configured list (`0, 4, 8, 12, 16, 24, 32` plus
+the full shortlist, capped at 64). The default `orthogonal_tests` rule has no
+budget: the number of modifiers is the number of Benjamini–Hochberg
+discoveries, capped at `modifier_selection.max_modifiers`.
+
+### Outer-fold confirmation
+
+Re-testing each outer fold's selected modifiers on that fold's held-out
+patients, with the same component tests and Cauchy combination as the training
+selection and Benjamini–Hochberg within the fold's selected set. Because the
+held-out patients took no part in selection, the tests are valid conditional on
+it. The confirmation is reported in `stage2/heterogeneity_diagnostics.json`
+and never feeds back into selection or estimation; see
+[Stage 2 selection](stage2_selection.md#outer-fold-confirmation).
 
 ### Fresh run and saved run
 

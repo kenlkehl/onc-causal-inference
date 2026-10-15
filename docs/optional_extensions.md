@@ -10,7 +10,7 @@ terms are defined in the [glossary](glossary.md).
 | Feature | Configuration | Default | In the multi-model example configuration | Extra LLM requests | Uses treatment or outcome |
 |---|---|---|---|---|---|
 | [Estimand-informed ontology search](#estimand-informed-ontology-search) | `stage2.estimand_ontology.enabled` | off | off | yes, plus extraction | yes, to choose definitions |
-| [Modifier-concept review](#modifier-concept-review) | `stage2.statistical_selection.multi_model.modifier_count.concept_review` | off | off | yes | aggregate statistics only |
+| [Modifier-concept review](#modifier-concept-review) | `stage2.statistical_selection.multi_model.modifier_count.concept_review`, with `modifier_selection.rule` set to `balanced_evidence` | off | off | yes | aggregate statistics only |
 | [Matched-batch contrast evidence](#matched-batch-contrast-evidence) | `stage2.statistical_selection.multi_model.matched_batch.enabled` | off | on | no | yes, in reported evidence only |
 | [Pre-selection measurement consolidation](#pre-selection-measurement-consolidation) | `stage2.selection_consolidation.enabled` | off | on | yes | no |
 | [Standalone `oci run` workflows](#standalone-explicit-feature-workflows-oci-run) | separate command and configuration | — | — | — | — |
@@ -19,7 +19,7 @@ All four Stage 2 features run within each outer fold on outer-training patients
 only; outer held-out patients and oracle columns are never used. Within a fold
 they run in this order: extraction and the informativeness filter, estimand
 search, selection consolidation, multi-model evidence (including matched-batch
-evidence), and the modifier-budget search (including concept review). Turning
+evidence), and modifier selection (including concept review). Turning
 any of them on or off changes the selection checkpoint identity, so on a
 completed run use [guarded reselection](configuration.md#guarded-reselection).
 
@@ -70,8 +70,9 @@ window.
 and the acceptance decision. The LLM never sees them, but the definitions that
 survive are chosen partly because they improve outcome-based losses on the
 outer-training patients. This is a supervised, data-adaptive step. The inner
-folds used here are also used later for selection evidence and the
-modifier-budget comparison, so those inner-fold comparisons are optimistic for
+folds used here are also used later for selection evidence and, under
+`balanced_evidence`, the modifier-budget comparison, so those inner-fold
+comparisons are optimistic for
 runs that use the search; only the outer held-out predictions evaluate the
 whole procedure honestly.
 
@@ -119,6 +120,11 @@ detection of heterogeneity.
 groups the top-ranked effect-modifier candidates into clinical concepts and
 nominates representative measurements, so that several redundant measurements
 of one concept do not use up the modifier budget.
+
+Concept review works only with the `balanced_evidence` modifier rule, whose
+nested per-fold rankings it groups. Enabling it requires
+`multi_model.modifier_selection.rule: "balanced_evidence"`; with the default
+`orthogonal_tests` rule the configuration is rejected.
 
 1. For each evidence fold (inner fold × stability partition), Python ranks the
    modifier candidates and takes the top `concept_top_n_per_fold`, then counts
@@ -222,7 +228,8 @@ mainly together with concept review or for auditing selection.
 | `ridge_penalty` | 0.01 | Ridge penalty |
 
 **Caveats.** It uses CPU only and makes no LLM requests, but it is computed in
-every evidence resample and again within each modifier-budget validation split.
+every evidence resample and, under `balanced_evidence`, again within each
+modifier-budget validation split.
 Enabling it changes the evidence checkpoint identity, so all multi-model
 evidence is recomputed.
 

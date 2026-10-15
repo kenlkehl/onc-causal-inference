@@ -32,8 +32,9 @@ the [glossary](glossary.md). The statistical details of Stage 2 selection are in
 >   `./run_synthetic.sh` uses: no propensity eligibility bounds, the optional
 >   pre-selection measurement consolidation off, matched-batch evidence off,
 >   estimand-informed ontology search off, and modifier-concept review off.
->   All three final effect models (causal forest, penalized interaction model,
->   DINA) compete.
+>   Effect modifiers are selected by the default `orthogonal_tests` rule, and
+>   all three final effect models (causal forest, penalized interaction model,
+>   DINA) are fitted and averaged.
 > - The example configuration
 >   `example_configs/research_all_evidence_multi_model.json` differs in three
 >   scientific settings: it sets propensity eligibility bounds of 0.1 to 0.9,
@@ -62,14 +63,14 @@ pipeline is run separately:
 |---|---:|---|
 | Outer training set | 800 | Everything for this fold: Stage 1 evidence, variable discovery, extraction refinement, selection, and model fitting |
 | Outer held-out set | 200 | Receives the fold's final effect predictions |
-| One inner training partition | 640 | Fits candidate models and builds a ranking of candidate modifiers |
-| Its inner validation partition | 160 | Scores those candidate models |
+| One inner training partition | 640 | Fits the evidence models and the cross-fitted nuisance models (and, under the alternative `balanced_evidence` rule, a modifier ranking and candidate effect models) |
+| Its inner validation partition | 160 | Scores the evidence models and receives out-of-fold nuisance predictions |
 | Subfolds of the 640 | 3 × about 213 | Cross-fitting and penalty tuning inside an inner training partition |
 
 Every patient is in exactly one outer held-out set, so the pooled predictions
 cover the whole cohort once. Different outer folds can discover different
-variables and choose different final models; this variation is itself
-informative about stability.
+variables and select different modifiers; this variation is itself informative
+about stability.
 
 **What each outer fold may use.** Everything before the final prediction step
 uses only the outer-training patients: evidence compilation and variable
@@ -147,9 +148,9 @@ held-out estimates.
 ```text
 handoff ─► 1 evidence cards ─► 2 candidate discovery ─► 3 merge + define
         ─► 4 extract (training) ─► 5 review, refine, harmonize ─► 6 informativeness filter
-        ─► 7 statistical evidence ─► 8 nuisance inputs ─► 9 modifier ranking + model choice
+        ─► 7 statistical evidence ─► 8 nuisance inputs ─► 9 modifier tests + estimator policy
         ─► 10 extract (held-out) ─► 11 final nuisances ─► 12 refit + predict
-        ─► 13 pooled ATE, diagnostics, oracle comparison
+        ─► 13 pooled ATE, diagnostics, confirmation, oracle comparison
 ```
 
 ### 1. Compile the evidence into cards
@@ -262,7 +263,8 @@ outer-training patients, over row subsamples, and over random subsets of about
 32 candidates, so each candidate is assessed in several covariate contexts.
 Whole-model gains over a constant effect are recorded alongside per-candidate
 importance, because an importance score from a model that does not generalize
-is weak evidence. See
+is weak evidence. Under the default modifier rule this effect evidence is
+recorded for audit, and the step 9 tests choose the modifiers. See
 [Stage 2 selection](stage2_selection.md#evidence-families-and-resampling).
 
 ### 8. Select nuisance-model inputs
@@ -276,29 +278,44 @@ roles decide which variables enter the final effect models as adjustment
 covariates (the forest's W and the interaction model's main effects); the
 nuisance predictions themselves always use the complete catalog (step 11).
 
-### 9. Rank candidate modifiers and choose the model
+### 9. Test candidate modifiers and set the estimator policy
 
-For each of the five inner splits, the pipeline rebuilds the step 7 evidence
-using only that split's 640 training patients and ranks the candidates by a
-fixed formula that combines the adjusted interaction tests with the predictive
-evidence. Rebuilding is necessary because a ranking built from all 800 patients
-would already have seen the outcomes of the 160 validation patients.
+The modifier tests use the training half of the step 11 nuisance construction,
+computed at this point because it needs no held-out measurements: each of the
+800 outer-training patients receives a recalibrated propensity and arm-specific
+outcome predictions from the inner-fold model that did not see that patient.
+The final estimation later reproduces exactly these training values.
 
-The pipeline then fits each of three effect models (a causal forest, a
-penalized interaction outcome model, and a DINA model) using the top 0, 4, 8,
-12, 16, 24, or 32 candidates of that split's ranking (plus the full shortlist,
-capped at 64) as modifiers. It scores every combination by validation R-loss on
-the 160 validation patients. Among combinations whose R-loss is within one
-paired standard error of the best, it picks the modifier count with the
-strongest repeated support from the interaction tests, and at that count the
-best-fitting model. Zero modifiers is a valid outcome and does not force a zero
-treatment effect.
+Each candidate, with its categorical levels, "not documented" indicator, and
+extraction-failure indicator tested jointly, receives three p-values:
 
-Finally, a ranking built from all 800 outer-training patients supplies the
-chosen number of top candidates as the fold's effect modifiers. The exact rule
-is in [Stage 2 selection](stage2_selection.md#modifier-count-and-model-selection).
-This nested comparison holds the catalog, extractions, and definitions fixed; it
-does not repeat discovery inside each inner split.
+- **R-learner projection** (`r_projection`): does the candidate explain
+  variation in the risk-difference effect, weighting patients by how uncertain
+  their treatment assignment was?
+- **AIPW projection** (`aipw_projection`): does the candidate predict each
+  patient's doubly robust effect score, weighting all patients equally?
+- **Adjusted interaction test** (`outcome_interaction`): does the candidate
+  interact with treatment in a logistic outcome model (on the odds-ratio scale;
+  an additive model for continuous outcomes)?
+
+A weighted [Cauchy combination](glossary.md#cauchy-combination) merges the
+three p-values (half the weight on the two risk-difference tests and half on
+the odds-ratio test for binary outcomes), and Benjamini–Hochberg is applied
+across candidates. Candidates with q-values of at most 0.10 become the fold's
+effect modifiers, ordered by p-value and capped at 64; investigator-specified
+modifiers are always included. Zero modifiers is a valid outcome and does not
+force a zero treatment effect. Each selected modifier is labeled by the scales
+on which it is supported (`absolute`, `multiplicative`, or `combined_only`).
+
+The estimator policy is the ensemble: in step 12 the causal forest, the
+penalized interaction model, and DINA are all refitted and their predictions
+averaged. No nested budget search runs, and confounder roles from step 8 are
+unchanged. The tests reuse the patients whose evidence built the catalog, so
+their p-values are somewhat optimistic; step 13 repeats them on held-out
+patients. The alternative `balanced_evidence` rule instead ranks the
+candidates and chooses the number of modifiers and one effect model by nested
+validation. See
+[Stage 2 selection](stage2_selection.md#modifier-selection-by-orthogonal-tests).
 
 ### 10. Measure the held-out patients
 
@@ -314,15 +331,16 @@ five inner folds; each training patient gets the prediction of the model that
 did not see it, and each held-out patient gets the average of the five models'
 predictions. The propensity and, for binary outcomes, both arm-specific outcome
 predictions are then Platt-recalibrated using calibrators learned from training
-predictions only. These predictions drive eligibility, the AIPW scores, the
-DINA offsets, the interaction model's adjustment covariates, the forest's
-prognostic score, and the diagnostics. See
+predictions only. The training predictions equal those used by the step 9
+tests. These predictions drive eligibility, the AIPW scores, the DINA offsets,
+the interaction model's adjustment covariates, the forest's prognostic score,
+and the diagnostics. See
 [Stage 2 selection](stage2_selection.md#nuisance-construction).
 
-### 12. Refit the chosen model and predict held-out effects
+### 12. Refit the effect models and predict held-out effects
 
-The chosen effect model is refitted on the outer-training patients with the
-retained confounders and modifiers:
+Each effect model of the ensemble is refitted on the outer-training patients
+with the retained confounders and modifiers:
 
 - **Causal forest:** modifiers (and, for binary outcomes, the prognostic score
   `logit μ̂0`) in X, the remaining confounders in W, with the forest fitting its
@@ -333,9 +351,12 @@ retained confounders and modifiers:
 - **DINA:** a grouped log-odds-ratio model over the selected modifiers, using
   the step 11 nuisances as offsets.
 
-Each held-out patient receives one `estimated_cate` (patients outside
-propensity eligibility bounds, when bounds are set, receive none). Only the
-causal forest produces per-patient confidence intervals.
+Each held-out patient receives one `estimated_cate`, the unweighted mean of the
+three models' predictions, which are also kept as `estimated_cate_causal_forest`,
+`estimated_cate_linear_interactions`, and `estimated_cate_dina` (patients
+outside propensity eligibility bounds, when bounds are set, receive none). The
+ensemble mean has no confidence interval; the causal forest's own interval is
+kept in separate columns.
 
 ### 13. Estimate the ATE and run diagnostics
 
@@ -348,6 +369,10 @@ in `stage2/cross_fitted_predictions.csv` and:
 - heterogeneity, overlap, and balance diagnostics are written to
   `stage2/heterogeneity_diagnostics.json` (see
   [Stage 2 selection](stage2_selection.md#heterogeneity-and-overlap-diagnostics));
+- each fold's selected modifiers are re-tested on its held-out patients with
+  the step 9 tests, for reporting only (`modifier_confirmation` in the same
+  file, summarized in `causal_estimate.json`; see
+  [Outer-fold confirmation](stage2_selection.md#outer-fold-confirmation));
 - for synthetic data, the frozen predictions are joined to the oracle effects
   and correlation and error metrics are written to
   `stage2/posthoc_oracle_ite_metrics.json`.
@@ -361,8 +386,10 @@ effect while the AIPW ATE is nonzero.
 
 The same steps run with these differences: `matched_pair_uplift` does not run;
 DINA is replaced by R-loss forms in Stage 1 screens and is removed from Stage 2
-evidence and from the final model search; the interaction model uses an identity
-link; outcome nuisances are not recalibrated; and the forest's X carries no
+evidence, the estimator ensemble, and the `balanced_evidence` model search; the
+interaction model uses an identity link; the outcome interaction test is a
+partial F test and the three modifier-test components are weighted equally;
+outcome nuisances are not recalibrated; and the forest's X carries no
 prognostic score.
 
 ## Checkpoints and parallel work

@@ -5,7 +5,8 @@ only the pooled cross-fitted prediction table (held-out AIPW score ``psi``,
 ``estimated_cate``, ``propensity``, ``mu0``, ``mu1``, ``treatment`` and the
 observed ``outcome``) and persisted per-fold measurement artifacts. They never
 read the dataset, so oracle columns cannot enter; columns and features with
-oracle-style names are dropped as a second guard.
+oracle-style names are dropped as a second guard. Nothing in selection or
+estimation reads these results.
 
 Diagnostics (all reported per outer fold and pooled):
 
@@ -21,6 +22,12 @@ Diagnostics (all reported per outer fold and pooled):
   maximum weight) and an AIPW trimming curve (Crump et al.).
 * Balance: IPW-weighted standardized mean differences of every measured
   candidate, with a summary of variables whose ``|SMD| > 0.1``.
+* Modifier confirmation (reporting only): each fold's selected effect
+  modifiers are re-tested on that fold's held-out patients with the same three
+  component tests and Cauchy combination used for training selection
+  (:mod:`oci.inference.stage2_modifier_tests`), with Benjamini-Hochberg within
+  the fold's selected set. Sample splitting makes these tests valid conditional
+  on the selection.
 
 Pooling rules (also written into the output under ``pooling_rules``):
 
@@ -40,6 +47,11 @@ Pooling rules (also written into the output under ``pooling_rules``):
   the pooled entry summarizes the fold tables.
 * Folds whose ``tau_hat`` is constant cannot rank patients. Their BLP slope is
   not identified, and they are left out of the pooled GATES, CLAN and RATE.
+* Modifier confirmation is computed per fold; the pooled entry counts selected
+  and confirmed modifiers. Each fold defines its own variables, so the
+  cross-fold summary matches exact normalized names only, and a Stouffer
+  combination of held-out z-scores is reported for names selected in several
+  folds.
 
 Every function below the I/O layer is pure. The I/O layer
 (:func:`write_heterogeneity_diagnostics`) never raises for a missing input: the
@@ -54,6 +66,7 @@ import json
 import logging
 import math
 import os
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,7 +78,7 @@ from scipy.stats import norm
 
 LOGGER = logging.getLogger(__name__)
 
-SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v1"
+SCHEMA_VERSION = "stage2_heterogeneity_diagnostics_v2_modifier_confirmation"
 DIAGNOSTICS_FILENAME = "heterogeneity_diagnostics.json"
 TRIMMING_THRESHOLDS = (0.0, 0.01, 0.025, 0.05, 0.1, 0.15)
 SMD_THRESHOLD = 0.1
@@ -157,7 +170,30 @@ INTERPRETATIONS = {
     ),
 }
 
+CONFIRMATION_INTERPRETATION = (
+    "Reporting only: no selection, estimation, ensemble or other fold reads these "
+    "results. Each outer fold's selected effect modifiers are re-tested on that "
+    "fold's held-out patients (propensity-eligible rows, the frozen held-out "
+    "nuisances e_hat, mu0_hat, mu1_hat and the observed labels) with the same "
+    "r_projection, aipw_projection and outcome_interaction tests and Cauchy "
+    "combination used for training selection; Benjamini-Hochberg runs within the "
+    "fold's selected set. confirmed means held-out combined q <= q. Because the "
+    "held-out patients took no part in discovery or selection, these tests are "
+    "valid conditional on the selection (sample splitting); training p-values are "
+    "optimistic because the candidate list was built from the training patients. "
+    "Each fold defines and extracts its own variables, so the cross-fold summary "
+    "matches exact normalized names only; a name selected in several folds may "
+    "still be measured differently in each."
+)
+CONFIRMATION_POOLING_RULE = (
+    "per fold; pooled counts of selected and confirmed modifiers; across folds, "
+    "exact normalized-name matches with an unweighted Stouffer combination of the "
+    "held-out combined p-values (one-sided z-scores) for names selected in two or "
+    "more folds"
+)
+
 POOLING_RULES = {
+    "modifier_confirmation": CONFIRMATION_POOLING_RULE,
     "blp": (
         "fixed-effect inverse-variance weighting of fold estimates (disjoint "
         "held-out rows); fold median reported as a robustness check; folds "
@@ -1057,10 +1093,22 @@ class MeasurementInput:
 
 
 @dataclass
+class ConfirmationInput:
+    """A fold's selected effect modifiers and their held-out measurements."""
+
+    definitions: list[dict[str, Any]]
+    frame: pd.DataFrame | None
+    sources: dict[str, str] = field(default_factory=dict)
+    excluded_oracle_features: list[str] = field(default_factory=list)
+    missing_measurement_columns: list[str] = field(default_factory=list)
+
+
+@dataclass
 class FoldArtifacts:
     clan: MeasurementInput | str
     balance_training: MeasurementInput | str
     balance_heldout: MeasurementInput | str
+    confirmation: ConfirmationInput | str = "modifier confirmation inputs were not loaded"
 
 
 def _guarded(name: str, function: Callable[..., dict[str, Any]], *args: Any, **kwargs: Any):
@@ -1217,6 +1265,251 @@ def _balance_section(
     }
 
 
+def normalized_feature_name(name: Any) -> str:
+    """Lower-case name with non-alphanumeric runs collapsed to ``_`` (cross-fold matching)."""
+
+    return re.sub(r"[^a-z0-9]+", "_", str(name).lower()).strip("_")
+
+
+def resolve_confirmation_policy(policy: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the confirmation policy and fill outcome-type default weights."""
+
+    from . import stage2_modifier_tests as modifier_tests
+
+    outcome_type = str(policy.get("outcome_type"))
+    if outcome_type not in {"binary", "continuous"}:
+        raise ValueError("modifier confirmation requires a binary or continuous outcome_type")
+    q = _float(policy.get("q"))
+    if q is None or not 0 < q <= 1:
+        raise ValueError("modifier confirmation q must be in (0, 1]")
+    configured = policy.get("weights")
+    weights = (
+        modifier_tests.default_weights(outcome_type)
+        if configured is None
+        else {name: float(configured[name]) for name in modifier_tests.COMPONENTS}
+    )
+    min_count = policy.get("min_count", 5)
+    if isinstance(min_count, bool) or not isinstance(min_count, (int, np.integer)) or min_count < 1:
+        raise ValueError("modifier confirmation min_count must be a positive integer")
+    return {
+        "outcome_type": outcome_type,
+        "q": q,
+        "weights": weights,
+        "weights_source": "outcome_type_default" if configured is None else "configured",
+        "min_count": int(min_count),
+        "family": "the fold's selected effect modifiers",
+        "components": list(modifier_tests.COMPONENTS),
+    }
+
+
+def _effect_eligibility(rows: pd.DataFrame) -> np.ndarray:
+    if "effect_eligible" in rows.columns:
+        values = rows["effect_eligible"]
+        if values.dtype == bool:
+            return values.to_numpy(dtype=bool)
+        return values.astype(str).str.strip().str.lower().isin({"true", "1", "1.0"}).to_numpy()
+    return np.isfinite(pd.to_numeric(rows["aipw_score"], errors="coerce").to_numpy(dtype=float))
+
+
+def confirm_fold_modifiers(
+    rows: pd.DataFrame,
+    confirmation: ConfirmationInput,
+    *,
+    policy: Mapping[str, Any],
+    propensity_clip: float,
+) -> dict[str, Any]:
+    """Re-test one fold's selected modifiers on its held-out rows (``policy`` resolved)."""
+
+    from . import stage2_modifier_tests as modifier_tests
+
+    rows = rows.reset_index(drop=True)
+    labels = {
+        name: pd.to_numeric(rows[name], errors="coerce").to_numpy(dtype=float)
+        for name in ("treatment", "outcome", "propensity", "mu0", "mu1")
+    }
+    finite = np.logical_and.reduce([np.isfinite(values) for values in labels.values()])
+    eligible = _effect_eligibility(rows) & finite
+    definitions = list(confirmation.definitions)
+    result: dict[str, Any] = {
+        "status": "ok",
+        "selected_modifiers": len(definitions),
+        "confirmed_modifiers": 0,
+        "heldout_rows": len(rows),
+        "eligible_rows": int(eligible.sum()),
+        "rows_with_nonfinite_inputs": int((~finite).sum()),
+        "measurement_source": dict(confirmation.sources),
+        "excluded_oracle_named_features": list(confirmation.excluded_oracle_features),
+        "missing_measurement_columns": list(confirmation.missing_measurement_columns),
+        "modifiers": [],
+    }
+    if not definitions:
+        return result
+    if confirmation.frame is None:
+        return unavailable("held-out measurements of the selected modifiers are missing")
+    try:
+        joined = _join_rows(rows, confirmation.frame).loc[finite].reset_index(drop=True)
+        records, audit = modifier_tests.candidate_tests(
+            joined,
+            definitions,
+            **{name: values[finite] for name, values in labels.items()},
+            binary=policy["outcome_type"] == "binary",
+            propensity_clip=propensity_clip,
+            eligible=eligible[finite],
+            min_count=policy["min_count"],
+        )
+    except ValueError as error:
+        return unavailable(f"held-out modifier tests could not run: {error}")
+    records, confirmed = modifier_tests.combine_and_select(
+        records,
+        weights=policy["weights"],
+        q=policy["q"],
+        binary=policy["outcome_type"] == "binary",
+        family_ids=[record["feature_id"] for record in records],
+        max_modifiers=None,
+    )
+    training = {
+        str(feature.get("feature_id") or feature["name"]): feature.get("modifier_evidence")
+        for feature in definitions
+    }
+    modifiers = []
+    for record in records:
+        components = record["components"]
+        evidence = training.get(record["feature_id"])
+        modifiers.append({
+            "feature_id": record["feature_id"],
+            "name": record["name"],
+            "normalized_name": normalized_feature_name(record["name"]),
+            "confirmed": bool(record["selected"]),
+            "combined_p_value": record["combined_p_value"],
+            "combined_q_value": record["combined_q_value"],
+            "combination_weights": record["combination_weights"],
+            "component_p_values": {
+                name: components[name].get("p_value") for name in modifier_tests.COMPONENTS
+            },
+            "component_q_values": {
+                name: components[name].get("q_value") for name in modifier_tests.COMPONENTS
+            },
+            "component_status": {
+                name: (
+                    "ok" if components[name].get("p_value") is not None
+                    else str(components[name].get("reason") or "not_evaluable")
+                )
+                for name in modifier_tests.COMPONENTS
+            },
+            "labels": list(record["labels"]),
+            "extreme_propensity_signal": bool(record["extreme_propensity_signal"]),
+            "n_eligible": record["n_eligible"],
+            "grouped_columns": list(record.get("grouped_columns") or []),
+            "dropped_sparse_columns": list(record.get("dropped_sparse_columns") or []),
+            "training_evidence": (
+                {key: evidence.get(key) for key in
+                 ("combined_p_value", "combined_q_value", "labels", "investigator_locked")}
+                if isinstance(evidence, Mapping) else None
+            ),
+        })
+    result.update(
+        confirmed_modifiers=len(confirmed),
+        tests_evaluable=bool(audit["evaluable"]),
+        modifiers=modifiers,
+    )
+    return result
+
+
+def _confirmation_section(
+    predictions: pd.DataFrame,
+    artifacts: Mapping[str, FoldArtifacts],
+    *,
+    policy: Mapping[str, Any] | None,
+    propensity_clip: float,
+) -> dict[str, Any]:
+    header = {
+        "interpretation": CONFIRMATION_INTERPRETATION,
+        "pooling_rule": CONFIRMATION_POOLING_RULE,
+    }
+    if policy is None:
+        return {**header, **unavailable("no modifier confirmation policy was supplied")}
+    try:
+        resolved = resolve_confirmation_policy(policy)
+    except (KeyError, TypeError, ValueError) as error:
+        return {**header, **unavailable(f"invalid modifier confirmation policy: {error}")}
+    resolved["propensity_clip"] = float(propensity_clip)
+    from . import stage2_modifier_tests as modifier_tests
+
+    per_fold: dict[str, Any] = {}
+    for fold, rows in predictions.groupby("outer_fold", sort=True):
+        fold = str(int(fold))
+        source = artifacts.get(fold)
+        item = source.confirmation if source is not None else "no fold artifacts were found"
+        if isinstance(item, str):
+            per_fold[fold] = unavailable(item)
+            continue
+        per_fold[fold] = _guarded(
+            f"modifier confirmation fold {fold}", confirm_fold_modifiers,
+            rows, item, policy=resolved, propensity_clip=propensity_clip,
+        )
+    per_fold = dict(sorted(per_fold.items(), key=lambda entry: _fold_key(entry[0])))
+    ok = {fold: result for fold, result in per_fold.items() if result.get("status") == "ok"}
+    names: dict[str, dict[str, Any]] = {}
+    for fold, result in ok.items():
+        seen = set()
+        for modifier in result["modifiers"]:
+            key = modifier["normalized_name"]
+            entry = names.setdefault(key, {
+                "normalized_name": key, "selected_in_folds": [], "confirmed_in_folds": [],
+                "heldout_combined_p_values": {}, "duplicate_names_in_folds": [],
+            })
+            if key in seen:
+                # The first matching variable in definition order represents the fold.
+                entry["duplicate_names_in_folds"].append(fold)
+                continue
+            seen.add(key)
+            entry["selected_in_folds"].append(fold)
+            if modifier["confirmed"]:
+                entry["confirmed_in_folds"].append(fold)
+            entry["heldout_combined_p_values"][fold] = modifier["combined_p_value"]
+    summaries = []
+    for entry in names.values():
+        p_values = list(entry["heldout_combined_p_values"].values())
+        summaries.append({
+            **entry,
+            "folds_selected": len(entry["selected_in_folds"]),
+            "folds_confirmed": len(entry["confirmed_in_folds"]),
+            "stouffer": (
+                modifier_tests.stouffer_combination(p_values)
+                if len(entry["selected_in_folds"]) >= 2 else None
+            ),
+        })
+    summaries.sort(key=lambda e: (-e["folds_confirmed"], -e["folds_selected"],
+                                  e["normalized_name"]))
+    if not ok:
+        return {
+            **header, "policy": resolved, "per_fold": per_fold,
+            **unavailable("no outer fold has modifier confirmation inputs"),
+        }
+    return {
+        **header,
+        "status": "ok",
+        "policy": resolved,
+        "per_fold": per_fold,
+        "pooled": {
+            "folds": sorted(ok, key=_fold_key),
+            "selected_by_fold": {fold: r["selected_modifiers"] for fold, r in ok.items()},
+            "confirmed_by_fold": {fold: r["confirmed_modifiers"] for fold, r in ok.items()},
+            "total_selected": int(sum(r["selected_modifiers"] for r in ok.values())),
+            "total_confirmed": int(sum(r["confirmed_modifiers"] for r in ok.values())),
+        },
+        "across_folds": {
+            "note": (
+                "Each fold defines its own variables; names are matched exactly after "
+                "normalization (lower case, non-alphanumeric runs replaced by '_'). "
+                "Stouffer combines the held-out combined p-values of the folds that "
+                "selected the name (z_k = Phi^-1(1 - p_k), Z = sum z_k / sqrt(K))."
+            ),
+            "names": summaries,
+        },
+    }
+
+
 def build_heterogeneity_diagnostics(
     predictions: pd.DataFrame,
     *,
@@ -1225,8 +1518,14 @@ def build_heterogeneity_diagnostics(
     fold_artifacts: Mapping[int, FoldArtifacts] | None = None,
     n_bootstrap: int = DEFAULT_BOOTSTRAP_REPLICATES,
     groups: int = CATE_GROUPS,
+    modifier_confirmation_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Compute every diagnostic from the pooled cross-fitted prediction table."""
+    """Compute every diagnostic from the pooled cross-fitted prediction table.
+
+    ``modifier_confirmation_policy`` (``outcome_type``, ``q``, ``weights`` or
+    None for the outcome-type defaults, ``min_count``) enables the held-out
+    modifier confirmation; without it that section is ``unavailable``.
+    """
 
     predictions = predictions.drop(
         columns=[column for column in predictions.columns if is_oracle_name(column)]
@@ -1381,6 +1680,13 @@ def build_heterogeneity_diagnostics(
         "training": _balance_section(by_fold, artifacts, scope="training", clip=propensity_clip),
         "heldout": _balance_section(by_fold, artifacts, scope="heldout", clip=propensity_clip),
     }
+    confirmation_rows = predictions.copy()
+    confirmation_rows[ROW_ID] = pd.to_numeric(confirmation_rows[ROW_ID]).astype(int)
+    confirmation_rows["outer_fold"] = pd.to_numeric(confirmation_rows["outer_fold"]).astype(int)
+    diagnostics["modifier_confirmation"] = _guarded(
+        "modifier confirmation", _confirmation_section, confirmation_rows, artifacts,
+        policy=modifier_confirmation_policy, propensity_clip=propensity_clip,
+    )
     return json_safe(diagnostics)
 
 
@@ -1447,6 +1753,23 @@ def summarize_diagnostics(diagnostics: Mapping[str, Any]) -> dict[str, Any]:
             **_pick(heldout_pooled, "columns_above_threshold_weighted",
                     "features_above_threshold_weighted", "max_abs_smd_weighted"),
         },
+        "modifier_confirmation": _confirmation_summary(diagnostics.get("modifier_confirmation")),
+    }
+
+
+def _confirmation_summary(section: Any) -> dict[str, Any]:
+    section = section if isinstance(section, Mapping) else {}
+    pooled = section.get("pooled") or {}
+    names = (section.get("across_folds") or {}).get("names") or []
+    return {
+        **_pick(section, "status", "reason"),
+        **_pick(pooled, "total_selected", "total_confirmed", "selected_by_fold",
+                "confirmed_by_fold"),
+        "q": (section.get("policy") or {}).get("q"),
+        "names_confirmed_in_multiple_folds": [
+            entry["normalized_name"] for entry in names
+            if isinstance(entry, Mapping) and int(entry.get("folds_confirmed") or 0) >= 2
+        ],
     }
 
 
@@ -1577,7 +1900,65 @@ def load_fold_artifacts(fold_dir: Path) -> FoldArtifacts:
             if missing:
                 training = f"{nuisance_fit} lacks columns {sorted(missing)}"
     heldout = measurement_input(candidate_heldout, heldout_retained, mask=heldout_mask)
-    return FoldArtifacts(clan=clan, balance_training=training, balance_heldout=heldout)
+    confirmation = _confirmation_input(
+        retained, final_path,
+        (candidate_heldout, heldout_retained),
+        mask=heldout_mask,
+    )
+    return FoldArtifacts(
+        clan=clan, balance_training=training, balance_heldout=heldout,
+        confirmation=confirmation,
+    )
+
+
+def _confirmation_input(
+    retained: list[dict[str, Any]] | str,
+    final_path: Path,
+    measurement_paths: Sequence[Path],
+    *,
+    mask: Path,
+) -> ConfirmationInput | str:
+    """The fold's selected modifiers and the first held-out file that measures them."""
+
+    if isinstance(retained, str):
+        return retained
+    selected = [
+        feature for feature in retained
+        if "effect_modifier" in set(map(str, feature.get("roles") or []))
+    ]
+    excluded = sorted(str(f["name"]) for f in selected if is_oracle_name(f.get("name")))
+    selected = [feature for feature in selected if not is_oracle_name(feature.get("name"))]
+    sources = {"definitions": str(final_path)}
+    if not selected:
+        return ConfirmationInput(definitions=[], frame=None, sources=sources,
+                                 excluded_oracle_features=excluded)
+    names = [str(feature["name"]) for feature in selected]
+    fallback: tuple[Path, pd.DataFrame, list[str]] | None = None
+    for path in measurement_paths:
+        if not path.is_file():
+            continue
+        frame = _read_measurements(path, mask)
+        frame = frame.drop(columns=[c for c in frame.columns if is_oracle_name(c)])
+        missing = [name for name in names if name not in frame.columns]
+        if not missing:
+            return ConfirmationInput(
+                definitions=selected, frame=frame,
+                sources={**sources, "measurements": str(path)},
+                excluded_oracle_features=excluded,
+            )
+        if fallback is None:
+            fallback = (path, frame, missing)
+    if fallback is None:
+        return (
+            "held-out measurements unavailable: "
+            + ", ".join(str(path) for path in measurement_paths) + " are missing"
+        )
+    path, frame, missing = fallback
+    return ConfirmationInput(
+        definitions=selected, frame=frame,
+        sources={**sources, "measurements": str(path)},
+        excluded_oracle_features=excluded, missing_measurement_columns=missing,
+    )
 
 
 def write_heterogeneity_diagnostics(
@@ -1587,10 +1968,12 @@ def write_heterogeneity_diagnostics(
     propensity_clip: float,
     seed: int,
     n_bootstrap: int = DEFAULT_BOOTSTRAP_REPLICATES,
+    modifier_confirmation_policy: Mapping[str, Any] | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     """Write ``heterogeneity_diagnostics.json`` and return (path, compact summary).
 
-    Never raises for diagnostic failures: they are recorded in the file.
+    Never raises for diagnostic failures: they are recorded in the file. Only
+    ``heterogeneity_diagnostics.json`` is written; no other artifact changes.
     """
 
     output_dir = Path(output_dir)
@@ -1604,13 +1987,14 @@ def write_heterogeneity_diagnostics(
             except Exception as error:  # a diagnostic must never fail a finished Stage 2 run
                 LOGGER.warning("Stage 2 diagnostics could not read fold %s", fold, exc_info=True)
                 reason = f"fold artifacts unreadable: {type(error).__name__}: {error}"
-                artifacts[fold] = FoldArtifacts(reason, reason, reason)
+                artifacts[fold] = FoldArtifacts(reason, reason, reason, reason)
         diagnostics = build_heterogeneity_diagnostics(
             predictions,
             propensity_clip=propensity_clip,
             seed=seed,
             fold_artifacts=artifacts,
             n_bootstrap=n_bootstrap,
+            modifier_confirmation_policy=modifier_confirmation_policy,
         )
     except Exception as error:  # a diagnostic must never fail a finished Stage 2 run
         LOGGER.warning("Stage 2 heterogeneity diagnostics failed", exc_info=True)
@@ -1642,6 +2026,7 @@ __all__ = [
     "SCHEMA_VERSION",
     "SMD_THRESHOLD",
     "TRIMMING_THRESHOLDS",
+    "ConfirmationInput",
     "FoldArtifacts",
     "MeasurementInput",
     "aipw_trimming_curve",
@@ -1649,16 +2034,19 @@ __all__ = [
     "build_heterogeneity_diagnostics",
     "cate_groups",
     "classification_analysis",
+    "confirm_fold_modifiers",
     "dr_scores",
     "encode_measurements",
     "group_average_treatment_effects",
     "inverse_propensity_weight_summary",
     "inverse_variance_pool",
     "load_fold_artifacts",
+    "normalized_feature_name",
     "overlap_weighted_effects",
     "pool_blp",
     "rank_weighted_ate_point",
     "rank_weighted_average_treatment_effects",
+    "resolve_confirmation_policy",
     "stack_encoded",
     "summarize_diagnostics",
     "summarize_fold_balance",

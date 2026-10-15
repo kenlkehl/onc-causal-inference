@@ -63,6 +63,7 @@ def numerical_identity(
     """Count-search settings do not change the underlying numerical evidence."""
     numerical_policy = policy.public_dict()
     numerical_policy["multi_model"].pop("modifier_count", None)
+    numerical_policy["multi_model"].pop("modifier_selection", None)
     numerical_policy["multi_model"].pop("interaction_ranking_weight", None)
     return {
         "schema_version": SCHEMA_VERSION,

@@ -2,32 +2,48 @@
 
 This page documents the statistical part of Stage 2: how OCI decides, within each
 outer fold, which extracted variables to adjust for, which to treat as effect
-modifiers, which effect model to use, and how it builds the final estimates and
+modifiers, which effect models to use, and how it builds the final estimates and
 diagnostics. It starts where [How OCI works](how_it_works.md) step 6 ends: each
 outer fold has a frozen catalog of candidate variables, each measured on every
 outer-training patient. Terms are defined in the [glossary](glossary.md).
 
 Everything on this page runs separately inside each outer fold and uses only
-that fold's outer-training patients, except the final held-out predictions and
-the pooled diagnostics. No step on this page sends a request to an LLM, except
+that fold's outer-training patients, except the final held-out predictions, the
+outer-fold confirmation, and the pooled diagnostics. No step on this page sends a request to an LLM, except
 the optional modifier-concept review described in
 [Optional extensions](optional_extensions.md). Configuration keys are under
 `stage2.statistical_selection` unless stated otherwise; defaults are listed in
 [Configuration](configuration.md).
 
+Two modifier rules are available (`multi_model.modifier_selection.rule`):
+
+- **`orthogonal_tests`** (default) selects modifiers with three pre-specified
+  component tests per candidate, combined by a Cauchy combination and
+  Benjamini–Hochberg, and averages every final effect model (the estimator
+  ensemble). Held-out patients then confirm the selected modifiers, for
+  reporting only.
+- **`balanced_evidence`** ranks candidates by a fixed formula and chooses the
+  number of modifiers and one effect model jointly by nested validation.
+
+Both rules share the evidence families, the predictive nuisance selection, the
+final refit of each effect model, the nuisance construction, and the
+diagnostics.
+
 ## Contents
 
 1. [Evidence families and resampling](#evidence-families-and-resampling)
 2. [Predictive nuisance selection](#predictive-nuisance-selection)
-3. [Modifier ranking](#modifier-ranking)
-4. [Modifier count and model selection](#modifier-count-and-model-selection)
-5. [Final refit](#final-refit)
-6. [Nuisance construction](#nuisance-construction)
-7. [Propensity eligibility and calibration](#propensity-eligibility-and-calibration)
-8. [DINA](#dina)
-9. [Heterogeneity and overlap diagnostics](#heterogeneity-and-overlap-diagnostics)
-10. [Output files](#output-files)
-11. [Limitations](#limitations)
+3. [Modifier selection by orthogonal tests](#modifier-selection-by-orthogonal-tests)
+4. [Estimator ensemble](#estimator-ensemble)
+5. [Outer-fold confirmation](#outer-fold-confirmation)
+6. [The balanced_evidence rule](#the-balanced_evidence-rule)
+7. [Final refit](#final-refit)
+8. [Nuisance construction](#nuisance-construction)
+9. [Propensity eligibility and calibration](#propensity-eligibility-and-calibration)
+10. [DINA](#dina)
+11. [Heterogeneity and overlap diagnostics](#heterogeneity-and-overlap-diagnostics)
+12. [Output files](#output-files)
+13. [Limitations](#limitations)
 
 ## Evidence families and resampling
 
@@ -52,6 +68,12 @@ candidates. Every candidate is exposed to every active family.
 that no later step reads; list them in `multi_model.diagnostic_families` to run
 them. Matched-batch evidence runs when `multi_model.matched_batch.enabled` is
 true.
+
+The families run under both modifier rules. Under `orthogonal_tests`, their
+effect evidence is recorded in `selection/statistical_evidence.json` for audit
+and does not choose modifiers; under `balanced_evidence`, it feeds the
+[modifier ranking](#modifier-ranking). The nuisance supports always come from
+the split nuisance models described below.
 
 **Adjusted interaction test.** For each candidate `Z`, two models are fitted on
 training patients:
@@ -138,10 +160,273 @@ used for scoring, eligibility, AIPW, and DINA always use the complete catalog
 
 Investigator-specified variables (`stage2.explicit_features`) keep their
 configured roles exactly; a confounder-only explicit variable never becomes a
-modifier, and an explicit modifier is always included outside the modifier
-budget.
+modifier, and an explicit modifier is always included, outside the
+Benjamini–Hochberg family of the orthogonal tests and outside the modifier
+budget of `balanced_evidence`.
 
-## Modifier ranking
+## Modifier selection by orthogonal tests
+
+The default rule, `orthogonal_tests`, selects effect modifiers with
+pre-specified tests on the outer-training patients. It runs no nested budget
+search and fits no effect model to choose modifiers; held-out patients are used
+afterwards to [confirm](#outer-fold-confirmation) the selection, never to make
+it.
+
+### Testing nuisances
+
+Before any modifier is chosen, the training half of the final
+[nuisance construction](#nuisance-construction) is computed: elastic nets on the
+complete catalog for treatment and for the outcome in each treatment arm,
+fitted in the inner cross-fitting folds with the final estimation's seeds,
+encoders, and standardization, followed by cross-fitted Platt recalibration.
+Each training patient receives `ê`, `μ̂0`, and `μ̂1` from the inner-fold model
+that did not see it. Held-out patients take no part; their measurements do not
+exist yet. The final estimation repeats the construction with the held-out
+patients added and reproduces the same training values exactly, because each
+inner-fold model predicts its inner-validation patients and the held-out
+patients in separate calls. The tests use the marginal outcome prediction
+
+$$
+\hat m = \hat e\,\hat\mu_1 + (1 - \hat e)\,\hat\mu_0 .
+$$
+
+When `stage2.min_propensity` or `stage2.max_propensity` is set, the tests use
+only the training patients whose recalibrated `ê` lies within the bounds, as
+the final estimation does.
+
+### Grouped design
+
+Each candidate `j` is tested on its grouped design `Z_j`, encoded on the
+eligible training patients: the value centered at its median (continuous
+candidates, with missing values imputed at the median) or one indicator per
+non-reference category (categorical candidates; the reference is the first
+declared category that is observed), plus the "not documented" indicator and,
+for candidates with training extraction failures, the
+[extraction-failure](glossary.md#extraction-failure) indicator. Indicator
+columns with fewer than `categorical_min_count` patients (default 5) on either
+side are dropped and listed in `dropped_sparse_columns`, because they cannot be
+estimated reliably and give a patient a leverage of one. The remaining columns
+are tested jointly; a column that adds no rank is skipped.
+
+### Component tests
+
+Each candidate receives up to three p-values, one per component:
+
+| Component | Model and test | Scale |
+|---|---|---|
+| `r_projection` | Ordinary least squares of `Y − m̂` on `[(T − ê), (T − ê)·Z_j]` with no intercept and no penalty; HC3 covariance; joint Wald χ² test of the `Z_j` interaction block | Absolute (risk difference for binary outcomes), overlap-weighted: each patient weighs in proportion to `(T − ê)²`, as in the R-learner |
+| `aipw_projection` | Ordinary least squares of the AIPW pseudo-outcome `ψ` on `[1, Z_j]`; HC3 covariance; joint Wald χ² test of the `Z_j` block | Absolute, population-weighted, as in the DR-learner projection |
+| `outcome_interaction` | Reduced `g(E[Y]) = α + β_T T + f(logit ê) + h(m̂) + β_Zᵀ Z_j` versus the same model plus `γᵀ T·Z_j`; likelihood-ratio test (logit link) for binary outcomes, partial F test (identity link) for continuous outcomes | Multiplicative (odds ratios) for binary outcomes, additive for continuous outcomes |
+
+Here
+
+$$
+\psi = \hat\mu_1 - \hat\mu_0 + \frac{T\,(Y - \hat\mu_1)}{\hat e_c} - \frac{(1 - T)(Y - \hat\mu_0)}{1 - \hat e_c},
+$$
+
+with `ê_c` the propensity clipped to `[c, 1 − c]`, `c = stage2.propensity_clip`,
+exactly as in the AIPW ATE. In `outcome_interaction`, `f` and `h` are a linear
+term plus one natural-cubic-spline term with knots at the 10th, 50th, and 90th
+percentiles (`m̂` enters on the logit scale for binary outcomes), as in the
+[adjusted interaction test](#evidence-families) of the evidence families, but
+with the testing nuisances and the whole grouped design interacted with
+treatment.
+
+A component without a usable fit gives no p-value, and the reason is recorded:
+a design without an independent candidate column, too few residual degrees of
+freedom, a patient with leverage one, a singular covariance, too few eligible
+patients or a single treatment arm, or a logistic fit that warned of
+nonconvergence or separation.
+
+### Cauchy combination
+
+The available component p-values of candidate `j` are combined with a weighted
+[Cauchy combination](glossary.md#cauchy-combination) (Liu and Xie 2020):
+
+$$
+T_j = \sum_k \tilde w_k \tan\{(0.5 - p_{jk})\,\pi\}, \qquad p_j = 0.5 - \frac{\arctan T_j}{\pi},
+$$
+
+where each `p_jk` is clamped to `[10⁻¹⁵, 1 − 10⁻¹⁵]` and the weights `w̃_k` are
+the configured weights renormalized over the components that have p-values.
+The default weights (`modifier_selection.weights` null) balance the two effect
+scales:
+
+| Outcome | `r_projection` | `aipw_projection` | `outcome_interaction` |
+|---|---|---|---|
+| Binary | 0.25 | 0.25 | 0.5 |
+| Continuous | 1/3 | 1/3 | 1/3 |
+
+For binary outcomes half the weight goes to absolute and half to
+multiplicative evidence; for continuous outcomes all three components are on
+the additive scale. The combined p-value is exactly uniform when the component
+tests are independent. The three components test related hypotheses on the
+same patients and are strongly positively correlated; the combination then
+remains accurate in the lower tail, where selection happens, but is not uniform
+over its whole range. In simulations without heterogeneity, rejection rates at
+0.01, 0.05, and 0.10 matched their nominal levels, and the excess probability
+sat near `p = 1`.
+
+### Selection
+
+1. **Family.** Every candidate that is not an investigator-locked variable and
+   has a combined p-value. Benjamini–Hochberg
+   [q-values](glossary.md#bh-q-value) are computed across the family.
+2. **Discoveries.** Candidates with combined `q ≤ modifier_selection.q`
+   (default 0.10), ordered by combined p-value.
+3. **Cap.** At most `modifier_selection.max_modifiers` discoveries (default
+   64; null for no cap) receive the `effect_modifier` role; the rest are marked
+   `excluded_by_cap`.
+4. **Locked modifiers.** Investigator-specified modifiers
+   (`stage2.explicit_features`) are always included. They are tested and
+   reported but stay outside the family and receive no q-value.
+   Confounder-only explicit variables never become modifiers.
+
+When no candidate modifies the effect and the p-values are valid and
+independent or positively dependent, Benjamini–Hochberg at level `q` bounds the
+probability of selecting any modifier by `q`. Zero discoveries is a valid
+outcome; estimation then proceeds with no modifiers (see
+[Zero modifiers](#final-refit)).
+
+### Labels
+
+Each component's p-values also receive Benjamini–Hochberg q-values across the
+same family at the same `q`; a component passes when its q-value is at most
+`q`. Each selected modifier is labeled:
+
+- `absolute` when `r_projection` or `aipw_projection` passes;
+- `multiplicative` (binary outcomes) or `additive` (continuous outcomes) when
+  `outcome_interaction` passes;
+- `combined_only` when it was selected although no single component passes.
+
+A candidate is flagged `extreme_propensity_signal` when `aipw_projection`
+passes and `r_projection` does not: the population-weighted projection gives
+patients with extreme propensities far more weight than the overlap-weighted
+one, so such a signal may rest on a few poorly overlapping patients. Labels and
+the flag are reported only; they do not affect selection or estimation.
+
+For binary outcomes the two scales differ in substance. Under a constant odds
+ratio the risk difference still varies with baseline risk, so a strongly
+prognostic variable is a genuine risk-difference modifier: the absolute
+components detect it and `outcome_interaction` does not, and it is labeled
+`absolute` only. A log-odds modifier also changes the risk difference, so
+multiplicative modifiers usually carry both labels.
+
+### Roles
+
+Confounder roles and nuisance routing come from the one-pass
+[predictive nuisance selection](#predictive-nuisance-selection), unchanged; so
+does the causal forest's W. Only the effect-modifier role is assigned here. Each
+modifier in `final_definitions.json` carries a compact `modifier_evidence`
+record (combined and component p- and q-values, labels, the flag, rank, and
+whether it is investigator-locked), and every candidate's full test record is in
+`selection/modifier_tests.json` (see [Configuration](configuration.md)).
+
+### Assumptions and limitations
+
+- The p-values are nominal and conditional on the frozen catalog and
+  extractions. The testing nuisances are cross-fitted, so the two projection
+  tests are first-order insensitive to nuisance error; `outcome_interaction` is
+  an ordinary adjusted test with learned adjustment scores.
+- Stage 1 evidence, candidate discovery, and the extraction definitions used
+  the same outer-training patients, and candidates reach the catalog partly
+  because they appeared related to treatment or outcome. Training p-values are
+  therefore somewhat optimistic. This is why the
+  [outer-fold confirmation](#outer-fold-confirmation) repeats the tests on
+  held-out patients.
+- Each test examines one candidate at a time. A candidate correlated with a
+  true modifier can be selected in its place, and Benjamini–Hochberg does not
+  account for this redundancy.
+- The Cauchy combination is accurate in the tail, not uniform, under the
+  strong dependence between components.
+- Rare indicator columns are dropped; a candidate whose only variation lies in
+  a rare level cannot be tested.
+- The HC3 Wald and likelihood-ratio tests are large-sample approximations.
+
+## Estimator ensemble
+
+Under `orthogonal_tests`, `modifier_selection.estimator_policy` decides the
+final effect model. The default (null) is `ensemble`: every final estimator
+available for the outcome type is fitted on the selected modifiers, exactly as
+described in [Final refit](#final-refit) and with the same seeds as when it is
+chosen alone, and `estimated_cate` is the unweighted mean of their predictions:
+
+| Outcome | Components |
+|---|---|
+| Binary | causal forest, penalized interaction model, DINA |
+| Continuous | causal forest, penalized interaction model |
+
+The prognostic score enters each component as it does alone: in the forest's
+X for binary outcomes, as an unpenalized covariate of the interaction model,
+and through the DINA offsets. The policy can instead name one estimator
+(`causal_forest`, `linear_interactions`, or `dina`; `dina` requires a binary
+outcome).
+
+- **Per-estimator columns.** `estimated_cate_causal_forest` and
+  `estimated_cate_linear_interactions` are always written, and
+  `estimated_cate_dina` when DINA was fitted, together with DINA's
+  `dina_log_odds_ratio`, `dina_mu0`, and `dina_mu1`.
+- **Intervals.** `estimated_cate_lower_95`, `estimated_cate_upper_95`, and
+  `estimated_cate_standard_error` stay empty, because the forest's standard
+  error does not describe the average. The forest's own interval is reported in
+  `estimated_cate_causal_forest_lower_95`, `estimated_cate_causal_forest_upper_95`,
+  and `estimated_cate_causal_forest_standard_error`; it describes the forest
+  alone.
+- **Unestimable components.** A component that is not estimable (for example a
+  DINA fit that converges for no penalty) is recorded in
+  `ensemble.unavailable_estimators` and left out of the mean; its column stays
+  empty (DINA's is not written). If no component is estimable, the fold fails.
+- **Audit.** `estimation/diagnostics.json` records `estimator_policy`
+  (`ensemble`), the component and fitted estimators, each component's fit audit
+  and architecture diagnostics, and `mean_estimated_cate_by_estimator`.
+
+## Outer-fold confirmation
+
+After every outer fold is finished and its predictions are frozen, the
+selected modifiers of each fold are re-tested on that fold's held-out patients.
+The confirmation is reporting only: it is computed in the pooled diagnostics
+step from frozen artifacts, and no selection, estimation, ensemble, or other
+fold reads it.
+
+- **Inputs per fold.** The selected modifiers (features with the
+  `effect_modifier` role in `final_definitions.json`), their held-out
+  measurements (`estimation/nuisance_candidate_heldout.csv`, or
+  `extraction/heldout/harmonized.csv` with the held-out failure mask), and the
+  held-out nuisances and labels in `cross_fitted_predictions.csv`
+  (`propensity`, `mu0`, `mu1`, `treatment`, `outcome`, `effect_eligible`).
+- **Tests.** The same three component tests and Cauchy combination, with the
+  configured `q` and weights, on the eligible held-out patients, with
+  Benjamini–Hochberg within the fold's selected set. A modifier is confirmed
+  when its held-out combined q-value is at most `q`. Because the held-out
+  patients took no part in discovery or selection, these tests are valid
+  conditional on the selection (sample splitting).
+- **Pooled.** Counts of selected and confirmed modifiers per fold and in total.
+- **Across folds.** Each fold defines and extracts its own variables, so
+  variables are matched across folds only by exact normalized name (lower case,
+  runs of other characters replaced by `_`), reported as "selected in `k`
+  folds, confirmed in `j`". For a name selected in several folds, the held-out
+  combined p-values are combined by Stouffer's method,
+  `Z = Σ_k Φ⁻¹(1 − p_k) / √K`.
+
+The results are written to `stage2/heterogeneity_diagnostics.json` under
+`modifier_confirmation`, with an `interpretation` string, and summarized in
+`stage2/causal_estimate.json`. Missing inputs make a fold or the section
+`unavailable`; they never fail the run. The confirmation also runs for
+`balanced_evidence` selections.
+
+## The balanced_evidence rule
+
+`multi_model.modifier_selection.rule = "balanced_evidence"` replaces the
+orthogonal tests and the estimator ensemble with a deterministic ranking of the
+candidates and a nested, joint choice of the number of modifiers and one
+effect model. Its settings are under `multi_model.modifier_count`;
+`modifier_selection.estimator_policy` must stay null, and
+`modifier_selection.q`, `weights`, and `max_modifiers` are not used for
+selection (`q` and `weights` still configure the outer-fold confirmation). The
+optional [modifier-concept review](optional_extensions.md#modifier-concept-review)
+works only with this rule.
+
+### Modifier ranking
 
 The ranking orders all unlocked candidates by a fixed formula over the saved
 numerical evidence; it involves no LLM. It combines two equally weighted groups
@@ -217,12 +502,12 @@ modifier, and adding predictive sources does not multiply their weight against
 the interaction test. Every component, coverage count, and rationale is saved in
 `ranking.json`.
 
-## Modifier count and model selection
+### Modifier count and model selection
 
 The number of modifiers and the final effect model are chosen together by
-nested validation on the five original inner folds. The rule is called
-`balanced_evidence` (`multi_model.modifier_count.selection_rule`, its only
-allowed value).
+nested validation on the five original inner folds. The count rule
+(`multi_model.modifier_count.selection_rule`) has one allowed value,
+`balanced_evidence`.
 
 **Candidate budgets.** Let `M = min(number of unlocked candidates, 64)`
 (`max_ranked_modifiers`). The budgets are `{min(k, M) : k ∈ 0, 4, 8, 12, 16, 24, 32} ∪ {M}`
@@ -290,23 +575,22 @@ The rule lets strong interaction evidence influence how many modifiers are kept
 without overriding a clear predictive disadvantage. It is a selection heuristic,
 not a test, and it carries no error-rate guarantee.
 
-**Zero modifiers.** A budget of zero is always a candidate. It does not force a
-zero effect: the forest then fits a constant effect (or, for binary outcomes,
-an effect that varies only with baseline risk); the interaction model keeps an
-unpenalized treatment coefficient; and DINA fits a constant log odds ratio,
-which still implies risk differences that vary with baseline risk.
+A budget of zero is always a candidate (see
+[Zero modifiers](#final-refit)).
 
 **Final modifier set.** A ranking built from all outer-training evidence
 supplies the top `K` candidates of the chosen budget, which receive the
-`effect_modifier` role. The nested comparison holds the catalog, extractions,
-and definitions fixed; see [Limitations](#limitations).
+`effect_modifier` role, and the chosen model is the only final effect model.
+The nested comparison holds the catalog, extractions, and definitions fixed;
+see [Limitations](#limitations).
 
 ## Final refit
 
-The chosen model is refitted on the outer-training patients that pass the
-eligibility rule, and predicts the outer held-out patients. Let the retained
-variables be the confounders (from nuisance selection) and the modifiers (from
-the chosen budget); a variable can be both.
+Each final effect model (every ensemble component, or the single chosen
+model) is refitted on the outer-training patients that pass the eligibility
+rule, and predicts the outer held-out patients. Let the retained variables be
+the confounders (from nuisance selection) and the modifiers (from the modifier
+rule); a variable can be both.
 
 - **Causal forest.** EconML `CausalForestDML` with honest trees, inference
   enabled, `stage2.estimation_trees` trees, minimum leaf 10, and square-root
@@ -318,7 +602,8 @@ the chosen budget); a variable can be both.
   and a forest restricted to the selected modifiers could not represent that.
   When there are no modifiers and the outcome is continuous, a constant X gives
   one effect for the fold. The forest is the only model that produces per-patient
-  95% confidence intervals.
+  95% confidence intervals (written to the `estimated_cate_causal_forest_*`
+  columns under the ensemble).
 - **Penalized interaction model.**
 
   $$
@@ -340,6 +625,12 @@ the chosen budget); a variable can be both.
   [final nuisances](#nuisance-construction) as offsets for both fitting and
   prediction. See [DINA](#dina).
 
+**Zero modifiers.** Zero modifiers does not force a zero effect: the forest
+then fits a constant effect (or, for binary outcomes, an effect that varies
+only with baseline risk); the interaction model keeps an unpenalized treatment
+coefficient; and DINA fits a constant log odds ratio, which still implies risk
+differences that vary with baseline risk.
+
 The effect predictions are frozen before the held-out treatment and outcome
 labels are read.
 
@@ -348,7 +639,8 @@ labels are read.
 One nuisance construction feeds every downstream quantity of the final
 estimation: propensity eligibility, the AIPW scores, the DINA offsets, the
 interaction model's adjustment covariates, the forest's prognostic score, and
-the diagnostics.
+the diagnostics. Its training half, computed earlier and identically, also
+supplies the [testing nuisances](#testing-nuisances) of the orthogonal tests.
 
 1. **Models.** Within the outer-training patients, the five inner folds are
    used for cross-fitting. In each inner fold, elastic nets are fitted on the
@@ -404,13 +696,15 @@ The same rule applies at every stage:
 | Stage | Training patients judged by | Validation or held-out patients judged by |
 |---|---|---|
 | Evidence families and modifier ranking | Out-of-fold training propensity | Propensity from models fitted on the split's training patients |
-| Modifier count and model selection | Out-of-fold training propensity | Propensity from models fitted on the fold's training patients |
+| Orthogonal modifier tests | Recalibrated out-of-fold propensity (testing nuisances) | Not used |
+| Modifier count and model selection (`balanced_evidence`) | Out-of-fold training propensity | Propensity from models fitted on the fold's training patients |
 | Final refit and estimation | Recalibrated out-of-fold propensity | Recalibrated inner-fold-ensemble propensity |
+| Outer-fold confirmation | Not used | `effect_eligible` from the final estimation |
 
 Held-out outcomes never determine eligibility, and there is no automatic
 threshold search. Too few eligible patients or treatment arms makes an evidence
-cell unevaluable and stops count selection or final estimation with an error;
-no step falls back to all patients. Excluded held-out patients stay
+cell or a modifier test unevaluable and stops count selection or final
+estimation with an error; no step falls back to all patients. Excluded held-out patients stay
 in `predictions.csv` and `cross_fitted_predictions.csv` with
 `effect_eligible = false` and missing `aipw_score` and `estimated_cate`; they do
 not contribute to the ATE, its standard error, the mean CATE, or oracle metrics.
@@ -488,14 +782,15 @@ does not produce per-patient confidence intervals.
 | Stage 1 `htr_neural` effect heads | DINA loss with nuisances frozen inside the effect-training fold |
 | Stage 1 `tfidf_topics`, `tfidf_orphan_ngrams`, `neural_query_moments`, embedding effect directions | DINA score `(T − a)(Y − expit(ν + (T − a)δ₀))` around a training-fitted constant `δ₀`, with Fisher-information weights |
 | Stage 2 evidence | One-candidate DINA gains, the joint grouped DINA model, and joint DINA permutation importance |
-| Stage 2 model search and final refit | The `dina` effect model |
+| Stage 2 estimator ensemble, `balanced_evidence` model search, and final refit | The `dina` effect model |
 
 **Scale.** DINA, the logistic interaction model, and the adjusted interaction
 test describe variation in log odds ratios; the causal forest describes
 variation in risk differences. A constant odds ratio implies risk differences
 that vary with baseline risk, so these methods can legitimately support
-different modifiers. The model search compares all models on the risk-difference
-scale.
+different modifiers. The `balanced_evidence` model search compares all models
+on the risk-difference scale; the orthogonal tests combine evidence from both
+scales.
 
 ## Heterogeneity and overlap diagnostics
 
@@ -508,7 +803,9 @@ the run. A compact summary is copied into `stage2/causal_estimate.json` under
 `heterogeneity_diagnostics`.
 
 Each section has an `interpretation` string, `per_fold` results, and a `pooled`
-result. `ψ` below is the held-out AIPW score and `τ̂` is `estimated_cate`.
+result. `ψ` below is the held-out AIPW score and `τ̂` is `estimated_cate` (the
+ensemble mean under the default estimator policy). The `modifier_confirmation`
+section is described in [Outer-fold confirmation](#outer-fold-confirmation).
 
 | Section | What it computes | How to read it |
 |---|---|---|
@@ -545,13 +842,15 @@ Per outer fold, under `stage2/outer_NNN/`:
 |---|---|
 | `extraction/candidate_missingness_filter.json` | The informativeness filter's decision for every candidate |
 | `selection/statistical_evidence.json` | All evidence cells, family summaries, nuisance supports, and policy |
-| `selection/nuisance_predictions.csv` | Out-of-fold nuisance predictions used during selection (outer-training patients only) |
-| `selection/modifier_count/selection.json` | The count and model choice: loss surface, guardrail, utilities, fold rankings, and the full-training ranking |
-| `selection/modifier_count/<id>/fold_NNN/ranking/ranking.json` | One nested ranking with every candidate's component scores |
+| `selection/nuisance_predictions.csv` | Out-of-fold nuisance predictions of the evidence families (outer-training patients only) |
+| `selection/modifier_tests.json` | `orthogonal_tests`: every candidate's component and combined p-values, q-values, selection, and labels |
+| `selection/modifier_count/selection.json` | The modifier selection report: for `orthogonal_tests`, the selected modifiers, estimator policy, and test summary; for `balanced_evidence`, the loss surface, guardrail, utilities, fold rankings, and the full-training ranking |
+| `selection/modifier_count/<id>/testing_nuisances.csv` | `orthogonal_tests`: the testing nuisances and eligibility of each training patient |
+| `selection/modifier_count/<id>/fold_NNN/ranking/ranking.json` | `balanced_evidence`: one nested ranking with every candidate's component scores |
 | `selection/elastic_net_selection.json` | Final role decisions with their sources |
-| `final_definitions.json` | Retained variables, roles, definitions, and the chosen model |
-| `estimation/predictions.csv` | Held-out predictions for this fold |
-| `estimation/diagnostics.json` | Fit audits, AIPW ATE, nuisance calibration, overlap, and methodology notes |
+| `final_definitions.json` | Retained variables, roles (with `modifier_evidence` for each modifier under `orthogonal_tests`), definitions, and the final estimator |
+| `estimation/predictions.csv` | Held-out predictions for this fold, including per-estimator CATE columns under the ensemble |
+| `estimation/diagnostics.json` | Fit audits (each ensemble component's), AIPW ATE, nuisance calibration, overlap, and methodology notes |
 | `estimation/nuisance_fit_predictions.csv` | Training out-of-fold nuisances, raw and recalibrated, with eligibility |
 | `estimation/propensity_overlap.json` | Training and held-out eligibility audit |
 | `estimation/extraction_failure_diagnostics.json` | Extraction-failure rates on training and held-out patients |
@@ -564,14 +863,16 @@ data, `posthoc_oracle_ite_metrics.json` and
 
 ## Limitations
 
-- **Inner-selection optimism.** Stage 1 evidence, variable discovery, the
+- **Selection optimism.** Stage 1 evidence, variable discovery, the
   extraction definitions, and the informativeness filter for an outer fold all
-  used every outer-training patient's labels, including the patients that later
-  serve as inner validation patients. The nested count and model selection
-  re-derives the evidence and ranking inside each inner fold but holds the
-  catalog and extractions fixed, so its validation R-loss is optimistic, and
-  the q-values used in ranking do not account for the adaptive discovery that
-  produced the candidates. Only the outer held-out predictions evaluate the
+  used every outer-training patient's labels. The orthogonal tests' training
+  p-values therefore do not account for the adaptive discovery that produced
+  the candidates and are somewhat optimistic; the outer-fold confirmation
+  re-tests the selected modifiers on held-out patients. Under
+  `balanced_evidence`, the nested count and model selection re-derives the
+  evidence and ranking inside each inner fold but holds the catalog and
+  extractions fixed, so its validation R-loss is optimistic, as are the
+  q-values used in ranking. Only the outer held-out predictions evaluate the
   complete pipeline, and the reported ATE standard error does not account for
   selection.
 - **Measurement error from LLM extraction.** Extracted values can be wrong,
@@ -600,9 +901,12 @@ data, `posthoc_oracle_ite_metrics.json` and
   Slopes before and after recalibration are in each fold's diagnostics.
 - **Inference.** Standard errors for the AIPW ATE and the diagnostics treat the
   cross-fitted nuisances and the eligibility rule as fixed. Only the causal
-  forest produces per-patient intervals. Rankings, budgets, and guardrails are
-  heuristics without error-rate guarantees, and validation R-loss is a noisy
-  criterion that does not directly optimize recovery of true modifiers.
+  forest produces per-patient intervals, and they do not describe the ensemble
+  mean, which has none. The modifier tests' error control is nominal (see
+  [Assumptions and limitations](#assumptions-and-limitations)). Under
+  `balanced_evidence`, rankings, budgets, and guardrails are heuristics without
+  error-rate guarantees, and validation R-loss is a noisy criterion that does
+  not directly optimize recovery of true modifiers.
 - **Synthetic benchmarks.** The bundled cohorts are LLM-written narratives
   generated from a known, simple data-generating process with one or five
   confounders and modifiers among 1,000 patients. Good recovery on them shows
@@ -613,6 +917,9 @@ data, `posthoc_oracle_ite_metrics.json` and
 
 ## References
 
+- Benjamini Y, Hochberg Y. Controlling the false discovery rate: a practical
+  and powerful approach to multiple testing. *Journal of the Royal Statistical
+  Society, Series B* 1995;57(1):289–300.
 - Chernozhukov V, Chetverikov D, Demirer M, et al. Double/debiased machine
   learning for treatment and structural parameters. *Econometrics Journal*
   2018;21(1):C1–C68.
@@ -625,8 +932,20 @@ data, `posthoc_oracle_ite_metrics.json` and
   regression for treatment effect estimation. *Bayesian Analysis* 2018;13(1):163–182.
 - Li F, Morgan KL, Zaslavsky AM. Balancing covariates via propensity score
   weighting. *Journal of the American Statistical Association* 2018;113(521):390–400.
+- Liu Y, Xie J. Cauchy combination test: a powerful test with analytic p-value
+  calculation under arbitrary dependency structures. *Journal of the American
+  Statistical Association* 2020;115(529):393–402.
+- MacKinnon JG, White H. Some heteroskedasticity-consistent covariance matrix
+  estimators with improved finite sample properties. *Journal of Econometrics*
+  1985;29(3):305–325.
 - Nie X, Wager S. Quasi-oracle estimation of heterogeneous treatment effects.
   *Biometrika* 2021;108(2):299–319.
+- Semenova V, Chernozhukov V. Debiased machine learning of conditional average
+  treatment effects and other causal functions. *Econometrics Journal*
+  2021;24(2):264–289.
+- Stouffer SA, Suchman EA, DeVinney LC, Star SA, Williams RM. *The American
+  Soldier, Vol. 1: Adjustment During Army Life.* Princeton University Press,
+  1949.
 - Yadlowsky S, Fleming S, Shah N, Brunskill E, Wager S. Evaluating treatment
   prioritization rules via rank-weighted average treatment effects. *Journal of
   the American Statistical Association* 2025;120(549):38–51.

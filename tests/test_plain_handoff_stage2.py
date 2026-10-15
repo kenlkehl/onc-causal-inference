@@ -5823,16 +5823,20 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     )
     from dataclasses import replace
 
-    from oci.inference.stage2_multi_model_config import ModifierCountConfig
+    from oci.inference.stage2_multi_model_config import (
+        ModifierCountConfig,
+        ModifierSelectionConfig,
+    )
     from tests.test_stage2_multi_model import small_policy
 
-    # Exercise the real multi-model selector with a small numerical budget and
-    # a causal-forest final estimator.
+    # Exercise the real multi-model selector with the nested balanced_evidence
+    # rule, a small numerical budget and a causal-forest final estimator.
     selection_policy = small_policy()
     selection_policy = replace(
         selection_policy,
         multi_model=replace(
             selection_policy.multi_model,
+            modifier_selection=ModifierSelectionConfig(rule="balanced_evidence"),
             modifier_count=ModifierCountConfig(estimators=("causal_forest",)),
         ),
     )
@@ -5884,15 +5888,20 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     assert str(heterogeneity_path) in first["artifacts"]
     heterogeneity_text = heterogeneity_path.read_text(encoding="utf-8")
     heterogeneity = json.loads(heterogeneity_text)
-    assert heterogeneity["schema_version"] == "stage2_heterogeneity_diagnostics_v1"
+    assert heterogeneity["schema_version"] == (
+        "stage2_heterogeneity_diagnostics_v2_modifier_confirmation"
+    )
     assert heterogeneity["oracle_columns_consumed"] is False
     assert "true_ite" not in heterogeneity_text
     assert heterogeneity["inputs"]["outer_folds"] == ["1", "2"]
     assert heterogeneity["inputs"]["rows"] == 40
     assert heterogeneity["inputs"]["recomputed_psi_max_abs_difference_from_aipw_score"] < 1e-9
     assert set(heterogeneity["pooling_rules"]) == {
-        "blp", "gates", "clan", "rate", "overlap", "balance"
+        "blp", "gates", "clan", "rate", "overlap", "balance", "modifier_confirmation"
     }
+    # Reporting-only held-out confirmation also covers balanced_evidence selections.
+    assert heterogeneity["modifier_confirmation"]["status"] == "ok"
+    assert set(heterogeneity["modifier_confirmation"]["per_fold"]) == {"1", "2"}
     for name in (
         "blp", "gates", "clan", "rate", "overlap_weighted_ate", "ipw_weights", "trimming_curve"
     ):

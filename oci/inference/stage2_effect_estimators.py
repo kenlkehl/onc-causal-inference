@@ -62,7 +62,19 @@ def nuisance_adjustment(*, train_propensity, valid_propensity, train_mu0, valid_
     }
 
 
+def ensemble_estimators(outcome_type):
+    """Every final estimator available for the outcome type, in canonical order."""
+    if outcome_type == "binary":
+        return ("causal_forest", "linear_interactions", "dina")
+    if outcome_type == "continuous":
+        return ("causal_forest", "linear_interactions")
+    raise ValueError("the estimator ensemble requires a binary or continuous outcome")
+
+
 def effect_model_family(estimator, outcome_type):
+    if estimator == "ensemble":
+        ensemble_estimators(outcome_type)
+        return "unweighted_estimator_ensemble"
     if estimator == "dina":
         if outcome_type != "binary":
             raise ValueError("DINA final architecture requires binary outcomes")

@@ -75,10 +75,13 @@ oci/
     │                                 #   selection driver, held-out extraction, final estimation
     ├── stage2_multi_model_config.py, stage2_elastic_net_selection.py   # Selection policy (config)
     ├── stage2_multi_model_selection.py     # Resampled evidence families, predictive nuisance selection
-    ├── stage2_modifier_ranking.py, stage2_modifier_count.py   # Modifier ranking, budget/estimator choice
+    ├── stage2_modifier_tests.py      # Orthogonal modifier tests, Cauchy combination, BH, labels
+    ├── stage2_modifier_ranking.py, stage2_modifier_count.py   # Modifier selection (orthogonal_tests,
+    │                                 #   or balanced_evidence ranking and budget/estimator choice)
     ├── stage2_nuisance_selection.py, stage2_statistical_selection.py, stage2_interaction_screen.py
     ├── stage2_effect_estimators.py, stage2_dina.py, stage2_final_modeling.py   # Final effect models
-    ├── stage2_diagnostics.py         # Oracle-free BLP, GATES, CLAN, RATE, ATO, trimming, SMDs
+    ├── stage2_diagnostics.py         # Oracle-free BLP, GATES, CLAN, RATE, ATO, trimming, SMDs,
+    │                                 #   outer-fold modifier confirmation (reporting only)
     ├── stage2_extraction_failures.py # Extraction-failure masks and reports
     ├── nuisance_diagnostics.py       # Held-out nuisance diagnostics, overlap policy
     ├── stage2_estimand_ontology*.py, stage2_modifier_concepts.py, stage2_multi_model_adjudication.py,
@@ -133,12 +136,18 @@ outer-training extraction with aggregate review and failure-driven definition
 refinement → informativeness and extraction-failure filter
 (`min_informative_patients`, `max_extraction_failure_fraction`) → optional
 estimand search and selection consolidation → resampled evidence families and
-predictive nuisance selection → modifier ranking and `balanced_evidence`
-budget/estimator choice (`causal_forest`, `linear_interactions`, `dina`) →
-held-out extraction of the full nuisance-candidate catalog → final refit with
-recalibrated nuisances → cross-fitted predictions, AIPW ATE, and
-`heterogeneity_diagnostics.json`. Details: `docs/how_it_works.md` and
-`docs/stage2_selection.md`.
+predictive nuisance selection → modifier selection by `orthogonal_tests` (the
+default: training-row final-estimation nuisances; `r_projection`,
+`aipw_projection`, and `outcome_interaction` tests per candidate; Cauchy
+combination; BH at `modifier_selection.q`) → held-out extraction of the full
+nuisance-candidate catalog → final refit with recalibrated nuisances of the
+estimator ensemble (unweighted mean of `causal_forest`, `linear_interactions`,
+and `dina` for binary outcomes) → cross-fitted predictions, AIPW ATE, and
+`heterogeneity_diagnostics.json`, including the reporting-only outer-fold
+confirmation of the selected modifiers. `modifier_selection.rule:
+"balanced_evidence"` instead runs the nested modifier ranking and
+budget/estimator choice; concept review requires it. Details:
+`docs/how_it_works.md` and `docs/stage2_selection.md`.
 
 Configuration rules:
 
@@ -151,6 +160,9 @@ Configuration rules:
   `--stage2-only --stage2-reselect`.
 - Diagnostic evidence families (`multi_model.diagnostic_families`) and
   matched-batch evidence are opt-in and do not drive selection.
+- Outer-fold confirmation (`modifier_confirmation` in
+  `heterogeneity_diagnostics.json`) is computed from frozen artifacts after
+  every fold finishes; no selection, estimation, or other fold reads it.
 
 ## Scientific invariants
 

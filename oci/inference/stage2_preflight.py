@@ -51,6 +51,16 @@ def validate_selection_resume(config: workflow.ResearchStage1Config) -> None:
         raise RuntimeError(
             "Stage 2 modifier-count estimation_trees changed; use guarded --stage2-reselect"
         )
+    if (
+        config.stage2.statistical_selection.multi_model.modifier_selection.rule
+        == "orthogonal_tests"
+        and "propensity_clip" in saved
+        and saved["propensity_clip"] != config.stage2.propensity_clip
+    ):
+        raise RuntimeError(
+            "Stage 2 propensity_clip changed and the orthogonal_tests modifier rule uses it; "
+            "use guarded --stage2-reselect"
+        )
 
 
 def _validate_partition(fit: list[int], heldout: list[int], universe: set[int]) -> None:

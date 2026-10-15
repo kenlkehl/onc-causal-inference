@@ -78,7 +78,7 @@
       "modifier_ridge_alpha": 10.0,
       "modifier_continuous_winsor_quantile": 0.005,
       "multi_model": {
-        "schema_version": "stage2_multi_model_selection_v8_opt_in_diagnostic_families",
+        "schema_version": "stage2_multi_model_selection_v9_orthogonal_modifier_tests",
         "repeats": 3,
         "row_fraction": 0.8,
         "l1_ratios": [
@@ -107,6 +107,13 @@
           "train_passes": 100,
           "validation_passes": 50,
           "ridge_penalty": 0.01
+        },
+        "modifier_selection": {
+          "rule": "orthogonal_tests",
+          "q": 0.1,
+          "weights": null,
+          "max_modifiers": 64,
+          "estimator_policy": null
         },
         "modifier_count": {
           "candidate_counts": [

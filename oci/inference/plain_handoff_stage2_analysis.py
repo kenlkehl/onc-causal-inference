@@ -6793,7 +6793,13 @@ def _extract_training_with_ontology_feedback(
     return extracted, current, len(rounds)
 
 
-def _fit_nuisance_prediction(x, y, valid, *, binary, seed, audit_path=None):
+def _fit_nuisance_prediction(x, y, valid, *, binary, seed, audit_path=None, split_at=None):
+    """Fit one nuisance model and predict ``valid``.
+
+    With ``split_at``, rows ``valid[:split_at]`` and ``valid[split_at:]`` are
+    predicted in separate calls, so the first block's values do not depend on
+    the rows appended after it.
+    """
     model = _fit_classifier(x, y, seed=seed) if binary else _fit_regressor(x, y, seed=seed)
     if audit_path is not None:
         # The elastic-net wrappers report standardization, the selected penalty
@@ -6808,13 +6814,19 @@ def _fit_nuisance_prediction(x, y, valid, *, binary, seed, audit_path=None):
                 else {"estimator": type(model).__name__, "fit_mode": "constant_or_external"}
             ),
         })
-    return _predict_probability(model, valid) if binary else np.asarray(model.predict(valid), float)
+
+    def predict(rows):
+        return _predict_probability(model, rows) if binary else np.asarray(model.predict(rows), float)
+
+    if split_at is None or not 0 < int(split_at) < len(valid):
+        return predict(valid)
+    return np.concatenate((predict(valid[: int(split_at)]), predict(valid[int(split_at):])))
 
 
 def _nuisance_prediction_futures(
     x_t, x_y, treatment, outcome, valid_t, valid_y, *, binary, seed,
     checkpoint_dir=None, checkpoint_fingerprint="uncached", name="full_training",
-    audit_dir=None,
+    audit_dir=None, split_at=None,
 ):
     from functools import partial
     from .stage2_final_modeling import prediction_future
@@ -6825,7 +6837,7 @@ def _nuisance_prediction_futures(
     pending = [prediction_future(
         checkpoint_dir, f"{name}/propensity", checkpoint_fingerprint,
         partial(_fit_nuisance_prediction, x_t, treatment, valid_t, binary=True, seed=seed,
-                audit_path=audit_path("propensity")),
+                audit_path=audit_path("propensity"), split_at=split_at),
         len(valid_t),
     )]
     for arm in (0, 1):
@@ -6835,7 +6847,8 @@ def _nuisance_prediction_futures(
         pending.append(prediction_future(
             checkpoint_dir, f"{name}/mu{arm}", checkpoint_fingerprint,
             partial(_fit_nuisance_prediction, x_y[mask], outcome[mask], valid_y,
-                    binary=binary, seed=seed + arm, audit_path=audit_path(f"mu{arm}")),
+                    binary=binary, seed=seed + arm, audit_path=audit_path(f"mu{arm}"),
+                    split_at=split_at),
             len(valid_y),
         ))
     return pending
@@ -6900,7 +6913,9 @@ def _cross_fitted_nuisance(
     models (the standard cross-fitting ensemble). Six arrays are then returned:
     training e, mu0, mu1 followed by held-out e, mu0, mu1. Averages are taken on
     the prediction scale (probabilities for binary targets), before any
-    recalibration.
+    recalibration. Each fold model predicts its inner-validation rows and the
+    held-out rows in separate calls, so the training values are identical with
+    and without ``heldout_extracted``.
     """
     from .stage2_final_modeling import prediction_result
 
@@ -6940,6 +6955,7 @@ def _cross_fitted_nuisance(
             binary=binary, seed=seed + fold_index,
             checkpoint_dir=checkpoint_dir, checkpoint_fingerprint=checkpoint_fingerprint,
             name=f"cross_fit/fold_{fold_index:03d}", audit_dir=audit_dir,
+            split_at=len(valid_ids) if heldout_extracted is not None else None,
         )
         pending.append((valid_positions, jobs))
     heldout_rows = 0 if heldout_extracted is None else len(heldout_extracted)
@@ -7030,14 +7046,20 @@ def _recalibrated_nuisances(
     binary: bool,
     inner_fold_ids: np.ndarray,
     fit: tuple[np.ndarray, np.ndarray, np.ndarray],
-    heldout: tuple[np.ndarray, np.ndarray, np.ndarray],
+    heldout: tuple[np.ndarray, np.ndarray, np.ndarray] | None,
 ) -> dict[str, Any]:
-    """Cross-fitted Platt recalibration learned from training OOF predictions only."""
+    """Cross-fitted Platt recalibration learned from training OOF predictions only.
+
+    Training values never depend on ``heldout``; without it, ``"heldout"`` is None.
+    """
 
     from ..utils.calibration import cross_fitted_platt
 
     raw_e_fit, raw_mu0_fit, raw_mu1_fit = (np.asarray(v, dtype=float) for v in fit)
-    raw_e_held, raw_mu0_held, raw_mu1_held = (np.asarray(v, dtype=float) for v in heldout)
+    raw_e_held, raw_mu0_held, raw_mu1_held = (
+        (None, None, None) if heldout is None
+        else (np.asarray(v, dtype=float) for v in heldout)
+    )
     e_fit, e_held, e_audit = cross_fitted_platt(
         raw_e_fit, treatment, inner_fold_ids, heldout_prob=raw_e_held
     )
@@ -7065,10 +7087,84 @@ def _recalibrated_nuisances(
         )
     return {
         "fit": (np.asarray(e_fit, float), np.asarray(mu0_fit, float), np.asarray(mu1_fit, float)),
-        "heldout": (
+        "heldout": None if heldout is None else (
             np.asarray(e_held, float), np.asarray(mu0_held, float), np.asarray(mu1_held, float)
         ),
         "audit": audit,
+    }
+
+
+# The final nuisance construction's seed offset; modifier testing reuses it.
+FINAL_NUISANCE_SEED_OFFSET = 30_000
+
+
+def _outer_training_nuisances(
+    *,
+    dataset: pd.DataFrame,
+    candidate_fit: pd.DataFrame,
+    candidate_definitions: Sequence[Mapping[str, Any]],
+    fit_ids: Sequence[int],
+    inner_splits: Sequence[Mapping[str, Any]],
+    treatment_column: str,
+    outcome_column: str,
+    binary: bool,
+    seed: int,
+    checkpoint_dir: Path | None,
+    checkpoint_fingerprint: str,
+    audit_dir: Path | None,
+    candidate_heldout: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """All-candidate, inner-cross-fitted, Platt-recalibrated e/mu0/mu1.
+
+    The final estimation (with ``candidate_heldout``) and the modifier tests
+    (training rows only, before held-out measurements exist) share this
+    construction: same candidates, folds, seeds, standardization and
+    recalibration. Training values are identical in both calls.
+    """
+
+    fit_ids = [int(value) for value in fit_ids]
+    fit_data = dataset.iloc[fit_ids]
+    treatment = fit_data[treatment_column].to_numpy(dtype=float)
+    outcome = fit_data[outcome_column].to_numpy(dtype=float)
+    inner_fold_ids = _inner_fold_assignment(fit_ids, inner_splits)
+    raw = _cross_fitted_nuisance(
+        dataset=dataset,
+        extracted=candidate_fit,
+        definitions=candidate_definitions,
+        fit_ids=fit_ids,
+        inner_splits=inner_splits,
+        treatment_column=treatment_column,
+        outcome_column=outcome_column,
+        binary=binary,
+        seed=seed + FINAL_NUISANCE_SEED_OFFSET,
+        checkpoint_dir=checkpoint_dir,
+        checkpoint_fingerprint=checkpoint_fingerprint,
+        # The pooled support was learned across all outer-training patients.
+        # It must not screen predictors for their own OOF nuisance predictions.
+        all_candidates=True,
+        audit_dir=audit_dir,
+        # Held-out rows: the average of the same K inner-fold models (the
+        # cross-fitting ensemble) that produced the training OOF predictions.
+        # No separate full-data fit.
+        heldout_extracted=candidate_heldout,
+    )
+    raw_fit = tuple(raw[:3])
+    raw_heldout = tuple(raw[3:]) if candidate_heldout is not None else None
+    recalibrated = _recalibrated_nuisances(
+        treatment=treatment,
+        outcome=outcome,
+        binary=binary,
+        inner_fold_ids=inner_fold_ids,
+        fit=raw_fit,
+        heldout=raw_heldout,
+    )
+    return {
+        "treatment": treatment,
+        "outcome": outcome,
+        "inner_fold_ids": inner_fold_ids,
+        "raw_fit": raw_fit,
+        "raw_heldout": raw_heldout,
+        "recalibrated": recalibrated,
     }
 
 
@@ -7111,15 +7207,18 @@ def estimate_outer_fold(
         NUISANCE_ADJUSTMENT_DESCRIPTION,
         PROGNOSTIC_FOREST_DESCRIPTION,
         effect_model_family,
+        ensemble_estimators,
         fit_interaction_effect,
         nuisance_adjustment,
         prognostic_score,
     )
 
     model_family = effect_model_family(estimator, outcome_type)
-    if estimator in {"linear_interactions", "dina"}:
+    if estimator in {"linear_interactions", "dina", "ensemble"}:
         if statistical_policy is None:
-            raise ValueError("linear interaction or DINA estimation requires a statistical policy")
+            raise ValueError(
+                "linear interaction, DINA or ensemble estimation requires a statistical policy"
+            )
         statistical_policy.validate()
     validate_propensity_bounds(min_propensity, max_propensity)
     complete_path = output_dir / "complete.json"
@@ -7150,7 +7249,7 @@ def estimate_outer_fold(
             },
             "interaction_policy": (
                 statistical_policy.public_dict()
-                if estimator in {"linear_interactions", "dina"}
+                if estimator in {"linear_interactions", "dina", "ensemble"}
                 else None
             ),
             "interaction_source_fingerprint": (
@@ -7166,7 +7265,7 @@ def estimate_outer_fold(
                         )
                     ]
                 )
-                if estimator in {"linear_interactions", "dina"}
+                if estimator in {"linear_interactions", "dina", "ensemble"}
                 else None
             ),
             "dataset_modeling_fingerprint": _frame_fingerprint(
@@ -7248,42 +7347,28 @@ def estimate_outer_fold(
     supplied_inner = list(split.get("inner_splits") or []) or _fallback_inner_splits(
         fit_ids, folds=inner_folds, seed=seed
     )
-    inner_fold_ids = _inner_fold_assignment(fit_ids, supplied_inner)
     # Fit audits live beside (not inside) the prediction checkpoints.
     nuisance_audit_dir = output_dir / "nuisance_fit_audits" / final_fit_fingerprint[:20]
-    (
-        raw_fit_propensity, raw_fit_mu0, raw_fit_mu1,
-        raw_propensity, raw_mu0, raw_mu1,
-    ) = _cross_fitted_nuisance(
+    nuisances = _outer_training_nuisances(
         dataset=dataset,
-        extracted=candidate_fit,
-        definitions=nuisance_candidate_definitions,
+        candidate_fit=candidate_fit,
+        candidate_definitions=nuisance_candidate_definitions,
         fit_ids=fit_ids,
         inner_splits=supplied_inner,
         treatment_column=treatment_column,
         outcome_column=outcome_column,
         binary=binary,
-        seed=seed + 30_000,
+        seed=seed,
         checkpoint_dir=final_fit_dir,
         checkpoint_fingerprint=final_fit_fingerprint,
-        # The pooled support was learned across all outer-training patients.
-        # It must not screen predictors for their own OOF nuisance predictions.
-        all_candidates=True,
         audit_dir=nuisance_audit_dir,
-        # Held-out rows: the average of the same K inner-fold models (the
-        # cross-fitting ensemble) that produced the training OOF predictions.
-        # No separate full-data fit.
-        heldout_extracted=candidate_heldout,
+        candidate_heldout=candidate_heldout,
     )
+    inner_fold_ids = nuisances["inner_fold_ids"]
+    raw_fit_propensity, raw_fit_mu0, raw_fit_mu1 = nuisances["raw_fit"]
+    raw_propensity, raw_mu0, raw_mu1 = nuisances["raw_heldout"]
     LOGGER.info("Stage 2 final nuisances completed output=%s", output_dir)
-    recalibrated = _recalibrated_nuisances(
-        treatment=t_fit,
-        outcome=y_fit,
-        binary=binary,
-        inner_fold_ids=inner_fold_ids,
-        fit=(raw_fit_propensity, raw_fit_mu0, raw_fit_mu1),
-        heldout=(raw_propensity, raw_mu0, raw_mu1),
-    )
+    recalibrated = nuisances["recalibrated"]
     fit_propensity, fit_mu0, fit_mu1 = recalibrated["fit"]
     propensity, mu0, mu1 = recalibrated["heldout"]
     fit_keep = propensity_eligibility(fit_propensity, min_propensity, max_propensity)
@@ -7322,155 +7407,241 @@ def estimate_outer_fold(
     _write_json(output_dir / "propensity_overlap.json", overlap)
     if not heldout_keep.any():
         raise ValueError("propensity bounds leave no held-out patients for effect estimation")
-    if estimator == "causal_forest":
-        effect_encoder = _FeatureEncoder(effect_defs).fit(eligible_fit)
-        control_encoder = _FeatureEncoder(pure_confounder_defs).fit(eligible_fit)
-        x_effect_fit = effect_encoder.transform(extracted_fit)
-        x_effect_heldout = effect_encoder.transform(extracted_heldout)
-        selected_modifier_columns = int(x_effect_fit.shape[1])
-        w_fit = control_encoder.transform(extracted_fit)
-        # M-04: on the risk-difference scale the CATE moves with baseline risk
-        # even under a constant odds ratio, so X carries the honest prognostic
-        # score (OOF for training rows, inner-fold ensemble for held-out rows).
-        prognostic_in_x = binary
-        if prognostic_in_x:
-            x_effect_fit = np.column_stack(
-                (x_effect_fit, prognostic_score(fit_mu0, binary=True))
-            )
-            x_effect_heldout = np.column_stack(
-                (x_effect_heldout, prognostic_score(mu0, binary=True))
-            )
-        if x_effect_fit.shape[1] == 0:
-            # EconML requires X for heterogeneous-effect prediction. A constant X
-            # yields one fold-level treatment effect when no modifier survived
-            # (continuous outcomes only; binary outcomes always carry the
-            # prognostic score).
-            x_effect_fit = np.ones((len(extracted_fit), 1), dtype=float)
-            x_effect_heldout = np.ones((len(extracted_heldout), 1), dtype=float)
-            constant_effect_design = True
+
+    def fit_estimator(name: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """Fit one final effect estimator on the eligible training rows.
+
+        Returns held-out effect predictions (eligible rows), the fit audit and
+        architecture diagnostics. No held-out labels enter any estimator.
+        """
+        if name == "causal_forest":
+            effect_encoder = _FeatureEncoder(effect_defs).fit(eligible_fit)
+            control_encoder = _FeatureEncoder(pure_confounder_defs).fit(eligible_fit)
+            x_effect_fit = effect_encoder.transform(extracted_fit)
+            x_effect_heldout = effect_encoder.transform(extracted_heldout)
+            selected_modifier_columns = int(x_effect_fit.shape[1])
+            w_fit = control_encoder.transform(extracted_fit)
+            # M-04: on the risk-difference scale the CATE moves with baseline risk
+            # even under a constant odds ratio, so X carries the honest prognostic
+            # score (OOF for training rows, inner-fold ensemble for held-out rows).
+            prognostic_in_x = binary
+            if prognostic_in_x:
+                x_effect_fit = np.column_stack(
+                    (x_effect_fit, prognostic_score(fit_mu0, binary=True))
+                )
+                x_effect_heldout = np.column_stack(
+                    (x_effect_heldout, prognostic_score(mu0, binary=True))
+                )
+            if x_effect_fit.shape[1] == 0:
+                # EconML requires X for heterogeneous-effect prediction. A constant X
+                # yields one fold-level treatment effect when no modifier survived
+                # (continuous outcomes only; binary outcomes always carry the
+                # prognostic score).
+                x_effect_fit = np.ones((len(extracted_fit), 1), dtype=float)
+                x_effect_heldout = np.ones((len(extracted_heldout), 1), dtype=float)
+                constant_effect_design = True
+            else:
+                constant_effect_design = False
+            controls_fit = w_fit[fit_keep] if w_fit.shape[1] else None
+            with modeling.threaded_fit() as forest_jobs:
+                causal_forest = CausalForestHead(
+                    n_estimators=int(estimation_trees),
+                    max_depth=None,
+                    min_samples_leaf=10,
+                    max_features="sqrt",
+                    honest=True,
+                    inference=True,
+                    random_state=seed + 20_000,
+                    tune_model=False,
+                    subforest_size=next(size for size in (4, 3, 2, 1) if int(estimation_trees) % size == 0),
+                    n_jobs=forest_jobs,
+                    outcome_type=outcome_type,
+                )
+                causal_forest.fit(
+                    x_effect_fit[fit_keep],
+                    t_fit[fit_keep],
+                    y_fit[fit_keep],
+                    W=controls_fit,
+                )
+                effect_predictions = causal_forest.predict(
+                    x_effect_heldout[heldout_keep],
+                    return_ci=True,
+                )
+
+                fit_audit = causal_forest.fit_audit()
+            architecture_diagnostics = {
+                "causal_forest_trees": int(estimation_trees),
+                "causal_forest_honest": True,
+                "causal_forest_inference": True,
+                "causal_forest_tuned": False,
+                "causal_forest_fit_audit": fit_audit,
+                "pure_confounders_in_w": len(pure_confounder_defs),
+                "dual_role_features_in_x_only": len(
+                    [f for f in adjustment_defs if str(f["feature_id"]) in effect_ids]
+                ),
+                "selected_modifier_columns_in_x": selected_modifier_columns,
+                "prognostic_score_in_x": prognostic_in_x,
+                "prognostic_score": (
+                    {
+                        "column": "logit_prognostic_mu0",
+                        "training_source": "inner_out_of_fold_all_candidate_recalibrated_mu0",
+                        "heldout_source": "inner_fold_ensemble_all_candidate_recalibrated_mu0",
+                        "description": PROGNOSTIC_FOREST_DESCRIPTION,
+                    }
+                    if prognostic_in_x
+                    else {"column": None, "reason": "continuous outcome: no scale-induced heterogeneity"}
+                ),
+                "constant_effect_design": constant_effect_design,
+            }
+        elif name == "dina":
+            from functools import partial
+            from .stage2_dina import fit_effect as fit_dina_effect
+            from .stage2_dina import unpack_nuisances
+
+            result = modeling.call(partial(
+                fit_dina_effect,
+                train=eligible_fit,
+                valid=extracted_heldout.iloc[np.flatnonzero(heldout_keep)],
+                definitions=definitions,
+                modifier_ids=effect_ids,
+                treatment=t_fit[fit_keep],
+                outcome=y_fit[fit_keep],
+                policy=statistical_policy,
+                seed=seed + 20_000,
+                nuisance=unpack_nuisances({
+                    "training_propensity": fit_propensity[fit_keep],
+                    "training_mu0": fit_mu0[fit_keep],
+                    "training_mu1": fit_mu1[fit_keep],
+                    "validation_propensity": propensity[heldout_keep],
+                    "validation_mu0": mu0[heldout_keep],
+                    "validation_mu1": mu1[heldout_keep],
+                }),
+            ))
+            effect_predictions = {
+                "tau_pred": result["tau"],
+                "log_odds_ratio": result["delta"],
+                "dina_mu0": result["mu0"],
+                "dina_mu1": result["mu1"],
+            }
+            fit_audit = result["audit"]
+            architecture_diagnostics = {
+                "dina_fit_audit": fit_audit,
+                "dina_offsets": (
+                    "training rows: inner out-of-fold all-candidate recalibrated e/mu0/mu1; "
+                    "held-out rows: inner-fold-ensemble all-candidate recalibrated e/mu0/mu1 "
+                    "(one construction for fitting and prediction)"
+                ),
+                "cate_confidence_intervals": "not_computed_for_grouped_dina",
+            }
         else:
-            constant_effect_design = False
-        controls_fit = w_fit[fit_keep] if w_fit.shape[1] else None
-        with modeling.threaded_fit() as forest_jobs:
-            causal_forest = CausalForestHead(
-                n_estimators=int(estimation_trees),
-                max_depth=None,
-                min_samples_leaf=10,
-                max_features="sqrt",
-                honest=True,
-                inference=True,
-                random_state=seed + 20_000,
-                tune_model=False,
-                subforest_size=next(size for size in (4, 3, 2, 1) if int(estimation_trees) % size == 0),
-                n_jobs=forest_jobs,
-                outcome_type=outcome_type,
+            # Shared with the inner validation search; no held-out labels enter this API.
+            result = fit_interaction_effect(
+                train=eligible_fit,
+                valid=extracted_heldout.iloc[np.flatnonzero(heldout_keep)],
+                definitions=definitions,
+                modifier_ids=effect_ids,
+                treatment=t_fit[fit_keep],
+                outcome=y_fit[fit_keep],
+                binary=binary,
+                policy=statistical_policy,
+                seed=seed + 20_000,
+                path_submit=final_modeling.penalty_path_submitter(
+                    final_fit_dir, final_fit_fingerprint
+                ),
+                adjustment=nuisance_adjustment(
+                    train_propensity=fit_propensity[fit_keep],
+                    valid_propensity=propensity[heldout_keep],
+                    train_mu0=fit_mu0[fit_keep],
+                    valid_mu0=mu0[heldout_keep],
+                    binary=binary,
+                ),
             )
-            causal_forest.fit(
-                x_effect_fit[fit_keep],
-                t_fit[fit_keep],
-                y_fit[fit_keep],
-                W=controls_fit,
-            )
-            effect_predictions = causal_forest.predict(
-                x_effect_heldout[heldout_keep],
-                return_ci=True,
-            )
+            effect_predictions = {"tau_pred": result["tau"]}
+            fit_audit = result["audit"]
+            architecture_diagnostics = {
+                "interaction_fit_audit": fit_audit,
+                "cate_confidence_intervals": "not_computed_for_penalized_interaction_model",
+                "no_selected_interactions": not effect_ids,
+            }
+        return effect_predictions, fit_audit, architecture_diagnostics
 
-            fit_audit = causal_forest.fit_audit()
-        architecture_diagnostics = {
-            "causal_forest_trees": int(estimation_trees),
-            "causal_forest_honest": True,
-            "causal_forest_inference": True,
-            "causal_forest_tuned": False,
-            "causal_forest_fit_audit": fit_audit,
-            "pure_confounders_in_w": len(pure_confounder_defs),
-            "dual_role_features_in_x_only": len(
-                [f for f in adjustment_defs if str(f["feature_id"]) in effect_ids]
-            ),
-            "selected_modifier_columns_in_x": selected_modifier_columns,
-            "prognostic_score_in_x": prognostic_in_x,
-            "prognostic_score": (
-                {
-                    "column": "logit_prognostic_mu0",
-                    "training_source": "inner_out_of_fold_all_candidate_recalibrated_mu0",
-                    "heldout_source": "inner_fold_ensemble_all_candidate_recalibrated_mu0",
-                    "description": PROGNOSTIC_FOREST_DESCRIPTION,
+    ensemble = None
+    if estimator == "ensemble":
+        from .stage2_multi_model_selection import NotEstimable
+
+        fitted: dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any]]] = {}
+        unavailable_components: dict[str, Any] = {}
+        for name in ensemble_estimators(outcome_type):
+            try:
+                fitted[name] = fit_estimator(name)
+            except NotEstimable as exc:
+                unavailable_components[name] = {
+                    "status": "not_estimable",
+                    "reason": str(exc),
+                    **({"optimizer_diagnostics": exc.diagnostics}
+                       if hasattr(exc, "diagnostics") else {}),
                 }
-                if prognostic_in_x
-                else {"column": None, "reason": "continuous outcome: no scale-induced heterogeneity"}
-            ),
-            "constant_effect_design": constant_effect_design,
+                LOGGER.warning(
+                    "Stage 2 ensemble component %s not estimable: %s", name, exc
+                )
+        if not fitted:
+            raise ValueError("no ensemble component estimator was estimable")
+        component_tau = {
+            name: np.asarray(value[0]["tau_pred"], dtype=float).reshape(-1)
+            for name, value in fitted.items()
         }
-    elif estimator == "dina":
-        from functools import partial
-        from .stage2_dina import fit_effect as fit_dina_effect
-        from .stage2_dina import unpack_nuisances
-
-        result = modeling.call(partial(
-            fit_dina_effect,
-            train=eligible_fit,
-            valid=extracted_heldout.iloc[np.flatnonzero(heldout_keep)],
-            definitions=definitions,
-            modifier_ids=effect_ids,
-            treatment=t_fit[fit_keep],
-            outcome=y_fit[fit_keep],
-            policy=statistical_policy,
-            seed=seed + 20_000,
-            nuisance=unpack_nuisances({
-                "training_propensity": fit_propensity[fit_keep],
-                "training_mu0": fit_mu0[fit_keep],
-                "training_mu1": fit_mu1[fit_keep],
-                "validation_propensity": propensity[heldout_keep],
-                "validation_mu0": mu0[heldout_keep],
-                "validation_mu1": mu1[heldout_keep],
-            }),
-        ))
         effect_predictions = {
-            "tau_pred": result["tau"],
-            "log_odds_ratio": result["delta"],
-            "dina_mu0": result["mu0"],
-            "dina_mu1": result["mu1"],
+            # The unweighted mean of the fitted components' CATEs.
+            "tau_pred": np.mean(np.vstack(list(component_tau.values())), axis=0),
+            **{f"component_tau_{name}": values for name, values in component_tau.items()},
         }
-        fit_audit = result["audit"]
-        architecture_diagnostics = {
-            "dina_fit_audit": fit_audit,
-            "dina_offsets": (
-                "training rows: inner out-of-fold all-candidate recalibrated e/mu0/mu1; "
-                "held-out rows: inner-fold-ensemble all-candidate recalibrated e/mu0/mu1 "
-                "(one construction for fitting and prediction)"
+        if "causal_forest" in fitted:
+            for key in ("tau_lower", "tau_upper", "tau_std"):
+                if fitted["causal_forest"][0].get(key) is not None:
+                    effect_predictions[f"causal_forest_{key}"] = fitted["causal_forest"][0][key]
+        if "dina" in fitted:
+            for key in ("log_odds_ratio", "dina_mu0", "dina_mu1"):
+                effect_predictions[key] = fitted["dina"][0][key]
+        ensemble = {
+            "estimator_policy": "ensemble",
+            "combination": "unweighted_mean_of_fitted_component_cates",
+            "component_estimators": list(ensemble_estimators(outcome_type)),
+            "fitted_estimators": list(fitted),
+            "unavailable_estimators": unavailable_components,
+            "component_model_families": {
+                name: effect_model_family(name, outcome_type) for name in fitted
+            },
+            "component_audits": {name: value[2] for name, value in fitted.items()},
+            "interval_columns": (
+                "estimated_cate_lower_95, estimated_cate_upper_95 and "
+                "estimated_cate_standard_error are empty: the causal forest's standard "
+                "error does not describe the ensemble average. The forest's own interval "
+                "is reported in estimated_cate_causal_forest_lower_95/_upper_95/"
+                "_standard_error."
             ),
-            "cate_confidence_intervals": "not_computed_for_grouped_dina",
+        }
+        # Each component's full fit audit is in ensemble["component_audits"].
+        fit_audit = {
+            "estimator_policy": "ensemble",
+            "fitted_estimators": list(fitted),
+            "outcome_model_contract": {
+                "effect_scale": (
+                    "probability_difference" if binary else "outcome_difference"
+                ),
+                "combination": "unweighted_mean_of_fitted_component_cates",
+                "components": {
+                    name: value[1].get("outcome_model_contract")
+                    for name, value in fitted.items()
+                },
+            },
+        }
+        architecture_diagnostics = {
+            "estimator_policy": "ensemble",
+            "ensemble": ensemble,
+            "cate_confidence_intervals": "not_computed_for_estimator_ensemble",
         }
     else:
-        # Shared with the inner validation search; no held-out labels enter this API.
-        result = fit_interaction_effect(
-            train=eligible_fit,
-            valid=extracted_heldout.iloc[np.flatnonzero(heldout_keep)],
-            definitions=definitions,
-            modifier_ids=effect_ids,
-            treatment=t_fit[fit_keep],
-            outcome=y_fit[fit_keep],
-            binary=binary,
-            policy=statistical_policy,
-            seed=seed + 20_000,
-            path_submit=final_modeling.penalty_path_submitter(
-                final_fit_dir, final_fit_fingerprint
-            ),
-            adjustment=nuisance_adjustment(
-                train_propensity=fit_propensity[fit_keep],
-                valid_propensity=propensity[heldout_keep],
-                train_mu0=fit_mu0[fit_keep],
-                valid_mu0=mu0[heldout_keep],
-                binary=binary,
-            ),
-        )
-        effect_predictions = {"tau_pred": result["tau"]}
-        fit_audit = result["audit"]
-        architecture_diagnostics = {
-            "interaction_fit_audit": fit_audit,
-            "cate_confidence_intervals": "not_computed_for_penalized_interaction_model",
-            "no_selected_interactions": not effect_ids,
-        }
+        effect_predictions, fit_audit, architecture_diagnostics = fit_estimator(estimator)
 
     def scatter_prediction(key: str) -> np.ndarray:
         values = np.full(len(heldout_ids), np.nan)
@@ -7513,12 +7684,35 @@ def estimate_outer_fold(
                     "dina_mu1": scatter_prediction("dina_mu1"),
                 }
                 if estimator == "dina"
+                or (ensemble is not None and "dina" in ensemble["fitted_estimators"])
                 else {}
             ),
             "estimated_cate": cate,
             "estimated_cate_lower_95": cate_lower_values,
             "estimated_cate_upper_95": cate_upper_values,
             "estimated_cate_standard_error": cate_std_values,
+            **(
+                {
+                    # Columns for causal_forest and linear_interactions are always
+                    # present (empty if not estimable); DINA only when fitted.
+                    **{
+                        f"estimated_cate_{name}": scatter_prediction(f"component_tau_{name}")
+                        for name in ensemble["component_estimators"]
+                        if name != "dina" or name in ensemble["fitted_estimators"]
+                    },
+                    "estimated_cate_causal_forest_lower_95": scatter_prediction(
+                        "causal_forest_tau_lower"
+                    ),
+                    "estimated_cate_causal_forest_upper_95": scatter_prediction(
+                        "causal_forest_tau_upper"
+                    ),
+                    "estimated_cate_causal_forest_standard_error": scatter_prediction(
+                        "causal_forest_tau_std"
+                    ),
+                }
+                if ensemble is not None
+                else {}
+            ),
             "propensity_uncalibrated": raw_propensity,
             "mu0_uncalibrated": raw_mu0,
             "mu1_uncalibrated": raw_mu1,
@@ -7617,11 +7811,25 @@ def estimate_outer_fold(
         **(
             {"interaction_model_nuisance_adjustment": NUISANCE_ADJUSTMENT_DESCRIPTION}
             if estimator == "linear_interactions"
+            or (ensemble is not None and "linear_interactions" in ensemble["fitted_estimators"])
             else {}
         ),
         **(
             {"forest_prognostic_score": PROGNOSTIC_FOREST_DESCRIPTION}
-            if estimator == "causal_forest" and binary
+            if binary and (
+                estimator == "causal_forest"
+                or (ensemble is not None and "causal_forest" in ensemble["fitted_estimators"])
+            )
+            else {}
+        ),
+        **(
+            {"estimator_ensemble": (
+                "estimated_cate is the unweighted mean of the CATEs of every final "
+                "estimator fitted for this outcome type (causal forest, linear "
+                "interactions and, for binary outcomes, DINA), each fitted exactly as when "
+                "chosen alone. Per-estimator CATEs are in estimated_cate_<estimator>."
+            )}
+            if ensemble is not None
             else {}
         ),
     }
@@ -7660,7 +7868,8 @@ def estimate_outer_fold(
             "training_crossfit_candidates": len(nuisance_candidate_definitions),
             "heldout_candidates": len(nuisance_candidate_definitions),
             "recalibration": "cross_fitted_platt",
-            "dina_reuses_external_nuisances": estimator == "dina",
+            "dina_reuses_external_nuisances": estimator == "dina"
+            or (ensemble is not None and "dina" in ensemble["fitted_estimators"]),
         },
         "nuisance_fit_audit_summary": _nuisance_fit_audit_summary(nuisance_audit_dir),
         "effect_modifiers": len(effect_defs),
@@ -7672,6 +7881,17 @@ def estimate_outer_fold(
             else None
         ),
         "mean_estimated_cate": float(np.nanmean(cate)) if np.isfinite(cate).any() else None,
+        **(
+            {
+                "mean_estimated_cate_by_estimator": {
+                    key.removeprefix("component_tau_"): float(np.mean(values))
+                    for key, values in effect_predictions.items()
+                    if key.startswith("component_tau_")
+                }
+            }
+            if ensemble is not None
+            else {}
+        ),
         **(
             {
                 "mean_causal_forest_lower_95": (
@@ -8483,6 +8703,12 @@ def run_fold_analysis(
             Path(__file__).with_name("stage2_modifier_ranking.py").read_bytes()
         ).hexdigest(),
     }
+    if statistical_policy.multi_model.modifier_selection.rule == "orthogonal_tests":
+        # The AIPW projection test clips propensities exactly as the AIPW ATE does.
+        selection_input["modifier_test_propensity_clip"] = float(config.propensity_clip)
+        selection_input["modifier_tests_source_sha256"] = hashlib.sha256(
+            Path(__file__).with_name("stage2_modifier_tests.py").read_bytes()
+        ).hexdigest()
     if getattr(
         getattr(statistical_policy.multi_model, "matched_batch", None), "enabled", False
     ):
@@ -8673,6 +8899,9 @@ def run_fold_analysis(
                 model_identity=str(getattr(config, "model", "")),
                 estimation_trees=int(config.estimation_trees),
                 run_numerical=_run_stage2_statistical_selection,
+                fit_row_ids=fit_ids,
+                propensity_clip=float(config.propensity_clip),
+                tests_path=selection_dir / "modifier_tests.json",
             )
         measurement_definitions = measurement_definitions_for_selected(
             selected,
@@ -8688,7 +8917,11 @@ def run_fold_analysis(
             ),
             "role_adjudication": role_adjudication_report,
             "final_role_assignment": (
-                "predictive_nuisances_and_nested_r_loss_modifiers"
+                (
+                    "predictive_nuisances_and_orthogonal_test_modifiers"
+                    if modifier_count_report.get("rule") == "orthogonal_tests"
+                    else "predictive_nuisances_and_nested_r_loss_modifiers"
+                )
                 if modifier_count_report is not None
                 else "predictive_nuisances_and_joint_orthogonal_modifiers"
             ),
@@ -8911,9 +9144,15 @@ def run_fold_analysis(
     _write_json(output_dir / "ontology_supervision" / "convergence.json", review_convergence)
     from .stage2_effect_estimators import effect_model_family
 
-    final_estimator = selection_report.get("modifier_count_selection", {}).get(
-        "chosen_estimator", "causal_forest"
-    )
+    modifier_selection = statistical_policy.multi_model.modifier_selection
+    count_report = selection_report.get("modifier_count_selection")
+    if count_report is None and modifier_selection.rule == "orthogonal_tests" and (
+        modifier_selection.resolved_estimator_policy != "dina" or outcome_type == "binary"
+    ):
+        # Without candidates no selection runs; the configured policy still applies.
+        final_estimator = modifier_selection.resolved_estimator_policy
+    else:
+        final_estimator = (count_report or {}).get("chosen_estimator", "causal_forest")
     _write_json(
         output_dir / "final_definitions.json",
         {

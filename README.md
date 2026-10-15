@@ -37,13 +37,19 @@ Other terms are defined in the [glossary](docs/glossary.md).
    for each. An extraction LLM measures every variable from every patient's
    record. Definitions are refined, values harmonized, and uninformative
    candidates removed.
-3. **Stage 2: select and estimate.** Statistical models choose which variables
-   to adjust for and which to treat as effect modifiers, and nested validation
-   chooses among a causal forest, a penalized interaction model, and a DINA
-   model (Gao and Hastie's difference-in-natural-parameters model, which for
-   binary outcomes estimates a conditional log odds ratio). The chosen model
-   predicts effects for held-out patients, and a doubly
-   robust (AIPW) estimator gives the ATE.
+3. **Stage 2: select and estimate.** Predictive models choose which variables
+   to adjust for. Effect modifiers are selected by pre-specified tests: each
+   candidate gets an R-learner projection test and an AIPW projection test of
+   the risk-difference effect and an adjusted interaction test on the
+   odds-ratio scale, combined by a Cauchy combination, with Benjamini–Hochberg
+   control across candidates. A causal forest, a penalized interaction model,
+   and a DINA model (Gao and Hastie's difference-in-natural-parameters model,
+   which for binary outcomes estimates a conditional log odds ratio) are all
+   fitted, and their average predicts effects for held-out patients. A doubly
+   robust (AIPW) estimator gives the ATE, and each fold's selected modifiers
+   are re-tested on its held-out patients for reporting. The alternative
+   `balanced_evidence` rule instead chooses the number of modifiers and one
+   model by nested validation.
 
 Everything runs within outer cross-validation folds, so each patient's
 prediction comes from a pipeline that never saw that patient's outcome. All
@@ -181,20 +187,29 @@ use a separate output directory for a different study. Details are in
 | Path in the output directory | Contents |
 |---|---|
 | `handoff/evidence.jsonl` | Frozen Stage 1 evidence passed to Stage 2 |
-| `stage2/outer_NNN/final_definitions.json` | Each outer fold's retained variables, roles, definitions, and chosen model |
-| `stage2/outer_NNN/selection/modifier_count/selection.json` | How the number of modifiers and the model were chosen |
+| `stage2/outer_NNN/final_definitions.json` | Each outer fold's retained variables, roles, definitions, each modifier's test evidence, and the final estimator |
+| `stage2/outer_NNN/selection/modifier_tests.json` | Every candidate's modifier tests, combined p- and q-values, selection, and labels |
+| `stage2/outer_NNN/selection/modifier_count/selection.json` | Summary of the modifier selection and the estimator policy |
 | `stage2/outer_NNN/estimation/diagnostics.json` | Model fit, nuisance calibration, overlap, and fold ATE |
 | `stage2/cross_fitted_predictions.csv` | One held-out prediction per patient |
 | `stage2/causal_estimate.json` | Pooled ATE with standard error and a diagnostics summary |
-| `stage2/heterogeneity_diagnostics.json` | Heterogeneity, overlap, and balance diagnostics |
+| `stage2/heterogeneity_diagnostics.json` | Heterogeneity, overlap, and balance diagnostics, and the outer-fold confirmation of the selected modifiers |
 | `stage2/posthoc_oracle_ite_metrics.json` | Comparison with true effects (synthetic data only) |
 
 **Per-patient columns** in `cross_fitted_predictions.csv`:
 
-- `estimated_cate` is the chosen effect model's predicted treatment effect for
-  the patient (a risk difference for binary outcomes). The causal forest adds
-  `estimated_cate_standard_error`, `estimated_cate_lower_95`, and
-  `estimated_cate_upper_95`; the other models leave them empty.
+- `estimated_cate` is the patient's predicted treatment effect (a risk
+  difference for binary outcomes): by default the unweighted mean of the causal
+  forest, the penalized interaction model, and, for binary outcomes, DINA.
+  Their individual predictions are in `estimated_cate_causal_forest`,
+  `estimated_cate_linear_interactions`, and `estimated_cate_dina`.
+- `estimated_cate_standard_error`, `estimated_cate_lower_95`, and
+  `estimated_cate_upper_95` are empty under the default ensemble, because the
+  forest's standard error does not describe the average; the forest's own
+  interval is in `estimated_cate_causal_forest_lower_95`,
+  `estimated_cate_causal_forest_upper_95`, and
+  `estimated_cate_causal_forest_standard_error`. When a single causal forest is
+  the final model, the forest fills the three main interval columns.
 - `propensity`, `mu0`, and `mu1` are the nuisance predictions: the probability of
   treatment and the expected outcome under comparator and under treatment, from
   separate cross-fitted elastic-net models (recalibrated for the propensity and,
@@ -210,6 +225,15 @@ standard error `sd(aipw_score)/√n`. It is a separate estimate from
 `mean_estimated_cate`, the mean of the model's predictions: an effect model can
 predict nearly constant effects while the AIPW ATE is clearly nonzero, or the
 reverse.
+
+**Modifier confirmation** (`modifier_confirmation` in
+`heterogeneity_diagnostics.json`, summarized in `causal_estimate.json`)
+re-tests each fold's selected modifiers on that fold's held-out patients and
+reports how many were confirmed (held-out q-value at most `q`, 0.10 by
+default), per fold and across folds by variable name. Training p-values are
+somewhat optimistic because the candidates were found in the same patients; the
+held-out tests are not. Confirmation is reporting only and never changes
+selection or estimation.
 
 **Heterogeneity diagnostics** ask whether the CATE predictions capture real
 differences, using only held-out data:

@@ -221,9 +221,9 @@ defaults the input budget per extraction request is
 | `min_informative_patients` | 20 | A candidate is kept only if at least this many outer-training patients have an observed value; categorical candidates also need two levels (counting "not documented") with at least this many patients each, and continuous candidates need non-identical values |
 | `max_extraction_failure_fraction` | 0.10 | Candidates whose training [extraction failures](glossary.md#extraction-failure) exceed this fraction of patients are dropped |
 | `min_propensity`, `max_propensity` | null | Inclusive [propensity eligibility bounds](glossary.md#propensity-eligibility-and-clipping) for effect estimation; either may be set alone. Set them here, not under `statistical_selection` |
-| `propensity_clip` | 0.02 | Clipping of AIPW denominators to `[c, 1 − c]`; excludes no one |
-| `estimation_trees` | 200 | Trees in the final causal forest and in the forests used for modifier-budget selection (minimum 10) |
-| `modeling_workers` | 1 | CPU processes shared by numerical selection and final estimation across all outer folds (see [Parallelism](#parallelism)) |
+| `propensity_clip` | 0.02 | Clipping of AIPW denominators to `[c, 1 − c]`; excludes no one. Under the `orthogonal_tests` modifier rule it also clips the AIPW projection test, so it is part of the selection identity |
+| `estimation_trees` | 200 | Trees in the final causal forest and, under `balanced_evidence`, in the forests used for modifier-budget selection (minimum 10) |
+| `modeling_workers` | 1 | CPU processes shared by numerical selection, modifier testing, and final estimation across all outer folds (see [Parallelism](#parallelism)) |
 | `estimand_ontology` | disabled | Outcome-informed search over alternative definitions ([Optional extensions](optional_extensions.md#estimand-informed-ontology-search)) |
 | `selection_consolidation` | disabled | Merging of equivalent extracted variables before selection ([Optional extensions](optional_extensions.md#pre-selection-measurement-consolidation)) |
 | `statistical_selection` | see below | Variable selection and final-model choice |
@@ -244,11 +244,11 @@ These settings control the deterministic selection procedure described in
 | Key | Default | Meaning |
 |---|---|---|
 | `l1_ratio` | 0.8 | Elastic-net mixing for nuisance and joint fits |
-| `internal_cv_folds` | 3 | Folds for penalty cross-validation and for nested modifier-budget splits (minimum 2) |
+| `internal_cv_folds` | 3 | Folds for penalty cross-validation and, under `balanced_evidence`, for nested modifier-budget splits (minimum 2) |
 | `minimum_log10_alpha`, `maximum_log10_alpha` | −5.0, −1.0 | Bounds of the elastic-net penalty grid |
 | `coefficient_tolerance` | 1e-7 | Group coefficient norm above which a variable counts as selected by a nuisance model |
 | `optimization_tolerance` | 1e-6 | Solver tolerance |
-| `categorical_min_count` | 5 | Categorical levels with fewer patients are pooled |
+| `categorical_min_count` | 5 | Categorical levels with fewer patients are pooled; modifier-test indicator columns with fewer patients on either side are dropped |
 | `max_iter` | 5000 | Solver iteration limit |
 | `modifier_one_standard_error_rule` | `false` | Use the one-standard-error rule when choosing the DINA penalty |
 | `modifier_ridge_alpha` | 10.0 | Ridge penalty for single-candidate effect fits |
@@ -267,14 +267,15 @@ These settings control the deterministic selection procedure described in
 | `forest_min_samples_leaf` | 10 | Minimum leaf size in evidence forests |
 | `feature_subset_size` | 32 | Candidates per random subset for joint evidence families |
 | `permutation_repeats` | 10 | Shuffles for permutation importance |
-| `nominal_p_threshold` | 0.05 | Nominal p-value support threshold |
-| `q_threshold` | 0.1 | [BH q-value](glossary.md#bh-q-value) support threshold |
+| `nominal_p_threshold` | 0.05 | Nominal p-value support threshold in the evidence families |
+| `q_threshold` | 0.1 | [BH q-value](glossary.md#bh-q-value) support threshold in the evidence families and the `balanced_evidence` interaction utility (the modifier tests use `modifier_selection.q`) |
 | `interaction_ranking_weight` | 0.5 | Weight of the adjusted-interaction score in modifier ranking (0 to 1) |
 | `max_prompt_chars` | 100000 | Character limit for concept-review prompts |
 | `diagnostic_families` | `[]` | Optional extra families recorded in `statistical_evidence.json` only: `penalized_main`, `predictive_forest` |
 | `matched_batch` | disabled | Matched-batch contrast evidence ([Optional extensions](optional_extensions.md#matched-batch-contrast-evidence)) |
 | `stability` | see below | Repeated partitions and grouping of equivalent measurements |
-| `modifier_count` | see below | Modifier-budget and final-estimator selection |
+| `modifier_selection` | see below | Modifier rule and final-estimator policy |
+| `modifier_count` | see below | Modifier-budget and final-estimator search of the `balanced_evidence` rule |
 
 `multi_model.stability`:
 
@@ -285,17 +286,34 @@ These settings control the deterministic selection procedure described in
 | `group_equivalent_measurements` | `true` | Group near-identical measurements when counting evidence |
 | `group_min_observations`, `group_min_overlap`, `group_min_association`, `group_min_name_similarity` | 30, 0.8, 0.95, 0.8 | Thresholds for treating two measurements as equivalent |
 
-`multi_model.modifier_count`:
+`multi_model.modifier_selection` ([Stage 2 selection](stage2_selection.md#modifier-selection-by-orthogonal-tests)):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `rule` | `orthogonal_tests` | `orthogonal_tests`: Benjamini–Hochberg selection on Cauchy-combined component tests. `balanced_evidence`: the nested ranking and budget search configured by `modifier_count` |
+| `q` | 0.1 | Benjamini–Hochberg level for selection and for the outer-fold confirmation, in (0, 1] |
+| `weights` | null | Component weights for the Cauchy combination: null, or an object with exactly the keys `r_projection`, `aipw_projection`, and `outcome_interaction`, each finite and nonnegative, with a positive sum. Null uses 0.25, 0.25, 0.5 for binary outcomes and 1/3 each for continuous outcomes. Also used by the confirmation |
+| `max_modifiers` | 64 | Maximum number of discovered modifiers; null for no cap. Investigator-specified modifiers are added on top |
+| `estimator_policy` | null | `orthogonal_tests` only: null or `ensemble` averages every final estimator for the outcome type; `causal_forest`, `linear_interactions`, or `dina` (binary outcomes only) fits one estimator. Must be null under `balanced_evidence`, which chooses its estimator by nested validation |
+
+Unknown keys are errors. `modifier_count.concept_review: true` requires
+`rule: "balanced_evidence"`. The rule and its settings are part of the
+selection identity, so changing them after selection has run requires
+[guarded reselection](#guarded-reselection); the multi-model evidence itself is
+reused.
+
+`multi_model.modifier_count` (used only when `modifier_selection.rule` is
+`balanced_evidence`):
 
 | Key | Default | Meaning |
 |---|---|---|
 | `candidate_counts` | `[0, 4, 8, 12, 16, 24, 32]` | [Modifier budgets](glossary.md#modifier-budget) to compare; sorted, starting at 0. The full ranked shortlist is always compared as well |
 | `max_ranked_modifiers` | 64 | Cap on the ranked shortlist |
-| `selection_rule` | `balanced_evidence` | The only rule |
+| `selection_rule` | `balanced_evidence` | The only count rule |
 | `relative_r_loss_tolerance` | 1e-4 | Relative R-loss tolerance in the selection rule |
 | `forest_seeds` | 3 | Causal-forest seeds averaged per evaluation |
 | `estimators` | `["causal_forest", "linear_interactions", "dina"]` | Final effect models to compare; `dina` is dropped for continuous outcomes |
-| `concept_review` | `false` | LLM concept review of modifier shortlists ([Optional extensions](optional_extensions.md#modifier-concept-review)) |
+| `concept_review` | `false` | LLM concept review of modifier shortlists ([Optional extensions](optional_extensions.md#modifier-concept-review)); requires `modifier_selection.rule: "balanced_evidence"` |
 | `concept_top_n_per_fold` | 100 | Top-ranked candidates per evidence fold given to concept review |
 
 ### `stage2.role_adjudication`
@@ -332,8 +350,10 @@ complete extraction definition:
 Explicit features are extracted like discovered candidates, but their
 definitions are never revised by the review steps and their roles are fixed:
 a `confounder` enters the nuisance models and an `effect_modifier` enters the
-effect model regardless of the selection evidence. They do not count toward the
-modifier budget.
+effect model regardless of the selection evidence. Explicit modifiers are
+always included: they stay outside the Benjamini–Hochberg family of the
+orthogonal tests and do not count toward the `balanced_evidence` modifier
+budget.
 
 ### Stage 1 template settings
 
@@ -617,7 +637,7 @@ components.
 | `run.workers` | Stage 1 CPU budget. TF-IDF runs up to this many contexts as separate processes with one numerical thread each. During `text_models` the budget is divided as evenly as possible across the active GPU processes, with at least one worker each |
 | `stage2.workers` | Concurrent interpretation requests across all outer folds |
 | `stage2.extraction_llm.workers` | Concurrent extraction requests across all outer folds |
-| `stage2.modeling_workers` | One shared pool of CPU processes for numerical selection evidence, modifier-budget evaluations, and final nuisance and interaction-model fits across all outer folds; 1 runs these fits serially within each fold. Final causal forests use a share of the same budget as threads |
+| `stage2.modeling_workers` | One shared pool of CPU processes for numerical selection evidence, modifier-test nuisance fits, modifier-budget evaluations, and final nuisance and interaction-model fits across all outer folds; 1 runs these fits serially within each fold. Final causal forests use a share of the same budget as threads |
 
 Outer folds run concurrently in Stage 2; review rounds within a fold run in
 order. Changing any worker count preserves compatible checkpoints, seeds, and
@@ -663,8 +683,8 @@ OUTPUT_DIR/
     │   ├── ontology_supervision/        extraction review rounds, definition refinement, convergence.json
     │   ├── estimand_ontology/           [estimand_ontology.enabled]
     │   ├── extraction/                  outer-training and held-out extractions, failure masks and reports
-    │   ├── selection/                   consolidation, multi-model evidence, modifier-budget search, selected definitions
-    │   ├── final_definitions.json       final variables, roles, and chosen estimator
+    │   ├── selection/                   consolidation, multi-model evidence, modifier tests or budget search, selected definitions
+    │   ├── final_definitions.json       final variables, roles, modifier evidence, and final estimator
     │   ├── estimation/                  nuisance fits and audits, overlap, predictions.csv, diagnostics.json
     │   ├── preselection/                [after reselection] frozen selection inputs
     │   ├── recovery_status.json, recovery_events.jsonl
@@ -672,7 +692,7 @@ OUTPUT_DIR/
     ├── features_by_outer_fold.jsonl     per-fold variables, roles, and estimation summary
     ├── cross_fitted_predictions.csv     one held-out prediction per patient
     ├── causal_estimate.json             AIPW ATE with 95% CI, overlap, calibration, heterogeneity summary
-    ├── heterogeneity_diagnostics.json   BLP, GATES, CLAN, RATE, overlap-weighted ATE, trimming curve, balance
+    ├── heterogeneity_diagnostics.json   BLP, GATES, CLAN, RATE, overlap-weighted ATE, trimming curve, balance, modifier confirmation
     ├── posthoc_oracle_ite_metrics.json  oracle comparison (records "unavailable" without oracle columns)
     ├── posthoc_predictions_with_oracle_ite.csv  [oracle columns present]
     ├── summary.json
@@ -690,12 +710,61 @@ written and the handoff streams the component evidence directly.
 | File | Content |
 |---|---|
 | `stage2/causal_estimate.json` | Cross-fitted AIPW ATE, standard error, and 95% CI; overlap and nuisance calibration summaries; mean estimated CATE; oracle correlations when available |
-| `stage2/cross_fitted_predictions.csv` | One row per patient from its outer held-out fold: `estimated_cate` (a risk difference for binary outcomes), `aipw_score`, `propensity`, `mu0`, `mu1`, `effect_eligible`, `outer_fold`, plus CI columns when the final model is the causal forest and DINA columns when it is DINA |
+| `stage2/cross_fitted_predictions.csv` | One row per patient from its outer held-out fold: `estimated_cate` (a risk difference for binary outcomes), `aipw_score`, `propensity`, `mu0`, `mu1`, `effect_eligible`, `outer_fold`, plus per-estimator CATE columns under the ensemble (see [Modifier-selection and ensemble outputs](#modifier-selection-and-ensemble-outputs)) |
 | `stage2/heterogeneity_diagnostics.json` | Whether the CATE predictions track real heterogeneity ([BLP, GATES, CLAN, RATE](glossary.md#blp-gates-clan-and-rate)); see [Stage 2 selection](stage2_selection.md) |
 | `stage2/features_by_outer_fold.jsonl` and `stage2/outer_00k/final_definitions.json` | Which variables were used in each fold, their roles and definitions, and the chosen estimator |
-| `stage2/outer_00k/selection/modifier_count/selection.json` | Modifier-budget and estimator comparison |
+| `stage2/outer_00k/selection/modifier_tests.json` | Every candidate's modifier tests and the selection (`orthogonal_tests`) |
+| `stage2/outer_00k/selection/modifier_count/selection.json` | Modifier selection report: selected modifiers and estimator policy, or the `balanced_evidence` budget and estimator comparison |
 | `stage2/outer_00k/extraction/failure_report_fit.json`, `failure_report_heldout.json` | Extraction failure rates by variable and treatment arm |
 | `stage2/outer_00k/estimation/diagnostics.json`, `propensity_overlap.json`, `nuisance_fit_audits/` | Fold-level ATE, calibration, overlap, and the fitted penalty and iteration count of each nuisance model |
+
+### Modifier-selection and ensemble outputs
+
+`stage2/outer_00k/selection/modifier_tests.json` (rule `orthogonal_tests`)
+records `q_threshold`, the resolved `weights` and `weights_source`,
+`max_modifiers`, `propensity_clip`, the propensity bounds,
+`sparse_indicator_min_count`, the testing-nuisance source and recalibration
+audit, `summary` counts, `selected_feature_ids`, `discovered_feature_ids`,
+`locked_modifier_ids`, an `interpretation` string per field, and one record per
+candidate in `candidates`:
+
+| Field | Meaning |
+|---|---|
+| `feature_id`, `name` | The candidate |
+| `n_rows`, `n_eligible` | Outer-training patients and the propensity-eligible patients tested |
+| `grouped_columns`, `dropped_sparse_columns` | Tested design columns and dropped rare indicator columns |
+| `components` | Per component (`r_projection`, `aipw_projection`, `outcome_interaction`): `p_value`, `statistic`, `degrees_of_freedom`, `q_value`, `passes`, and `status`/`reason` when not evaluable |
+| `combined_p_value`, `combined_statistic`, `combination_weights` | Cauchy combination and the weights renormalized over the available components |
+| `combined_q_value`, `bh_family` | Benjamini–Hochberg q-value; `bh_family` is false for investigator-locked variables, which get no q-value |
+| `selected`, `selection_rank`, `selection_reason`, `excluded_by_cap` | Selection outcome |
+| `labels`, `extreme_propensity_signal` | Scale labels of a selected modifier and the concordance flag |
+| `nuisance_source`, `q_threshold`, `investigator_locked` | Provenance |
+
+`selection/modifier_count/<fingerprint>/testing_nuisances.csv` holds each
+training patient's testing nuisances (`propensity`, `mu0`, `mu1`,
+`marginal_outcome`, `inner_fold`, `effect_eligible`); they equal the training
+columns of `estimation/nuisance_fit_predictions.csv`. Each effect modifier in
+`final_definitions.json` carries a `modifier_evidence` record with its rule,
+combined and component p- and q-values, labels, flag, rank, and lock status.
+
+Under the estimator ensemble, `estimation/predictions.csv` and
+`cross_fitted_predictions.csv` add `estimated_cate_causal_forest`,
+`estimated_cate_linear_interactions`, `estimated_cate_dina` (when DINA was
+fitted), and the forest's interval in `estimated_cate_causal_forest_lower_95`,
+`estimated_cate_causal_forest_upper_95`, and
+`estimated_cate_causal_forest_standard_error`. `estimated_cate` is the
+unweighted mean of the fitted components, and `estimated_cate_lower_95`,
+`estimated_cate_upper_95`, and `estimated_cate_standard_error` are empty.
+`estimation/diagnostics.json` records `estimator_policy`, an `ensemble` section
+(component and fitted estimators, unavailable components with reasons, and each
+component's audit), and `mean_estimated_cate_by_estimator`.
+
+`stage2/heterogeneity_diagnostics.json` contains `modifier_confirmation`: the
+confirmation policy, per-fold results for each selected modifier (`confirmed`,
+held-out combined and component p- and q-values, labels), pooled counts of
+selected and confirmed modifiers, and the cross-fold name summary with Stouffer
+combinations. `stage2/causal_estimate.json` repeats a compact summary under
+`heterogeneity_diagnostics.modifier_confirmation`.
 
 ## Checkpoints and resuming
 
@@ -728,7 +797,7 @@ Stage 2 checks its saved state on every start:
 | Endpoint URLs, ports, worker counts, timeouts | Allowed |
 | Interpretation sampling, reasoning, or `max_tokens` | Completed feature definitions do not match the requested policy; the run stops |
 | Extraction context window, margin, chunk size, or output ceilings | Affected extraction chunks are extracted again |
-| `min_propensity`, `max_propensity`, `statistical_selection`, or `estimation_trees` after selection has run | Refused; use [guarded reselection](#guarded-reselection) |
+| `min_propensity`, `max_propensity`, `statistical_selection`, `estimation_trees`, or (under `orthogonal_tests`) `propensity_clip` after selection has run | Refused; use [guarded reselection](#guarded-reselection) |
 
 `run_config.json` stores every API key as `<redacted>`. When relaunching from it
 against servers that require a key, set the `OCI_STAGE2_*_API_KEY` environment
@@ -779,8 +848,8 @@ The report states whether Stage 2 will start, resume, or reselect.
 `--stage2-only --stage2-reselect` reruns variable selection and estimation of a
 completed Stage 2 run without repeating interpretation, extraction review, or
 outer-training extraction. Use it after changing selection or estimation
-settings such as `statistical_selection`, `estimation_trees`, or the propensity
-bounds.
+settings such as `statistical_selection`, `estimation_trees`, the propensity
+bounds, or, under `orthogonal_tests`, `propensity_clip`.
 
 ```bash
 python scripts/run_all_evidence.py \

@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass, field
 import math
 from typing import Any, Mapping
 
-SCHEMA_VERSION = "stage2_multi_model_selection_v8_opt_in_diagnostic_families"
+SCHEMA_VERSION = "stage2_multi_model_selection_v9_orthogonal_modifier_tests"
 FAMILIES = (
     "univariable",
     "penalized_main",
@@ -44,6 +44,9 @@ EVIDENCE_FAMILY_POLICY = {
     ),
 }
 FINAL_ESTIMATORS = ("causal_forest", "linear_interactions", "dina")
+MODIFIER_SELECTION_RULES = ("orthogonal_tests", "balanced_evidence")
+TEST_COMPONENTS = ("r_projection", "aipw_projection", "outcome_interaction")
+ESTIMATOR_POLICIES = ("ensemble", *FINAL_ESTIMATORS)
 
 
 @dataclass(frozen=True)
@@ -81,6 +84,80 @@ class MatchedBatchConfig:
                 raise ValueError(f"matched_batch.{name} must be finite and nonnegative")
         if self.ridge_penalty == 0:
             raise ValueError("matched_batch.ridge_penalty must be positive")
+
+
+@dataclass(frozen=True)
+class ModifierSelectionConfig:
+    """How modifiers and the final estimator are chosen.
+
+    ``orthogonal_tests`` selects modifiers by Benjamini-Hochberg on Cauchy-
+    combined component tests and, by default, averages every final estimator.
+    ``balanced_evidence`` runs the nested ranking/count search configured by
+    ``modifier_count`` and chooses its estimator there.
+    """
+
+    rule: str = "orthogonal_tests"
+    q: float = 0.1
+    # None uses the outcome-type defaults of stage2_modifier_tests.default_weights.
+    weights: Mapping[str, float] | None = None
+    max_modifiers: int | None = 64
+    # None means "ensemble" under orthogonal_tests and the nested choice under
+    # balanced_evidence.
+    estimator_policy: str | None = None
+
+    def validate(self) -> None:
+        if self.rule not in MODIFIER_SELECTION_RULES:
+            raise ValueError(
+                "multi_model.modifier_selection.rule must be orthogonal_tests or balanced_evidence"
+            )
+        if (isinstance(self.q, bool) or not isinstance(self.q, (int, float))
+                or not math.isfinite(self.q) or not 0 < self.q <= 1):
+            raise ValueError("multi_model.modifier_selection.q must be in (0, 1]")
+        if self.weights is not None:
+            if not isinstance(self.weights, Mapping) or set(self.weights) != set(TEST_COMPONENTS):
+                raise ValueError(
+                    "multi_model.modifier_selection.weights must be null or map exactly "
+                    f"{list(TEST_COMPONENTS)} to nonnegative numbers"
+                )
+            values = list(self.weights.values())
+            if any(isinstance(v, bool) or not isinstance(v, (int, float))
+                   or not math.isfinite(v) or v < 0 for v in values) or sum(values) <= 0:
+                raise ValueError(
+                    "multi_model.modifier_selection.weights must be finite, nonnegative, "
+                    "and have a positive sum"
+                )
+        if self.max_modifiers is not None and (
+            isinstance(self.max_modifiers, bool) or not isinstance(self.max_modifiers, int)
+            or self.max_modifiers < 1
+        ):
+            raise ValueError(
+                "multi_model.modifier_selection.max_modifiers must be null or a positive integer"
+            )
+        if self.estimator_policy is not None:
+            if self.rule == "balanced_evidence":
+                raise ValueError(
+                    "multi_model.modifier_selection.estimator_policy must be null under "
+                    "balanced_evidence, which chooses its estimator by nested validation"
+                )
+            if self.estimator_policy not in ESTIMATOR_POLICIES:
+                raise ValueError(
+                    "multi_model.modifier_selection.estimator_policy must be null or one of "
+                    f"{list(ESTIMATOR_POLICIES)}"
+                )
+
+    @property
+    def resolved_estimator_policy(self) -> str:
+        if self.rule == "balanced_evidence":
+            return "nested_selection"
+        return self.estimator_policy or "ensemble"
+
+    def public_dict(self) -> dict[str, Any]:
+        return {
+            **asdict(self),
+            "weights": None if self.weights is None else {
+                name: float(self.weights[name]) for name in TEST_COMPONENTS
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -181,6 +258,7 @@ class Stage2MultiModelConfig:
     q_threshold: float = 0.1
     interaction_ranking_weight: float = 0.5
     max_prompt_chars: int = 100_000
+    modifier_selection: ModifierSelectionConfig = field(default_factory=ModifierSelectionConfig)
     modifier_count: ModifierCountConfig = field(default_factory=ModifierCountConfig)
     matched_batch: MatchedBatchConfig = MatchedBatchConfig()
     diagnostic_families: tuple[str, ...] = ()
@@ -203,9 +281,21 @@ class Stage2MultiModelConfig:
         if not isinstance(self.matched_batch, MatchedBatchConfig):
             raise ValueError("multi_model.matched_batch must be a MatchedBatchConfig object")
         self.matched_batch.validate()
+        if not isinstance(self.modifier_selection, ModifierSelectionConfig):
+            raise ValueError(
+                "multi_model.modifier_selection must be a ModifierSelectionConfig object"
+            )
+        self.modifier_selection.validate()
         if not isinstance(self.modifier_count, ModifierCountConfig):
             raise ValueError("multi_model.modifier_count must be a ModifierCountConfig object")
         self.modifier_count.validate()
+        if self.modifier_count.concept_review and self.modifier_selection.rule != "balanced_evidence":
+            raise ValueError(
+                "multi_model.modifier_count.concept_review requires "
+                "multi_model.modifier_selection.rule='balanced_evidence': concept review "
+                "groups the nested per-fold multi-model rankings, which the "
+                "orthogonal_tests rule does not build"
+            )
         for name in (
             "repeats",
             "regularization_grid_size",
@@ -251,6 +341,7 @@ class Stage2MultiModelConfig:
         result = {
             "schema_version": SCHEMA_VERSION,
             **asdict(self),
+            "modifier_selection": self.modifier_selection.public_dict(),
             "modifier_count": self.modifier_count.public_dict(),
             "diagnostic_families": list(self.diagnostic_families),
             "evidence_family_policy": deepcopy(EVIDENCE_FAMILY_POLICY),
@@ -315,6 +406,20 @@ def multi_model_config_from_mapping(
         if not isinstance(stability, Mapping) or set(stability) - set(EvidenceStabilityConfig.__dataclass_fields__):
             raise ValueError('unsupported multi_model.stability configuration')
         raw['stability'] = EvidenceStabilityConfig(**stability)
+    if "modifier_selection" in raw:
+        chosen = raw["modifier_selection"]
+        if not isinstance(chosen, Mapping):
+            raise ValueError("multi_model.modifier_selection must be an object")
+        chosen = dict(chosen)
+        unknown = set(chosen) - set(ModifierSelectionConfig.__dataclass_fields__)
+        if unknown:
+            raise ValueError(f"unsupported modifier_selection fields: {sorted(unknown)}")
+        weights = chosen.get("weights")
+        if weights is not None:
+            if not isinstance(weights, Mapping):
+                raise ValueError("multi_model.modifier_selection.weights must be null or an object")
+            chosen["weights"] = dict(weights)
+        raw["modifier_selection"] = ModifierSelectionConfig(**chosen)
     if "modifier_count" in raw:
         count = raw["modifier_count"]
         if not isinstance(count, Mapping):

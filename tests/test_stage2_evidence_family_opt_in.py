@@ -65,6 +65,8 @@ def _policy(diagnostic_families=(), *, concept_review=False):
         "feature_subset_size": 4,
         "permutation_repeats": 2,
         "stability": {"partition_repeats": 1, "subset_partitions": 1},
+        # These tests exercise the nested budget search and its concept review.
+        "modifier_selection": {"rule": "balanced_evidence"},
         "modifier_count": {
             "candidate_counts": [0, 2, 4],
             "max_ranked_modifiers": 4,

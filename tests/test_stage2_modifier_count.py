@@ -11,7 +11,11 @@ import pytest
 from oci.inference import stage2_modifier_count as count
 from oci.inference import stage2_modifier_ranking as ranking
 from oci.inference import stage2_multi_model_selection as numerical
-from oci.inference.stage2_multi_model_config import MatchedBatchConfig, ModifierCountConfig
+from oci.inference.stage2_multi_model_config import (
+    MatchedBatchConfig,
+    ModifierCountConfig,
+    ModifierSelectionConfig,
+)
 from oci.inference.stage2_role_adjudication import Stage2RoleAdjudicationConfig
 from tests.test_stage2_multi_model import sample_inputs
 
@@ -104,6 +108,7 @@ def test_real_nested_selection_scoring_alignment_and_no_refit_resume(tmp_path, m
         min_propensity=0.1,
         max_propensity=0.9,
         multi_model=replace(arguments["policy"].multi_model, repeats=1, modifier_count=cfg,
+            modifier_selection=ModifierSelectionConfig(rule="balanced_evidence"),
             matched_batch=MatchedBatchConfig(enabled=True, batch_size=4, bins_per_nuisance=1,
                 min_reference_arm=2, max_smd=100, min_delta=0, z_threshold=0,
                 train_passes=3, validation_passes=3)),

@@ -1,8 +1,17 @@
-"""Nested predictive/interaction selection of architecture and modifier budget.
+"""Modifier selection: orthogonal tests (default) or the nested budget search.
 
-The feature catalog/extractions are frozen upstream. Within each count-validation
-split, numerical evidence and statistical ranking use only its training rows. Broad scoring nuisances and eligibility stay fixed across budgets.
-This validates Stage 2 conditional on the supplied catalog, not upstream discovery.
+``orthogonal_tests`` tests every candidate with the pre-specified component
+tests of ``stage2_modifier_tests`` on the final-estimation nuisance
+construction (training rows only), applies Benjamini-Hochberg to the
+Cauchy-combined p-values, and hands the final estimation an estimator policy
+(by default the ensemble of every final estimator).
+
+``balanced_evidence`` is the nested predictive/interaction selection of
+architecture and modifier budget. The feature catalog/extractions are frozen
+upstream. Within each count-validation split, numerical evidence and
+statistical ranking use only its training rows. Broad scoring nuisances and
+eligibility stay fixed across budgets. This validates Stage 2 conditional on
+the supplied catalog, not upstream discovery.
 """
 
 from copy import deepcopy
@@ -19,10 +28,12 @@ from . import stage2_multi_model_selection as numerical
 from . import stage2_modifier_ranking as ranking
 from . import stage2_modifier_concepts as concepts
 from . import stage2_modeling_pool as modeling
+from . import stage2_modifier_tests as modifier_tests
 from .stage2_prompt_catalog import PROMPT_VERSION
 from .stage2_effect_estimators import (
     NUISANCE_ADJUSTMENT_DESCRIPTION,
     PROGNOSTIC_FOREST_DESCRIPTION,
+    ensemble_estimators,
     fit_interaction_effect,
     nuisance_adjustment,
     prognostic_score,
@@ -32,6 +43,17 @@ from .stage2_role_adjudication import _fingerprint, _write_json
 
 LOGGER = logging.getLogger(__name__)
 SCHEMA_VERSION = "stage2_nested_modifier_count_v8_nuisance_adjusted"
+ORTHOGONAL_SCHEMA_VERSION = "stage2_orthogonal_modifier_selection_v1"
+DEFAULT_PROPENSITY_CLIP = 0.02
+TESTING_NUISANCE_SOURCE = "outer_training_inner_out_of_fold_all_candidate_recalibrated"
+TESTING_NUISANCE_DESCRIPTION = (
+    "Testing nuisances are the final-estimation construction restricted to the "
+    "outer-training rows: elastic nets on the complete nuisance-candidate catalog, "
+    "fitted in the inner cross-fitting folds with the final-estimation seeds and "
+    "standardization, then cross-fitted Platt recalibration. Each training row gets "
+    "the prediction of the fold model that did not see it; m_hat = e_hat * mu1_hat + "
+    "(1 - e_hat) * mu0_hat. Final estimation reproduces the same training values."
+)
 
 
 def choose_modifier_count(fold_losses):
@@ -268,9 +290,10 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
             "investigator_locked": definition.get("configured_explicit_feature") is True,
         }
         if definition.get("configured_explicit_feature") is not True:
-            decision["rationale"] = (
-                decision.get("rationale", "")
-                + f" Modifier role set by nested {selection_rule} prefix selection (rank={rank}, additional budget={count}); nuisance task supports preserved."
+            decision["rationale"] = decision.get("rationale", "") + (
+                f" Modifier role set by nested {selection_rule} prefix selection (rank={rank}, additional budget={count}); nuisance task supports preserved."
+                if selection_rule == "balanced_evidence"
+                else f" Modifier role set by {selection_rule} Benjamini-Hochberg selection (rank={rank}, discoveries={count}); nuisance task supports preserved."
             )
             if key in kept_modifiers:
                 decision["evidence_ids"] = sorted(
@@ -283,7 +306,11 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
             feature["roles"] = roles
             feature.update(routing)
             if definition.get("configured_explicit_feature") is not True:
-                feature["selection_source"] = "multi_model_predictive_nuisances_nested_modifier_selection"
+                feature["selection_source"] = (
+                    "multi_model_predictive_nuisances_nested_modifier_selection"
+                    if selection_rule == "balanced_evidence"
+                    else "multi_model_predictive_nuisances_orthogonal_modifier_tests"
+                )
                 feature["selection_authority"] = "multi_model"
                 feature["roles_are_model_routing_not_causal_labels"] = True
                 decision.update({k: feature[k] for k in (
@@ -298,6 +325,295 @@ def _apply_budget(definitions, selected, role_report, ordered, count, locked_mod
     report["decisions"] = final_decisions
     report["retained_feature_ids"] = [f["feature_id"] for f in retained]
     return retained, report
+
+
+def _select_by_orthogonal_tests(
+    *,
+    dataset,
+    extracted_fit,
+    frame,
+    definitions,
+    inner_splits,
+    treatment_column,
+    outcome_column,
+    outcome_type,
+    seed,
+    policy,
+    selected,
+    role_report,
+    base_fingerprint,
+    output_dir,
+    fit_row_ids,
+    propensity_clip,
+    tests_path,
+):
+    """BH selection on Cauchy-combined orthogonal tests; no nested count search.
+
+    Nuisance and confounder roles come from the one-pass statistical evidence
+    (``selected``) and are preserved; only effect-modifier roles change.
+    """
+    from . import plain_handoff_stage2_analysis as analysis
+
+    chosen = policy.multi_model.modifier_selection
+    binary = outcome_type == "binary"
+    estimator_policy = chosen.resolved_estimator_policy
+    if estimator_policy == "dina" and not binary:
+        raise ValueError("modifier_selection.estimator_policy=dina requires a binary outcome")
+    weights = (
+        {name: float(chosen.weights[name]) for name in modifier_tests.COMPONENTS}
+        if chosen.weights is not None
+        else modifier_tests.default_weights(outcome_type)
+    )
+    fit_ids = [
+        int(value)
+        for value in (fit_row_ids if fit_row_ids is not None else frame["_oci_row_id"])
+    ]
+    if len(set(fit_ids)) != len(fit_ids) or set(fit_ids) != set(map(int, frame.index)):
+        raise ValueError("fit_row_ids must list exactly the outer-training measurement rows")
+    locked = {
+        str(f["feature_id"]) for f in definitions if f.get("configured_explicit_feature") is True
+    }
+    locked_modifiers = [
+        str(f["feature_id"])
+        for f in definitions
+        if str(f["feature_id"]) in locked and "effect_modifier" in f.get("roles", [])
+    ]
+    identity = {
+        "schema_version": ORTHOGONAL_SCHEMA_VERSION,
+        "tests_schema_version": modifier_tests.SCHEMA_VERSION,
+        "rule": "orthogonal_tests",
+        "numerical_input_fingerprint": base_fingerprint,
+        "modifier_selection": chosen.public_dict(),
+        "resolved_weights": weights,
+        "resolved_estimator_policy": estimator_policy,
+        "propensity_clip": float(propensity_clip),
+        "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
+        "categorical_min_count": policy.categorical_min_count,
+        "fit_row_ids": fit_ids,
+        "role_decisions": _fingerprint(role_report),
+        "selected_definitions": selected,
+        "sources": {
+            str(Path(p).name): sha256(Path(p).read_bytes()).hexdigest()
+            for p in (
+                __file__,
+                modifier_tests.__file__,
+                analysis.__file__,
+                Path(__file__).with_name("stage2_statistical_selection.py"),
+                Path(__file__).with_name("stage2_interaction_screen.py"),
+                Path(__file__).parent.parent / "utils" / "calibration.py",
+                Path(__file__).parent.parent / "models" / "elastic_net_nuisance.py",
+            )
+        },
+    }
+    fingerprint = _fingerprint(identity)
+    directory = Path(output_dir) / fingerprint[:20]
+    _write_json(directory / "input.json", {**identity, "input_fingerprint": fingerprint})
+    tests_path = Path(tests_path) if tests_path is not None else Path(output_dir) / "modifier_tests.json"
+
+    def compute():
+        # The exact frame the final estimation aligns for its nuisance candidates.
+        candidate_fit = analysis._aligned_measurement_frame(
+            extracted_fit, fit_ids, definitions, label="training"
+        )
+        LOGGER.info("Stage 2 modifier tests: training-row final-estimation nuisances")
+        nuisances = analysis._outer_training_nuisances(
+            dataset=dataset,
+            candidate_fit=candidate_fit,
+            candidate_definitions=definitions,
+            fit_ids=fit_ids,
+            inner_splits=inner_splits,
+            treatment_column=treatment_column,
+            outcome_column=outcome_column,
+            binary=binary,
+            seed=seed,
+            checkpoint_dir=directory / "testing_nuisances",
+            checkpoint_fingerprint=fingerprint,
+            audit_dir=directory / "testing_nuisance_fit_audits",
+        )
+        e, mu0, mu1 = nuisances["recalibrated"]["fit"]
+        t, y = nuisances["treatment"], nuisances["outcome"]
+        keep = numerical.linear.propensity_eligibility(
+            e, policy.min_propensity, policy.max_propensity
+        )
+        scores = modifier_tests.testing_scores(
+            treatment=t, outcome=y, propensity=e, mu0=mu0, mu1=mu1,
+            propensity_clip=propensity_clip,
+        )
+        nuisance_path = directory / "testing_nuisances.csv"
+        analysis._write_frame(nuisance_path, pd.DataFrame({
+            "_oci_row_id": fit_ids,
+            "inner_fold": nuisances["inner_fold_ids"],
+            "propensity": e,
+            "mu0": mu0,
+            "mu1": mu1,
+            "marginal_outcome": scores["marginal"],
+            "effect_eligible": keep,
+        }))
+        LOGGER.info("Stage 2 modifier tests: %s candidates, %s eligible rows",
+                    len(definitions), int(keep.sum()))
+        records, test_audit = modifier_tests.candidate_tests(
+            candidate_fit, definitions, treatment=t, outcome=y, propensity=e, mu0=mu0,
+            mu1=mu1, binary=binary, propensity_clip=propensity_clip, eligible=keep,
+            min_count=policy.categorical_min_count,
+        )
+        for record in records:
+            record["investigator_locked"] = record["feature_id"] in locked
+        records, discovered = modifier_tests.combine_and_select(
+            records,
+            weights=weights,
+            q=chosen.q,
+            binary=binary,
+            family_ids=[r["feature_id"] for r in records if not r["investigator_locked"]],
+            max_modifiers=chosen.max_modifiers,
+        )
+        for record in records:
+            if record["feature_id"] in locked_modifiers:
+                record["selected"] = True
+                record["selection_reason"] = "investigator_locked_modifier"
+            elif record["selected"]:
+                record["selection_reason"] = "combined_bh_q_at_most_threshold"
+            else:
+                record["selection_reason"] = None
+            record["nuisance_source"] = TESTING_NUISANCE_SOURCE
+        by_id = {r["feature_id"]: r for r in records}
+        ordered = [
+            {
+                "feature_id": key,
+                "evidence_ids": [],
+                "rationale": (
+                    f"Orthogonal modifier tests: combined p={by_id[key]['combined_p_value']:.3g}, "
+                    f"BH q={by_id[key]['combined_q_value']:.3g}; labels "
+                    f"{', '.join(by_id[key]['labels'])}."
+                ),
+            }
+            for key in discovered
+        ]
+        kept, updated_roles = _apply_budget(
+            definitions, selected, role_report, ordered, len(ordered), locked_modifiers,
+            selection_rule="orthogonal_tests",
+        )
+        for feature in kept:
+            if "effect_modifier" in feature["roles"]:
+                feature["modifier_evidence"] = modifier_tests.compact_evidence(
+                    by_id[str(feature["feature_id"])], rule="orthogonal_tests"
+                )
+        selected_ids = [*locked_modifiers, *discovered]
+        label_counts = {}
+        for key in discovered:
+            for label in by_id[key]["labels"]:
+                label_counts[label] = label_counts.get(label, 0) + 1
+        summary = {
+            "candidates": len(records),
+            "tested_family": sum(r["bh_family"] for r in records),
+            "combined_p_available": sum(
+                r["combined_p_value"] is not None for r in records if r["bh_family"]
+            ),
+            "component_p_available": {
+                name: sum(
+                    r["components"][name].get("p_value") is not None
+                    for r in records if r["bh_family"]
+                )
+                for name in modifier_tests.COMPONENTS
+            },
+            "discoveries": len(discovered),
+            "excluded_by_cap": sum(r["excluded_by_cap"] for r in records),
+            "locked_modifiers": len(locked_modifiers),
+            "selected_modifiers": len(selected_ids),
+            "labels": label_counts,
+            "extreme_propensity_signal": sum(
+                r["extreme_propensity_signal"] for r in records if r["feature_id"] in discovered
+            ),
+        }
+        testing_nuisances = {
+            "source": TESTING_NUISANCE_SOURCE,
+            "description": TESTING_NUISANCE_DESCRIPTION,
+            "rows": len(fit_ids),
+            "eligible_rows": int(keep.sum()),
+            "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
+            "seed_offset": analysis.FINAL_NUISANCE_SEED_OFFSET,
+            "predictions_path": str(nuisance_path),
+            "recalibration": nuisances["recalibrated"]["audit"],
+            "fit_audit_summary": analysis._nuisance_fit_audit_summary(
+                directory / "testing_nuisance_fit_audits"
+            ),
+        }
+        tests_report = modifier_tests.json_ready({
+            "schema_version": modifier_tests.SCHEMA_VERSION,
+            "rule": "orthogonal_tests",
+            "input_fingerprint": fingerprint,
+            "outcome_type": outcome_type,
+            "q_threshold": chosen.q,
+            "weights": weights,
+            "weights_source": "configured" if chosen.weights is not None else "outcome_type_default",
+            "max_modifiers": chosen.max_modifiers,
+            "propensity_clip": float(propensity_clip),
+            "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
+            "sparse_indicator_min_count": policy.categorical_min_count,
+            "nuisance_source": TESTING_NUISANCE_SOURCE,
+            "testing_nuisances": testing_nuisances,
+            "component_descriptions": modifier_tests.COMPONENT_DESCRIPTIONS,
+            "interpretation": modifier_tests.INTERPRETATIONS,
+            "test_audit": test_audit,
+            "summary": summary,
+            "selected_feature_ids": selected_ids,
+            "discovered_feature_ids": discovered,
+            "locked_modifier_ids": locked_modifiers,
+            "candidates": records,
+        })
+        report = {
+            "schema_version": ORTHOGONAL_SCHEMA_VERSION,
+            "status": "complete",
+            "rule": "orthogonal_tests",
+            "input_fingerprint": fingerprint,
+            "chosen_estimator": estimator_policy,
+            "estimator_policy": estimator_policy,
+            "final_estimators": (
+                list(ensemble_estimators(outcome_type))
+                if estimator_policy == "ensemble" else [estimator_policy]
+            ),
+            "chosen_modifier_count": len(selected_ids),
+            "actual_additional_count": len(discovered),
+            "selected_modifier_ids": selected_ids,
+            "discovered_feature_ids": discovered,
+            "locked_modifier_ids": locked_modifiers,
+            "modifier_selection_policy": chosen.public_dict(),
+            "resolved_weights": weights,
+            "modifier_tests_path": str(tests_path),
+            "tests_summary": summary,
+            "testing_nuisances": {
+                k: v for k, v in testing_nuisances.items()
+                if k not in {"recalibration", "fit_audit_summary"}
+            },
+            "methodology_notes": {
+                "modifier_tests": modifier_tests.COMPONENT_DESCRIPTIONS,
+                "combination": modifier_tests.INTERPRETATIONS["combined_p_value"],
+                "multiplicity": modifier_tests.INTERPRETATIONS["combined_q_value"],
+                "training_p_value_optimism": modifier_tests.INTERPRETATIONS[
+                    "training_p_value_optimism"
+                ],
+                "testing_nuisances": TESTING_NUISANCE_DESCRIPTION,
+            },
+            "propensity_bounds": {"min": policy.min_propensity, "max": policy.max_propensity},
+            "confounder_policy": "preserve separate statistically selected nuisance task supports and investigator locks",
+            "boundaries": {
+                "tests_use_outer_training_rows_only": True,
+                "nested_count_search_run": False,
+                "oracle_or_outer_test_labels_used": False,
+                "candidate_list_built_from_the_same_training_rows": True,
+                "conditional_on_frozen_upstream_catalog_and_extractions": True,
+            },
+            "checkpoint_dir": str(directory),
+        }
+        updated_roles["modifier_count_selection"] = report
+        return {
+            "selected": kept, "role_report": updated_roles, "report": report,
+            "tests": tests_report,
+        }
+
+    result = numerical._checkpoint(directory, "result", fingerprint, compute)
+    _write_json(Path(output_dir) / "selection.json", result["report"])
+    _write_json(tests_path, result["tests"])
+    return result["selected"], result["role_report"], result["report"]
 
 
 def select_modifier_count(
@@ -321,8 +637,16 @@ def select_modifier_count(
     model_identity,
     estimation_trees,
     run_numerical=None,
+    fit_row_ids=None,
+    propensity_clip=DEFAULT_PROPENSITY_CLIP,
+    tests_path=None,
 ):
-    """Jointly select count/architecture, preserving each nuisance task's support."""
+    """Select modifiers (and the final estimator), preserving each nuisance task's support.
+
+    ``fit_row_ids`` is the outer split's training-row order (the order the final
+    estimation uses); ``tests_path`` receives ``modifier_tests.json`` under
+    ``orthogonal_tests``.
+    """
     policy.validate()
     cfg = policy.multi_model.modifier_count
     if not definitions:
@@ -355,6 +679,27 @@ def select_modifier_count(
     if statistical_report.get("input_fingerprint") != base_fingerprint:
         raise ValueError("modifier count received statistical evidence from different inputs")
     from . import plain_handoff_stage2_analysis as analysis
+
+    if policy.multi_model.modifier_selection.rule == "orthogonal_tests":
+        return _select_by_orthogonal_tests(
+            dataset=dataset,
+            extracted_fit=extracted_fit,
+            frame=frame,
+            definitions=definitions,
+            inner_splits=inner_splits,
+            treatment_column=treatment_column,
+            outcome_column=outcome_column,
+            outcome_type=outcome_type,
+            seed=seed,
+            policy=policy,
+            selected=selected,
+            role_report=role_report,
+            base_fingerprint=base_fingerprint,
+            output_dir=output_dir,
+            fit_row_ids=fit_row_ids,
+            propensity_clip=propensity_clip,
+            tests_path=tests_path,
+        )
 
     identity = {
         "schema_version": SCHEMA_VERSION,
