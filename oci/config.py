@@ -484,6 +484,18 @@ class ExplicitFeatureForestConfig:
     max_features: str = "sqrt"
     honest: bool = True
     inference: bool = True
+    # EconML tune() replaces the configured forest settings with grid-searched
+    # values. Off by default; when on, fit_audit() records every change.
+    tune_model: bool = False
+    # Standalone runners fail closed when cv_folds <= 1 and no held-out "test"
+    # split exists, because discovery and estimation would use the same rows.
+    # Set true to allow that non-honest full-data refit (outputs are labelled).
+    allow_non_honest_outer_split: bool = False
+
+    def __post_init__(self):
+        for name in ("honest", "inference", "tune_model", "allow_non_honest_outer_split"):
+            if not isinstance(getattr(self, name), bool):
+                raise TypeError(f"explicit_feature_forest.{name} must be boolean")
 
 
 # =============================================================================
@@ -1952,9 +1964,8 @@ class MultiModelAgenticForestConfig:
     parsimony_factor_min_coverage: float = 0.10
     parsimony_parallelism: str = "auto"
     parsimony_metric_epsilon: float = 1e-6
-    # Compatibility default: allow legacy full-data runs, but label them as
-    # non-honest. Set true to require CV or an explicit held-out test split.
-    require_honest_outer_split: bool = False
+    # Outer-split honesty is governed by
+    # explicit_feature_forest.allow_non_honest_outer_split (fail closed by default).
     # Final accepted values must come from complete-document reading. This guard
     # prevents the current LLM extractor from silently using only the note tail.
     fail_on_extraction_truncation: bool = True
@@ -2401,6 +2412,43 @@ class MultiModelForestConfig:
         return methods
 
 
+HTR_EFFECT_OBJECTIVES = ("dina", "squared_r_loss", "pseudo_outcome_mse")
+
+
+def resolve_effect_objective(value: Any, *, outcome_type: Any) -> str:
+    """Resolve the HTR effect objective against the outcome type.
+
+    ``"auto"`` means ``"dina"`` for binary outcomes and ``"pseudo_outcome_mse"``
+    for continuous outcomes. Binary outcomes require DINA and DINA requires a
+    binary outcome; an explicit mismatch raises instead of being overridden.
+    """
+
+    objective = str(value).strip().lower()
+    if objective not in {"auto", *HTR_EFFECT_OBJECTIVES}:
+        raise ValueError(
+            "agentic_attention_variable_forest.effect_objective must be one of "
+            "'auto', 'dina', 'squared_r_loss', or 'pseudo_outcome_mse'; "
+            f"got {value!r}"
+        )
+    binary = str(outcome_type).strip().lower() == "binary"
+    if objective == "auto":
+        return "dina" if binary else "pseudo_outcome_mse"
+    if binary and objective != "dina":
+        raise ValueError(
+            "binary outcomes require agentic_attention_variable_forest."
+            f"effect_objective='dina' (or 'auto'); got {objective!r}. Set it to "
+            "'auto' or 'dina', or use outcome_type='continuous' for the "
+            "R-loss objectives."
+        )
+    if not binary and objective == "dina":
+        raise ValueError(
+            "agentic_attention_variable_forest.effect_objective='dina' requires "
+            "outcome_type='binary'; use 'auto', 'pseudo_outcome_mse', or "
+            "'squared_r_loss' for continuous outcomes."
+        )
+    return objective
+
+
 @dataclass
 class AgenticAttentionVariableForestConfig:
     """Configuration for attention-evidence agentic variable discovery.
@@ -2445,7 +2493,9 @@ class AgenticAttentionVariableForestConfig:
     e_clip: float = 0.01
     r_stage_min_propensity: float = 0.0
     r_stage_max_propensity: float = 1.0
-    effect_objective: str = "pseudo_outcome_mse"
+    # "auto" resolves to "dina" for binary outcomes and "pseudo_outcome_mse"
+    # for continuous outcomes (see resolve_effect_objective).
+    effect_objective: str = "auto"
     manual_features_locked: bool = True
     neural_only: bool = False
 
@@ -2504,14 +2554,10 @@ class AgenticAttentionVariableForestConfig:
                 "agentic_attention_variable_forest.attention_top_k_chunks must be >= 1"
             )
         effect_objective = str(self.effect_objective).strip().lower()
-        if effect_objective not in {
-            "dina",
-            "squared_r_loss",
-            "pseudo_outcome_mse",
-        }:
+        if effect_objective not in {"auto", *HTR_EFFECT_OBJECTIVES}:
             raise ValueError(
                 "agentic_attention_variable_forest.effect_objective must be one "
-                "of 'dina', 'squared_r_loss', or 'pseudo_outcome_mse'"
+                "of 'auto', 'dina', 'squared_r_loss', or 'pseudo_outcome_mse'"
             )
         self.effect_objective = effect_objective
         if self.candidate_proposals_per_fold < 1:
@@ -2661,6 +2707,16 @@ class AppliedInferenceConfig:
     explicit_features: ExplicitFeatureExtractionConfig = field(
         default_factory=ExplicitFeatureExtractionConfig
     )
+
+    def __post_init__(self):
+        # Fail at parse time, before any component runs, when the configured
+        # HTR effect objective contradicts the outcome type.
+        avf_config = getattr(self.architecture, "agentic_attention_variable_forest", None)
+        if avf_config is not None:
+            resolve_effect_objective(
+                getattr(avf_config, "effect_objective", "auto"),
+                outcome_type=self.outcome_type,
+            )
 
 
 @dataclass

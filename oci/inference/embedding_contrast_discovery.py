@@ -233,8 +233,13 @@ class EmbeddingContrastEvidenceGenerator:
         return bool(getattr(self.embedding_config, "enabled", False))
 
     def prepare(self, dataset: pd.DataFrame) -> None:
-        """Prepare chunk embeddings for the dataset order used by this runner."""
-        if not self.enabled or self._prepared:
+        """Prepare chunk embeddings for the dataset order used by this runner.
+
+        The chunk-embedding cache is a shared support service: neural-query
+        discovery reads it even when the embedding evidence lanes are disabled,
+        so ``enabled`` gates only :meth:`build_evidence`, not the cache.
+        """
+        if self._prepared:
             return
         if self.config.text_column not in dataset.columns:
             raise ValueError(f"Embedding contrast requires text column {self.config.text_column!r}")
@@ -1625,7 +1630,7 @@ class EmbeddingContrastEvidenceGenerator:
     def _concept_phrases(self, importance: Dict[str, Any]) -> List[str]:
         phrases: List[str] = list(self.embedding_config.concept_phrases)
         if bool(self.embedding_config.include_bow_phrases_as_concepts):
-            for row in importance.get("phrase_features", []) or []:
+            for row in importance.get("phrase_consensus", []) or []:
                 phrase = str(row.get("feature", "")).strip()
                 if phrase:
                     phrases.append(phrase)

@@ -70,20 +70,6 @@ ALLOWED_AXES = {
     "semantic",
     "unclear",
 }
-_OPERATIONAL_KEYS = {
-    "artifacts",
-    "artifact_inventory",
-    "common_vocabulary",
-    "config",
-    "fit_row_ids",
-    "heldout_row_ids",
-    "metrics",
-    "model_diagnostics",
-    "predictions",
-    "run_config",
-    "schema_version",
-    "train_activations",
-}
 _NUMERIC_SCORE_KEYS = {
     "attention",
     "best_abs_confounder_score",
@@ -265,37 +251,6 @@ def _safe_token(value: Any, *, default: str) -> str:
 
 def _clean_text(value: Any) -> str:
     return _normalize_evidence_text(value)
-
-
-def _content_text(value: Any, *, limit: int = 12_000) -> str:
-    """Collect readable leaves for a last-resort structured evidence unit."""
-
-    parts: list[str] = []
-
-    def visit(child: Any, key: str = "") -> None:
-        if sum(len(part) for part in parts) >= limit:
-            return
-        if isinstance(child, Mapping):
-            for raw_key, nested in child.items():
-                name = str(raw_key)
-                lowered = name.lower()
-                if (
-                    lowered in _OPERATIONAL_KEYS
-                    or lowered.endswith(("_sha256", "_hash", "_fingerprint", "_path"))
-                    or lowered.startswith(("authenticated_", "attestation_", "immutable_"))
-                ):
-                    continue
-                visit(nested, name)
-        elif isinstance(child, (list, tuple)):
-            for nested in child:
-                visit(nested, key)
-        elif isinstance(child, str):
-            text = _clean_text(child)
-            if text and not re.fullmatch(r"[a-f0-9]{32,}", text.lower()):
-                parts.append(f"{key}: {text}" if key else text)
-
-    visit(value)
-    return _clean_text("; ".join(dict.fromkeys(parts)))[:limit]
 
 
 def _finite_scores(value: Mapping[str, Any]) -> dict[str, float]:
@@ -752,7 +707,12 @@ def _extract_sparse_occurrences(
                 if not isinstance(view, Mapping):
                     continue
                 view_name = str(view.get("view_name") or f"view_{view_index + 1}")
+                score_polarity = view.get("score_polarity")
+                score_polarity = score_polarity if isinstance(score_polarity, Mapping) else {}
                 for field, (axes, polarity, family) in ranked_fields.items():
+                    # Tree-model importances rank strength, not direction.
+                    if score_polarity.get(field.rsplit("_", 1)[0]) == "unsigned_importance":
+                        polarity = "unsigned"
                     for compact in _compact_bow_rows(view.get(field)):
                         add_term(
                             compact,
@@ -1007,8 +967,10 @@ def _extract_tfidf_occurrences(
 ) -> list[dict[str, Any]]:
     try:
         blocks = _compact_tfidf_evidence(payload)
-    except ValueError:
-        return []
+    except ValueError as exc:
+        raise ValueError(
+            f"handoff row {handoff_row} has an unrecognized TF-IDF payload: {exc}"
+        ) from exc
     output: list[dict[str, Any]] = []
     for block_index, (families, _role, content) in enumerate(blocks):
         terms = content.get("terms") if isinstance(content, Mapping) else None
@@ -1134,33 +1096,6 @@ def _extract_neural_query_occurrences(
     return output
 
 
-def _extract_generic_occurrence(
-    row: Mapping[str, Any],
-    payload: Any,
-    *,
-    handoff_row: int,
-) -> list[dict[str, Any]]:
-    text = _content_text(payload)
-    if not text:
-        return []
-    architecture = (
-        str(payload.get("architecture") or row.get("source") or "structured_evidence")
-        if isinstance(payload, Mapping)
-        else str(row.get("source") or "structured_evidence")
-    )
-    occurrence = _occurrence(
-        text=text,
-        evidence_kind="structured_evidence",
-        axes=_axes_from_descriptor(_canonical_json(payload)),
-        polarity="unsigned",
-        source_families=[_safe_token(row.get("source"), default="unknown_source")],
-        architecture=architecture,
-        reference=_base_reference(row, handoff_row=handoff_row, json_path="evidence"),
-        details={"architecture": architecture},
-    )
-    return [occurrence] if occurrence is not None else []
-
-
 def _extract_occurrences(rows: Iterable[Mapping[str, Any]]) -> dict[int, list[dict[str, Any]]]:
     by_outer: dict[int, list[dict[str, Any]]] = defaultdict(list)
     neural_by_outer: dict[int, _ExactOccurrenceCompactor] = {}
@@ -1209,11 +1144,15 @@ def _extract_occurrences(rows: Iterable[Mapping[str, Any]]) -> dict[int, list[di
             occurrences.extend(
                 _extract_neural_query_occurrences(row, payload, handoff_row=handoff_row)
             )
-        if not occurrences:
-            occurrences = _extract_generic_occurrence(
-                row,
-                payload,
-                handoff_row=handoff_row,
+        else:
+            # Never guess axes or architecture from an unknown structure.  A
+            # recognized producer row that yields nothing simply contributes
+            # no occurrences.
+            raise ValueError(
+                f"handoff row {handoff_row} has an unrecognized Stage 1 payload "
+                f"(source={source!r}); the evidence compiler accepts only "
+                "text_models, tfidf, neural_queries, and stage1_architecture rows. "
+                "Rebuild the handoff with the current Stage 1 workflow."
             )
         for occurrence in occurrences:
             if str(occurrence["architecture"]) == NEURAL_QUERY_MOMENTS:

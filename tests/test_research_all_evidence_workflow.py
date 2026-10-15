@@ -601,12 +601,9 @@ def test_other_evidence_families_reuse_visible_tfidf_splits(tmp_path):
 def test_text_model_contexts_are_independently_resumable(tmp_path, monkeypatch):
     _raw, config = _inputs(tmp_path, components=("text_models",))
     config = replace(config, workers=1)
-    context = Stage1RunContext(
-        config=config,
-        dataset=pd.read_parquet(config.dataset),
-        applied_config=None,
-        neural_query_config=None,
-    )
+    # Without a TF-IDF run, the canonical split plan is materialized from the
+    # resolved Stage 1 configuration (there is no unstratified fallback).
+    context = ResearchAllEvidenceWorkflow(config)._resolved_context()
     calls: list[str] = []
 
     def fit_one(*, spec, context_dir, **_unused):

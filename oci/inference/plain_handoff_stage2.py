@@ -256,15 +256,40 @@ def _safe_ite_correlation(
     return float(np.corrcoef(left, right)[0, 1])
 
 
+def _stage2_oracle_ite_column(columns: Iterable[Any], outcome_type: str) -> str | None:
+    """Pick the oracle ITE column on the analysis outcome scale.
+
+    ``true_ite`` is on the outcome scale for both outcome types; legacy
+    ``true_ite_prob`` is the outcome scale only for binary outcomes.  This is
+    the same contract as ``applied.resolve_oracle_ite_column``.
+    """
+
+    names = {str(column) for column in columns}
+    if "true_ite" in names:
+        return "true_ite"
+    if "true_ite_prob" in names and str(outcome_type).lower() == "binary":
+        return "true_ite_prob"
+    return None
+
+
 def _evaluate_stage2_oracle_ite(
     *,
     prediction_path: Path,
     dataset: pd.DataFrame,
     output_dir: Path,
-    oracle_ite_column: str = "true_ite_prob",
+    outcome_type: str = "binary",
+    oracle_ite_column: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate frozen cross-fitted ITEs without exposing truth to modeling."""
 
+    unavailable_reason: str | None = None
+    if oracle_ite_column is None:
+        oracle_ite_column = _stage2_oracle_ite_column(dataset.columns, outcome_type)
+        if oracle_ite_column is None and "true_ite_prob" in map(str, dataset.columns):
+            unavailable_reason = (
+                "continuous-outcome dataset lacks outcome-scale true_ite; "
+                "probability-scale true_ite_prob is not comparable"
+            )
     prediction_path = Path(prediction_path)
     output_dir = Path(output_dir)
     metrics_path = output_dir / "posthoc_oracle_ite_metrics.json"
@@ -281,10 +306,12 @@ def _evaluate_stage2_oracle_ite(
         "frozen_prediction_sha256": frozen_sha256,
         "metrics_path": str(metrics_path),
     }
-    if oracle_ite_column not in dataset.columns:
+    if oracle_ite_column is None or oracle_ite_column not in dataset.columns:
         payload = {
             **base,
-            "reason": f"dataset does not contain {oracle_ite_column!r}",
+            "reason": unavailable_reason or (
+                f"dataset does not contain {oracle_ite_column or 'true_ite'!r}"
+            ),
         }
         _write_json(metrics_path, payload)
         return payload
@@ -555,6 +582,9 @@ def _stage2_explicit_feature_from_mapping(
         combined.update(entry)
     else:
         combined = entry
+    _reject_unknown_stage2_keys(
+        combined, Stage2ExplicitFeature, section=source, extra=("type", "categories", "unit"),
+    )
 
     def required_value(key: str, *aliases: str) -> Any:
         for candidate in (key, *aliases):
@@ -594,6 +624,12 @@ def _stage2_explicit_features_from_value(raw: Any) -> tuple[Stage2ExplicitFeatur
     if raw is None:
         return ()
     if isinstance(raw, Mapping):
+        unknown = sorted(set(map(str, raw)) - {"enabled", "features"})
+        if unknown:
+            raise ValueError(
+                f"stage2.explicit_features contains unsupported fields: {unknown}. "
+                "Use {\"enabled\": ..., \"features\": [...]} or a list of features."
+            )
         enabled = raw.get("enabled", True)
         if not isinstance(enabled, bool):
             raise ValueError("stage2.explicit_features.enabled must be true or false")
@@ -1223,6 +1259,21 @@ class PlainHandoffStage2Config:
         return values
 
 
+def _reject_unknown_stage2_keys(
+    raw: Mapping[str, Any],
+    schema: type,
+    *,
+    section: str,
+    extra: Iterable[str] = (),
+) -> None:
+    unknown = sorted(set(map(str, raw)) - set(schema.__dataclass_fields__) - set(extra))
+    if unknown:
+        raise ValueError(
+            f"{section} contains unsupported fields: {unknown}. Fix the spelling or "
+            "remove them; Stage 2 does not ignore unknown settings."
+        )
+
+
 def plain_stage2_config_from_mapping(
     raw: Mapping[str, Any],
     *,
@@ -1232,6 +1283,10 @@ def plain_stage2_config_from_mapping(
         raise ValueError(
             "stage2.command is not used by the plain workflow; configure stage2.endpoint"
         )
+    # A misspelled scientific key would otherwise fall back to its default.
+    # Every dataclass field is accepted so a saved run_config.json snapshot
+    # round-trips; its runtime_* fields are re-derived at run time.
+    _reject_unknown_stage2_keys(raw, PlainHandoffStage2Config, section="stage2")
     endpoint = str(raw.get("endpoint") or "").strip()
     model = str(raw.get("model") or "").strip()
     managed_vllm = managed_vllm_config_from_mapping(raw.get("vllm"), model=model)
@@ -1280,6 +1335,9 @@ def plain_stage2_config_from_mapping(
     elif not isinstance(raw_extraction_llm, Mapping):
         raise ValueError("stage2.extraction_llm must be an object")
     else:
+        _reject_unknown_stage2_keys(
+            raw_extraction_llm, Stage2ExtractionLLMConfig, section="stage2.extraction_llm"
+        )
         extraction_endpoint = str(raw_extraction_llm.get("endpoint") or "").strip().rstrip("/")
         extraction_model = str(raw_extraction_llm.get("model") or "").strip()
         extraction_workers = max(1, int(raw_extraction_llm.get(
@@ -1294,6 +1352,7 @@ def plain_stage2_config_from_mapping(
             model=extraction_model,
             default_base_port=DEFAULT_EXTRACTION_VLLM_BASE_PORT,
             default_internal_port_base=DEFAULT_EXTRACTION_VLLM_INTERNAL_PORT_BASE,
+            section="stage2.extraction_llm.vllm",
         )
         if extraction_endpoint and extraction_vllm is not None:
             raise ValueError(
@@ -1535,11 +1594,24 @@ def _served_model_ids(config: PlainHandoffStage2Config) -> list[str]:
             rendered = str(value or "").strip()
             return rendered or None
 
+        def positive_int_field(name: str) -> int | None:
+            value = getattr(model, name, None)
+            if value is None:
+                value = extras.get(name)
+            if isinstance(value, bool):
+                return None
+            if isinstance(value, str) and value.strip().isdigit():
+                value = int(value.strip())
+            return value if isinstance(value, int) and value > 0 else None
+
         records_by_id[model_id] = {
             "id": model_id,
             "root": stable_field("root"),
             "parent": stable_field("parent"),
             "revision": stable_field("revision") or stable_field("model_revision"),
+            # vLLM advertises the served context window here; external
+            # endpoints have no managed --max-model-len to fall back on.
+            "max_model_len": positive_int_field("max_model_len"),
         }
     records = [records_by_id[model_id] for model_id in sorted(records_by_id)]
     return _ServedModelIds(
@@ -1657,6 +1729,7 @@ def _endpoint_model_identity(
                     "root": None,
                     "parent": None,
                     "revision": None,
+                    "max_model_len": None,
                 }
             )
         else:
@@ -1822,6 +1895,14 @@ class _Stage2OutputWhitespaceError(_Stage2OutputLengthError):
     """Abort a streamed JSON formatting loop and request a fresh response."""
 
 
+class _Stage2ReasoningOnlyResponseError(ValueError):
+    """The server returned reasoning text but no final message content.
+
+    Reasoning can contain draft JSON objects, so it is never parsed as the
+    answer; the request is repaired instead.
+    """
+
+
 class _Stage2TransportFailure(RuntimeError):
     """Carry the number of real HTTP calls consumed by one completion call."""
 
@@ -1960,6 +2041,29 @@ def _primary_prompt_tokenizer(
         model=model, cache_dir=cache_dir,
         chat_template_kwargs=json.loads(template_kwargs_json),
     )
+
+
+@lru_cache(maxsize=8)
+def _external_primary_tokenizer_available(model: str) -> bool:
+    """Budget external-endpoint prompts only when the served tokenizer loads locally.
+
+    Without client-side budgeting an over-long prompt is rejected by the server,
+    so no semantic content is silently truncated.
+    """
+    tokenizer = _primary_prompt_tokenizer(model, "", json.dumps({}, sort_keys=True))
+    try:
+        if hasattr(tokenizer, "_load"):
+            tokenizer._load()
+    except RuntimeError as exc:
+        LOGGER.warning(
+            "Prompt token budgeting is disabled for external endpoint model %r because "
+            "its tokenizer could not be loaded locally (%s). The server will reject "
+            "prompts that exceed its context window.",
+            model,
+            exc.__cause__ or exc,
+        )
+        return False
+    return True
 
 
 def _primary_prompt_token_counter(
@@ -2311,13 +2415,21 @@ def _message_text(value: Any) -> str:
 
 
 def _response_message_text(message: Any) -> str:
-    """Read final content whether reasoning was parsed separately or left inline."""
+    """Read final message content; inline reasoning is removed by the JSON parser.
+
+    Separately parsed reasoning is never used as the answer (see
+    ``_response_reasoning_text``).
+    """
 
     content = _message_text(
         message.get("content") if isinstance(message, Mapping) else getattr(message, "content", None)
     )
-    if content.strip():
-        return content
+    return content if content.strip() else ""
+
+
+def _response_reasoning_text(message: Any) -> str:
+    """Return reasoning text that a server parsed out of the final content."""
+
     containers: list[Mapping[str, Any]] = []
     if isinstance(message, Mapping):
         containers.append(message)
@@ -2524,6 +2636,10 @@ def _openai_completion(
             f"Stage 2 server stopped the response with finish_reason={finish_reason}"
         )
     content = _response_message_text(choice.message)
+    if not content and _response_reasoning_text(choice.message):
+        raise _Stage2ReasoningOnlyResponseError(
+            "Stage 2 model returned reasoning but no final message content"
+        )
     if not content:
         raise _Stage2TransportFailure(
             _RetryableStage2ResponseError("Stage 2 model returned an empty response"),
@@ -2714,6 +2830,9 @@ def _completion_with_transport_retries(
     )
     max_attempts = max(1, int(config.transport_max_attempts))
     remaining_attempts = max_attempts
+    # Every transport attempt resends the caller's messages unchanged.  A
+    # checkpointed measurement is fingerprinted by those messages, so failure
+    # text must never be appended here (it is logged and audited instead).
     retry_messages = [dict(message) for message in messages]
 
     def exhausted(reason: str, cause: Exception | None = None) -> Stage2RequestExhaustedError:
@@ -2799,14 +2918,6 @@ def _completion_with_transport_retries(
                 type(cause).__name__,
                 cause,
             )
-            retry_messages = _transport_retry_messages(
-                messages,
-                cause,
-                max_prompt_chars=int(config.max_prompt_chars),
-                prompt_token_counter=prompt_token_counter,
-                context_window_tokens=context_window_tokens,
-                context_margin_tokens=context_margin_tokens,
-            )
             if delay > 0:
                 time.sleep(delay)
     raise RuntimeError("unreachable Stage 2 transport retry state")
@@ -2875,49 +2986,6 @@ def _compact_json_messages(
     return compacted
 
 
-def _transport_retry_messages(
-    messages: Sequence[Mapping[str, str]],
-    exc: Exception,
-    *,
-    max_prompt_chars: int,
-    prompt_token_counter: Callable[[Sequence[Mapping[str, str]]], int] | None,
-    context_window_tokens: int | None,
-    context_margin_tokens: int,
-) -> list[dict[str, Any]]:
-    """Carry the latest call failure forward without accumulating retry turns."""
-
-    detail = f"{type(exc).__name__}: {exc}"
-    directive = (
-        f"The previous request failed: {detail}. "
-        "Retry the original task and return one complete JSON object using the required "
-        "schema. Keep the response concise. This is a request failure, not evidence "
-        "about the patient or the scientific result."
-    )
-
-    def fits(candidate: Sequence[Mapping[str, str]]) -> bool:
-        return (
-            sum(len(str(row.get("content") or "")) for row in candidate) <= max_prompt_chars
-            and (
-                prompt_token_counter is None
-                or context_window_tokens is None
-                or int(prompt_token_counter(candidate)) + context_margin_tokens
-                < context_window_tokens
-            )
-        )
-
-    # Preserve any semantic repair feedback already in the input. Compact JSON
-    # losslessly when needed; never truncate patient records to make room.
-    for base in ([dict(row) for row in messages], _compact_json_messages(messages)):
-        for content in (directive, detail):
-            candidate = [*base, {"role": "user", "content": content}]
-            if fits(candidate):
-                return candidate
-    raise ValueError(
-        "Stage 2 transport retry prompt cannot fit the previous error within its "
-        "prompt budget"
-    ) from exc
-
-
 def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None = None, repeated_error_count: int = 1) -> dict[str, str]:
     del repeated_error_count
     if isinstance(exc, _Stage2OutputWhitespaceError):
@@ -2934,6 +3002,12 @@ def _repair_message(exc: Exception, *, repair_context: Mapping[str, Any] | None 
             "occurrence and its supporting quote. Preserve valid repeated occurrences. "
             "Omit null or unavailable placeholders instead of recording them as observations. "
             'If no supported values occur in the section, return {"observations": []}.'
+        )
+    elif isinstance(exc, _Stage2ReasoningOnlyResponseError):
+        content = (
+            "Your preceding response contained reasoning but no final answer. "
+            "Return the complete JSON object as the final message content, after any "
+            "reasoning, using the task and information above."
         )
     elif isinstance(exc, _Stage2OutputLengthError):
         content = (
@@ -3022,7 +3096,10 @@ def _request_json(
         and _uses_default_openai_transport(completion)
     ):
         primary_window = _primary_context_window_tokens(config)
-        if primary_window is not None:
+        if primary_window is not None and (
+            config.vllm is not None
+            or _external_primary_tokenizer_available(config.runtime_sampling_model or config.model)
+        ):
             prompt_token_counter = _primary_prompt_token_counter(config)
             context_window_tokens = primary_window
             context_margin_tokens = max(context_margin_tokens, 4096)
@@ -3158,7 +3235,9 @@ def _request_json(
             # Only a returned (or length-truncated) model response is eligible
             # for semantic repair/fallback. Local prompt-budget, configuration,
             # and transport exceptions must abort instead of becoming evidence.
-            if response is None and not isinstance(exc, _Stage2OutputLengthError):
+            if response is None and not isinstance(
+                exc, (_Stage2OutputLengthError, _Stage2ReasoningOnlyResponseError)
+            ):
                 raise
             validation_failure_count += 1
             request_audit.event("response_validation_failed", error_type=type(exc).__name__,
@@ -4596,16 +4675,29 @@ def _validate_operationalization(
     }
 
 
+_SPLIT_PROVENANCE_REMEDY = (
+    "Restore components/tfidf/split_provenance.jsonl from the original Stage 1 "
+    "run, or rerun Stage 1 (scripts/run_all_evidence.py with the same output "
+    "directory) so the handoff and split provenance are regenerated together."
+)
+
+
 def _load_stage2_splits(
     *,
     provenance_path: Path | None,
     dataset_rows: int,
     outer_fold_ids: Sequence[int],
-    inner_folds: int,
-    seed: int,
+    inner_folds: int | None = None,
+    seed: int | None = None,
 ) -> dict[int, dict[str, Any]]:
-    """Read the ordinary Stage 1 split file, with a deterministic fallback."""
+    """Read the frozen Stage 1 split file; never recreate outer folds.
 
+    A resampled split can place rows that Stage 1 fitted on into Stage 2
+    held-out sets, so a missing or empty file fails closed.  ``inner_folds``
+    and ``seed`` are accepted for caller compatibility and are not used.
+    """
+
+    del inner_folds, seed
     rows: list[dict[str, Any]] = []
     if provenance_path is not None and Path(provenance_path).is_file():
         rows = [
@@ -4614,44 +4706,17 @@ def _load_stage2_splits(
             if line.strip()
         ]
     if not rows:
-        from sklearn.model_selection import KFold
-
-        fold_ids = sorted(set(map(int, outer_fold_ids)))
-        if len(fold_ids) < 2:
-            raise FileNotFoundError(
-                "full Stage 2 needs components/tfidf/split_provenance.jsonl when "
-                "the handoff contains fewer than two outer folds"
-            )
-        splitter = KFold(n_splits=len(fold_ids), shuffle=True, random_state=int(seed))
-        all_rows = np.arange(dataset_rows, dtype=int)
-        for outer_fold, (fit, heldout) in zip(fold_ids, splitter.split(all_rows)):
-            fit_ids = all_rows[fit]
-            inner_count = min(max(2, int(inner_folds)), len(fit_ids))
-            inner_rows: list[dict[str, Any]] = []
-            if inner_count >= 2:
-                inner_splitter = KFold(
-                    n_splits=inner_count,
-                    shuffle=True,
-                    random_state=int(seed) + 51_000 + int(outer_fold),
-                )
-                for inner_fold, (inner_fit, inner_heldout) in enumerate(
-                    inner_splitter.split(fit_ids), start=1
-                ):
-                    inner_rows.append(
-                        {
-                            "inner_fold": inner_fold,
-                            "fit_row_ids": fit_ids[inner_fit].tolist(),
-                            "heldout_row_ids": fit_ids[inner_heldout].tolist(),
-                        }
-                    )
-            rows.append(
-                {
-                    "outer_fold": int(outer_fold),
-                    "fit_row_ids": fit_ids.tolist(),
-                    "heldout_row_ids": all_rows[heldout].tolist(),
-                    "inner_splits": inner_rows,
-                }
-            )
+        location = (
+            str(provenance_path)
+            if provenance_path is not None
+            else "components/tfidf/split_provenance.jsonl (no path was supplied)"
+        )
+        raise FileNotFoundError(
+            "Stage 2 requires the frozen Stage 1 split provenance, but "
+            f"{location} is missing or empty. Stage 2 will not recreate outer "
+            "folds because a different split could put rows that Stage 1 "
+            "trained on into Stage 2 held-out sets. " + _SPLIT_PROVENANCE_REMEDY
+        )
     by_fold: dict[int, dict[str, Any]] = {}
     for raw in rows:
         outer_fold = int(raw["outer_fold"])
@@ -4682,8 +4747,149 @@ def _load_stage2_splits(
         }
     missing = sorted(set(map(int, outer_fold_ids)) - set(by_fold))
     if missing:
-        raise ValueError(f"split provenance is missing Stage 2 outer folds: {missing}")
+        raise ValueError(
+            f"split provenance is missing Stage 2 outer folds: {missing}. "
+            + _SPLIT_PROVENANCE_REMEDY
+        )
     return by_fold
+
+
+def _stage1_context_row_provenance(handoff_path: Path) -> list[dict[str, Any]]:
+    """Return the fit/held-out rows each Stage 1 context recorded.
+
+    Raw (omitted-selector) handoff rows embed their producer row.  Materialized
+    architecture handoffs carry compact occurrences only, so their producer
+    rows are read from the component files referenced by ``index.json``.
+    TF-IDF and neural-query contexts record row IDs; text-model contexts
+    record fit/held-out row counts.  Rows are streamed, never retained.
+    """
+
+    def context_of(row: Mapping[str, Any], payload: Mapping[str, Any]) -> dict[str, Any] | None:
+        outer_fold = row.get("outer_fold")
+        outer_fold = payload.get("outer_fold") if outer_fold is None else outer_fold
+        if outer_fold is None:
+            return None
+        inner_fold = row.get("inner_fold")
+        inner_fold = payload.get("inner_fold") if inner_fold is None else inner_fold
+        scope = str(row.get("scope") or payload.get("scope") or "")
+        if scope == "full_outer_train":
+            inner_fold = None
+        fit_ids = payload.get("fit_row_ids")
+        heldout_ids = payload.get("heldout_row_ids")
+        metrics = payload.get("metrics") if isinstance(payload.get("metrics"), Mapping) else {}
+        context: dict[str, Any] = {
+            "outer_fold": int(outer_fold),
+            "inner_fold": None if inner_fold is None else int(inner_fold),
+            "scope": scope,
+        }
+        if isinstance(fit_ids, list) and isinstance(heldout_ids, list):
+            context["fit_row_ids"] = [int(value) for value in fit_ids]
+            context["heldout_row_ids"] = [int(value) for value in heldout_ids]
+        elif (
+            metrics.get("handoff_fit_rows") is not None
+            and metrics.get("handoff_heldout_rows") is not None
+        ):
+            context["fit_rows"] = int(metrics["handoff_fit_rows"])
+            context["heldout_rows"] = int(metrics["handoff_heldout_rows"])
+        else:
+            return None
+        return context
+
+    handoff_path = Path(handoff_path)
+    contexts: list[dict[str, Any]] = []
+    materialized = False
+    for row in _iter_jsonl(handoff_path):
+        if str(row.get("source") or "") == "stage1_architecture":
+            materialized = True
+            continue
+        payload = row.get("evidence")
+        context = context_of(row, payload if isinstance(payload, Mapping) else row)
+        if context is not None:
+            contexts.append(context)
+    if materialized:
+        index_path = handoff_path.parent / "index.json"
+        index = (
+            json.loads(index_path.read_text(encoding="utf-8")) if index_path.is_file() else {}
+        )
+        sources = index.get("sources") if isinstance(index, Mapping) else None
+        if not isinstance(sources, Mapping) or not sources:
+            raise RuntimeError(
+                f"Stage 2 cannot verify outer folds: {index_path} does not list "
+                "the Stage 1 component evidence behind the architecture handoff. "
+                + _SPLIT_PROVENANCE_REMEDY
+            )
+        for _name, relative in sorted(sources.items()):
+            source_path = handoff_path.parent / str(relative)
+            if not source_path.is_file():
+                raise FileNotFoundError(
+                    "Stage 2 cannot verify outer folds: Stage 1 component evidence "
+                    f"{source_path} referenced by {index_path} is missing. "
+                    + _SPLIT_PROVENANCE_REMEDY
+                )
+            for row in _iter_jsonl(source_path):
+                context = context_of(row, row)
+                if context is not None:
+                    contexts.append(context)
+    return contexts
+
+
+def _verify_stage2_splits_against_handoff(
+    splits: Mapping[int, Mapping[str, Any]],
+    *,
+    handoff_path: Path,
+    outer_fold_ids: Sequence[int],
+) -> None:
+    """Require the split file to reproduce every Stage 1 context's rows."""
+
+    contexts = _stage1_context_row_provenance(handoff_path)
+    verified_outer: set[int] = set()
+    for context in contexts:
+        outer_fold = int(context["outer_fold"])
+        inner_fold = context["inner_fold"]
+        label = (
+            f"outer fold {outer_fold}"
+            if inner_fold is None
+            else f"outer fold {outer_fold} inner fold {inner_fold}"
+        )
+        split = splits.get(outer_fold)
+        if split is not None and inner_fold is not None:
+            split = next(
+                (
+                    inner
+                    for inner in split.get("inner_splits") or []
+                    if int(inner["inner_fold"]) == int(inner_fold)
+                ),
+                None,
+            )
+        if split is None:
+            raise RuntimeError(
+                f"Stage 1 handoff context {label} ({context['scope']}) has no "
+                "matching entry in the Stage 2 split provenance. "
+                + _SPLIT_PROVENANCE_REMEDY
+            )
+        for side in ("fit", "heldout"):
+            expected = [int(value) for value in split[f"{side}_row_ids"]]
+            if f"{side}_row_ids" in context:
+                actual = context[f"{side}_row_ids"]
+                matches = len(actual) == len(expected) and set(actual) == set(expected)
+            else:
+                matches = int(context[f"{side}_rows"]) == len(expected)
+            if not matches:
+                raise RuntimeError(
+                    f"Stage 2 split provenance disagrees with the Stage 1 handoff "
+                    f"for {label} ({context['scope']}): the {side} rows Stage 1 "
+                    "used differ from the split file, so Stage 2 held-out rows "
+                    "could overlap Stage 1 training rows. " + _SPLIT_PROVENANCE_REMEDY
+                )
+        if inner_fold is None:
+            verified_outer.add(outer_fold)
+    unverified = sorted(set(map(int, outer_fold_ids)) - verified_outer)
+    if unverified:
+        raise RuntimeError(
+            "Stage 2 cannot verify outer folds "
+            f"{unverified}: the Stage 1 handoff records no full_outer_train "
+            "fit/held-out row provenance for them. " + _SPLIT_PROVENANCE_REMEDY
+        )
 
 
 class PlainHandoffStage2:
@@ -6308,8 +6514,11 @@ class PlainHandoffStage2:
                 provenance_path=split_provenance_path,
                 dataset_rows=len(dataset),
                 outer_fold_ids=sorted(packets_by_outer),
-                inner_folds=inner_folds,
-                seed=seed,
+            )
+            _verify_stage2_splits_against_handoff(
+                splits,
+                handoff_path=handoff_path,
+                outer_fold_ids=sorted(packets_by_outer),
             )
         outer_fold_ids = sorted(packets_by_outer)
         fold_results_by_id: dict[int, Mapping[str, Any]] = {}
@@ -6440,6 +6649,7 @@ class PlainHandoffStage2:
                 prediction_path=predictions_path,
                 dataset=dataset,
                 output_dir=output_dir,
+                outcome_type=outcome_type,
             )
             oracle_overall = dict(oracle_ite_evaluation.get("overall") or {})
             if "effect_eligible" in predictions:

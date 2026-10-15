@@ -351,7 +351,7 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
             test,
             nuisance,
             outer_fold=1,
-            effect_objective="squared_r_loss",
+            effect_objective="dina",
         )
     assert first_runner.effect_calls == [1, 2]
 
@@ -364,7 +364,7 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
         test,
         nuisance,
         outer_fold=1,
-        effect_objective="squared_r_loss",
+        effect_objective="dina",
     )
     assert resumed_runner.effect_calls == [2, 3]
 
@@ -377,7 +377,7 @@ def test_htr_effect_folds_resume_after_interruption(tmp_path, monkeypatch):
         test,
         nuisance,
         outer_fold=1,
-        effect_objective="squared_r_loss",
+        effect_objective="dina",
     )
     assert clean_runner.effect_calls == [1, 2, 3]
     pd.testing.assert_frame_equal(

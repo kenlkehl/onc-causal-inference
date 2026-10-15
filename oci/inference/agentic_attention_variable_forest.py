@@ -29,7 +29,6 @@ from sklearn.ensemble import (
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.metrics import (
     log_loss,
-    mean_absolute_error,
     mean_squared_error,
     r2_score,
     roc_auc_score,
@@ -41,7 +40,6 @@ from ..config import (
     ExplicitFeatureForestConfig,
     ExplicitFeatureSpec,
 )
-from ..models.causal_forest_head import CausalForestHead
 from .agentic_explicit_feature_forest import (
     AgenticFeatureProposal,
     OpenAICompatibleFeatureSearchAgent,
@@ -51,21 +49,31 @@ from .agentic_explicit_feature_forest import (
     apply_agentic_value_harmonization,
     validate_agentic_proposals,
 )
-from .applied_explicit_feature_forest import _build_features, _hstack_present
+from .applied import drop_oracle_columns, standalone_outer_splits
+from .applied_explicit_feature_forest import (
+    _build_features,
+    _hstack_present,
+    add_forest_prediction_columns,
+    fit_predict_explicit_forest,
+)
 from .htr_trainer import (
     EffectNet,
     HTRTrainer,
     NuisanceNet,
+    cross_fitted_calibrators,
     effect_objective_name,
     r_pseudo_outcome as _r_pseudo_outcome,  # _crossfit_effect has a local of that name
 )
 from ..utils.calibration import (
-    BinaryProbabilityCalibrator,
     binary_calibration_metrics,
     clip_probability,
 )
 
 logger = logging.getLogger(__name__)
+
+# Recorded in the nuisance checkpoint fingerprint so checkpoints written with
+# the old in-sample calibration are never reused.
+NUISANCE_CALIBRATION_SCOPE = "cross_fitted_out_of_fold_v1"
 
 VALID_ROLES = {"confounder", "effect_modifier"}
 VALID_TYPES = {"categorical", "continuous"}
@@ -136,7 +144,7 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
         self._thread_state = threading.local()
         # Sets ``config``, ``device`` (via the property setter) and ``avf_config``.
         super().__init__(config=config, device=device)
-        self.dataset = dataset.reset_index(drop=True).copy()
+        self.dataset = drop_oracle_columns(dataset).reset_index(drop=True).copy()
         self.dataset["_oci_row_id"] = np.arange(len(self.dataset), dtype=int)
         self.output_path = Path(output_path)
         self.artifact_dir = self.output_path.parent / "agentic_attention_variable_forest"
@@ -360,35 +368,7 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
         }
 
     def _analysis_splits(self) -> List[Tuple[int, np.ndarray, np.ndarray]]:
-        if self.config.cv_folds > 1:
-            splits = KFold(
-                n_splits=self.config.cv_folds,
-                shuffle=True,
-                random_state=42,
-            ).split(self.dataset)
-            return [
-                (fold, np.asarray(train_idx), np.asarray(test_idx))
-                for fold, (train_idx, test_idx) in enumerate(splits, start=1)
-            ]
-
-        split_col = self.config.split_column
-        if split_col in self.dataset.columns and "test" in set(self.dataset[split_col]):
-            train_mask = self.dataset[split_col].isin(["train", "val"])
-            test_mask = self.dataset[split_col] == "test"
-            return [
-                (
-                    1,
-                    np.where(train_mask.to_numpy())[0],
-                    np.where(test_mask.to_numpy())[0],
-                )
-            ]
-
-        all_idx = np.arange(len(self.dataset))
-        logger.warning(
-            "No held-out split configured for agentic_attention_variable_forest; "
-            "variable discovery and final estimates will use the full dataset."
-        )
-        return [(1, all_idx, all_idx)]
+        return standalone_outer_splits(self.dataset, self.config)
 
     def _run_one_analysis_split(
         self,
@@ -452,12 +432,13 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
                 ],
             }
         )
-        predictions, metrics = self._fit_final_forest(
+        predictions, metrics, fit_audit = self._fit_final_forest(
             train_df=train_df,
             test_df=test_df,
             selected_specs=selected_specs,
             fold_id=outer_fold,
         )
+        self.consensus_rows[-1]["final_causal_forest_fit_audit"] = fit_audit
         predictions["outer_fold"] = outer_fold
         predictions["selected_feature_names"] = ",".join(spec.name for spec in selected_specs)
         self.metric_rows.append({"outer_fold": outer_fold, **metrics})
@@ -567,24 +548,6 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
                     metrics.update(
                         binary_calibration_metrics(y, m_raw, prefix="nuisance_outcome_raw")
                     )
-        if "true_ite_prob" in predictions.columns:
-            metrics["r_stage_ite_corr"] = _safe_corr(
-                predictions["true_ite_prob"].to_numpy(),
-                predictions["tau_hat_r_stage"].to_numpy(),
-            )
-            try:
-                rho, _ = stats.spearmanr(
-                    predictions["true_ite_prob"].to_numpy(),
-                    predictions["tau_hat_r_stage"].to_numpy(),
-                )
-                metrics["r_stage_ite_spearman_corr"] = _finite_or_none(rho)
-            except Exception:
-                metrics["r_stage_ite_spearman_corr"] = None
-        if "true_treatment_prob" in predictions.columns:
-            metrics["nuisance_true_propensity_corr"] = _safe_corr(
-                predictions["true_treatment_prob"].to_numpy(),
-                predictions["e_hat"].to_numpy(),
-            )
         return metrics
 
     def _initial_specs(self) -> List[ExplicitFeatureSpec]:
@@ -617,7 +580,11 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
                 start=1,
             )
         )
-        checkpoint_fingerprint = self._crossfit_checkpoint_fingerprint("nuisance", folds)
+        checkpoint_fingerprint = self._crossfit_checkpoint_fingerprint(
+            "nuisance",
+            folds,
+            extra_payload={"nuisance_calibration_scope": NUISANCE_CALIBRATION_SCOPE},
+        )
 
         def run_fold(fold: int, fit_pos: np.ndarray, heldout_pos: np.ndarray):
             cached = self._load_nuisance_fold_checkpoint(
@@ -666,64 +633,11 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
                     folds,
                     self._cuda_memory_summary(),
                 )
-                fit_df = df.iloc[fit_pos]
-                e_fit_raw, m_fit_raw = self._predict_nuisance_model(model, fit_df)
+                # Only raw held-out predictions are produced here. Calibration
+                # is cross-fitted after every fold has finished (see
+                # _crossfit_calibrate_nuisance), so no calibrator ever sees the
+                # in-sample predictions of the model it corrects.
                 e_raw, m_raw = self._predict_nuisance_model(model, heldout)
-                prop_calibrator = BinaryProbabilityCalibrator.fit(
-                    e_fit_raw,
-                    fit_df[self.config.treatment_column].to_numpy(dtype=float),
-                    method=self.avf_config.nuisance_calibration,
-                )
-                e_hat = prop_calibrator.transform(e_raw)
-                if self.config.outcome_type == "continuous":
-                    m_hat = m_raw
-                else:
-                    outcome_calibrator = BinaryProbabilityCalibrator.fit(
-                        m_fit_raw,
-                        fit_df[self.config.outcome_column].to_numpy(dtype=float),
-                        method=self.avf_config.nuisance_calibration,
-                    )
-                    m_hat = outcome_calibrator.transform(m_raw)
-                y = heldout[self.config.outcome_column].to_numpy(dtype=float)
-                t = heldout[self.config.treatment_column].to_numpy(dtype=float)
-                propensity_auroc = _safe_roc_auc(t, e_hat)
-                propensity_raw_auroc = _safe_roc_auc(t, e_raw)
-                outcome_auroc = (
-                    _safe_roc_auc(y, m_hat) if self.config.outcome_type != "continuous" else None
-                )
-                outcome_raw_auroc = (
-                    _safe_roc_auc(y, m_raw) if self.config.outcome_type != "continuous" else None
-                )
-                prop_cal = binary_calibration_metrics(t, e_hat, prefix="propensity")
-                prop_raw_cal = binary_calibration_metrics(t, e_raw, prefix="propensity_raw")
-                out_cal = (
-                    binary_calibration_metrics(y, m_hat, prefix="outcome")
-                    if self.config.outcome_type != "continuous"
-                    else {}
-                )
-                out_raw_cal = (
-                    binary_calibration_metrics(y, m_raw, prefix="outcome_raw")
-                    if self.config.outcome_type != "continuous"
-                    else {}
-                )
-                logger.info(
-                    "Outer fold %s nuisance fold %s/%s heldout metrics: "
-                    "propensity_auroc=%s raw=%s propensity_ece=%s raw_ece=%s "
-                    "outcome_auroc=%s raw=%s outcome_ece=%s raw_ece=%s",
-                    outer_fold,
-                    fold,
-                    folds,
-                    _format_optional_metric(propensity_auroc),
-                    _format_optional_metric(propensity_raw_auroc),
-                    _format_optional_metric(prop_cal.get("propensity_ece")),
-                    _format_optional_metric(prop_raw_cal.get("propensity_raw_ece")),
-                    _format_optional_metric(outcome_auroc),
-                    _format_optional_metric(outcome_raw_auroc),
-                    _format_optional_metric(out_cal.get("outcome_ece")),
-                    _format_optional_metric(out_raw_cal.get("outcome_raw_ece")),
-                )
-                y_resid = y - m_hat
-                t_resid = t - e_hat
                 logger.info(
                     "Outer fold %s nuisance fold %s/%s: collecting attention evidence",
                     outer_fold,
@@ -736,35 +650,24 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
                     fold=fold,
                     outer_fold=outer_fold,
                     stage="nuisance",
-                    extra={
-                        "e_hat": e_hat,
-                        "e_hat_raw": e_raw,
-                        "m_hat": m_hat,
-                        "m_hat_raw": m_raw,
-                        "y_residual": y_resid,
-                        "t_residual": t_resid,
-                    },
+                    extra={"e_hat_raw": e_raw, "m_hat_raw": m_raw},
                 )
                 logger.info(
                     "Outer fold %s nuisance fold %s/%s complete: attention_rows=%s "
-                    "e_hat_mean=%.4f m_hat_mean=%.4f%s",
+                    "e_hat_raw_mean=%.4f m_hat_raw_mean=%.4f%s",
                     outer_fold,
                     fold,
                     folds,
                     len(fold_attention),
-                    float(np.mean(e_hat)),
-                    float(np.mean(m_hat)),
+                    float(np.mean(e_raw)),
+                    float(np.mean(m_raw)),
                     self._cuda_memory_summary(),
                 )
                 result = {
                     "fold": fold,
                     "heldout_pos": heldout_pos,
-                    "e_hat": e_hat,
                     "e_hat_raw": e_raw,
-                    "m_hat": m_hat,
                     "m_hat_raw": m_raw,
-                    "y_resid": y_resid,
-                    "t_resid": t_resid,
                     "attention": fold_attention,
                 }
                 self._save_nuisance_fold_checkpoint(
@@ -812,13 +715,14 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             n_jobs,
             device_context=self._device_context_for_inner_fold,
         )
+        self._crossfit_calibrate_nuisance(df, fold_results, outer_fold=outer_fold)
 
         for result in fold_results:
             heldout_pos = result["heldout_pos"]
             predictions.loc[heldout_pos, "e_hat"] = result["e_hat"]
-            predictions.loc[heldout_pos, "e_hat_raw"] = result.get("e_hat_raw", result["e_hat"])
+            predictions.loc[heldout_pos, "e_hat_raw"] = result["e_hat_raw"]
             predictions.loc[heldout_pos, "m_hat"] = result["m_hat"]
-            predictions.loc[heldout_pos, "m_hat_raw"] = result.get("m_hat_raw", result["m_hat"])
+            predictions.loc[heldout_pos, "m_hat_raw"] = result["m_hat_raw"]
             predictions.loc[heldout_pos, "y_residual"] = result["y_resid"]
             predictions.loc[heldout_pos, "t_residual"] = result["t_resid"]
             predictions.loc[heldout_pos, "r_loss_at_zero_tau"] = result["y_resid"] ** 2
@@ -828,6 +732,102 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
         self.nuisance_rows.append(predictions)
         self.nuisance_attention_rows.extend(attention_rows)
         return {"predictions": predictions, "attention": attention_rows}
+
+    def _crossfit_calibrate_nuisance(
+        self,
+        df: pd.DataFrame,
+        fold_results: Sequence[Dict[str, Any]],
+        *,
+        outer_fold: int,
+    ) -> None:
+        """Cross-fitted nuisance calibration (in place on ``fold_results``).
+
+        Uses the shared Stage 1 helper ``cross_fitted_calibrators``: the
+        calibrator applied to fold k is fit on the pooled raw held-out
+        predictions and labels of the other folds. Those rows are all inside
+        fold k's training rows, and each prediction comes from a model that
+        did not train on that row, so the calibrator learns the networks'
+        out-of-sample miscalibration rather than in-sample overfit.
+        """
+
+        t_all = df[self.config.treatment_column].to_numpy(dtype=float)
+        y_all = df[self.config.outcome_column].to_numpy(dtype=float)
+        row_ids = df["_oci_row_id"].to_numpy()
+        method = self.avf_config.nuisance_calibration
+        total = len(fold_results)
+        positions = np.concatenate(
+            [np.asarray(result["heldout_pos"], dtype=int) for result in fold_results]
+        )
+        fold_ids = np.concatenate(
+            [np.full(len(result["heldout_pos"]), int(result["fold"])) for result in fold_results]
+        )
+        e_calibrators = cross_fitted_calibrators(
+            np.concatenate([np.asarray(r["e_hat_raw"], dtype=float) for r in fold_results]),
+            t_all[positions],
+            fold_ids,
+            method=method,
+        )
+        m_calibrators = (
+            None
+            if self.config.outcome_type == "continuous"
+            else cross_fitted_calibrators(
+                np.concatenate([np.asarray(r["m_hat_raw"], dtype=float) for r in fold_results]),
+                y_all[positions],
+                fold_ids,
+                method=method,
+            )
+        )
+        for result in fold_results:
+            heldout_pos = np.asarray(result["heldout_pos"], dtype=int)
+            e_raw = np.asarray(result["e_hat_raw"], dtype=float)
+            m_raw = np.asarray(result["m_hat_raw"], dtype=float)
+            e_hat = e_calibrators[int(result["fold"])].transform(e_raw)
+            m_hat = (
+                m_raw
+                if m_calibrators is None
+                else m_calibrators[int(result["fold"])].transform(m_raw)
+            )
+            y = y_all[heldout_pos]
+            t = t_all[heldout_pos]
+            y_resid = y - m_hat
+            t_resid = t - e_hat
+            result.update(e_hat=e_hat, m_hat=m_hat, y_resid=y_resid, t_resid=t_resid)
+            calibrated = {
+                row_id: (float(e), float(m), float(yr), float(tr))
+                for row_id, e, m, yr, tr in zip(
+                    row_ids[heldout_pos], e_hat, m_hat, y_resid, t_resid
+                )
+            }
+            for record in result["attention"]:
+                values = calibrated.get(record.get("row_id"))
+                if values is not None:
+                    record.update(
+                        e_hat=values[0],
+                        m_hat=values[1],
+                        y_residual=values[2],
+                        t_residual=values[3],
+                    )
+            binary = self.config.outcome_type != "continuous"
+            logger.info(
+                "Outer fold %s nuisance fold %s/%s heldout metrics (cross-fitted "
+                "calibration): propensity_auroc=%s raw=%s propensity_ece=%s raw_ece=%s "
+                "outcome_auroc=%s raw=%s outcome_ece=%s raw_ece=%s",
+                outer_fold,
+                result["fold"],
+                total,
+                _format_optional_metric(_safe_roc_auc(t, e_hat)),
+                _format_optional_metric(_safe_roc_auc(t, e_raw)),
+                _format_optional_metric(binary_calibration_metrics(t, e_hat)["ece"]),
+                _format_optional_metric(binary_calibration_metrics(t, e_raw)["ece"]),
+                _format_optional_metric(_safe_roc_auc(y, m_hat) if binary else None),
+                _format_optional_metric(_safe_roc_auc(y, m_raw) if binary else None),
+                _format_optional_metric(
+                    binary_calibration_metrics(y, m_hat)["ece"] if binary else None
+                ),
+                _format_optional_metric(
+                    binary_calibration_metrics(y, m_raw)["ece"] if binary else None
+                ),
+            )
 
     def _crossfit_effect(
         self,
@@ -1977,10 +1977,11 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
         test_df: pd.DataFrame,
         selected_specs: List[ExplicitFeatureSpec],
         fold_id: int,
-    ) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    ) -> Tuple[pd.DataFrame, Dict[str, Any], Dict[str, Any]]:
         train_T = train_df[self.config.treatment_column].to_numpy()
         train_Y = train_df[self.config.outcome_column].to_numpy()
         test_T = test_df[self.config.treatment_column].to_numpy()
+        test_Y = test_df[self.config.outcome_column].to_numpy()
 
         X_train, W_train, x_names, w_names, means, stds = _build_features(
             train_df,
@@ -1993,19 +1994,20 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             X_test = np.zeros((len(test_df), 1), dtype=np.float32)
             x_names = ["intercept_effect"]
 
-        forest = CausalForestHead(
-            n_estimators=self.cf_config.n_estimators,
-            max_depth=self.cf_config.max_depth,
-            min_samples_leaf=self.cf_config.min_samples_leaf,
-            max_features=self.cf_config.max_features,
-            honest=self.cf_config.honest,
-            inference=self.cf_config.inference,
-            random_state=42 + fold_id,
+        fitted = fit_predict_explicit_forest(
+            X_train=X_train,
+            W_train=W_train,
+            T_train=train_T,
+            Y_train=train_Y,
+            X_test=X_test,
+            W_test=W_test,
+            T_test=test_T,
+            Y_test=test_Y,
+            cf_config=self.cf_config,
             outcome_type=self.config.outcome_type,
+            random_state=42 + fold_id,
         )
-        forest.fit(X=X_train, W=W_train, T=train_T, Y=train_Y)
-        cf_preds = forest.predict(X_test, return_ci=True)
-        tau = cf_preds["tau_pred"]
+        tau = fitted["tau"]
 
         nuisance_train = _hstack_present(X_train, W_train)
         nuisance_test = _hstack_present(X_test, W_test)
@@ -2035,16 +2037,12 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             y0 = np.clip(y0, 0.0, 1.0)
             y1 = np.clip(y1, 0.0, 1.0)
 
-        predictions = test_df.copy()
-        predictions["pred_ite_prob"] = tau
+        predictions = add_forest_prediction_columns(test_df.copy(), fitted)
         predictions["pred_y0_prob"] = y0
         predictions["pred_y1_prob"] = y1
         predictions["pred_propensity_prob"] = propensity
         predictions["pred_outcome_prob"] = outcome_pred
         predictions["cv_fold"] = fold_id
-        if "tau_lower" in cf_preds:
-            predictions["pred_ite_lower"] = cf_preds["tau_lower"]
-            predictions["pred_ite_upper"] = cf_preds["tau_upper"]
 
         metrics = {
             "n_train": int(len(train_df)),
@@ -2052,17 +2050,12 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             "n_selected_features": int(len(selected_specs)),
             "n_x_features": int(actual_x_dim),
             "n_w_features": int(0 if W_train is None else W_train.shape[1]),
-            "ate_estimate": float(np.mean(tau)),
+            **fitted["ate_metrics"],
             "treatment_auroc": _safe_roc_auc(test_T, propensity),
             "x_feature_names": x_names,
             "w_feature_names": w_names,
         }
-        if "true_ite_prob" in test_df.columns:
-            true_ite = test_df["true_ite_prob"].to_numpy()
-            metrics["ite_mse"] = float(mean_squared_error(true_ite, tau))
-            metrics["ite_mae"] = float(mean_absolute_error(true_ite, tau))
-            metrics["ite_corr"] = _safe_corr(true_ite, tau)
-        return predictions, metrics
+        return predictions, metrics, fitted["fit_audit"]
 
     @staticmethod
     def _merge_specs(*spec_groups: Sequence[ExplicitFeatureSpec]) -> List[ExplicitFeatureSpec]:
@@ -2692,20 +2685,8 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
         return {
             "fold": fold,
             "heldout_pos": np.asarray(heldout_pos),
-            "e_hat": pred_df["e_hat"].to_numpy(dtype=float),
-            "e_hat_raw": (
-                pred_df["e_hat_raw"].to_numpy(dtype=float)
-                if "e_hat_raw" in pred_df.columns
-                else pred_df["e_hat"].to_numpy(dtype=float)
-            ),
-            "m_hat": pred_df["m_hat"].to_numpy(dtype=float),
-            "m_hat_raw": (
-                pred_df["m_hat_raw"].to_numpy(dtype=float)
-                if "m_hat_raw" in pred_df.columns
-                else pred_df["m_hat"].to_numpy(dtype=float)
-            ),
-            "y_resid": pred_df["y_residual"].to_numpy(dtype=float),
-            "t_resid": pred_df["t_residual"].to_numpy(dtype=float),
+            "e_hat_raw": pred_df["e_hat_raw"].to_numpy(dtype=float),
+            "m_hat_raw": pred_df["m_hat_raw"].to_numpy(dtype=float),
             "attention": attention_rows,
         }
 
@@ -2723,15 +2704,12 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
                 "_oci_row_id": df.iloc[heldout_pos]["_oci_row_id"].to_numpy(),
                 "outer_fold": int(outer_fold),
                 "nuisance_fold": int(result["fold"]),
-                "e_hat": np.asarray(result["e_hat"], dtype=float),
-                "e_hat_raw": np.asarray(result.get("e_hat_raw", result["e_hat"]), dtype=float),
-                "m_hat": np.asarray(result["m_hat"], dtype=float),
-                "m_hat_raw": np.asarray(result.get("m_hat_raw", result["m_hat"]), dtype=float),
-                "y_residual": np.asarray(result["y_resid"], dtype=float),
-                "t_residual": np.asarray(result["t_resid"], dtype=float),
+                # Raw predictions only: calibration is cross-fitted across
+                # folds after all folds finish and is recomputed on resume.
+                "e_hat_raw": np.asarray(result["e_hat_raw"], dtype=float),
+                "m_hat_raw": np.asarray(result["m_hat_raw"], dtype=float),
             }
         )
-        predictions["r_loss_at_zero_tau"] = predictions["y_residual"] ** 2
         self._save_fold_checkpoint(
             "nuisance",
             outer_fold,
@@ -3079,16 +3057,6 @@ class AgenticAttentionVariableForestRunner(HTRTrainer):
             for row in self.metric_rows
         ]
         pd.DataFrame(metrics_for_csv).to_csv(self.artifact_dir / "metrics.csv", index=False)
-        oracle_metric_columns = {
-            "true_ite_prob",
-            "pred_ite_prob",
-            "pred_y0_prob",
-            "pred_y1_prob",
-        }
-        if oracle_metric_columns.issubset(results_df.columns):
-            metrics = _oracle_metrics(results_df)
-            with open(self.artifact_dir / "oracle_metrics.json", "w") as f:
-                json.dump(metrics, f, indent=2)
         manifest = {
             "model_type": "agentic_attention_variable_forest",
             "config": asdict(self.avf_config),
@@ -4162,30 +4130,6 @@ def _safe_corr(a: np.ndarray, b: np.ndarray) -> Optional[float]:
     if len(a) < 2 or np.std(a) == 0 or np.std(b) == 0:
         return None
     return float(np.corrcoef(a, b)[0, 1])
-
-
-def _oracle_metrics(results_df: pd.DataFrame) -> Dict[str, Any]:
-    metrics = {
-        "ite_mse": float(
-            mean_squared_error(results_df["true_ite_prob"], results_df["pred_ite_prob"])
-        ),
-        "ite_mae": float(
-            mean_absolute_error(results_df["true_ite_prob"], results_df["pred_ite_prob"])
-        ),
-        "ite_corr": _safe_corr(results_df["true_ite_prob"], results_df["pred_ite_prob"]),
-        "ate_bias": float(
-            abs(results_df["pred_ite_prob"].mean() - results_df["true_ite_prob"].mean())
-        ),
-    }
-    if "true_y0_prob" in results_df.columns:
-        metrics["y0_mse"] = float(
-            mean_squared_error(results_df["true_y0_prob"], results_df["pred_y0_prob"])
-        )
-    if "true_y1_prob" in results_df.columns:
-        metrics["y1_mse"] = float(
-            mean_squared_error(results_df["true_y1_prob"], results_df["pred_y1_prob"])
-        )
-    return metrics
 
 
 def _write_jsonl(path: Path, rows: Sequence[Dict[str, Any]]) -> None:

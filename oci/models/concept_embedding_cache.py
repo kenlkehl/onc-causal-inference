@@ -711,7 +711,12 @@ class ConceptEmbeddingCache:
         progress = [0, 0]
         log_stride = max(1000, total_chunks // 10)
 
-        def _encode_shard(device: torch.device, shard_start: int, shard_end: int) -> int:
+        def _encode_shard(
+            target: np.memmap,
+            device: torch.device,
+            shard_start: int,
+            shard_end: int,
+        ) -> int:
             encoder = load_sentence_transformer(
                 self._sentence_model_name,
                 device=device,
@@ -763,7 +768,7 @@ class ConceptEmbeddingCache:
                     expected_rows=len(batch_chunks),
                     expected_dim=embedding_dim,
                 )
-                emb_mmap[cursor:end] = batch_embeddings.astype(np.float16)
+                target[cursor:end] = batch_embeddings.astype(np.float16)
                 del batch_embeddings
                 cursor = end
 
@@ -788,7 +793,7 @@ class ConceptEmbeddingCache:
         final_batch_sizes = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(shards)) as executor:
             futures = [
-                executor.submit(_encode_shard, device, start, end)
+                executor.submit(_encode_shard, emb_mmap, device, start, end)
                 for device, start, end in shards
             ]
             for future in concurrent.futures.as_completed(futures):

@@ -265,11 +265,20 @@ def managed_vllm_config_from_mapping(
     model: str,
     default_base_port: int = 8010,
     default_internal_port_base: int = _VLLM_INTERNAL_PORT_BASE,
+    section: str = "stage2.vllm",
 ) -> ManagedVLLMConfig | None:
     if raw is None:
         return None
     if not isinstance(raw, Mapping):
-        raise ValueError("stage2.vllm must be an object")
+        raise ValueError(f"{section} must be an object")
+    unknown = sorted(
+        set(map(str, raw)) - set(ManagedVLLMConfig.__dataclass_fields__) - {"enabled"}
+    )
+    if unknown:
+        raise ValueError(
+            f"{section} contains unsupported fields: {unknown}. Fix the spelling or "
+            "remove them; Stage 2 does not ignore unknown settings."
+        )
     enabled = raw.get("enabled", True)
     if not isinstance(enabled, bool):
         raise ValueError("stage2.vllm.enabled must be true or false")

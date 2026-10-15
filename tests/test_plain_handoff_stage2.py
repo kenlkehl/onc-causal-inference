@@ -508,6 +508,78 @@ def test_stage2_explicit_feature_requires_complete_ontology():
         )
 
 
+_COMPLETE_EXPLICIT_FEATURE = {
+    "name": "ecog", "roles": ["confounder"], "description": "ECOG status.",
+    "value_type": "ordinal", "categories_or_unit": ["0-4"],
+    "measurement_definition": "Latest pretreatment ECOG.",
+    "missing_value_rule": "Null when undocumented.",
+}
+
+
+@pytest.mark.parametrize(
+    "raw,section",
+    [
+        ({"endpoint": "http://s.test/v1", "min_nonmising_fraction": 0.2}, "stage2 "),
+        # A typo in the only enabling key must not silently disable Stage 2.
+        ({"endpont": "http://s.test/v1"}, "stage2 "),
+        ({"endpoint": "http://s.test/v1", "command": None}, "stage2 "),
+        ({"endpoint": "http://s.test/v1",
+          "extraction_llm": {"endpoint": "http://e.test/v1", "wokers": 2}},
+         "stage2.extraction_llm "),
+        ({"model": "m", "vllm": {"gpus": ["cuda:0"], "extra_arg": ["--x"]}}, "stage2.vllm "),
+        ({"model": "m", "vllm": {"enabled": False, "gpu": ["cuda:0"]}}, "stage2.vllm "),
+        ({"endpoint": "http://s.test/v1",
+          "extraction_llm": {"model": "e", "vllm": {"gpus": ["cuda:1"], "ports": [], "hots": "x"}}},
+         "stage2.extraction_llm.vllm "),
+        ({"endpoint": "http://s.test/v1",
+          "explicit_features": {"enabled": True, "features": [], "feature": []}},
+         "stage2.explicit_features "),
+        ({"endpoint": "http://s.test/v1",
+          "explicit_features": [{**_COMPLETE_EXPLICIT_FEATURE, "conflict_resoluton": "max"}]},
+         r"stage2.explicit_features\[0\] "),
+        ({"endpoint": "http://s.test/v1",
+          "estimand_ontology": {"max_features_per_rol": 2}}, "estimand_ontology"),
+        ({"endpoint": "http://s.test/v1", "statistical_selection": {"l1_ration": 0.5}},
+         "stage2.statistical_selection "),
+    ],
+)
+def test_stage2_unknown_keys_fail_closed_at_every_level(raw, section):
+    with pytest.raises(ValueError, match=section) as caught:
+        plain_stage2_config_from_mapping(raw, default_workers=1)
+    assert re.search("unsupported|unknown", str(caught.value))
+
+
+def test_stage2_resolved_snapshots_and_shipped_configs_still_parse(tmp_path):
+    from dataclasses import asdict
+
+    from oci.inference.vllm_server_pool import ManagedVLLMConfig
+
+    config = plain_stage2_config_from_mapping(
+        {
+            "model": "primary",
+            "vllm": {"gpus": ["cuda:0"], "extra_args": ["--max-model-len", "4096"]},
+            "extraction_llm": {
+                "model": "small",
+                "endpoints": [{"endpoint": "http://e.test/v1", "max_concurrency": 2}],
+            },
+            "explicit_features": [_COMPLETE_EXPLICIT_FEATURE],
+        },
+        default_workers=2,
+    )
+    assert isinstance(config.vllm, ManagedVLLMConfig)
+    # run_config.json stores the full dataclass, including runtime_* fields.
+    snapshot = json.loads(json.dumps(asdict(config), default=str))
+    snapshot.pop("runtime_response_format")
+    assert plain_stage2_config_from_mapping(snapshot, default_workers=2) == config
+    assert plain_stage2_config_from_mapping(config.public_dict(), default_workers=2) is not None
+    root = Path(__file__).resolve().parents[1] / "example_configs"
+    for path in sorted(root.glob("research_all_evidence*.json")):
+        raw = json.loads(path.read_text(encoding="utf-8"))["stage2"]
+        plain_stage2_config_from_mapping(
+            {**raw, "endpoint": raw.get("endpoint") or "http://s.test/v1"}, default_workers=4
+        )
+
+
 def test_stage2_autodiscovers_the_only_served_model(monkeypatch):
     monkeypatch.setattr(
         stage2_workflow,
@@ -2446,9 +2518,8 @@ def test_stage2_retries_retryable_transport_errors_without_using_repair_turns(
     )
 
     assert result == {"ok": True}
-    assert calls[1] == calls[2]
-    assert calls[1][:-1] == calls[0]
-    assert "RetryableTransportError: temporary timeout" in calls[1][-1]["content"]
+    # Transport retries resend the fingerprinted prompt without error text.
+    assert calls == [[{"role": "user", "content": "Return JSON."}]] * 3
     assert delays == [0.25, 0.5]
 
 
@@ -2729,6 +2800,56 @@ def test_response_message_prefers_final_content_over_parsed_reasoning():
     )()
 
     assert stage2_workflow._response_message_text(message) == '{"ok": true}'
+
+
+def test_reasoning_only_response_is_repaired_not_parsed(monkeypatch):
+    from types import SimpleNamespace
+
+    import openai
+
+    sent = []
+    replies = [
+        {"content": None, "reasoning_content": 'Draft: {"required": false}'},
+        {"content": '{"required": true}', "reasoning_content": "checked"},
+    ]
+
+    class FakeClient:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        @staticmethod
+        def create(**kwargs):
+            sent.append([dict(row) for row in kwargs["messages"]])
+            message = SimpleNamespace(**replies[len(sent) - 1])
+            return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop")])
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(openai, "OpenAI", FakeClient)
+    assert stage2_workflow._response_message_text(SimpleNamespace(**replies[0])) == ""
+    seen = []
+
+    def validate(value):
+        seen.append(dict(value))
+        if value.get("required") is not True:
+            raise ValueError("required must be true")
+        return dict(value)
+
+    config = PlainHandoffStage2Config(
+        endpoint="http://stage2.test/v1", model="test-model", transport_retry_backoff=0,
+    )
+    original = [{"role": "user", "content": "Return the required value as JSON."}]
+    assert stage2_workflow._request_json(
+        messages=original, config=config, completion=stage2_workflow._openai_completion,
+        validate=validate,
+    ) == {"required": True}
+    # The draft object in reasoning was neither validated nor fed back.
+    assert seen == [{"required": True}]
+    assert len(sent) == 2
+    assert sent[1][: len(original)] == original
+    assert "reasoning but no final answer" in sent[1][-1]["content"]
+    assert "Draft" not in json.dumps(sent[1])
 
 
 def test_openai_completion_reports_output_token_truncation(monkeypatch):
@@ -5333,6 +5454,63 @@ def test_stage2_posthoc_oracle_ite_reports_unavailable_for_real_dataset(tmp_path
     assert not (tmp_path / "posthoc_predictions_with_oracle_ite.csv").exists()
 
 
+@pytest.mark.parametrize(
+    "columns,outcome_type,expected",
+    [
+        (("true_ite", "true_ite_prob"), "binary", "true_ite"),
+        (("true_ite_prob",), "binary", "true_ite_prob"),
+        (("true_ite",), "continuous", "true_ite"),
+        (("true_ite_prob",), "continuous", None),
+    ],
+)
+def test_stage2_oracle_ite_column_matches_the_outcome_scale(
+    tmp_path: Path, columns, outcome_type, expected,
+):
+    prediction_path = tmp_path / "cross_fitted_predictions.csv"
+    estimated = np.array([0.1, 0.2, 0.3, 0.4])
+    pd.DataFrame(
+        {"_oci_row_id": range(4), "outer_fold": [1, 1, 2, 2], "estimated_cate": estimated}
+    ).to_csv(prediction_path, index=False)
+    # Only the outcome-scale column tracks the estimate.
+    dataset = pd.DataFrame({column: -estimated for column in columns})
+    if expected is not None:
+        dataset[expected] = estimated
+
+    evaluation = stage2_workflow._evaluate_stage2_oracle_ite(
+        prediction_path=prediction_path,
+        dataset=dataset,
+        output_dir=tmp_path,
+        outcome_type=outcome_type,
+    )
+
+    assert evaluation["oracle_ite_column"] == expected
+    persisted = json.loads((tmp_path / "posthoc_oracle_ite_metrics.json").read_text())
+    assert persisted["oracle_ite_column"] == expected
+    if expected is None:
+        assert evaluation["available"] is False
+        assert "probability-scale true_ite_prob is not comparable" in evaluation["reason"]
+    else:
+        assert evaluation["overall"]["pearson_correlation"] == pytest.approx(1.0)
+
+
+def _tfidf_topic_payload(topic_id, terms):
+    """Minimal real TF-IDF producer payload: one treatment-bank topic."""
+
+    return {"discovery": {"topic_banks": {"treatment": {"topics": [{
+        "topic_id": topic_id,
+        "terms": [{"term": term, "loading": 0.9} for term in terms],
+    }]}}}}
+
+
+def _bow_outcome_payload(terms):
+    """Minimal real text-model producer payload: one BoW outcome view."""
+
+    return {"importance": {"views": [{
+        "view_name": "bow",
+        "outcome_positive": [{"feature": term, "coefficient": 0.5} for term in terms],
+    }]}}
+
+
 def test_plain_stage2_is_fold_scoped_and_resumable(tmp_path: Path):
     handoff = tmp_path / "handoff.jsonl"
     rows = [
@@ -5341,24 +5519,16 @@ def test_plain_stage2_is_fold_scoped_and_resumable(tmp_path: Path):
             "outer_fold": 1,
             "inner_fold": None,
             "scope": "full_outer_train",
-            "evidence": {
-                "architecture": "tfidf_topic_contrast",
-                "evidence_id": "treatment-ecog",
-                "objective": "treatment",
-                "terms": ["ECOG", "poor performance status"],
-            },
+            "evidence": _tfidf_topic_payload(
+                "treatment-ecog", ["ECOG", "poor performance status"]
+            ),
         },
         {
             "source": "text_models",
             "outer_fold": 1,
             "inner_fold": 1,
             "scope": "candidate_consistency_inner_train",
-            "evidence": {
-                "architecture": "embedding_contrast_whole",
-                "evidence_id": "outcome-ecog",
-                "objective": "outcome",
-                "witnesses": ["ECOG 2 and unable to work"],
-            },
+            "evidence": _bow_outcome_payload(["ECOG 2 and unable to work"]),
         },
     ]
     handoff.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
@@ -5404,7 +5574,9 @@ def test_plain_stage2_is_fold_scoped_and_resumable(tmp_path: Path):
     assert second["features_by_fold"] == {"1": 1}
     assert len(calls) == 4
 
-    rows[0]["evidence"]["terms"].append("newly compiled evidence")
+    rows[0]["evidence"] = _tfidf_topic_payload(
+        "treatment-ecog", ["ECOG", "poor performance status", "newly compiled evidence"]
+    )
     handoff.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
     with pytest.raises(RuntimeError, match="different evidence plan"):
         run_plain_handoff_stage2(
@@ -5427,12 +5599,9 @@ def test_feature_definitions_resume_without_llm_calls_after_extractor_transport_
                 "outer_fold": 1,
                 "inner_fold": None,
                 "scope": "full_outer_train",
-                "evidence": {
-                    "architecture": "tfidf_topic_contrast",
-                    "evidence_id": "treatment-ecog",
-                    "objective": "treatment",
-                    "terms": ["ECOG", "poor performance status"],
-                },
+                "evidence": _tfidf_topic_payload(
+                    "treatment-ecog", ["ECOG", "poor performance status"]
+                ),
             }
         )
         + "\n",
@@ -5590,20 +5759,28 @@ def test_plain_stage2_finishes_extraction_review_and_causal_estimation(
     handoff = tmp_path / "handoff.jsonl"
     evidence_rows = []
     for outer_fold in (1, 2):
-        for objective in ("treatment", "outcome"):
-            evidence_rows.append(
-                {
-                    "source": "text_models",
-                    "outer_fold": outer_fold,
-                    "inner_fold": None,
-                    "scope": "full_outer_train",
-                    "evidence": {
-                        "architecture": f"model_{objective}",
-                        "objective": objective,
-                        "witnesses": ["ECOG performance status"],
-                    },
-                }
-            )
+        evidence_rows.append(
+            {
+                "source": "text_models",
+                "outer_fold": outer_fold,
+                "inner_fold": None,
+                "scope": "full_outer_train",
+                "evidence": {
+                    **_bow_outcome_payload(["ECOG performance status"]),
+                    # Text-model contexts record their fit/held-out sizes.
+                    "metrics": {"handoff_fit_rows": 20, "handoff_heldout_rows": 20},
+                },
+            }
+        )
+        evidence_rows.append(
+            {
+                "source": "tfidf",
+                "outer_fold": outer_fold,
+                "inner_fold": None,
+                "scope": "full_outer_train",
+                "evidence": _tfidf_topic_payload("treatment-ecog", ["ECOG performance status"]),
+            }
+        )
     handoff.write_text(
         "".join(json.dumps(row) + "\n" for row in evidence_rows),
         encoding="utf-8",

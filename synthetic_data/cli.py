@@ -659,8 +659,14 @@ Examples:
     parser.add_argument(
         "--treatment-effect",
         type=float,
-        default=0.20,
-        help="Target treatment effect on probability scale (e.g., 0.10 = 10%% increase in outcome probability, default: 0.20)",
+        default=None,
+        help=(
+            "Treatment main-effect coefficient in the outcome equation: log-odds units "
+            "for binary outcomes, outcome units for continuous outcomes (not a "
+            "probability-scale effect). The realized ATE also depends on the randomly "
+            "drawn treatment x effect-modifier interactions; see true_ite in the output. "
+            f"Default: {SyntheticDataConfig.treatment_effect_prob}"
+        ),
     )
     parser.add_argument(
         "--target-treatment-rate",
@@ -671,8 +677,11 @@ Examples:
     parser.add_argument(
         "--target-control-outcome-rate",
         type=float,
-        default=0.5,
-        help="Target outcome rate in control group (treatment=0) (default: 0.5)",
+        default=None,
+        help=(
+            "Target outcome rate in control group (treatment=0) "
+            f"(default: {SyntheticDataConfig.target_control_outcome_rate})"
+        ),
     )
     parser.add_argument(
         "--num-features",
@@ -914,11 +923,11 @@ Examples:
             config.clinical_question = args.clinical_question
         if args.dataset_size != 500:
             config.dataset_size = args.dataset_size
-        if args.treatment_effect != 0.20:
+        if args.treatment_effect is not None:
             config.treatment_effect_prob = args.treatment_effect
         if args.target_treatment_rate != 0.5:
             config.target_treatment_rate = args.target_treatment_rate
-        if args.target_control_outcome_rate != 0.5:
+        if args.target_control_outcome_rate is not None:
             config.target_control_outcome_rate = args.target_control_outcome_rate
         if args.enforce_positivity:
             config.enforce_positivity = True
@@ -975,13 +984,20 @@ Examples:
         if args.max_tokens != 50000:
             config.llm.max_tokens = args.max_tokens
     else:
-        # Build config from CLI args
+        # Build config from CLI args; unset options keep the dataclass defaults.
+        optional_overrides = {
+            key: value
+            for key, value in (
+                ("treatment_effect_prob", args.treatment_effect),
+                ("target_control_outcome_rate", args.target_control_outcome_rate),
+            )
+            if value is not None
+        }
         config = SyntheticDataConfig(
             clinical_question=args.clinical_question,
             dataset_size=args.dataset_size,
-            treatment_effect_prob=args.treatment_effect,
             target_treatment_rate=args.target_treatment_rate,
-            target_control_outcome_rate=args.target_control_outcome_rate,
+            **optional_overrides,
             enforce_positivity=args.enforce_positivity,
             min_treatment_rate_per_stratum=args.min_treatment_rate,
             max_treatment_rate_per_stratum=args.max_treatment_rate,

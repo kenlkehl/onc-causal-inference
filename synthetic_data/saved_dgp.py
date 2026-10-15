@@ -255,12 +255,7 @@ def _generate_locked(config, metadata_path, num_workers, output):
         if len(df) != config.dataset_size or not df["clinical_text"].str.strip().ne("").all():
             raise ValueError("Final dataset has missing patients/text")
         metadata["generation_status"] = "complete"
-        metadata["dataset_statistics"] = {"n_patients": len(df)}
-        for name, column in (("treatment", "treatment_indicator"), ("outcome", "outcome_indicator")):
-            metadata["dataset_statistics"][f"{name}_rate"] = float(df[column].mean())
-        for name in ("treatment_prob", "outcome_prob", "ite_prob"):
-            metadata["dataset_statistics"][f"mean_{name}"] = float(df[f"true_{name}"].mean())
-            metadata["dataset_statistics"][f"std_{name}"] = float(df[f"true_{name}"].std())
+        metadata["dataset_statistics"] = g.oracle_dataset_statistics(df)
         dataset_stats = metadata["dataset_statistics"]
         dataset_stats["generation_mode"] = config.generation_mode
         dataset_stats["clinical_text_stats"] = {"non_empty_count": len(df), "mean_length": float(df.clinical_text.str.len().mean())}

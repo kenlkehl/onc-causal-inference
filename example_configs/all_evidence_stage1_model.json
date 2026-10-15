@@ -6,7 +6,7 @@
         "e_clip": 0.01,
         "effect_epochs": 30,
         "effect_folds": 5,
-        "effect_objective": "pseudo_outcome_mse",
+        "effect_objective": "auto",
         "nuisance_calibration": "temperature_isotonic",
         "nuisance_epochs": 30,
         "nuisance_folds": 5,

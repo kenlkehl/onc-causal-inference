@@ -23,6 +23,7 @@ from .sparse_text_modeling import (
     _make_bow_regressor,
     _make_bow_vectorizer,
     _model_feature_scores,
+    _model_feature_scores_are_signed,
     _top_feature_rows,
 )
 from .stage1_checkpointing import Stage1CheckpointStore, row_id_identity
@@ -532,15 +533,17 @@ class RidgeDeltaBoWPairModel:
         terms = self.vectorizer.get_feature_names_out().astype(str)
         names = np.concatenate([np.char.add("control::", terms), np.char.add("treated::", terms)])
         coef = _model_feature_scores(self.model, len(names))
-        return {
-            "ridge_delta_probability_positive": _top_feature_rows(names, coef, top_n),
-            "ridge_delta_probability_negative": _top_feature_rows(
+        ranked = {"ridge_delta_probability_positive": _top_feature_rows(names, coef, top_n)}
+        # Tree-view importances are unsigned; their lowest values are not
+        # negative evidence, so only signed (linear) models get this list.
+        if _model_feature_scores_are_signed(self.model):
+            ranked["ridge_delta_probability_negative"] = _top_feature_rows(
                 names,
                 coef,
                 top_n,
                 descending=False,
-            ),
-        }
+            )
+        return ranked
 
 
 def _fit_bow_pair_uplift_fold(

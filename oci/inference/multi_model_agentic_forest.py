@@ -40,6 +40,7 @@ from ..config import (
     load_explicit_feature_specs_json,
 )
 from ..models.explicit_feature_featurizer import get_raw_explicit_features
+from .applied import drop_oracle_columns, is_oracle_name, standalone_outer_splits
 from .agentic_explicit_feature_forest import (
     AgenticFeatureProposal,
     CausalForestExplicitEvaluator,
@@ -136,12 +137,7 @@ def _make_configured_explicit_evaluator(
 
 def _without_oracle_columns(frame: pd.DataFrame) -> pd.DataFrame:
     """Return the modeling frame with synthetic-oracle columns removed."""
-    oracle_columns = [
-        column
-        for column in frame.columns
-        if str(column).lower().startswith(("true_", "oracle_", "ground_truth"))
-    ]
-    return frame.drop(columns=oracle_columns, errors="ignore")
+    return drop_oracle_columns(frame)
 
 
 def run_multi_model_agentic_forest(
@@ -552,40 +548,7 @@ class MultiModelAgenticForestRunner:
         }
 
     def _analysis_splits(self) -> List[Tuple[int, np.ndarray, np.ndarray]]:
-        if self.config.cv_folds > 1:
-            splits = KFold(
-                n_splits=self.config.cv_folds,
-                shuffle=True,
-                random_state=42,
-            ).split(self.dataset)
-            return [
-                (fold, np.asarray(train_idx), np.asarray(test_idx))
-                for fold, (train_idx, test_idx) in enumerate(splits, start=1)
-            ]
-
-        split_col = self.config.split_column
-        if split_col in self.dataset.columns and "test" in set(self.dataset[split_col]):
-            train_mask = self.dataset[split_col].isin(["train", "val"])
-            test_mask = self.dataset[split_col] == "test"
-            return [
-                (
-                    1,
-                    np.where(train_mask.to_numpy())[0],
-                    np.where(test_mask.to_numpy())[0],
-                )
-            ]
-
-        all_idx = np.arange(len(self.dataset))
-        if bool(getattr(self.nn_config, "require_honest_outer_split", False)):
-            raise ValueError(
-                "multi_model_agentic_forest.require_honest_outer_split=True "
-                "requires cv_folds > 1 or a split column with a held-out 'test' split"
-            )
-        logger.warning(
-            "No held-out split configured for multi_model_agentic_forest; "
-            "variable discovery and final estimates will use the full dataset."
-        )
-        return [(1, all_idx, all_idx)]
+        return standalone_outer_splits(self.dataset, self.config)
 
     def _split_provenance_rows(
         self,
@@ -593,7 +556,7 @@ class MultiModelAgenticForestRunner:
     ) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         if self.config.cv_folds > 1:
-            split_source = "kfold_cv"
+            split_source = "stratified_kfold_cv"
         elif self.config.split_column in self.dataset.columns and "test" in set(
             self.dataset[self.config.split_column]
         ):
@@ -763,6 +726,7 @@ class MultiModelAgenticForestRunner:
             fold_id=outer_fold,
         )
         predictions = final_eval.predictions.copy()
+        self.feature_set_rows[-1]["final_causal_forest_fit_audit"] = final_eval.fit_audit
         honest = _split_is_honest(train_idx, test_idx)
         predictions["outer_fold"] = int(outer_fold)
         predictions["honest_outer_holdout"] = bool(honest)
@@ -9836,8 +9800,7 @@ def _agent_visible_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _is_oracle_metric_name(key: Any) -> bool:
-    name = str(key).lower()
-    return name.startswith("oracle_") or name.startswith("true_") or "true_" in name
+    return is_oracle_name(key)
 
 
 def _scalar_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:

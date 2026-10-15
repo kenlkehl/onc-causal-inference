@@ -21,7 +21,6 @@ import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import log_loss, r2_score, roc_auc_score
-from sklearn.model_selection import KFold, StratifiedKFold
 
 from ..config import (
     AgenticFeatureSearchConfig,
@@ -50,8 +49,18 @@ from ..extraction.llm_routing import (
     google_json_response_format_kwargs,
 )
 from ..extraction.llm_routing import parse_server_urls
-from ..models.causal_forest_head import CausalForestHead
-from .applied_explicit_feature_forest import _build_features, _hstack_present
+from .applied import (
+    drop_oracle_columns,
+    required_applied_seed,
+    stratified_fold_indices,
+    without_oracle_metrics,
+)
+from .applied_explicit_feature_forest import (
+    _build_features,
+    _hstack_present,
+    add_forest_prediction_columns,
+    fit_predict_explicit_forest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +191,7 @@ class SplitEvaluation:
 
     predictions: pd.DataFrame
     metrics: Dict[str, Any]
+    fit_audit: Optional[Dict[str, Any]] = None
 
 
 @dataclass
@@ -228,7 +238,7 @@ class AgenticFeatureSearchRunner:
         extraction_provider: Optional[Any] = None,
         evaluator: Optional[Any] = None,
     ):
-        self.dataset = dataset.reset_index(drop=True).copy()
+        self.dataset = drop_oracle_columns(dataset).reset_index(drop=True).copy()
         self.config = config
         self.output_path = Path(output_path)
         self.artifact_dir = self.output_path.parent / "agentic_feature_search"
@@ -272,6 +282,7 @@ class AgenticFeatureSearchRunner:
         self.outer_metric_rows: List[Dict[str, Any]] = []
         self.feature_set_rows: List[Dict[str, Any]] = []
         self.screening_metric_rows: List[Dict[str, Any]] = []
+        self.forest_fit_audit_rows: List[Dict[str, Any]] = []
 
     def run(self) -> None:
         """Execute outer CV, inner adaptive search, and final reporting."""
@@ -280,12 +291,13 @@ class AgenticFeatureSearchRunner:
         logger.info("=" * 80)
 
         # Broad-screen search extracts the initial variables together with the
-        # broad inventory union.
+        # broad inventory union. Outer folds use the shared seeded
+        # treatment x outcome stratification and the configured run seed.
         outer_splits = _make_splits(
             self.dataset,
             self.config,
             n_splits=self.search_config.outer_folds,
-            random_state=self.search_config.random_state,
+            random_state=required_applied_seed(self.config),
         )
 
         selected_by_outer_fold = self._search_all_outer_trains_broad_screen(outer_splits)
@@ -330,6 +342,9 @@ class AgenticFeatureSearchRunner:
                 **_without_list_values(final_eval.metrics),
             }
             self.outer_metric_rows.append(metrics)
+            self.forest_fit_audit_rows.append(
+                {"outer_fold": outer_fold, "fit_audit": final_eval.fit_audit}
+            )
             self.feature_set_rows.append(
                 {
                     "outer_fold": outer_fold,
@@ -1050,6 +1065,8 @@ class AgenticFeatureSearchRunner:
         )
         with open(self.artifact_dir / "feature_sets.json", "w") as f:
             json.dump(self.feature_set_rows, f, indent=2, default=_json_default)
+        with open(self.artifact_dir / "causal_forest_fit_audits.json", "w") as f:
+            json.dump(self.forest_fit_audit_rows, f, indent=2, default=_json_default)
         self._save_decision_events()
         logger.info("Agentic search artifacts saved to: %s", self.artifact_dir)
 
@@ -2223,19 +2240,20 @@ class CausalForestExplicitEvaluator:
         if nuisance_train is None or nuisance_test is None:
             raise ValueError("Unable to build explicit-feature nuisance matrices")
 
-        forest = CausalForestHead(
-            n_estimators=self.cf_config.n_estimators,
-            max_depth=self.cf_config.max_depth,
-            min_samples_leaf=self.cf_config.min_samples_leaf,
-            max_features=self.cf_config.max_features,
-            honest=self.cf_config.honest,
-            inference=self.cf_config.inference,
-            random_state=42 + fold_id,
+        fitted = fit_predict_explicit_forest(
+            X_train=X_train,
+            W_train=W_train,
+            T_train=train_T,
+            Y_train=train_Y,
+            X_test=X_test,
+            W_test=W_test,
+            T_test=test_T,
+            Y_test=test_Y,
+            cf_config=self.cf_config,
             outcome_type=self.config.outcome_type,
+            random_state=42 + fold_id,
         )
-        forest.fit(X_train, train_T, train_Y, W=W_train)
-        cf_preds = forest.predict(X_test, return_ci=True)
-        tau = cf_preds["tau_pred"]
+        tau = fitted["tau"]
 
         propensity = _fit_predict_propensity(
             nuisance_train,
@@ -2259,16 +2277,12 @@ class CausalForestExplicitEvaluator:
             y0_prob = np.clip(y0_prob, 0, 1)
             y1_prob = np.clip(y1_prob, 0, 1)
 
-        predictions = test_df.copy()
-        predictions["pred_ite_prob"] = tau
+        predictions = add_forest_prediction_columns(test_df.copy(), fitted)
         predictions["pred_y0_prob"] = y0_prob
         predictions["pred_y1_prob"] = y1_prob
         predictions["pred_propensity_prob"] = propensity
         predictions["pred_outcome_prob"] = outcome_pred
         predictions["cv_fold"] = fold_id
-        if "tau_lower" in cf_preds:
-            predictions["pred_ite_lower"] = cf_preds["tau_lower"]
-            predictions["pred_ite_upper"] = cf_preds["tau_upper"]
 
         metrics = {
             "fold": fold_id,
@@ -2277,7 +2291,7 @@ class CausalForestExplicitEvaluator:
             "n_explicit_features": len(specs),
             "n_x_features": actual_x_dim,
             "n_w_features": 0 if W_train is None else W_train.shape[1],
-            "ate_estimate": float(np.mean(tau)),
+            **fitted["ate_metrics"],
             "r_loss": float(_r_loss(test_Y, test_T, outcome_pred, propensity, tau)),
             "treatment_auroc": _safe_roc_auc(test_T, propensity),
             "outcome_auroc": (
@@ -2288,13 +2302,12 @@ class CausalForestExplicitEvaluator:
             "x_feature_names": x_names,
             "w_feature_names": w_names,
         }
-        if "true_ite_prob" in test_df.columns:
-            metrics["oracle_true_ite_corr"] = _safe_corr(test_df["true_ite_prob"].values, tau)
-            metrics["oracle_true_ite_mae"] = float(
-                np.mean(np.abs(np.asarray(test_df["true_ite_prob"].values) - tau))
-            )
 
-        return SplitEvaluation(predictions=predictions, metrics=metrics)
+        return SplitEvaluation(
+            predictions=predictions,
+            metrics=metrics,
+            fit_audit=fitted["fit_audit"],
+        )
 
 
 def build_agent_prompt(
@@ -5433,19 +5446,14 @@ def _make_splits(
     n_splits: int,
     random_state: int,
 ) -> List[Tuple[np.ndarray, np.ndarray]]:
-    if n_splits > len(df):
-        raise ValueError(f"n_splits={n_splits} exceeds n={len(df)}")
-    y = df[config.treatment_column].astype(str) + "_" + df[config.outcome_column].astype(str)
-    counts = y.value_counts()
-    if len(counts) >= 2 and counts.min() >= n_splits:
-        splitter = StratifiedKFold(
-            n_splits=n_splits,
-            shuffle=True,
-            random_state=random_state,
-        )
-        return list(splitter.split(df, y))
-    splitter = KFold(n_splits=n_splits, shuffle=True, random_state=random_state)
-    return list(splitter.split(df))
+    return stratified_fold_indices(
+        df,
+        treatment_column=config.treatment_column,
+        outcome_column=config.outcome_column,
+        outcome_type=config.outcome_type,
+        n_splits=n_splits,
+        seed=random_state,
+    )
 
 
 def _fit_predict_propensity(
@@ -5564,11 +5572,7 @@ def _without_list_values(metrics: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _non_oracle_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        key: value
-        for key, value in metrics.items()
-        if not str(key).startswith("oracle_") and not str(key).startswith("true_")
-    }
+    return without_oracle_metrics(metrics)
 
 
 def _clinical_question_text(config: AppliedInferenceConfig) -> str:

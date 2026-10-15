@@ -560,12 +560,30 @@ def _apply_explicit_architecture_selection(
     applied: Mapping[str, Any],
     selected: Sequence[str],
 ) -> dict[str, Any]:
-    """Narrow model work while retaining prerequisites for selected lanes."""
+    """Narrow model work while retaining prerequisites for selected lanes.
+
+    Prerequisites run as private support and never enter the Stage 2 handoff,
+    which keeps only the selected lanes' evidence:
+
+    * embedding lanes residualize against text-model nuisance predictions, so
+      an embedding-only selection runs the BoW nuisance models (HTR only when
+      BoW is disabled in the template);
+    * ``neural_query_moments`` reads the embedding cache, which the
+      ``embedding_cache`` component prepares regardless of whether the
+      embedding evidence lanes are enabled.
+
+    A selection without any text-model lane prunes the ``text_models``
+    component, so the text-model switches are left exactly as configured.
+    """
 
     narrowed = copy.deepcopy(dict(applied))
     selected_set = set(selected)
     architecture = narrowed.setdefault("architecture", {})
     multi_model = architecture.setdefault("multi_model_forest", {})
+    topic = multi_model.setdefault("tfidf_topic", {})
+    topic["orphan_ngram_enabled"] = TFIDF_ORPHAN_NGRAMS in selected_set
+    if "text_models" not in selected_components(tuple(selected_set)):
+        return narrowed
 
     matched_selected = MATCHED_PAIR_UPLIFT in selected_set
     bow_available = bool(multi_model.get("bow_discovery_enabled", True))
@@ -589,6 +607,17 @@ def _apply_explicit_architecture_selection(
             }
         )
     )
+    if embedding_needed and not (bow_needed or htr_needed):
+        if bow_available:
+            bow_needed = True
+        elif htr_available:
+            htr_needed = True
+        else:
+            raise ValueError(
+                "selected embedding architectures need a text-model nuisance "
+                "source, but both bow_discovery_enabled and htr_evidence_enabled "
+                "are false in the Stage 1 template; enable one of them"
+            )
 
     multi_model["bow_discovery_enabled"] = bow_needed
     multi_model["htr_evidence_enabled"] = htr_needed
@@ -610,14 +639,19 @@ def _apply_explicit_architecture_selection(
 
     embedding = multi_model.setdefault("embedding_contrast", {})
     embedding["enabled"] = embedding_needed
+    if embedding_needed:
+        embedding.pop("disable_reason", None)
+    else:
+        embedding["disable_reason"] = (
+            "no embedding evidence lane is in the explicit Stage 1 architecture "
+            "selection"
+        )
     embedding["include_cluster_contrast_vectors"] = (
         EMBEDDING_CLUSTERED in selected_set
     )
     embedding["retrieval_tfidf_enabled"] = (
         TFIDF_SEMANTIC_RETRIEVAL in selected_set
     )
-    topic = multi_model.setdefault("tfidf_topic", {})
-    topic["orphan_ngram_enabled"] = TFIDF_ORPHAN_NGRAMS in selected_set
     return narrowed
 
 
@@ -1034,57 +1068,16 @@ def _stage1_context_specs(context: Stage1RunContext) -> list[dict[str, Any]]:
     TF-IDF writes the split definitions as ordinary JSONL before the other
     evidence families run.  Reusing that readable file keeps all families on
     identical rows without adding a split registry or validation protocol.
-    The KFold fallback keeps individual components runnable on their own.
+    When a component runs without TF-IDF, the identical canonical plan
+    (stratified jointly on treatment and outcome) is materialized first, so
+    every lane and Stage 2 always share one ``split_provenance.jsonl``.
     """
 
-    provenance_path = context.component_dir("tfidf") / "split_provenance.jsonl"
-    if provenance_path.is_file():
-        specs: list[dict[str, Any]] = []
-        for outer in _load_jsonl(provenance_path):
-            outer_fold = int(outer["outer_fold"])
-            outer_fit = np.asarray(outer["fit_row_ids"], dtype=int)
-            specs.append(
-                {
-                    "scope_id": f"outer_{outer_fold:03d}_full",
-                    "fold_key": outer_fold,
-                    "outer_fold": outer_fold,
-                    "scope": "full_outer_train",
-                    "train_idx": outer_fit,
-                    "heldout_idx": np.asarray(outer["heldout_row_ids"], dtype=int),
-                    "inner_fold": None,
-                    "heldout_rows": len(outer.get("heldout_row_ids") or []),
-                }
-            )
-            for inner in outer.get("inner_splits") or []:
-                inner_fold = int(inner["inner_fold"])
-                specs.append(
-                    {
-                        "scope_id": (f"outer_{outer_fold:03d}_inner_{inner_fold:03d}"),
-                        "fold_key": 1000 * outer_fold + inner_fold,
-                        "outer_fold": outer_fold,
-                        "scope": "candidate_consistency_inner_train",
-                        "train_idx": np.asarray(inner["fit_row_ids"], dtype=int),
-                        "heldout_idx": np.asarray(inner["heldout_row_ids"], dtype=int),
-                        "inner_fold": inner_fold,
-                        "heldout_rows": len(inner.get("heldout_row_ids") or []),
-                    }
-                )
-        if specs:
-            return specs
-
-    from sklearn.model_selection import KFold
-
-    outer_splitter = KFold(
-        n_splits=context.config.outer_folds,
-        shuffle=True,
-        random_state=context.config.seed,
-    )
+    provenance_path = _ensure_split_provenance(context)
     specs: list[dict[str, Any]] = []
-    for outer_fold, (outer_fit, outer_heldout) in enumerate(
-        outer_splitter.split(context.dataset),
-        start=1,
-    ):
-        outer_fit = np.asarray(outer_fit, dtype=int)
+    for outer in _load_jsonl(provenance_path):
+        outer_fold = int(outer["outer_fold"])
+        outer_fit = np.asarray(outer["fit_row_ids"], dtype=int)
         specs.append(
             {
                 "scope_id": f"outer_{outer_fold:03d}_full",
@@ -1092,38 +1085,36 @@ def _stage1_context_specs(context: Stage1RunContext) -> list[dict[str, Any]]:
                 "outer_fold": outer_fold,
                 "scope": "full_outer_train",
                 "train_idx": outer_fit,
-                "heldout_idx": np.asarray(outer_heldout, dtype=int),
+                "heldout_idx": np.asarray(outer["heldout_row_ids"], dtype=int),
                 "inner_fold": None,
-                "heldout_rows": int(len(outer_heldout)),
+                "heldout_rows": len(outer.get("heldout_row_ids") or []),
             }
         )
-        inner_splitter = KFold(
-            n_splits=context.config.inner_folds,
-            shuffle=True,
-            random_state=context.config.seed + 51_000 + outer_fold,
-        )
-        outer_frame = context.dataset.iloc[outer_fit]
-        for inner_fold, (inner_fit, inner_heldout) in enumerate(
-            inner_splitter.split(outer_frame),
-            start=1,
-        ):
+        for inner in outer.get("inner_splits") or []:
+            inner_fold = int(inner["inner_fold"])
             specs.append(
                 {
                     "scope_id": (f"outer_{outer_fold:03d}_inner_{inner_fold:03d}"),
                     "fold_key": 1000 * outer_fold + inner_fold,
                     "outer_fold": outer_fold,
                     "scope": "candidate_consistency_inner_train",
-                    "train_idx": outer_fit[np.asarray(inner_fit, dtype=int)],
-                    "heldout_idx": outer_fit[np.asarray(inner_heldout, dtype=int)],
+                    "train_idx": np.asarray(inner["fit_row_ids"], dtype=int),
+                    "heldout_idx": np.asarray(inner["heldout_row_ids"], dtype=int),
                     "inner_fold": inner_fold,
-                    "heldout_rows": int(len(inner_heldout)),
+                    "heldout_rows": len(inner.get("heldout_row_ids") or []),
                 }
             )
+    if not specs:
+        raise RuntimeError(
+            f"Stage 1 split provenance {provenance_path} contains no outer folds; "
+            "delete the file (or rerun the tfidf component) so the canonical "
+            "split plan is rebuilt"
+        )
     return specs
 
 
 def _ensure_split_provenance(context: Stage1RunContext) -> Path:
-    """Materialize the shared split plan for targeted non-TF-IDF runs."""
+    """Materialize the shared split plan whenever TF-IDF has not written it."""
 
     path = context.component_dir("tfidf") / "split_provenance.jsonl"
     if path.is_file():

@@ -18,8 +18,13 @@ from sklearn.cluster import MiniBatchKMeans
 from sklearn.metrics import brier_score_loss, log_loss, mean_squared_error
 from sklearn.model_selection import KFold
 
-from ..config import AppliedInferenceConfig, BoWViewConfig, MultiModelForestConfig
-from ..utils.calibration import BinaryProbabilityCalibrator, clip_probability
+from ..config import (
+    AppliedInferenceConfig,
+    BoWViewConfig,
+    MultiModelForestConfig,
+    resolve_effect_objective,
+)
+from ..utils.calibration import clip_probability
 from .causal_modeling_support import safe_roc_auc as _safe_roc_auc
 from .embedding_contrast_discovery import (
     EmbeddingContrastEvidenceGenerator,
@@ -37,7 +42,14 @@ from .embedding_contrast_discovery import (
 )
 from .discovery_randomness import derive_discovery_seed
 from .htr_evidence_provider import HTREvidenceProvider
-from .htr_trainer import EffectNet, NuisanceNet, effect_objective_name, r_pseudo_outcome
+from .htr_trainer import (
+    EffectNet,
+    NuisanceNet,
+    _metadata_value,
+    cross_fitted_calibrators,
+    effect_objective_name,
+    r_pseudo_outcome,
+)
 from .stage1_modeling_support import (
     _agentic_discovery_handoff_row,
     _align_htr_prediction_frame,
@@ -57,6 +69,7 @@ from .sparse_text_modeling import (
     _make_bow_regressor,
     _make_bow_vectorizer,
     _model_feature_scores,
+    _model_feature_scores_are_signed,
     _top_feature_rows,
 )
 from .multi_model_pair_uplift import (
@@ -315,12 +328,11 @@ class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
         runner = self._runner
         if runner is None:
             raise RuntimeError("HTR runner has not been initialized")
-        if objective == "dina" and str(runner.config.outcome_type).lower() != "binary":
-            raise ValueError("DINA requires binary outcomes")
-        previous = getattr(runner.avf_config, "effect_objective", "pseudo_outcome_mse")
-        runner.avf_config.effect_objective = (
-            "dina" if str(runner.config.outcome_type).lower() == "binary" else str(objective)
-        )
+        # Binary outcomes require DINA and DINA requires binary outcomes; a
+        # mismatched variant raises instead of being silently replaced.
+        resolved = resolve_effect_objective(objective, outcome_type=runner.config.outcome_type)
+        previous = runner.avf_config.effect_objective
+        runner.avf_config.effect_objective = resolved
         try:
             yield
         finally:
@@ -424,59 +436,27 @@ class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
                     fold=fold,
                     total_folds=folds,
                 )
-                fit_df = train_df.iloc[fit_pos]
                 heldout = train_df.iloc[heldout_pos]
-                e_fit_raw, m_fit_raw = runner._predict_nuisance_model(model, fit_df)
+                # Calibration happens after every fold has produced its raw
+                # out-of-fold predictions (see cross_fitted_calibrators); the
+                # model's in-sample predictions on fit_pos are never used.
                 e_raw, m_raw = runner._predict_nuisance_model(model, heldout)
                 e_test_raw, m_test_raw = runner._predict_nuisance_model(model, test_df)
-                prop_calibrator = BinaryProbabilityCalibrator.fit(
-                    e_fit_raw,
-                    fit_df[runner.config.treatment_column].to_numpy(dtype=float),
-                    method=runner.avf_config.nuisance_calibration,
-                )
-                e_hat = prop_calibrator.transform(e_raw)
-                e_test = prop_calibrator.transform(e_test_raw)
-                if runner.config.outcome_type == "continuous":
-                    m_hat = m_raw
-                    m_test = m_test_raw
-                else:
-                    outcome_calibrator = BinaryProbabilityCalibrator.fit(
-                        m_fit_raw,
-                        fit_df[runner.config.outcome_column].to_numpy(dtype=float),
-                        method=runner.avf_config.nuisance_calibration,
-                    )
-                    m_hat = outcome_calibrator.transform(m_raw)
-                    m_test = outcome_calibrator.transform(m_test_raw)
-                y = heldout[runner.config.outcome_column].to_numpy(dtype=float)
-                t = heldout[runner.config.treatment_column].to_numpy(dtype=float)
-                y_resid = y - m_hat
-                t_resid = t - e_hat
                 fold_attention = runner._attention_evidence(
                     model.extractor,
                     heldout,
                     fold=fold,
                     outer_fold=outer_fold,
                     stage="nuisance",
-                    extra={
-                        "e_hat": e_hat,
-                        "e_hat_raw": e_raw,
-                        "m_hat": m_hat,
-                        "m_hat_raw": m_raw,
-                        "y_residual": y_resid,
-                        "t_residual": t_resid,
-                    },
+                    extra={"e_hat_raw": e_raw, "m_hat_raw": m_raw},
                 )
                 return {
                     "fold": int(fold),
                     "heldout_pos": heldout_pos,
-                    "e_hat": e_hat,
                     "e_hat_raw": e_raw,
-                    "m_hat": m_hat,
                     "m_hat_raw": m_raw,
-                    "y_resid": y_resid,
-                    "t_resid": t_resid,
-                    "test_e_hat": e_test,
-                    "test_m_hat": m_test,
+                    "test_e_hat_raw": e_test_raw,
+                    "test_m_hat_raw": m_test_raw,
                     "attention": fold_attention,
                 }
             finally:
@@ -493,10 +473,10 @@ class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
             def validate(result: Mapping[str, Any]) -> None:
                 if len(np.asarray(result["heldout_pos"])) != len(heldout_pos):
                     raise ValueError("HTR nuisance checkpoint held-out row count changed")
-                for name in ("e_hat", "e_hat_raw", "m_hat", "m_hat_raw"):
+                for name in ("e_hat_raw", "m_hat_raw"):
                     if len(np.asarray(result[name])) != len(heldout_pos):
                         raise ValueError(f"HTR nuisance checkpoint {name} row count changed")
-                for name in ("test_e_hat", "test_m_hat"):
+                for name in ("test_e_hat_raw", "test_m_hat_raw"):
                     if len(np.asarray(result[name])) != len(test_df):
                         raise ValueError(f"HTR nuisance checkpoint {name} row count changed")
 
@@ -528,26 +508,90 @@ class MultiModelForestStage1HTRProvider(HTREvidenceProvider):
             run_fold(int(fold), np.asarray(fit_pos), np.asarray(heldout_pos))
             for fold, (fit_pos, heldout_pos) in split_items
         ]
+        # Out-of-fold calibration: fold k's calibrator is fit on the raw
+        # predictions that the other folds' models made for fold k's fit rows.
+        e_raw_oof = np.full(len(train_df), np.nan, dtype=float)
+        m_raw_oof = np.full(len(train_df), np.nan, dtype=float)
+        fold_of_row = np.zeros(len(train_df), dtype=int)
+        for result in fold_results:
+            heldout_pos = np.asarray(result["heldout_pos"], dtype=int)
+            e_raw_oof[heldout_pos] = np.asarray(result["e_hat_raw"], dtype=float)
+            m_raw_oof[heldout_pos] = np.asarray(result["m_hat_raw"], dtype=float)
+            fold_of_row[heldout_pos] = int(result["fold"])
+        t_all = train_df[runner.config.treatment_column].to_numpy(dtype=float)
+        y_all = train_df[runner.config.outcome_column].to_numpy(dtype=float)
+        calibration_method = runner.avf_config.nuisance_calibration
+        propensity_calibrators = cross_fitted_calibrators(
+            e_raw_oof,
+            t_all,
+            fold_of_row,
+            method=calibration_method,
+        )
+        outcome_calibrators = (
+            None
+            if runner.config.outcome_type == "continuous"
+            else cross_fitted_calibrators(
+                m_raw_oof,
+                y_all,
+                fold_of_row,
+                method=calibration_method,
+            )
+        )
         attention_rows: List[Dict[str, Any]] = []
         test_e = []
         test_m = []
         for result in fold_results:
-            heldout_pos = result["heldout_pos"]
-            predictions.loc[heldout_pos, "e_hat"] = result["e_hat"]
+            fold = int(result["fold"])
+            heldout_pos = np.asarray(result["heldout_pos"], dtype=int)
+            e_hat = propensity_calibrators[fold].transform(result["e_hat_raw"])
+            test_e_hat = propensity_calibrators[fold].transform(result["test_e_hat_raw"])
+            if outcome_calibrators is None:
+                m_hat = np.asarray(result["m_hat_raw"], dtype=float)
+                test_m_hat = np.asarray(result["test_m_hat_raw"], dtype=float)
+            else:
+                m_hat = outcome_calibrators[fold].transform(result["m_hat_raw"])
+                test_m_hat = outcome_calibrators[fold].transform(result["test_m_hat_raw"])
+            y_resid = y_all[heldout_pos] - m_hat
+            t_resid = t_all[heldout_pos] - e_hat
+            predictions.loc[heldout_pos, "e_hat"] = e_hat
             predictions.loc[heldout_pos, "e_hat_raw"] = result["e_hat_raw"]
-            predictions.loc[heldout_pos, "m_hat"] = result["m_hat"]
+            predictions.loc[heldout_pos, "m_hat"] = m_hat
             predictions.loc[heldout_pos, "m_hat_raw"] = result["m_hat_raw"]
-            predictions.loc[heldout_pos, "y_residual"] = result["y_resid"]
-            predictions.loc[heldout_pos, "t_residual"] = result["t_resid"]
+            predictions.loc[heldout_pos, "y_residual"] = y_resid
+            predictions.loc[heldout_pos, "t_residual"] = t_resid
             predictions.loc[heldout_pos, "r_pseudo_outcome"] = r_pseudo_outcome(
-                result["y_resid"],
-                result["t_resid"],
+                y_resid,
+                t_resid,
             )
-            predictions.loc[heldout_pos, "r_loss_at_zero_tau"] = result["y_resid"] ** 2
-            predictions.loc[heldout_pos, "nuisance_fold"] = result["fold"]
+            predictions.loc[heldout_pos, "r_loss_at_zero_tau"] = y_resid**2
+            predictions.loc[heldout_pos, "nuisance_fold"] = fold
+            calibrated_by_row = {
+                int(row_id): {
+                    "e_hat": e_value,
+                    "m_hat": m_value,
+                    "y_residual": y_value,
+                    "t_residual": t_value,
+                }
+                for row_id, e_value, m_value, y_value, t_value in zip(
+                    train_df["_oci_row_id"].to_numpy()[heldout_pos],
+                    e_hat,
+                    m_hat,
+                    y_resid,
+                    t_resid,
+                )
+            }
+            for record in result["attention"]:
+                values = calibrated_by_row.get(int(record["row_id"]))
+                if values is not None:
+                    record.update(
+                        {
+                            key: _metadata_value(value, 0)
+                            for key, value in values.items()
+                        }
+                    )
             attention_rows.extend(result["attention"])
-            test_e.append(np.asarray(result["test_e_hat"], dtype=float))
-            test_m.append(np.asarray(result["test_m_hat"], dtype=float))
+            test_e.append(np.asarray(test_e_hat, dtype=float))
+            test_m.append(np.asarray(test_m_hat, dtype=float))
         test_predictions = pd.DataFrame(
             {
                 "_oci_row_id": test_df["_oci_row_id"].to_numpy(),
@@ -922,7 +966,7 @@ class MultiModelForestStage1Runner:
         metrics["handoff_fit_rows"] = int(len(train_df))
         metrics["handoff_heldout_rows"] = int(len(heldout_df))
         result["metrics"] = metrics
-        return _agentic_discovery_handoff_row(
+        row = _agentic_discovery_handoff_row(
             result,
             fold_key=int(fold_key),
             outer_fold=int(outer_fold),
@@ -931,6 +975,12 @@ class MultiModelForestStage1Runner:
             inner_fold=inner_fold,
             heldout_rows=(len(heldout_df) if heldout_rows is None else int(heldout_rows)),
         )
+        # Exact row provenance, as TF-IDF and neural-query contexts record, so
+        # Stage 2 verifies this context against split_provenance.jsonl by row
+        # identity rather than by row counts.
+        row["fit_row_ids"] = [int(value) for value in train_df["_oci_row_id"]]
+        row["heldout_row_ids"] = [int(value) for value in heldout_df["_oci_row_id"]]
+        return row
 
     def _build_feature_bundle(
         self,
@@ -981,7 +1031,6 @@ class MultiModelForestStage1Runner:
         nuisance_test: List[Tuple[str, np.ndarray, np.ndarray]] = []
         bow_nuisance_by_view: List[Dict[str, Any]] = []
         bow_view_results: List[Dict[str, Any]] = []
-        ensemble_view_results: List[Dict[str, Any]] = []
         htr_evidence: Dict[str, Any] = {}
         nuisance_checkpoint_units: List[str] = []
 
@@ -1635,20 +1684,6 @@ class MultiModelForestStage1Runner:
                             "view_index": int(view_index),
                         }
                     )
-                    ensemble_view_results.append(
-                        {
-                            "metrics": {
-                                **view_metrics,
-                                "target_source": "ensemble_mean_nuisance",
-                            },
-                            "importance": copy.deepcopy(importance),
-                            "pseudo_target": pseudo_target,
-                            "t_resid": t_resid,
-                            "view": view,
-                            "view_name": f"ensemble_r__{view.name}",
-                            "view_index": int(view_index),
-                        }
-                    )
 
         if self._htr_enabled():
             htr_effect_variants: Dict[str, Any] = {}
@@ -1731,23 +1766,36 @@ class MultiModelForestStage1Runner:
                 "predict a delta logit added to the matched untreated outcome logit."
             )
             importance["matched_pair_uplift"] = pair_importance
-        if ensemble_view_results:
-            ensemble_importance = _multi_view_importance(
-                ensemble_view_results,
-                top_n=int(self.nn_config.top_n_features),
-            )
+        if bow_view_results:
+            # Metadata only: the per-view effect evidence lives once, under
+            # importance["views"]; a copy here would be emitted twice downstream.
             nuisance_source_names = [item[0] for item in nuisance_train]
-            ensemble_importance["target_source"] = (
-                "ensemble_mean_nuisance_with_htr"
-                if any(str(name).startswith("htr") for name in nuisance_source_names)
-                else "ensemble_mean_nuisance"
-            )
-            ensemble_importance["nuisance_sources"] = nuisance_source_names
-            ensemble_importance["pseudo_target_construction"] = (
-                "mean nuisance predictions across Stage 1 text models, then "
-                "(Y - mean_m_hat) / (T - mean_e_hat)"
-            )
-            importance["ensemble_r"] = ensemble_importance
+            if binary_dina:
+                importance["ensemble_r"] = {
+                    "target_source": "per_view_cross_fitted_dina_nuisance",
+                    "nuisance_sources": nuisance_source_names,
+                    "pseudo_target_construction": (
+                        "binary outcome: Bernoulli DINA effect model on each "
+                        "view's BoW features, offset by that view's "
+                        "cross-fitted DINA nuisances (treatment propensity and "
+                        "arm-specific outcome models); the ensemble mean "
+                        "nuisance does not enter the effect target"
+                    ),
+                }
+            else:
+                importance["ensemble_r"] = {
+                    "target_source": (
+                        "ensemble_mean_nuisance_with_htr"
+                        if any(str(name).startswith("htr") for name in nuisance_source_names)
+                        else "ensemble_mean_nuisance"
+                    ),
+                    "nuisance_sources": nuisance_source_names,
+                    "pseudo_target_construction": (
+                        "mean nuisance predictions across Stage 1 text models, then "
+                        "(Y - mean_m_hat) / (T - mean_e_hat), regressed with "
+                        "weights (T - mean_e_hat)^2"
+                    ),
+                }
 
         embedding_evidence: Dict[str, Any] = {}
         if self._embedding_contrast_enabled():
@@ -1873,23 +1921,29 @@ class MultiModelForestStage1Runner:
         x_model = vectorizer.fit_transform(texts)
         features = np.asarray(vectorizer.get_feature_names_out())
 
+        # Constant zero scores (single-class targets) are treated as signed;
+        # tree ensembles report unsigned importances and get no negative list.
+        signed = {"treatment": True, "outcome": True, "pseudo_target": True}
         if len(np.unique(np.asarray(t, dtype=int))) < 2:
             treatment_coef = np.zeros(len(features), dtype=float)
         else:
             treatment_model = _make_bow_classifier(_model_params(view), random_state=101)
             treatment_model.fit(x_model, np.asarray(t, dtype=int))
             treatment_coef = _model_feature_scores(treatment_model, len(features))
+            signed["treatment"] = _model_feature_scores_are_signed(treatment_model)
 
         if str(self.config.outcome_type).lower() == "continuous":
             outcome_model = _make_bow_regressor(_model_params(view), random_state=202)
             outcome_model.fit(x_model, y)
             outcome_coef = _model_feature_scores(outcome_model, len(features))
+            signed["outcome"] = _model_feature_scores_are_signed(outcome_model)
         elif len(np.unique(np.asarray(y, dtype=int))) < 2:
             outcome_coef = np.zeros(len(features), dtype=float)
         else:
             outcome_model = _make_bow_classifier(_model_params(view), random_state=202)
             outcome_model.fit(x_model, np.asarray(y, dtype=int))
             outcome_coef = _model_feature_scores(outcome_model, len(features))
+            signed["outcome"] = _model_feature_scores_are_signed(outcome_model)
 
         if str(self.config.outcome_type).lower() == "binary":
             from .stage1_dina import crossfit_nuisance
@@ -1911,9 +1965,24 @@ class MultiModelForestStage1Runner:
                 unsupported_sample_weight_policy=(view.unsupported_sample_weight_policy),
             )
         effect_coef = _model_feature_scores(effect_model, len(features))
+        signed["pseudo_target"] = _model_feature_scores_are_signed(effect_model)
 
         top_n = int(self.nn_config.top_n_features)
         confounder_score = np.abs(treatment_coef) * np.abs(outcome_coef)
+        ranked: Dict[str, Any] = {}
+        for target, coef in (
+            ("treatment", treatment_coef),
+            ("outcome", outcome_coef),
+            ("pseudo_target", effect_coef),
+        ):
+            ranked[f"{target}_positive"] = _top_feature_rows(features, coef, top_n)
+            if signed[target]:
+                ranked[f"{target}_negative"] = _top_feature_rows(
+                    features,
+                    coef,
+                    top_n,
+                    descending=False,
+                )
         return {
             "view_name": str(view.name),
             "view_config": _bow_view_to_dict(view),
@@ -1945,27 +2014,11 @@ class MultiModelForestStage1Runner:
                 treatment_coef=treatment_coef,
                 outcome_coef=outcome_coef,
             ),
-            "treatment_positive": _top_feature_rows(features, treatment_coef, top_n),
-            "treatment_negative": _top_feature_rows(
-                features,
-                treatment_coef,
-                top_n,
-                descending=False,
-            ),
-            "outcome_positive": _top_feature_rows(features, outcome_coef, top_n),
-            "outcome_negative": _top_feature_rows(
-                features,
-                outcome_coef,
-                top_n,
-                descending=False,
-            ),
-            "pseudo_target_positive": _top_feature_rows(features, effect_coef, top_n),
-            "pseudo_target_negative": _top_feature_rows(
-                features,
-                effect_coef,
-                top_n,
-                descending=False,
-            ),
+            "score_polarity": {
+                target: ("signed" if is_signed else "unsigned_importance")
+                for target, is_signed in signed.items()
+            },
+            **ranked,
         }
 
     def _build_primary_embedding_contrast_evidence(

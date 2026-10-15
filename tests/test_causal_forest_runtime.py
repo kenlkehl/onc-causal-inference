@@ -184,3 +184,108 @@ def test_binary_head_rejects_nonbinary_outcomes():
 
     with pytest.raises(ValueError, match="must contain exactly both 0 and 1"):
         head.fit(effect, treatment, np.array([0.0, 0.2, 0.8, 1.0]))
+
+
+def _continuous_data(n=1200, seed=4):
+    rng = np.random.RandomState(seed)
+    effect = rng.normal(size=(n, 2))
+    control = rng.normal(size=(n, 2))
+    propensity = 1.0 / (1.0 + np.exp(-0.8 * control[:, 0]))
+    treatment = rng.binomial(1, propensity)
+    tau = 1.0 + 0.5 * effect[:, 0]
+    outcome = control[:, 0] + 0.5 * effect[:, 1] + tau * treatment + rng.normal(size=n)
+    return effect, control, treatment, outcome
+
+
+def _small_head(**overrides):
+    values = dict(
+        n_estimators=40,
+        subforest_size=4,
+        min_samples_leaf=5,
+        nuisance_regularization_grid_size=5,
+        n_jobs=1,
+    )
+    values.update(overrides)
+    return CausalForestHead(**values)
+
+
+def test_prediction_reports_finite_pointwise_standard_errors():
+    effect, control, treatment, outcome = _data()
+    head = _small_head(outcome_type="binary").fit(effect, treatment, outcome, W=control)
+
+    result = head.predict(effect[:10], return_ci=True)
+
+    assert result["tau_std"] is not None
+    assert result["tau_std"].shape == (10,)
+    assert np.isfinite(result["tau_std"]).all() and (result["tau_std"] > 0).all()
+    np.testing.assert_allclose(
+        result["tau_upper"] - result["tau_lower"],
+        2 * 1.959964 * result["tau_std"],
+        rtol=1e-4,
+    )
+
+
+def test_tuning_is_opt_in_and_every_tuned_parameter_is_audited():
+    from oci.models.causal_forest_head import CAUSAL_FOREST_TUNING_GRID
+
+    effect, control, treatment, outcome = _continuous_data(n=400)
+    assert CausalForestHead().tune_model is False
+
+    fixed = _small_head(outcome_type="continuous").fit(effect, treatment, outcome, W=control)
+    fixed_audit = fixed.fit_audit()
+    assert fixed_audit["tuning_attempted"] is False
+    assert fixed_audit["tuning_params"] is None
+    assert fixed_audit["tuned_parameter_changes"] == {}
+
+    tuned = _small_head(outcome_type="continuous", tune_model=True).fit(
+        effect, treatment, outcome, W=control
+    )
+    audit = tuned.fit_audit()
+    assert audit["tuning_attempted"] is True
+    assert audit["tuning_params"] == {k: list(v) for k, v in CAUSAL_FOREST_TUNING_GRID.items()}
+    assert set(CAUSAL_FOREST_TUNING_GRID) <= set(audit["configured_parameters"])
+    assert set(CAUSAL_FOREST_TUNING_GRID) <= set(audit["effective_parameters"])
+    for name, change in audit["tuned_parameter_changes"].items():
+        assert change["configured"] == audit["configured_parameters"][name]
+        assert change["effective"] == audit["effective_parameters"][name]
+    changed = {
+        name
+        for name in audit["configured_parameters"]
+        if audit["configured_parameters"][name] != audit["effective_parameters"][name]
+    }
+    assert changed == set(audit["tuned_parameter_changes"])
+    json.dumps(audit)
+
+
+def test_doubly_robust_ate_contract():
+    from oci.models.causal_forest_head import summarize_doubly_robust_scores
+
+    effect, control, treatment, outcome = _continuous_data()
+    fit, held = slice(0, 800), slice(800, None)
+    head = _small_head(outcome_type="continuous").fit(
+        effect[fit], treatment[fit], outcome[fit], W=control[fit]
+    )
+
+    training = head.training_doubly_robust_ate()
+    assert training["ate"] == pytest.approx(float(np.ravel(head.model.ate_)[0]))
+    assert training["ate_stderr"] == pytest.approx(float(np.ravel(head.model.ate_stderr_)[0]))
+    assert training["n"] == 800
+
+    scores = head.doubly_robust_scores(
+        effect[held], treatment[held], outcome[held], W=control[held]
+    )
+    e_hat, m_hat = head.nuisance_predictions(effect[held], control[held])
+    tau = head.predict(effect[held], return_ci=False)["tau_pred"]
+    residual = treatment[held] - e_hat
+    expected = tau + (outcome[held] - m_hat - tau * residual) * residual / np.maximum(
+        e_hat * (1 - e_hat), 0.01
+    )
+    np.testing.assert_allclose(scores, expected)
+
+    summary = summarize_doubly_robust_scores(scores)
+    assert summary["n"] == 400
+    assert summary["ate"] == pytest.approx(np.mean(scores))
+    assert summary["ate_stderr"] == pytest.approx(np.std(scores, ddof=1) / np.sqrt(400))
+    # True ATE is 1.0; both DR estimates cover it comfortably.
+    assert abs(summary["ate"] - 1.0) < 3 * summary["ate_stderr"] + 0.05
+    assert abs(training["ate"] - 1.0) < 3 * training["ate_stderr"] + 0.05

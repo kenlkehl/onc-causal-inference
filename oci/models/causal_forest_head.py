@@ -2,8 +2,10 @@
 """Causal Forest head for ITE estimation from neural network features."""
 
 import logging
+import math
 from typing import Optional, Dict, Any
 import numpy as np
+from scipy.stats import norm
 
 from .elastic_net_nuisance import ElasticNetLogisticClassifier, ElasticNetRegressor
 
@@ -16,6 +18,45 @@ except ImportError:
     CausalForestDML = None
 
 logger = logging.getLogger(__name__)
+
+# Explicit copy of EconML 0.16's ``CausalForestDML.tune(params="auto")`` grid.
+# Passing it explicitly makes the searched parameters part of the audit instead
+# of an implicit library default.
+CAUSAL_FOREST_TUNING_GRID: Dict[str, list] = {
+    "min_weight_fraction_leaf": [0.0001, 0.01],
+    "max_depth": [3, 5, None],
+    "min_var_fraction_leaf": [0.001, 0.01],
+}
+
+# EconML's doubly robust ATE floors e(1-e) at 0.01; the held-out scores use the
+# same floor so training-sample and held-out DR estimates are comparable.
+DR_PROPENSITY_VARIANCE_FLOOR = 0.01
+
+
+def summarize_doubly_robust_scores(scores: Any, alpha: float = 0.05) -> Dict[str, Any]:
+    """Mean, standard error and normal CI of per-row doubly robust (AIPW) scores."""
+
+    values = np.asarray(scores, dtype=float).reshape(-1)
+    values = values[np.isfinite(values)]
+    n = int(values.size)
+    if n == 0:
+        return {
+            "ate": None,
+            "ate_stderr": None,
+            "ate_ci_lower": None,
+            "ate_ci_upper": None,
+            "n": 0,
+        }
+    ate = float(np.mean(values))
+    stderr = float(np.std(values, ddof=1) / math.sqrt(n)) if n > 1 else None
+    z = float(norm.ppf(1.0 - alpha / 2.0))
+    return {
+        "ate": ate,
+        "ate_stderr": stderr,
+        "ate_ci_lower": None if stderr is None else ate - z * stderr,
+        "ate_ci_upper": None if stderr is None else ate + z * stderr,
+        "n": n,
+    }
 
 
 def _normalize_outcome_type(value: Any) -> str:
@@ -56,9 +97,11 @@ def tune_causal_forest_model(
     T: np.ndarray,
     X: Optional[np.ndarray],
     W: Optional[np.ndarray] = None,
-    params: Any = "auto",
+    params: Any = None,
 ) -> bool:
     """Tune an EconML CausalForestDML model, falling back to configured parameters."""
+    if params is None:
+        params = {name: list(values) for name, values in CAUSAL_FOREST_TUNING_GRID.items()}
     try:
         logger.info("Tuning CausalForestDML hyperparameters with params=%r", params)
         model.tune(Y=Y, T=T, X=X, W=W, params=params)
@@ -100,7 +143,7 @@ class CausalForestHead:
         honest: bool = True,
         inference: bool = True,
         random_state: int = 42,
-        tune_model: bool = True,
+        tune_model: bool = False,
         subforest_size: int = 4,
         nuisance_l1_ratio: float = 0.8,
         nuisance_cv_folds: int = 3,
@@ -125,9 +168,11 @@ class CausalForestHead:
             honest: Use honest estimation (sample splitting within trees)
             inference: Enable inference for confidence intervals
             random_state: Random seed for reproducibility
-            tune_model: Run EconML's automatic tuning step before fitting. This
-                remains enabled by default for backward compatibility; callers
-                with a fixed, pre-evaluated configuration can disable it.
+            tune_model: Run EconML's tuning step over ``CAUSAL_FOREST_TUNING_GRID``
+                before fitting. Disabled by default because tuning silently
+                replaces the configured forest settings; when enabled, every
+                tuned parameter and its effective value is recorded in
+                ``fit_audit()``.
             subforest_size: Number of trees in each inference subforest.
             nuisance_l1_ratio: Elastic-net L1 share for both nuisance tasks.
             nuisance_cv_folds: Internal folds used to select regularization.
@@ -238,6 +283,9 @@ class CausalForestHead:
         self.max_depth = max_depth
         self.min_samples_leaf = min_samples_leaf
         self.max_features = max_features
+        # EconML defaults, fixed explicitly because tuning may change them.
+        self.min_weight_fraction_leaf = 0.0
+        self.min_var_fraction_leaf = None
         self.honest = honest
         self.inference = inference
         self.random_state = random_state
@@ -273,6 +321,8 @@ class CausalForestHead:
             "max_depth": self.max_depth,
             "min_samples_leaf": self.min_samples_leaf,
             "max_features": self.max_features,
+            "min_weight_fraction_leaf": self.min_weight_fraction_leaf,
+            "min_var_fraction_leaf": self.min_var_fraction_leaf,
             "honest": bool(self.honest),
             "inference": bool(self.inference),
             "subforest_size": int(self.subforest_size),
@@ -437,6 +487,8 @@ class CausalForestHead:
             max_depth=self.max_depth,
             min_samples_leaf=self.min_samples_leaf,
             max_features=self.max_features,
+            min_weight_fraction_leaf=self.min_weight_fraction_leaf,
+            min_var_fraction_leaf=self.min_var_fraction_leaf,
             honest=self.honest,
             inference=self.inference,
             subforest_size=self.subforest_size,
@@ -516,6 +568,7 @@ class CausalForestHead:
         # CausalForestDML expects T and Y as one-dimensional arrays.
         self.model.fit(Y=Y, T=T, X=X, W=W)
         self.effective_forest_parameters_ = self._effective_forest_parameters()
+        self.n_fit_rows_ = int(len(Y))
         if (
             not self.tune_model
             and self.effective_forest_parameters_ != self._configured_forest_parameters()
@@ -550,10 +603,26 @@ class CausalForestHead:
             "tuning_failure_fell_back_to_configured_parameters": bool(
                 self.tuning_attempted_ and self.tuning_succeeded_ is False
             ),
-            "tuning_params": "auto" if self.tune_model else None,
+            "tuning_params": (
+                {name: list(values) for name, values in CAUSAL_FOREST_TUNING_GRID.items()}
+                if self.tune_model
+                else None
+            ),
+            "tuned_parameter_changes": self._tuned_parameter_changes(),
             "effective_parameters": dict(self.effective_forest_parameters_),
             "effective_nuisance_parameters": dict(self.effective_nuisance_parameters_),
             "fitted_nuisance_models": self._fitted_nuisance_model_audit(),
+        }
+
+    def _tuned_parameter_changes(self) -> Dict[str, Dict[str, Any]]:
+        """Configured versus effective value of every parameter tuning changed."""
+
+        configured = self._configured_forest_parameters()
+        effective = dict(self.effective_forest_parameters_ or {})
+        return {
+            name: {"configured": configured[name], "effective": effective.get(name)}
+            for name in configured
+            if effective.get(name) != configured[name]
         }
 
     def _fitted_nuisance_model_audit(self) -> Dict[str, Any]:
@@ -625,12 +694,106 @@ class CausalForestHead:
                 ci = inference_result.conf_int(alpha=alpha)
                 result["tau_lower"] = ci[0].flatten()
                 result["tau_upper"] = ci[1].flatten()
-                result["tau_std"] = (
-                    inference_result.std_point.flatten()
-                    if hasattr(inference_result, "std_point")
-                    else None
-                )
+                # EconML 0.16 inference results expose the pointwise CATE
+                # standard error as ``stderr``.
+                result["tau_std"] = np.asarray(inference_result.stderr, dtype=float).flatten()
             except Exception as e:
                 logger.warning(f"Could not compute confidence intervals: {e}")
 
         return result
+
+    def training_doubly_robust_ate(self, alpha: float = 0.05) -> Dict[str, Any]:
+        """EconML's doubly robust ATE over the forest's own fitting rows.
+
+        CausalForestDML combines out-of-bag forest predictions with its
+        cross-fitted elastic-net residuals, so this is an honest AIPW-type
+        estimate for the fitting sample (not the held-out rows).
+        """
+
+        if not self._fitted:
+            raise RuntimeError("CausalForestHead must be fitted before requesting the ATE")
+        ate = float(np.ravel(self.model.ate_)[0])
+        stderr = float(np.ravel(self.model.ate_stderr_)[0])
+        z = float(norm.ppf(1.0 - alpha / 2.0))
+        return {
+            "ate": ate,
+            "ate_stderr": stderr,
+            "ate_ci_lower": ate - z * stderr,
+            "ate_ci_upper": ate + z * stderr,
+            "n": int(getattr(self, "n_fit_rows_", 0)),
+            "estimand": "fitting_sample_ate",
+            "method": "econml_causal_forest_dml_doubly_robust_ate",
+        }
+
+    def nuisance_predictions(
+        self,
+        X: Optional[np.ndarray],
+        W: Optional[np.ndarray] = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Predict e(X, W) and m(X, W) for new rows from the fitted nuisance clones.
+
+        Each EconML cross-fit clone was trained on part of the fitting rows
+        only, so for rows outside the fitting sample the clone average is an
+        out-of-sample nuisance prediction. The design matches EconML's
+        first-stage input ``[X, W]``.
+        """
+
+        if not self._fitted:
+            raise RuntimeError("CausalForestHead must be fitted before predicting nuisances")
+        n_rows = X.shape[0] if X is not None else (W.shape[0] if W is not None else 0)
+        if X is None:
+            design = W if W is not None else np.ones((n_rows, 1))
+        else:
+            design = np.hstack([X, W]) if W is not None else X
+
+        def flat(models: Any) -> list:
+            if isinstance(models, (list, tuple)):
+                return [leaf for child in models for leaf in flat(child)]
+            return [models]
+
+        treatment_models = flat(self.model.models_t)
+        outcome_models = flat(self.model.models_y)
+        if not treatment_models or not outcome_models:
+            raise RuntimeError("fitted causal forest exposes no nuisance models")
+        e_hat = np.mean(
+            [np.asarray(model.predict_proba(design))[:, 1] for model in treatment_models],
+            axis=0,
+        )
+        if self.discrete_outcome:
+            m_hat = np.mean(
+                [np.asarray(model.predict_proba(design))[:, 1] for model in outcome_models],
+                axis=0,
+            )
+        else:
+            m_hat = np.mean(
+                [
+                    np.asarray(model.predict(design), dtype=float).reshape(-1)
+                    for model in outcome_models
+                ],
+                axis=0,
+            )
+        return e_hat, m_hat
+
+    def doubly_robust_scores(
+        self,
+        X: Optional[np.ndarray],
+        T: np.ndarray,
+        Y: np.ndarray,
+        W: Optional[np.ndarray] = None,
+    ) -> np.ndarray:
+        """Per-row AIPW scores on rows outside the fitting sample.
+
+        ``psi = tau(X) + (Y - m - tau (T - e)) (T - e) / max(e (1 - e), 0.01)``
+        with the forest's tau and its out-of-sample elastic-net nuisances. The
+        mean over held-out rows is a cross-fitted doubly robust ATE.
+        """
+
+        if not self._fitted:
+            raise RuntimeError("CausalForestHead must be fitted before scoring")
+        tau = self.model.effect(X, T0=0, T1=1).flatten()
+        e_hat, m_hat = self.nuisance_predictions(X, W)
+        t = np.asarray(T, dtype=float).reshape(-1)
+        y = np.asarray(Y, dtype=float).reshape(-1)
+        t_resid = t - e_hat
+        variance = np.maximum(e_hat * (1.0 - e_hat), DR_PROPENSITY_VARIANCE_FLOOR)
+        return tau + (y - m_hat - tau * t_resid) * t_resid / variance

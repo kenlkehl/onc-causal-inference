@@ -4,6 +4,10 @@
 For categorical features: k-1 dummy variables (reference coding)
 For continuous features: z-score normalized value
 For all features: binary missingness indicator
+
+A non-null categorical value that matches no declared category or alias is
+encoded as missing (missingness indicator 1, all dummies 0). It is never
+silently coded as the reference category.
 """
 
 import logging
@@ -115,6 +119,7 @@ def get_raw_explicit_features(
 
     # Encode samples
     features_list = []
+    unmatched_counts: Dict[str, int] = {}
     for values in feature_values_list:
         features = []
 
@@ -131,6 +136,10 @@ def get_raw_explicit_features(
                     if val is not None
                     else None
                 )
+                if not missing and canonical_val is None:
+                    # Unmatched (or null) value: missing, never the reference level.
+                    missing = True
+                    unmatched_counts[name] = unmatched_counts.get(name, 0) + 1
                 # k-1 dummy coding
                 for i, cat in enumerate(cats[1:], 1):
                     if not missing and canonical_val == cat:
@@ -149,4 +158,11 @@ def get_raw_explicit_features(
 
         features_list.append(features)
 
+    for name, count in unmatched_counts.items():
+        logger.warning(
+            "Explicit feature %s: %s non-missing value(s) matched no declared category "
+            "or alias and were encoded as missing",
+            name,
+            count,
+        )
     return features_list, feature_names

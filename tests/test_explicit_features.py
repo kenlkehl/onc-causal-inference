@@ -546,6 +546,34 @@ def test_raw_explicit_features_maps_categorical_value_aliases():
     assert features == [[0.0, 1.0, 0.0]]
 
 
+def test_unmatched_categorical_value_is_missing_not_the_reference_level(caplog):
+    specs = [
+        ExplicitFeatureSpec(
+            name="stage",
+            type="categorical",
+            categories=["I", "II", "III"],
+            roles=["confounder"],
+        ),
+    ]
+    values = [
+        {"stage": "I", "stage_missing": False},  # reference level
+        {"stage": "stage IV", "stage_missing": False},  # matches no category
+        {"stage": None, "stage_missing": False},  # inconsistent null
+        {"stage": "III", "stage_missing": False},
+    ]
+    with caplog.at_level("WARNING"):
+        features, names = get_raw_explicit_features(values, specs)
+
+    assert names == ["stage_II", "stage_III", "stage_missing"]
+    assert features == [
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 0.0, 1.0],
+        [0.0, 1.0, 0.0],
+    ]
+    assert "matched no declared category" in caplog.text
+
+
 def test_vllm_feature_extractor_server_client_uses_request_timeout(monkeypatch):
     calls = {}
 

@@ -6,11 +6,13 @@ import sys
 import logging
 
 from .config import (
+    HTR_EFFECT_OBJECTIVES,
     ExperimentConfig,
     create_default_config,
     load_explicit_feature_specs_json,
     normalize_multi_model_feature_discovery_methods,
     parse_explicit_feature_spec_entries,
+    resolve_effect_objective,
 )
 from .experiments.runner import ExperimentRunner
 from .utils.system import setup_logging, limit_threads
@@ -153,10 +155,12 @@ Examples:
     )
     run_parser.add_argument(
         '--effect-objective',
-        choices=['squared_r_loss', 'pseudo_outcome_mse'],
+        choices=['auto', *HTR_EFFECT_OBJECTIVES],
         help=(
             "Override neural effect-stage objective for "
-            "model_type='agentic_attention_variable_forest'."
+            "model_type='agentic_attention_variable_forest'. 'auto' (the config "
+            "default) selects 'dina' for binary outcomes and 'pseudo_outcome_mse' "
+            "for continuous outcomes; binary outcomes accept only 'auto' or 'dina'."
         )
     )
     run_parser.add_argument(
@@ -328,6 +332,14 @@ Examples:
                     "--effect-objective only applies to "
                     "model_type='agentic_attention_variable_forest'"
                 )
+                return 1
+            try:
+                resolve_effect_objective(
+                    args.effect_objective,
+                    outcome_type=config.applied_inference.outcome_type,
+                )
+            except ValueError as e:
+                print(f"Invalid --effect-objective: {e}")
                 return 1
             (
                 config.applied_inference.architecture

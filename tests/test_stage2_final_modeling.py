@@ -319,7 +319,10 @@ def test_forest_threads_and_process_jobs_share_one_budget_and_release_on_error()
         for _, change in events:
             active += change
             peak = max(peak, active)
-        assert peak == 2  # One CPU remains reserved for the threaded forest.
+        # One CPU remains reserved for the threaded forest. Worker processes can
+        # start slowly enough that the short jobs never overlap, so only the
+        # upper bound is deterministic.
+        assert 1 <= peak <= 2
         assert all(row[2] != os.getpid() for row in rows)
         assert pool._pool.available == 3
         with pytest.raises(RuntimeError, match="failed"):

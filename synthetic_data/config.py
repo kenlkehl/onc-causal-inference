@@ -54,11 +54,17 @@ class SyntheticDataConfig:
 
     # Dataset parameters
     dataset_size: int = 500
-    treatment_effect_prob: float = 0.10  # Target average treatment effect on probability scale (e.g., 0.10 = 10% increase)
+    # Treatment main-effect coefficient added to the outcome linear predictor:
+    # log-odds units for binary outcomes, outcome units for continuous outcomes.
+    # It is NOT a probability-scale ATE: the realized ATE also depends on the
+    # randomly drawn treatment x effect-modifier interactions (see the
+    # ``true_ite`` column and ``dataset_statistics.mean_ite``). The field name
+    # is kept because saved generation configs and saved-DGP checks use it.
+    treatment_effect_prob: float = 0.20
 
     # Target rates (intercepts will be calibrated to achieve these)
     target_treatment_rate: float = 0.5  # Proportion of patients receiving treatment=1
-    target_control_outcome_rate: float = 0.2  # Outcome rate in control group (treatment=0)
+    target_control_outcome_rate: float = 0.5  # Outcome rate in control group (treatment=0)
 
     # Positivity enforcement - ensures adequate treatment/control overlap for causal inference
     enforce_positivity: bool = False  # If True, ensures minimum treatment rate per confounder stratum
@@ -69,6 +75,11 @@ class SyntheticDataConfig:
     main_coefficient_scale: float = 0.3  # Scale for main effect coefficients
     interaction_coefficient_scale: float = 0.1  # Scale for interaction coefficients
     target_logit_std: float = 2.0  # Target std of logits; lower values compress propensities toward 0.5
+    # How continuous covariates are drawn from their summary mean/SD.
+    # "positive_lognormal": moment-matched log-normal when the mean is positive
+    # (so values such as NLR or creatinine clearance cannot be negative),
+    # Normal otherwise. "normal": the original untruncated Normal draw.
+    continuous_covariate_distribution: str = "positive_lognormal"
     
     # Number of role-tagged explicit features (None = use LLM default of 8-12).
     # num_confounders / num_effect_modifiers are role counts, not necessarily
@@ -144,6 +155,12 @@ class SyntheticDataConfig:
 
         if not self.llm.api_base_url:
             raise ValueError("llm.api_base_url is required")
+
+        if self.continuous_covariate_distribution not in {"positive_lognormal", "normal"}:
+            raise ValueError(
+                "continuous_covariate_distribution must be 'positive_lognormal' or "
+                f"'normal', got {self.continuous_covariate_distribution!r}"
+            )
 
         if self.generation_mode != "two_stage":
             raise ValueError(f"generation_mode must be 'two_stage', got '{self.generation_mode}'")

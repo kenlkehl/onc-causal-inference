@@ -403,6 +403,18 @@ def model_feature_scores(model: Any, n_features: int) -> np.ndarray:
     return resized
 
 
+def model_feature_scores_are_signed(model: Any) -> bool:
+    """Return whether :func:`model_feature_scores` yields signed coefficients.
+
+    Linear models (and DINA) expose a signed ``coef_``. Tree ensembles expose
+    unsigned impurity or gain importances: their lowest values are merely the
+    least important terms and carry no negative direction, so callers must not
+    publish a ``*_negative`` list for them.
+    """
+
+    return getattr(model, "coef_", None) is not None
+
+
 def top_feature_rows(
     features: np.ndarray,
     scores: np.ndarray,
@@ -443,6 +455,7 @@ _fit_regressor = fit_regressor
 _bounded_fold_count = bounded_fold_count
 _binary_split_items = binary_split_items
 _model_feature_scores = model_feature_scores
+_model_feature_scores_are_signed = model_feature_scores_are_signed
 _top_feature_rows = top_feature_rows
 
 
@@ -456,5 +469,6 @@ __all__ = [
     "make_bow_regressor",
     "make_bow_vectorizer",
     "model_feature_scores",
+    "model_feature_scores_are_signed",
     "top_feature_rows",
 ]

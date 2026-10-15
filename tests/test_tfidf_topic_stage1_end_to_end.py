@@ -21,11 +21,11 @@ from oci.inference.tfidf_topic_stage1 import (
 pytestmark = pytest.mark.filterwarnings("ignore::sklearn.exceptions.ConvergenceWarning")
 
 
-def _dataset() -> pd.DataFrame:
+def _dataset(rows_count: int = 96) -> pd.DataFrame:
     rng = np.random.default_rng(5)
     vocab = [f"term{index}" for index in range(60)]
     rows = []
-    for _ in range(96):
+    for _ in range(rows_count):
         treatment = int(rng.random() < 0.5)
         marker = rng.random() < 0.5
         outcome = int(rng.random() < (0.3 + 0.3 * marker * treatment + 0.1 * treatment))
@@ -98,9 +98,9 @@ def _config(*, orphan: bool) -> AppliedInferenceConfig:
     return config
 
 
-def _run(tmp_path, config):
+def _run(tmp_path, config, *, rows_count: int = 96):
     run_tfidf_topic_stage1(
-        dataset=_dataset(),
+        dataset=_dataset(rows_count),
         config=config,
         output_path=tmp_path / "predictions.parquet",
         artifact_dir=tmp_path,
@@ -139,7 +139,10 @@ def test_topic_contexts_are_complete_and_resume_without_refitting(tmp_path, monk
 
 
 def test_orphan_lane_selects_clusters_from_fit_rows_only(tmp_path):
-    rows = _run(tmp_path, _config(orphan=True))
+    # The orphan lane nests three levels of cross-fitting; 96 rows leave some
+    # DINA nuisance subfolds without a treatment arm for some run seeds, which
+    # correctly fails closed. 144 rows keep every subfold feasible.
+    rows = _run(tmp_path, _config(orphan=True), rows_count=144)
 
     for row in rows:
         discovery = row["discovery"]

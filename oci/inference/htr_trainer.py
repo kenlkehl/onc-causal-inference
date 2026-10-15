@@ -21,7 +21,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from ..config import AgenticAttentionVariableForestConfig, AppliedInferenceConfig
+from ..config import (
+    HTR_EFFECT_OBJECTIVES,
+    AgenticAttentionVariableForestConfig,
+    AppliedInferenceConfig,
+    resolve_effect_objective,
+)
+from ..utils.calibration import BinaryProbabilityCalibrator
 from ..models.hierarchical_transformer_extractor import (
     HTR_SENTENCE_ENCODER_TRAINING_AUDIT_SCHEMA,
     HierarchicalTransformerExtractor,
@@ -29,11 +35,22 @@ from ..models.hierarchical_transformer_extractor import (
 
 logger = logging.getLogger(__name__)
 
-EFFECT_OBJECTIVES = {"squared_r_loss", "pseudo_outcome_mse", "dina"}
+EFFECT_OBJECTIVES = set(HTR_EFFECT_OBJECTIVES)
 
 
 def effect_objective_name(config: AgenticAttentionVariableForestConfig) -> str:
-    value = str(getattr(config, "effect_objective", "pseudo_outcome_mse")).strip().lower()
+    """Return the resolved effect objective of an HTR trainer's config.
+
+    ``HTRTrainer.__init__`` resolves ``"auto"`` against the outcome type, so an
+    unresolved value here is a programming error rather than a default.
+    """
+
+    value = str(getattr(config, "effect_objective", "auto")).strip().lower()
+    if value == "auto":
+        raise ValueError(
+            "effect_objective='auto' must be resolved against the outcome type "
+            "with resolve_effect_objective() before training"
+        )
     if value not in EFFECT_OBJECTIVES:
         raise ValueError(
             "agentic_attention_variable_forest.effect_objective must be one of "
@@ -263,14 +280,19 @@ class HTRTrainer:
     ) -> None:
         self.config = config
         self.device = torch.device(device)
-        self.avf_config: AgenticAttentionVariableForestConfig = getattr(
-            config.architecture,
-            "agentic_attention_variable_forest",
-            AgenticAttentionVariableForestConfig(),
+        self.avf_config: AgenticAttentionVariableForestConfig = copy.deepcopy(
+            getattr(
+                config.architecture,
+                "agentic_attention_variable_forest",
+                AgenticAttentionVariableForestConfig(),
+            )
         )
-        if str(config.outcome_type).lower() == "binary":
-            self.avf_config = copy.deepcopy(self.avf_config)
-            self.avf_config.effect_objective = "dina"
+        # "auto" becomes "dina" for binary and "pseudo_outcome_mse" for
+        # continuous outcomes; an explicit mismatch raises (never overridden).
+        self.avf_config.effect_objective = resolve_effect_objective(
+            self.avf_config.effect_objective,
+            outcome_type=config.outcome_type,
+        )
 
     def _effect_epochs(self) -> int:
         value = getattr(self.avf_config, "effect_epochs", None)
@@ -874,6 +896,43 @@ class HTRTrainer:
             return ""
 
 
+def cross_fitted_calibrators(
+    raw_predictions: Any,
+    target: Any,
+    fold_ids: Any,
+    *,
+    method: Optional[str],
+) -> Dict[int, BinaryProbabilityCalibrator]:
+    """Fit one nuisance probability calibrator per cross-fitting fold, out of fold.
+
+    ``raw_predictions[i]`` must be the uncalibrated prediction for row ``i``
+    from the model of fold ``fold_ids[i]``, i.e. a model that never trained on
+    row ``i``. The calibrator returned for fold ``k`` is fit on the rows with
+    ``fold_ids != k`` (fold ``k``'s fit partition) using those out-of-fold
+    predictions, and is then applied to fold ``k``'s held-out and external
+    predictions. Fold ``k``'s model's in-sample predictions, which are
+    overconfident after training, and fold ``k``'s held-out labels never
+    enter fold ``k``'s calibrator.
+    """
+
+    raw = np.asarray(raw_predictions, dtype=float).reshape(-1)
+    labels = np.asarray(target, dtype=float).reshape(-1)
+    folds = np.asarray(fold_ids).reshape(-1)
+    if not (len(raw) == len(labels) == len(folds)):
+        raise ValueError("raw predictions, targets, and fold ids must align row by row")
+    unique_folds = np.unique(folds)
+    if len(unique_folds) < 2:
+        raise ValueError("out-of-fold calibration requires at least two folds")
+    return {
+        int(fold): BinaryProbabilityCalibrator.fit(
+            raw[folds != fold],
+            labels[folds != fold],
+            method=method,
+        )
+        for fold in unique_folds
+    }
+
+
 def _metadata_value(values: Any, offset: int) -> Any:
     array = np.asarray(values, dtype=object)
     value = array.item() if array.ndim == 0 else array[offset]
@@ -927,6 +986,7 @@ __all__ = [
     "EffectNet",
     "HTRTrainer",
     "NuisanceNet",
+    "cross_fitted_calibrators",
     "current_lr",
     "effect_loss_label",
     "effect_objective_name",

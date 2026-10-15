@@ -357,10 +357,11 @@ def _multi_view_importance(
         importance["metrics"] = _agent_visible_metrics(result.get("metrics", {}))
         views.append(importance)
     consensus = _consensus_phrase_feature_rows(views, top_n=top_n)
+    # Per-view "phrase_features" stay inside each view; the cross-view list is
+    # published once, so downstream consumers do not count it twice.
     return {
         "n_views": len(views),
         "views": views,
-        "phrase_features": consensus,
         "phrase_consensus": consensus,
     }
 

@@ -3,8 +3,10 @@
 
 import logging
 import json
+import math
 import random
 import re
+import unicodedata
 from pathlib import Path
 from typing import Dict, Any, List, Tuple, Optional
 from dataclasses import asdict
@@ -31,6 +33,39 @@ from .structured_data import convert_structured_event_to_text
 
 
 logger = logging.getLogger(__name__)
+
+CONTINUOUS_COVARIATE_DISTRIBUTIONS = ("positive_lognormal", "normal")
+
+# Oracle columns written for every patient. A feature whose ``true_<name>``
+# column would collide with one of these is rejected.
+_RESERVED_ORACLE_COLUMNS = {
+    "true_treatment_prob",
+    "true_outcome_prob",
+    "true_y0_prob",
+    "true_y1_prob",
+    "true_ite_prob",
+    "true_y0",
+    "true_y1",
+    "true_ite",
+}
+
+# Hyphen/dash look-alikes that LLMs emit interchangeably (U+2010 hyphen,
+# U+2011 non-breaking hyphen, U+2012 figure dash, U+2013 en dash, U+2014 em
+# dash, U+2212 minus). NFKC does not fold these to ASCII "-".
+_DASH_TRANSLATION = str.maketrans({ch: "-" for ch in "\u2010\u2011\u2012\u2013\u2014\u2212"})
+
+
+def _category_lookup_key(value: Any) -> str:
+    """Spelling-insensitive key for matching category labels across LLM outputs.
+
+    Feature definitions and summary statistics are produced by separate LLM
+    calls, so the same category can arrive as "First\u2011line" in one and
+    "First-line" in the other. Matching on this key keeps every declared
+    category sampleable while the sampled value keeps the definition's label.
+    """
+
+    text = unicodedata.normalize("NFKC", str(value)).translate(_DASH_TRANSLATION)
+    return re.sub(r"\s+", " ", text).strip().casefold()
 
 
 def generate_synthetic_dataset(
@@ -118,6 +153,7 @@ def generate_synthetic_dataset(
         treatment_eq=treatment_eq,
         outcome_eq=outcome_eq,
         target_logit_std=config.target_logit_std,
+        continuous_distribution=config.continuous_covariate_distribution,
     )
 
     # Step 5: Calibrate intercepts to hit target rates (after rescaling)
@@ -129,6 +165,7 @@ def generate_synthetic_dataset(
         outcome_eq=outcome_eq,
         target_treatment_rate=config.target_treatment_rate,
         target_control_outcome_rate=config.target_control_outcome_rate,
+        continuous_distribution=config.continuous_covariate_distribution,
     )
 
     # Step 6: Generate patient data
@@ -157,17 +194,7 @@ def generate_synthetic_dataset(
         "treatment_equation": treatment_eq,
         "outcome_equation": outcome_eq,
         "summary_statistics": summary_stats,
-        "dataset_statistics": {
-            "n_patients": len(df),
-            "treatment_rate": df["treatment_indicator"].mean(),
-            "outcome_rate": df["outcome_indicator"].mean(),
-            "mean_treatment_prob": df["true_treatment_prob"].mean(),
-            "std_treatment_prob": df["true_treatment_prob"].std(),
-            "mean_outcome_prob": df["true_outcome_prob"].mean(),
-            "std_outcome_prob": df["true_outcome_prob"].std(),
-            "mean_ite_prob": df["true_ite_prob"].mean(),
-            "std_ite_prob": df["true_ite_prob"].std(),
-        }
+        "dataset_statistics": oracle_dataset_statistics(df),
     }
     
     # Save outputs
@@ -182,6 +209,27 @@ def generate_synthetic_dataset(
     logger.info(f"Metadata saved to {metadata_path}")
     
     return df, metadata
+
+
+def oracle_dataset_statistics(df: pd.DataFrame) -> Dict[str, Any]:
+    """Summary statistics of the oracle columns (scale depends on outcome type).
+
+    ``mean_ite``/``std_ite`` summarize ``true_ite`` on the outcome scale. The
+    probability-scale ``*_prob`` statistics are reported only for binary
+    outcomes, where those columns exist.
+    """
+
+    stats: Dict[str, Any] = {
+        "n_patients": int(len(df)),
+        "treatment_rate": float(df["treatment_indicator"].mean()),
+        "outcome_rate": float(df["outcome_indicator"].mean()),
+    }
+    for name in ("treatment_prob", "outcome_prob", "ite_prob", "ite"):
+        column = f"true_{name}"
+        if column in df.columns:
+            stats[f"mean_{name}"] = float(df[column].mean())
+            stats[f"std_{name}"] = float(df[column].std())
+    return stats
 
 
 def _resolve_feature_count_request(
@@ -379,6 +427,12 @@ def _validate_equation_coefficients(
     not in the valid_names set, logging warnings for removed items.
     """
     validated = equation.copy()
+    canonical_names = {_category_lookup_key(name): name for name in valid_names}
+
+    def canonical(name: str) -> Optional[str]:
+        if name in valid_names:
+            return name
+        return canonical_names.get(_category_lookup_key(name))
 
     # Ensure required keys exist with defaults
     validated.setdefault("coefficients", {})
@@ -390,8 +444,8 @@ def _validate_equation_coefficients(
         original_coefs = validated["coefficients"]
         filtered_coefs = {}
         for name, value in original_coefs.items():
-            if name in valid_names:
-                filtered_coefs[name] = value
+            if canonical(name) is not None:
+                filtered_coefs[canonical(name)] = value
             else:
                 logger.warning(
                     f"{equation_name}: Removing invalid coefficient '{name}' "
@@ -406,10 +460,12 @@ def _validate_equation_coefficients(
         for interaction in original_interactions:
             terms = interaction.get("terms", [])
             # Check if all terms are valid
-            if all(term in valid_names for term in terms):
-                filtered_interactions.append(interaction)
+            if all(canonical(term) is not None for term in terms):
+                filtered_interactions.append(
+                    {**interaction, "terms": [canonical(term) for term in terms]}
+                )
             else:
-                invalid_terms = [t for t in terms if t not in valid_names]
+                invalid_terms = [t for t in terms if canonical(t) is None]
                 logger.warning(
                     f"{equation_name}: Removing invalid interaction with terms {terms} "
                     f"(invalid terms: {invalid_terms})"
@@ -555,6 +611,7 @@ def _calibrate_intercepts(
     target_treatment_rate: float,
     target_control_outcome_rate: float,
     n_samples: int = 10000,
+    continuous_distribution: str = "positive_lognormal",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Calibrate equation intercepts to achieve target marginal rates.
@@ -578,7 +635,9 @@ def _calibrate_intercepts(
     
     # Sample characteristics for calibration
     sampled_chars = [
-        _sample_patient_characteristics(confounders, summary_stats)
+        _sample_patient_characteristics(
+            confounders, summary_stats, continuous_distribution=continuous_distribution
+        )
         for _ in range(n_samples)
     ]
     
@@ -664,6 +723,7 @@ def _rescale_for_target_logit_std(
     outcome_eq: Dict[str, Any],
     target_logit_std: float = 2.0,
     n_samples: int = 10000,
+    continuous_distribution: str = "positive_lognormal",
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """
     Rescale all coefficients (except intercept) to achieve target logit std.
@@ -672,7 +732,9 @@ def _rescale_for_target_logit_std(
     """
     # Sample characteristics
     sampled_chars = [
-        _sample_patient_characteristics(confounders, summary_stats)
+        _sample_patient_characteristics(
+            confounders, summary_stats, continuous_distribution=continuous_distribution
+        )
         for _ in range(n_samples)
     ]
 
@@ -755,9 +817,39 @@ def _rescale_for_target_logit_std(
     return treatment_eq, outcome_eq
 
 
+def _sample_continuous_value(mean: float, std: float, distribution: str) -> float:
+    """Draw one continuous covariate value with the summary mean and SD.
+
+    ``positive_lognormal`` (default): clinical covariates with a positive
+    summary mean (age, labs such as NLR or creatinine clearance, scores) are
+    strictly positive quantities, but an untruncated Normal with the same
+    moments puts mass below zero (e.g. NLR mean 4.5, SD 2.5: 3.6% negative).
+    Such covariates are drawn from the log-normal with exactly the same mean
+    and SD (sigma^2 = log(1 + (SD/mean)^2), mu = log(mean) - sigma^2 / 2), so
+    the z-scores used by the outcome/treatment equations keep mean 0 and SD 1
+    and values can never be negative. Covariates with a non-positive mean keep
+    the Normal draw. ``normal`` reproduces the original untruncated Normal.
+    Both branches consume exactly one Gaussian draw from the global RNG.
+    """
+
+    if distribution not in CONTINUOUS_COVARIATE_DISTRIBUTIONS:
+        raise ValueError(
+            f"continuous covariate distribution must be one of "
+            f"{CONTINUOUS_COVARIATE_DISTRIBUTIONS}, got {distribution!r}"
+        )
+    mean = float(mean)
+    std = float(std)
+    if distribution == "positive_lognormal" and mean > 0:
+        sigma2 = math.log1p((std / mean) ** 2)
+        mu = math.log(mean) - sigma2 / 2.0
+        return float(np.exp(np.random.normal(mu, math.sqrt(sigma2))))
+    return float(np.random.normal(mean, std))
+
+
 def _sample_patient_characteristics(
     confounders: List[Dict[str, Any]],
     summary_stats: Dict[str, Any],
+    continuous_distribution: str = "positive_lognormal",
 ) -> Dict[str, Any]:
     """Sample patient characteristics from summary statistics."""
     characteristics = {}
@@ -767,11 +859,11 @@ def _sample_patient_characteristics(
         stats = summary_stats.get(name, {})
         
         if conf["type"] == "continuous":
-            # Sample from normal distribution
-            mean = stats.get("mean", 0.0)
-            std = stats.get("std", 1.0)
-            value = np.random.normal(mean, std)
-            characteristics[name] = value
+            characteristics[name] = _sample_continuous_value(
+                stats.get("mean", 0.0),
+                stats.get("std", 1.0),
+                continuous_distribution,
+            )
         else:
             # Sample from categorical distribution
             categories = conf["categories"]
@@ -781,8 +873,11 @@ def _sample_patient_characteristics(
             if not proportions:
                 proportions = {cat: 1.0 / len(categories) for cat in categories}
             
-            # Ensure proportions sum to 1
-            probs = [proportions.get(cat, 0.0) for cat in categories]
+            # Match proportions to categories by a spelling-insensitive key
+            # (e.g. "First\u2011line" vs "First-line"); the sampled value keeps
+            # the feature definition's label.
+            by_key = {_category_lookup_key(cat): value for cat, value in proportions.items()}
+            probs = [by_key.get(_category_lookup_key(cat), 0.0) for cat in categories]
             prob_sum = sum(probs)
             if prob_sum > 0:
                 probs = [p / prob_sum for p in probs]
@@ -1116,7 +1211,13 @@ def _build_patient_scaffold_record(
     This is the single sampler shared by API generation and saved-DGP
     generation; it draws from the global NumPy RNG in a fixed order.
     """
-    characteristics = _sample_patient_characteristics(confounders, summary_stats)
+    characteristics = _sample_patient_characteristics(
+        confounders,
+        summary_stats,
+        continuous_distribution=getattr(
+            config, "continuous_covariate_distribution", "positive_lognormal"
+        ),
+    )
 
     treatment_logit = _compute_logit(
         characteristics, confounders, summary_stats, treatment_eq
@@ -1160,13 +1261,35 @@ def _build_patient_scaffold_record(
         "treatment_indicator": treatment,
         "outcome_indicator": outcome,
         "true_treatment_prob": treatment_prob,
-        "true_outcome_prob": outcome_prob,
-        "true_y0_prob": outcome_prob_0,
-        "true_y1_prob": outcome_prob_1,
-        "true_ite_prob": outcome_prob_1 - outcome_prob_0,
     }
+    # Oracle potential outcomes and ITE on the outcome's own scale:
+    # binary -> probabilities sigma(lp_t); continuous -> E[Y(t) | X] = lp_t,
+    # because Y = lp + N(0, outcome_noise_std^2). ``true_ite`` is always the
+    # outcome-scale ITE; the ``*_prob`` columns exist only for binary outcomes.
+    if outcome_type == "continuous":
+        record.update(
+            true_y0=outcome_logit_0,
+            true_y1=outcome_logit_1,
+            true_ite=outcome_logit_1 - outcome_logit_0,
+        )
+    else:
+        record.update(
+            true_outcome_prob=outcome_prob,
+            true_y0_prob=outcome_prob_0,
+            true_y1_prob=outcome_prob_1,
+            true_ite_prob=outcome_prob_1 - outcome_prob_0,
+            true_y0=outcome_prob_0,
+            true_y1=outcome_prob_1,
+            true_ite=outcome_prob_1 - outcome_prob_0,
+        )
     for name, value in characteristics.items():
-        record[f"true_{name}"] = value
+        column = f"true_{name}"
+        if column in _RESERVED_ORACLE_COLUMNS:
+            raise ValueError(
+                f"feature name {name!r} collides with the oracle column {column!r}; "
+                "rename the feature"
+            )
+        record[column] = value
     return record
 
 

@@ -5,8 +5,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from oci.evaluation.stage1 import (
+    _association_metrics,
     _lexical_metrics,
     _materialize_or_load_manifest,
     _native_evidence_metrics,
@@ -277,3 +279,51 @@ def test_legacy_backfill_resolves_source_artifacts_from_handoff_index(tmp_path: 
     assert evidence_row["lineage"]["source_artifact"] == manifest["source_artifacts"][
         "text_models"
     ]
+
+
+@pytest.mark.parametrize(
+    ("outcome_type", "oracle_columns", "expected_target", "applicable"),
+    [
+        ("binary", ("true_ite_prob",), "true_ite_prob", True),
+        ("binary", ("true_ite", "true_ite_prob"), "true_ite", True),
+        ("continuous", ("true_ite",), "true_ite", True),
+        ("continuous", ("true_ite_prob",), None, False),
+    ],
+)
+def test_true_ite_metrics_resolve_the_outcome_scale_oracle_column(
+    outcome_type, oracle_columns, expected_target, applicable
+):
+    rows = np.arange(12)
+    scores = pd.DataFrame(
+        {
+            "_oci_row_id": rows,
+            "scope": "full_outer_train",
+            "inner_fold": None,
+            "tau_hat": rows / 10.0,
+        }
+    )
+    dataset = pd.DataFrame({"_oci_row_id": rows})
+    for column in oracle_columns:
+        # true_ite tracks tau_hat exactly; the probability column is reversed,
+        # so the test also shows which column was correlated.
+        dataset[column] = rows if column == "true_ite" else -rows
+
+    metrics = [
+        row
+        for row in _association_metrics(
+            "bow_r_loss", scores, dataset, [], outcome_type=outcome_type
+        )
+        if row["metric_family"] == "true_ite"
+    ]
+
+    assert {row["metric"] for row in metrics} == {
+        "best_tau_abs_pearson",
+        "best_tau_abs_spearman",
+    }
+    for row in metrics:
+        assert row["target"] == expected_target
+        if applicable:
+            assert row["value"] == pytest.approx(1.0)
+        else:
+            assert row["value"] is None
+            assert "lacks outcome-scale true_ite" in row["reason"]

@@ -227,11 +227,10 @@ def test_compiler_reuses_fusion_tfidf_allowlist_and_drops_large_score_arrays(
     assert compiled.packets[0]["content"]["source_families"] == ["tfidf_topics"]
 
 
-@pytest.mark.parametrize("include_optional", [False, True], ids=["default_eight", "explicit_ten"])
-def test_compiler_preserves_enabled_architectures_as_independent_interpretation_lanes(
-    tmp_path: Path, include_optional: bool,
-):
-    rows = [
+def _all_architecture_raw_rows() -> list[dict]:
+    """Raw omitted-selector handoff rows covering all ten Stage 1 architectures."""
+
+    return [
         {
             "source": "text_models",
             "outer_fold": 1,
@@ -387,6 +386,13 @@ def test_compiler_preserves_enabled_architectures_as_independent_interpretation_
             },
         },
     ]
+
+
+@pytest.mark.parametrize("include_optional", [False, True], ids=["default_eight", "explicit_ten"])
+def test_compiler_preserves_enabled_architectures_as_independent_interpretation_lanes(
+    tmp_path: Path, include_optional: bool,
+):
+    rows = _all_architecture_raw_rows()
 
     required = SUPPORTED_STAGE2_ARCHITECTURES if include_optional else DEFAULT_STAGE1_ARCHITECTURES
     if not include_optional:
@@ -558,3 +564,91 @@ def test_compiler_memory_maps_existing_stage1_embeddings_for_semantic_cards(
     )
     assert sum(len(lineage["member_ids"]) for lineage in compiled.lineage_by_outer_fold[1]) == 20
     assert compiled.summary["schema_version"] == EVIDENCE_COMPILER_VERSION
+
+
+def _compile(rows, tmp_path: Path, **kwargs):
+    return compile_stage2_handoff_evidence(
+        rows,
+        handoff_path=tmp_path / "handoff" / "evidence.jsonl",
+        max_cards_per_outer_fold=64,
+        max_packet_chars=4_000,
+        **kwargs,
+    )
+
+
+def test_raw_and_materialized_handoffs_compile_every_architecture(tmp_path: Path):
+    from oci.inference.stage1_architecture_artifacts import (
+        materialize_stage1_architecture_artifacts,
+    )
+
+    raw = _all_architecture_raw_rows()
+    # A recognized producer context without evidence contributes nothing.
+    raw.append({"source": "text_models", "outer_fold": 1, "inner_fold": None,
+                "scope": "full_outer_train", "evidence": {"importance": {"views": []}}})
+    compiled_raw = _compile(raw, tmp_path, required_architectures=SUPPORTED_STAGE2_ARCHITECTURES)
+    materialized, _manifest = materialize_stage1_architecture_artifacts(
+        output_dir=tmp_path,
+        raw_handoff_rows=raw,
+        selected_architectures=SUPPORTED_STAGE2_ARCHITECTURES,
+        source_artifacts={},
+        selection_mode="explicit",
+    )
+    compiled_materialized = _compile(
+        materialized,
+        tmp_path,
+        required_architectures=SUPPORTED_STAGE2_ARCHITECTURES,
+        included_architectures=SUPPORTED_STAGE2_ARCHITECTURES,
+    )
+    for compiled in (compiled_raw, compiled_materialized):
+        assert {packet["architecture"] for packet in compiled.packets} == set(
+            SUPPORTED_STAGE2_ARCHITECTURES
+        )
+
+
+@pytest.mark.parametrize(
+    "row,match",
+    [
+        ({"source": "fusion", "outer_fold": 1, "evidence": {"objective": "treatment",
+          "witnesses": ["ECOG performance status"]}}, "unrecognized Stage 1 payload"),
+        ({"source": "text_models", "outer_fold": 1, "evidence": "ECOG performance status"},
+         "unrecognized Stage 1 payload"),
+        ({"source": "tfidf", "outer_fold": 1, "evidence": {"objective": "treatment",
+          "terms": ["ECOG performance status"]}}, "unrecognized TF-IDF payload"),
+    ],
+    ids=["unknown_source", "non_mapping_payload", "tfidf_without_topic_banks"],
+)
+def test_compiler_fails_closed_on_unrecognized_payloads(tmp_path: Path, row, match):
+    rows = [*_all_architecture_raw_rows(), row]
+    with pytest.raises(ValueError, match=match):
+        _compile(rows, tmp_path)
+    # The included-architecture filter must not hide an unrecognized row either.
+    with pytest.raises(ValueError, match=match):
+        _compile(rows, tmp_path, included_architectures=(TFIDF_TOPICS,))
+
+
+def test_unsigned_tree_importances_are_not_labelled_positive_evidence():
+    from oci.inference.plain_handoff_stage2_evidence import (
+        extract_stage1_architecture_occurrences,
+    )
+
+    def view(name, polarity):
+        return {
+            "view_name": name,
+            "score_polarity": {"treatment": polarity, "outcome": polarity,
+                               "pseudo_target": polarity},
+            "treatment_positive": [{"feature": f"{name} treatment term", "score": 0.4}],
+            "pseudo_target_positive": [{"feature": f"{name} effect term", "score": 0.2}],
+        }
+
+    rows = [{
+        "source": "text_models", "outer_fold": 1, "scope": "full_outer_train",
+        "evidence": {"importance": {"views": [
+            view("word_linear", "signed"), view("word_extratrees", "unsigned_importance"),
+        ]}},
+    }]
+    occurrences = extract_stage1_architecture_occurrences(rows)[1]
+    polarity = {item["text"]: item["polarity"] for item in occurrences}
+    assert polarity["word_linear treatment term"] == "positive"
+    assert polarity["word_linear effect term"] == "positive"
+    assert polarity["word_extratrees treatment term"] == "unsigned"
+    assert polarity["word_extratrees effect term"] == "unsigned"

@@ -7,7 +7,7 @@ import hashlib
 import json
 import logging
 import multiprocessing as mp
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -18,7 +18,11 @@ from joblib import Parallel, delayed, parallel_config
 from sklearn.model_selection import KFold, StratifiedKFold
 from threadpoolctl import threadpool_limits
 
-from ..config import AppliedInferenceConfig, MultiModelForestConfig
+from ..config import (
+    AppliedInferenceConfig,
+    MultiModelForestConfig,
+    TfidfTopicDiscoveryConfig,
+)
 from .tfidf_topic_discovery import (
     DISCOVERY_SCHEMA_VERSION,
     HANDOFF_SCHEMA_VERSION,
@@ -108,6 +112,35 @@ def _tfidf_context_scope_seed(*, global_seed: int, scope_id: str) -> int:
         f"{int(global_seed)}\0{str(scope_id)}".encode("utf-8")
     ).digest()
     return int.from_bytes(digest[:4], "big") & 0x7FFFFFFF
+
+
+def _derived_tfidf_seed(run_seed: int, stream: str, configured: int) -> int:
+    digest = hashlib.sha256(
+        f"{int(run_seed)}\0tfidf_topic\0{stream}\0{int(configured)}".encode("utf-8")
+    ).digest()
+    # 30 bits leave headroom for the fixed per-model offsets added downstream;
+    # sklearn and NumPy accept seeds below 2**32.
+    return int.from_bytes(digest[:4], "big") & 0x3FFFFFFF
+
+
+def seeded_tfidf_topic_config(config: AppliedInferenceConfig) -> TfidfTopicDiscoveryConfig:
+    """Return the TF-IDF topic settings with every seed derived from the run seed.
+
+    ``tfidf_topic.random_state`` and ``tfidf_topic.topic_seeds`` select seed
+    streams; the run seed (``config.seed``) selects the values, so changing the
+    run seed changes every TF-IDF nuisance, screen, stability, consensus-NMF
+    and bootstrap draw, as it already changes the splits.
+    """
+
+    topic = config.architecture.multi_model_forest.tfidf_topic
+    run_seed = _configured_seed(config)
+    return replace(
+        topic,
+        random_state=_derived_tfidf_seed(run_seed, "random_state", topic.random_state),
+        topic_seeds=[
+            _derived_tfidf_seed(run_seed, "nmf_topic_seed", seed) for seed in topic.topic_seeds
+        ],
+    )
 
 
 def make_joint_treatment_outcome_splits(
@@ -421,7 +454,7 @@ def tfidf_topic_stage1_identity(
         ),
         "views": [asdict(view) for view in nn_config.bow_views],
         "nuisance_folds": nn_config.nuisance_folds,
-        "topic": asdict(nn_config.tfidf_topic),
+        "topic": asdict(seeded_tfidf_topic_config(config)),
         "text_column": config.text_column,
         "treatment_column": config.treatment_column,
         "outcome_column": config.outcome_column,
@@ -529,7 +562,7 @@ def _fit_tfidf_topic_context_with_orphan_calibration(
     """
 
     nn_config: MultiModelForestConfig = config.architecture.multi_model_forest
-    topic_config = nn_config.tfidf_topic
+    topic_config = seeded_tfidf_topic_config(config)
     registered_fit = spec["fit_df"].copy()
     registered_heldout = spec["heldout_df"].loc[:, ["_oci_row_id", config.text_column]].copy()
     model_fit, calibration, nesting = _nested_calibration_plan(
@@ -620,7 +653,7 @@ def _fit_tfidf_topic_stage1_spec_impl(
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Fit or reuse one exact context without capturing runner-local state."""
     nn_config: MultiModelForestConfig = config.architecture.multi_model_forest
-    topic_config = nn_config.tfidf_topic
+    topic_config = seeded_tfidf_topic_config(config)
     orphan_enabled = bool(topic_config.orphan_ngram_enabled)
     metadata_path = contexts_dir / spec["scope_id"] / "context_metadata.json"
     if metadata_path.exists():

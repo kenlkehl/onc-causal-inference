@@ -685,8 +685,9 @@ def test_primary_requests_automatically_budget_context_across_repairs_and_retrie
             return "{}"
         if len(calls) == 2:
             raise stage2_workflow._RetryableStage2ResponseError("empty response")
-        assert "missing required field" in messages[-2]["content"]
-        assert "empty response" in messages[-1]["content"]
+        # The transport retry resends the repair prompt unchanged.
+        assert messages == calls[1]
+        assert "missing required field" in messages[-1]["content"]
         return '{"required": true}'
 
     def validate(value):
@@ -730,16 +731,72 @@ def test_primary_context_uses_smallest_live_or_managed_limit(args):
     assert stage2_workflow._primary_context_window_tokens(config, identity) == 200000
 
 
-def test_transport_feedback_preserves_semantic_error_and_original_input():
+def test_external_endpoint_context_window_comes_from_models_payload(monkeypatch):
+    from openai.types import Model
+
+    payload = [
+        Model.model_validate({
+            "id": "clinical", "object": "model", "created": 0, "owned_by": "vllm",
+            "root": "Qwen/Qwen3-8B", "parent": None, "max_model_len": 32768,
+        }),
+        Model.model_validate({"id": "other", "object": "model", "created": 0, "owned_by": "x"}),
+    ]
+
+    class Client:
+        def __init__(self, **_kwargs):
+            self.models = SimpleNamespace(list=lambda: SimpleNamespace(data=payload))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("openai.OpenAI", Client)
+    config = PlainHandoffStage2Config(
+        endpoint="http://external.test/v1", model="clinical", required_architectures=(),
+    )
+    records = {row["id"]: row for row in stage2_workflow._served_model_ids(config).records}
+    assert records["clinical"]["max_model_len"] == 32768
+    assert records["other"]["max_model_len"] is None
+    # No managed vLLM pool: the advertised window is the only budget source.
+    runner = PlainHandoffStage2(config=config, clinical_question="Question")
+    assert runner.config.runtime_context_window_tokens == 32768
+
+
+def test_external_endpoint_without_local_tokenizer_skips_budgeting(monkeypatch, caplog):
+    class Tokenizer:
+        def __init__(self, available):
+            self.available = available
+
+        def _load(self):
+            if not self.available:
+                raise RuntimeError("tokenizer unavailable") from OSError("not cached")
+            return self
+
+    availability = {"external-only-model": False, "cached-model": True}
+    monkeypatch.setattr(
+        stage2_workflow, "_primary_prompt_tokenizer",
+        lambda model, *_args: Tokenizer(availability[model]),
+    )
+    stage2_workflow._external_primary_tokenizer_available.cache_clear()
+    try:
+        with caplog.at_level("WARNING", logger=stage2_workflow.LOGGER.name):
+            assert stage2_workflow._external_primary_tokenizer_available("external-only-model") is False
+            assert stage2_workflow._external_primary_tokenizer_available("cached-model") is True
+    finally:
+        stage2_workflow._external_primary_tokenizer_available.cache_clear()
+    assert "Prompt token budgeting is disabled" in caplog.text
+    assert "external-only-model" in caplog.text and "cached-model" not in caplog.text
+
+
+def test_transport_retry_resends_the_fingerprinted_prompt_unchanged(tmp_path):
     calls = []
     original = [{"role": "user", "content": "Return the required value as JSON."}]
 
     def completion(messages, _config):
         calls.append([dict(row) for row in messages])
-        if len(calls) == 1:
-            return "{}"
-        if len(calls) == 2:
+        if len(calls) in {1, 3}:
             raise stage2_workflow._RetryableStage2ResponseError("empty response")
+        if len(calls) == 2:
+            return "{}"
         return '{"required": true}'
 
     def validate(value):
@@ -747,28 +804,31 @@ def test_transport_feedback_preserves_semantic_error_and_original_input():
             raise ValueError("missing required field")
         return dict(value)
 
-    assert stage2_workflow._request_json(
-        messages=original,
+    assert stage2_workflow._checkpointed_request_json(
+        output_dir=tmp_path, input_value={"phase": "test"}, messages=original,
         config=_runner(transport_retry_backoff=0).config,
-        completion=completion,
-        validate=validate,
+        completion=completion, validate=validate,
     ) == {"required": True}
-    assert calls[2][:-1] == calls[1]
-    assert "missing required field" in calls[2][-2]["content"]
-    assert "empty response" in calls[2][-1]["content"]
-    assert original == calls[0]
+    assert calls[0] == calls[1] == original
+    assert calls[2] == calls[3]
+    assert calls[2][:2] == [*original, {"role": "assistant", "content": "{}"}]
+    assert "missing required field" in calls[2][-1]["content"]
+    sent = json.dumps(calls)
+    assert "empty response" not in sent and "previous request failed" not in sent
+    persisted = json.loads((tmp_path / "input.json").read_text(encoding="utf-8"))
+    assert json.dumps(original, sort_keys=True) in json.dumps(persisted, sort_keys=True)
 
 
-def test_transport_feedback_respects_context_and_adjusts_output_budget():
+def test_transport_retry_keeps_the_context_budget_of_the_original_prompt():
     calls = []
 
     def completion(messages, config):
         calls.append(messages)
-        if len(calls) == 1:
-            raise stage2_workflow._RetryableStage2ResponseError("empty response")
         prompt_tokens = sum(len(row["content"]) for row in messages)
         assert config.extraction_max_tokens == 400 - prompt_tokens - 10
-        assert "empty response" in messages[-1]["content"]
+        if len(calls) == 1:
+            raise stage2_workflow._RetryableStage2ResponseError("empty response")
+        assert messages == calls[0]
         return '{"ok": true}'
 
     assert stage2_workflow._request_json(
@@ -781,16 +841,7 @@ def test_transport_feedback_respects_context_and_adjusts_output_budget():
         context_window_tokens=400,
         context_margin_tokens=10,
     ) == {"ok": True}
-
-
-def test_transport_feedback_fails_closed_when_prompt_is_full():
-    original = [{"role": "user", "content": "x" * 100}]
-    with pytest.raises(ValueError, match="cannot fit the previous error"):
-        stage2_workflow._transport_retry_messages(
-            original, ValueError("empty response"), max_prompt_chars=100,
-            prompt_token_counter=None, context_window_tokens=None, context_margin_tokens=0,
-        )
-    assert original == [{"role": "user", "content": "x" * 100}]
+    assert len(calls) == 2
 
 
 def test_extraction_failure_is_logged_before_executor_shutdown(tmp_path, monkeypatch, caplog):
@@ -829,3 +880,196 @@ def test_extraction_failure_is_logged_before_executor_shutdown(tmp_path, monkeyp
     assert caught.value is error
     assert shutdown_checks == [True]
     assert not (output_dir / "batches" / "batch_00001" / "complete.json").exists()
+
+
+def _split_rows():
+    return [
+        {
+            "outer_fold": outer_fold,
+            "fit_row_ids": [row for row in range(8) if row not in heldout],
+            "heldout_row_ids": heldout,
+            "inner_splits": [
+                {"inner_fold": 1, "fit_row_ids": fit[:3], "heldout_row_ids": fit[3:]},
+                {"inner_fold": 2, "fit_row_ids": fit[3:], "heldout_row_ids": fit[:3]},
+            ],
+        }
+        for outer_fold, heldout in ((1, [0, 1, 2, 3]), (2, [4, 5, 6, 7]))
+        for fit in ([row for row in range(8) if row not in heldout],)
+    ]
+
+
+@pytest.mark.parametrize("state", ["absent", "empty", "unset"])
+def test_stage2_split_loading_fails_closed_without_frozen_provenance(tmp_path, state):
+    path = tmp_path / "components" / "tfidf" / "split_provenance.jsonl"
+    if state == "empty":
+        path.parent.mkdir(parents=True)
+        path.write_text("\n", encoding="utf-8")
+    with pytest.raises(FileNotFoundError) as caught:
+        stage2_workflow._load_stage2_splits(
+            provenance_path=None if state == "unset" else path,
+            dataset_rows=8,
+            outer_fold_ids=[1, 2],
+            inner_folds=2,
+            seed=7,
+        )
+    message = str(caught.value)
+    assert "split_provenance.jsonl" in message
+    assert "will not recreate outer folds" in message
+    assert "rerun Stage 1" in message
+
+
+def _raw_handoff(tmp_path, splits, *, mutate=None):
+    rows = []
+    for split in splits:
+        contexts = [(None, "full_outer_train", split)] + [
+            (inner["inner_fold"], "candidate_selection_inner_fit", inner)
+            for inner in split["inner_splits"]
+        ]
+        for inner_fold, scope, rows_for_context in contexts:
+            payload = {
+                "outer_fold": split["outer_fold"], "inner_fold": inner_fold, "scope": scope,
+                "fit_row_ids": list(rows_for_context["fit_row_ids"]),
+                "heldout_row_ids": list(rows_for_context["heldout_row_ids"]),
+            }
+            rows.append({"source": "tfidf", "outer_fold": split["outer_fold"],
+                         "inner_fold": inner_fold, "scope": scope, "evidence": payload})
+        rows.append({
+            "source": "text_models", "outer_fold": split["outer_fold"], "inner_fold": None,
+            "scope": "full_outer_train",
+            "evidence": {"metrics": {
+                "handoff_fit_rows": len(split["fit_row_ids"]),
+                "handoff_heldout_rows": len(split["heldout_row_ids"]),
+            }},
+        })
+    if mutate is not None:
+        mutate(rows)
+    path = tmp_path / "handoff" / "evidence.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return path
+
+
+def _loaded_splits(tmp_path, rows=None):
+    path = tmp_path / "split_provenance.jsonl"
+    path.write_text(
+        "".join(json.dumps(row) + "\n" for row in (rows or _split_rows())), encoding="utf-8"
+    )
+    return stage2_workflow._load_stage2_splits(
+        provenance_path=path, dataset_rows=8, outer_fold_ids=[1, 2],
+    )
+
+
+def test_stage2_splits_match_raw_handoff_row_provenance(tmp_path):
+    splits = _loaded_splits(tmp_path)
+    handoff = _raw_handoff(tmp_path, _split_rows())
+    stage2_workflow._verify_stage2_splits_against_handoff(
+        splits, handoff_path=handoff, outer_fold_ids=[1, 2],
+    )
+
+
+def _swap_outer_rows(rows):
+    for row in rows:
+        payload = row["evidence"]
+        if row["source"] == "tfidf" and row["outer_fold"] == 1 and row["inner_fold"] is None:
+            payload["fit_row_ids"] = [0, 5, 6, 7]
+            payload["heldout_row_ids"] = [4, 1, 2, 3]
+
+
+def _drop_inner_row(rows):
+    rows[1]["evidence"]["heldout_row_ids"] = rows[1]["evidence"]["heldout_row_ids"][:-1]
+
+
+def _wrong_text_model_count(rows):
+    for row in rows:
+        if row["source"] == "text_models" and row["outer_fold"] == 2:
+            row["evidence"]["metrics"]["handoff_heldout_rows"] = 3
+
+
+def _unknown_outer_fold(rows):
+    rows.append({**rows[0], "outer_fold": 3, "evidence": {**rows[0]["evidence"], "outer_fold": 3}})
+
+
+def _no_fold_two_provenance(rows):
+    rows[:] = [row for row in rows if row["outer_fold"] != 2]
+
+
+@pytest.mark.parametrize(
+    "mutate,match",
+    [
+        (_swap_outer_rows, "outer fold 1 .*fit rows"),
+        (_drop_inner_row, "outer fold 1 inner fold 1 .*heldout rows"),
+        (_wrong_text_model_count, "outer fold 2 .*heldout rows"),
+        (_unknown_outer_fold, "outer fold 3 .*no matching entry"),
+        (_no_fold_two_provenance, r"cannot verify outer folds \[2\]"),
+    ],
+)
+def test_stage2_splits_that_disagree_with_handoff_fail_closed(tmp_path, mutate, match):
+    splits = _loaded_splits(tmp_path)
+    handoff = _raw_handoff(tmp_path, _split_rows(), mutate=mutate)
+    with pytest.raises(RuntimeError, match=match) as caught:
+        stage2_workflow._verify_stage2_splits_against_handoff(
+            splits, handoff_path=handoff, outer_fold_ids=[1, 2],
+        )
+    assert "split_provenance.jsonl" in str(caught.value)
+
+
+def test_stage2_splits_are_verified_through_materialized_handoff_sources(tmp_path):
+    source = tmp_path / "components" / "tfidf" / "evidence.jsonl"
+    source.parent.mkdir(parents=True)
+    producer_rows = [
+        {"outer_fold": split["outer_fold"], "inner_fold": None, "scope": "full_outer_train",
+         "fit_row_ids": split["fit_row_ids"], "heldout_row_ids": split["heldout_row_ids"]}
+        for split in _split_rows()
+    ]
+    source.write_text("".join(json.dumps(row) + "\n" for row in producer_rows), encoding="utf-8")
+    handoff = tmp_path / "handoff" / "evidence.jsonl"
+    handoff.parent.mkdir(parents=True)
+    handoff.write_text(
+        "".join(
+            json.dumps({"source": "stage1_architecture", "outer_fold": fold, "inner_fold": None,
+                        "scope": "full_outer_train",
+                        "evidence": {"architecture": "tfidf_topics", "occurrence": {}}}) + "\n"
+            for fold in (1, 2)
+        ),
+        encoding="utf-8",
+    )
+    (handoff.parent / "index.json").write_text(
+        json.dumps({"sources": {"tfidf": "../components/tfidf/evidence.jsonl"}}), encoding="utf-8"
+    )
+    splits = _loaded_splits(tmp_path)
+    stage2_workflow._verify_stage2_splits_against_handoff(
+        splits, handoff_path=handoff, outer_fold_ids=[1, 2],
+    )
+    reshuffled = _split_rows()
+    reshuffled[0]["fit_row_ids"], reshuffled[0]["heldout_row_ids"] = [0, 5, 6, 7], [4, 1, 2, 3]
+    reshuffled[1]["fit_row_ids"], reshuffled[1]["heldout_row_ids"] = [4, 1, 2, 3], [0, 5, 6, 7]
+    with pytest.raises(RuntimeError, match="disagrees with the Stage 1 handoff"):
+        stage2_workflow._verify_stage2_splits_against_handoff(
+            _loaded_splits(tmp_path, reshuffled), handoff_path=handoff, outer_fold_ids=[1, 2],
+        )
+    source.unlink()
+    with pytest.raises(FileNotFoundError, match="component evidence"):
+        stage2_workflow._verify_stage2_splits_against_handoff(
+            splits, handoff_path=handoff, outer_fold_ids=[1, 2],
+        )
+
+
+def test_dataset_backed_stage2_refuses_to_resample_missing_splits(tmp_path):
+    handoff = _raw_handoff(tmp_path, _split_rows())
+    dataset = pd.DataFrame({
+        "patient_id": [f"p{row}" for row in range(8)],
+        "clinical_text": ["ECOG 1."] * 8,
+        "treatment_indicator": [0, 1] * 4,
+        "outcome_indicator": [0, 0, 1, 1] * 2,
+    })
+    runner = _runner(
+        extraction_llm=Stage2ExtractionLLMConfig(endpoint="http://extract.test/v1", model="small"),
+    )
+    runner._load_or_compile_evidence = lambda **_kwargs: (
+        [{"outer_fold": 1, "packet_id": "a"}, {"outer_fold": 2, "packet_id": "b"}], {},
+    )
+    with pytest.raises(FileNotFoundError, match="will not recreate outer folds"):
+        runner.run(
+            handoff_path=handoff, output_dir=tmp_path / "stage2", dataset=dataset,
+            split_provenance_path=tmp_path / "missing_split_provenance.jsonl",
+        )

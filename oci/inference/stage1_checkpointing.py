@@ -30,7 +30,9 @@ import torch
 logger = logging.getLogger(__name__)
 
 STAGE1_CHECKPOINT_SCHEMA_VERSION = "stage1_context_checkpoint_v1"
-STAGE1_CHECKPOINT_IMPLEMENTATION_VERSION = 2
+# 3: out-of-fold HTR nuisance calibration (raw fold payloads), signed-only BoW
+# negative lists, and metadata-only ensemble_r; older units must not be reused.
+STAGE1_CHECKPOINT_IMPLEMENTATION_VERSION = 3
 
 T = TypeVar("T")
 

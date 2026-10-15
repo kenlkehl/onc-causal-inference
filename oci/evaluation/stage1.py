@@ -890,11 +890,38 @@ def _r_loss_metrics(
     ]
 
 
+def _oracle_ite_column(
+    columns: Iterable[str],
+    *,
+    outcome_type: str,
+) -> tuple[str | None, str | None]:
+    """Resolve the oracle ITE column: ``(column, reason_when_unusable)``.
+
+    ``true_ite`` is on the outcome scale for both outcome types. Older binary
+    datasets carry only ``true_ite_prob``, which is the same quantity for a
+    binary outcome but is not comparable for a continuous one.
+    """
+
+    available = set(columns)
+    if "true_ite" in available:
+        return "true_ite", None
+    if "true_ite_prob" in available:
+        if str(outcome_type).strip().lower() == "binary":
+            return "true_ite_prob", None
+        return None, (
+            "continuous-outcome dataset lacks outcome-scale true_ite; "
+            "probability-scale true_ite_prob is not comparable"
+        )
+    return None, None
+
+
 def _association_metrics(
     architecture: str,
     frame: pd.DataFrame,
     dataset: pd.DataFrame,
     features: Sequence[Mapping[str, Any]],
+    *,
+    outcome_type: str = "binary",
 ) -> list[dict[str, Any]]:
     factory = _MetricFactory(architecture)
     heldout = _outer_heldout(frame)
@@ -954,7 +981,11 @@ def _association_metrics(
                 reason="no usable row score for oracle feature",
             )
         )
-    if "true_ite_prob" in joined.columns:
+    ite_column, ite_unusable_reason = _oracle_ite_column(
+        joined.columns,
+        outcome_type=outcome_type,
+    )
+    if ite_column is not None or ite_unusable_reason is not None:
         tau_scores = [
             score
             for score in scores
@@ -965,20 +996,21 @@ def _association_metrics(
             ("best_tau_abs_spearman", _safe_abs_spearman),
         ):
             candidates = []
-            for score in tau_scores:
-                value, n = function(joined[score], joined["true_ite_prob"])
-                if value is not None:
-                    candidates.append((value, score, n))
+            if ite_column is not None:
+                for score in tau_scores:
+                    value, n = function(joined[score], joined[ite_column])
+                    if value is not None:
+                        candidates.append((value, score, n))
             best = max(candidates, default=None)
             output.append(
                 factory.row(
                     metric_family="true_ite",
                     metric=metric,
                     value=None if best is None else best[0],
-                    target="true_ite_prob",
+                    target=ite_column,
                     score=None if best is None else best[1],
                     n=None if best is None else best[2],
-                    reason="no held-out tau-like score is available",
+                    reason=ite_unusable_reason or "no held-out tau-like score is available",
                 )
             )
     return output
@@ -1219,7 +1251,13 @@ def evaluate_stage1_architectures(
         for path, score_frame, raw_score_frame in score_frames:
             relative = os.path.relpath(path, start=run_dir)
             generated = [
-                *_association_metrics(architecture, score_frame, frame, features),
+                *_association_metrics(
+                    architecture,
+                    score_frame,
+                    frame,
+                    features,
+                    outcome_type=outcome_type,
+                ),
                 *_nuisance_metrics(
                     architecture,
                     score_frame,
